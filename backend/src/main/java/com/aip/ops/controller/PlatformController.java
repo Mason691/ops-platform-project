@@ -1,0 +1,284 @@
+package com.aip.ops.controller;
+
+import com.aip.ops.entity.*;
+import com.aip.ops.mapper.*;
+import com.aip.sdk.result.R;
+import com.aip.sdk.security.SecurityUtils;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDateTime;
+import java.util.*;
+
+/**
+ * 金地燃气聚合展示引流平台 — 核心 Controller。
+ * 定位: 商品/活动展示 + 积分消耗 + 引流跳转第三方小程序，不提供交易功能。
+ */
+@RestController @RequestMapping("/api/ops") @RequiredArgsConstructor
+public class PlatformController {
+
+    private final GsUserMapper userMapper;
+    private final GsProductMapper productMapper;
+    private final GsOrderMapper orderMapper;
+    private final GsActivityMapper activityMapper;
+    private final GsAddressMapper addressMapper;
+    private final GsPointsLogMapper pointsLogMapper;
+    private final GsCouponMapper couponMapper;
+    private final GsUserCouponMapper userCouponMapper;
+    private final GsClickLogMapper clickLogMapper;
+
+    // ═══ 用户登录 ═══
+    @PostMapping("/auth/login")
+    public R<?> login(@RequestBody Map<String,String> body) {
+        String phone = body.get("phone");
+        Long corpId = body.get("corpId") != null ? Long.valueOf(body.get("corpId")) : 3L;
+        if (phone == null || phone.isEmpty()) return R.fail("手机号不能为空");
+        GsUser user = userMapper.selectOne(new LambdaQueryWrapper<GsUser>()
+                .eq(GsUser::getCorpId, corpId).eq(GsUser::getPhone, phone));
+        if (user == null) {
+            user = new GsUser(); user.setCorpId(corpId); user.setPhone(phone);
+            user.setNickname("燃气用户"); user.setPointsBalance(500);
+            user.setStatus(1); user.setLastLoginTime(LocalDateTime.now());
+            userMapper.insert(user);
+        } else { user.setLastLoginTime(LocalDateTime.now()); userMapper.updateById(user); }
+        Map<String,Object> r = new LinkedHashMap<>();
+        r.put("userId", user.getId()); r.put("phone", user.getPhone());
+        r.put("nickname", user.getNickname()); r.put("pointsBalance", user.getPointsBalance());
+        r.put("token", "ops-token-" + user.getId());
+        r.put("corpId", corpId);
+        return R.ok(r);
+    }
+
+    @GetMapping("/user/me")
+    public R<?> me() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        GsUser u = userMapper.selectOne(new LambdaQueryWrapper<GsUser>()
+                .eq(GsUser::getId, userId).eq(GsUser::getCorpId, corpId));
+        if (u == null) return R.fail("用户不存在");
+        Map<String,Object> r = new LinkedHashMap<>();
+        r.put("id",u.getId()); r.put("phone",u.getPhone());
+        r.put("nickname",u.getNickname()); r.put("avatar",u.getAvatar());
+        r.put("pointsBalance",u.getPointsBalance());
+        return R.ok(r);
+    }
+
+    @PutMapping("/user/profile")
+    public R<?> updateProfile(@RequestBody Map<String,String> body) {
+        GsUser u = new GsUser(); u.setId(SecurityUtils.getCurrentUserId());
+        if (body.containsKey("nickname")) u.setNickname(body.get("nickname"));
+        if (body.containsKey("avatar")) u.setAvatar(body.get("avatar"));
+        userMapper.updateById(u);
+        return R.ok();
+    }
+
+    // ═══ 商品 (展示，非交易) ═══
+    @GetMapping("/product/page")
+    public R<?> productPage(@RequestParam(defaultValue="1") int pageNum,
+            @RequestParam(defaultValue="10") int pageSize,
+            @RequestParam(required=false) String name,
+            @RequestParam(required=false) Long categoryId) {
+        Long corpId = getCorpId();
+        Page<GsProduct> page = productMapper.selectPage(new Page<>(pageNum, pageSize),
+                new LambdaQueryWrapper<GsProduct>().eq(GsProduct::getCorpId, corpId)
+                        .eq(GsProduct::getStatus, 1)
+                        .like(name != null && !name.isEmpty(), GsProduct::getName, name)
+                        .eq(categoryId != null, GsProduct::getCategoryId, categoryId)
+                        .orderByDesc(GsProduct::getId));
+        return R.ok(page);
+    }
+
+    @GetMapping("/product/{id}")
+    public R<?> productDetail(@PathVariable Long id) {
+        GsProduct p = productMapper.selectById(id);
+        if (p == null) return R.fail("商品不存在");
+        // 点击统计
+        GsClickLog cl = new GsClickLog(); cl.setCorpId(p.getCorpId());
+        cl.setUserId(getUserIdOrNull()); cl.setTargetType("PRODUCT"); cl.setTargetId(id);
+        clickLogMapper.insert(cl);
+        p.setClickCount((p.getClickCount() != null ? p.getClickCount() : 0) + 1);
+        productMapper.updateById(p);
+        return R.ok(p);
+    }
+
+    // ═══ 积分兑换订单 (预扣积分，跳转第三方) ═══
+    @PostMapping("/order/create")
+    public R<?> createOrder(@RequestBody Map<String,Object> body) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        Long productId = Long.valueOf(body.get("productId").toString());
+        GsProduct p = productMapper.selectById(productId);
+        if (p == null || p.getStatus() != 1) return R.fail("商品不存在或已下架");
+        GsUser u = userMapper.selectById(userId);
+        int pointsSpent = p.getPointsPrice();
+        if (u.getPointsBalance() < pointsSpent) return R.fail("积分不足，当前余额" + u.getPointsBalance());
+
+        u.setPointsBalance(u.getPointsBalance() - pointsSpent); userMapper.updateById(u);
+        GsPointsLog log = new GsPointsLog(); log.setCorpId(corpId); log.setUserId(userId);
+        log.setChangeType("CONSUME"); log.setAmount(pointsSpent);
+        log.setBalanceAfter(u.getPointsBalance()); log.setRemark("兑换商品：" + p.getName());
+        pointsLogMapper.insert(log);
+
+        String orderNo = "OPS" + System.currentTimeMillis() + userId;
+        GsOrder order = new GsOrder(); order.setCorpId(corpId); order.setUserId(userId);
+        order.setOrderNo(orderNo); order.setProductId(productId);
+        order.setProductName(p.getName()); order.setProductImage(p.getCoverImage());
+        order.setPointsSpent(pointsSpent); order.setCashAmount(p.getCashPrice());
+        order.setStatus("PENDING");
+        order.setExpireTime(LocalDateTime.now().plusMinutes(30));
+        orderMapper.insert(order);
+        log.setOrderNo(orderNo); pointsLogMapper.updateById(log);
+
+        return R.ok(Map.of("orderNo", orderNo, "orderId", order.getId(),
+                "pointsSpent", pointsSpent, "status", "PENDING",
+                "expireTime", order.getExpireTime().toString()));
+    }
+
+    @GetMapping("/order/my")
+    public R<?> myOrders(@RequestParam(defaultValue="1") int pageNum,
+                         @RequestParam(defaultValue="10") int pageSize) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        Page<GsOrder> page = orderMapper.selectPage(new Page<>(pageNum, pageSize),
+                new LambdaQueryWrapper<GsOrder>().eq(GsOrder::getUserId, userId)
+                        .orderByDesc(GsOrder::getId));
+        return R.ok(page);
+    }
+
+    /** 第三方回调：确认支付或退还积分 */
+    @PostMapping("/order/{orderNo}/callback")
+    public R<?> orderCallback(@PathVariable String orderNo, @RequestBody Map<String,Object> body) {
+        GsOrder o = orderMapper.selectOne(new LambdaQueryWrapper<GsOrder>()
+                .eq(GsOrder::getOrderNo, orderNo));
+        if (o == null) return R.fail("订单不存在");
+        String action = (String) body.getOrDefault("action", "PAID");
+        if ("PAID".equals(action)) {
+            o.setStatus("PAID"); o.setThirdPartyOrderNo((String)body.get("thirdPartyOrderNo"));
+        } else {
+            o.setStatus("CANCELLED");
+            GsUser u = userMapper.selectById(o.getUserId());
+            u.setPointsBalance(u.getPointsBalance() + o.getPointsSpent()); userMapper.updateById(u);
+            GsPointsLog log = new GsPointsLog(); log.setCorpId(o.getCorpId());
+            log.setUserId(o.getUserId()); log.setChangeType("REFUND");
+            log.setAmount(o.getPointsSpent()); log.setBalanceAfter(u.getPointsBalance());
+            log.setOrderNo(orderNo); log.setRemark("订单取消退还积分");
+            pointsLogMapper.insert(log);
+        }
+        orderMapper.updateById(o);
+        return R.ok(Map.of("status", o.getStatus()));
+    }
+
+    // ═══ 活动 ═══
+    @GetMapping("/activity/page")
+    public R<?> activityPage(@RequestParam(defaultValue="1") int pageNum,
+            @RequestParam(defaultValue="10") int pageSize,
+            @RequestParam(required=false) String category) {
+        Page<GsActivity> page = activityMapper.selectPage(new Page<>(pageNum, pageSize),
+                new LambdaQueryWrapper<GsActivity>().eq(GsActivity::getStatus, 1)
+                        .eq(category != null && !category.isEmpty(), GsActivity::getCategory, category)
+                        .orderByDesc(GsActivity::getId));
+        return R.ok(page);
+    }
+
+    @GetMapping("/activity/{id}")
+    public R<?> activityDetail(@PathVariable Long id) {
+        return R.ok(activityMapper.selectById(id));
+    }
+
+    // ═══ 地址 ═══
+    @GetMapping("/address/list")
+    public R<?> addressList() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        return R.ok(addressMapper.selectList(new LambdaQueryWrapper<GsAddress>()
+                .eq(GsAddress::getUserId, userId).orderByDesc(GsAddress::getIsDefault)));
+    }
+
+    @GetMapping("/address/default")
+    public R<?> defaultAddress() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        return R.ok(addressMapper.selectOne(new LambdaQueryWrapper<GsAddress>()
+                .eq(GsAddress::getUserId, userId).eq(GsAddress::getIsDefault, 1).last("LIMIT 1")));
+    }
+
+    @PostMapping("/address")
+    public R<?> saveAddress(@RequestBody GsAddress addr) {
+        addr.setUserId(SecurityUtils.getCurrentUserId());
+        addr.setCorpId(SecurityUtils.getCurrentCorpId());
+        if (Integer.valueOf(1).equals(addr.getIsDefault())) clearDefault(addr.getUserId());
+        addressMapper.insert(addr);
+        return R.ok();
+    }
+
+    @PutMapping("/address/{id}")
+    public R<?> updateAddress(@PathVariable Long id, @RequestBody GsAddress addr) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        addr.setId(id); addr.setUserId(userId);
+        if (Integer.valueOf(1).equals(addr.getIsDefault())) clearDefault(userId);
+        addressMapper.updateById(addr);
+        return R.ok();
+    }
+
+    @DeleteMapping("/address/{id}")
+    public R<?> deleteAddress(@PathVariable Long id) { addressMapper.deleteById(id); return R.ok(); }
+
+    private void clearDefault(Long userId) {
+        addressMapper.update(null, new LambdaUpdateWrapper<GsAddress>()
+                .eq(GsAddress::getUserId, userId).set(GsAddress::getIsDefault, 0));
+    }
+
+    // ═══ 积分 ═══
+    @GetMapping("/points/log")
+    public R<?> pointsLog(@RequestParam(defaultValue="1") int pageNum,
+                          @RequestParam(defaultValue="20") int pageSize) {
+        Page<GsPointsLog> page = pointsLogMapper.selectPage(new Page<>(pageNum, pageSize),
+                new LambdaQueryWrapper<GsPointsLog>().eq(GsPointsLog::getUserId,
+                        SecurityUtils.getCurrentUserId()).orderByDesc(GsPointsLog::getId));
+        return R.ok(page);
+    }
+
+    // ═══ 优惠券 ═══
+    @GetMapping("/coupon/list")
+    public R<?> couponList() {
+        return R.ok(couponMapper.selectList(new LambdaQueryWrapper<GsCoupon>()
+                .eq(GsCoupon::getStatus, 1).gt(GsCoupon::getRemainQty, 0)));
+    }
+
+    @PostMapping("/coupon/draw")
+    public R<?> drawCoupon(@RequestBody Map<String,Object> body) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        Long couponId = Long.valueOf(body.get("couponId").toString());
+        GsCoupon c = couponMapper.selectById(couponId);
+        if (c == null || c.getRemainQty() <= 0) return R.fail("优惠券已抢完");
+        Long count = userCouponMapper.selectCount(new LambdaQueryWrapper<GsUserCoupon>()
+                .eq(GsUserCoupon::getUserId, userId).eq(GsUserCoupon::getCouponId, couponId));
+        if (count > 0) return R.fail("已领取过该优惠券");
+        c.setRemainQty(c.getRemainQty() - 1); couponMapper.updateById(c);
+        GsUserCoupon uc = new GsUserCoupon(); uc.setCorpId(c.getCorpId());
+        uc.setUserId(userId); uc.setCouponId(couponId);
+        uc.setExpireTime(LocalDateTime.now().plusDays(c.getExpireDays() != null ? c.getExpireDays() : 30));
+        uc.setStatus("UNUSED"); userCouponMapper.insert(uc);
+        return R.ok();
+    }
+
+    @GetMapping("/coupon/my")
+    public R<?> myCoupons() {
+        return R.ok(userCouponMapper.selectList(new LambdaQueryWrapper<GsUserCoupon>()
+                .eq(GsUserCoupon::getUserId, SecurityUtils.getCurrentUserId())
+                .orderByDesc(GsUserCoupon::getId)));
+    }
+
+    // ═══ 浏览历史 ═══
+    @GetMapping("/history")
+    public R<?> history(@RequestParam(defaultValue="1") int pageNum,
+                        @RequestParam(defaultValue="20") int pageSize) {
+        return R.ok(clickLogMapper.selectPage(new Page<>(pageNum, pageSize),
+                new LambdaQueryWrapper<GsClickLog>().eq(GsClickLog::getUserId,
+                        SecurityUtils.getCurrentUserId()).orderByDesc(GsClickLog::getId)));
+    }
+
+    // ═══ 辅助 ═══
+    private Long getCorpId() { try { return SecurityUtils.getCurrentCorpId(); } catch (Exception e) { return 3L; } }
+    private Long getUserIdOrNull() { try { return SecurityUtils.getCurrentUserId(); } catch (Exception e) { return null; } }
+}

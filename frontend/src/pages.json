@@ -1,0 +1,24 @@
+{
+  "pages": [
+    {"path":"pages/index/index","style":{"navigationBarTitleText":"金地燃气","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
+    {"path":"pages/activity/index","style":{"navigationBarTitleText":"精彩活动"}},
+    {"path":"pages/activity/detail","style":{"navigationBarTitleText":"活动详情"}},
+    {"path":"pages/product/index","style":{"navigationBarTitleText":"积分商城"}},
+    {"path":"pages/product/detail","style":{"navigationBarTitleText":"商品详情"}},
+    {"path":"pages/mine/index","style":{"navigationBarTitleText":"我的","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
+    {"path":"pages/order/list","style":{"navigationBarTitleText":"兑换记录"}},
+    {"path":"pages/order/detail","style":{"navigationBarTitleText":"订单详情"}},
+    {"path":"pages/address/list","style":{"navigationBarTitleText":"收货地址"}},
+    {"path":"pages/address/add","style":{"navigationBarTitleText":"编辑地址"}},
+    {"path":"pages/points/log","style":{"navigationBarTitleText":"积分明细"}},
+    {"path":"pages/coupon/list","style":{"navigationBarTitleText":"优惠券"}},
+    {"path":"pages/auth/login","style":{"navigationBarTitleText":"登录"}}
+  ],
+  "tabBar": {"color":"#999","selectedColor":"#FF6B35","backgroundColor":"#fff","list":[
+    {"pagePath":"pages/index/index","text":"首页","iconPath":"static/tab-home.png","selectedIconPath":"static/tab-home-active.png"},
+    {"pagePath":"pages/activity/index","text":"活动","iconPath":"static/tab-activity.png","selectedIconPath":"static/tab-activity-active.png"},
+    {"pagePath":"pages/product/index","text":"商品","iconPath":"static/tab-shop.png","selectedIconPath":"static/tab-shop-active.png"},
+    {"pagePath":"pages/mine/index","text":"我的","iconPath":"static/tab-mine.png","selectedIconPath":"static/tab-mine-active.png"}
+  ]},
+  "globalStyle":{"navigationBarTextStyle":"black","navigationBarTitleText":"金地燃气","backgroundColor":"#f5f5f5"}
+}
