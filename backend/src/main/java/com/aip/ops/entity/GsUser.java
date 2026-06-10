@@ -14,6 +14,7 @@ public class GsUser {
     @TableField("nickname") private String nickname;
     @TableField("avatar") private String avatar;
     @TableField("points_balance") private Integer pointsBalance;
+    @TableField("platform_member_id") private Long platformMemberId;
     @TableField("status") private Integer status;
     @TableField("last_login_time") private LocalDateTime lastLoginTime;
 }

@@ -3,8 +3,11 @@ import { request } from '@/utils/request'
 export const api = {
   // 登录 & 注册
   login: (phone, password) => request({url:'/api/ops/auth/login',method:'POST',data:{phone,password}}),
-  register: (phone, password, confirmPassword) => request({url:'/api/ops/auth/register',method:'POST',data:{phone,password,confirmPassword}}),
+  register: (payload) => request({url:'/api/ops/auth/register',method:'POST',data:payload}),
   getMe: () => request({url:'/api/ops/user/me'}),
+
+  // 公众号配置
+  getPublicAccountConfig: (corpId) => request({url:'/api/public-account/config',data:{corpId}}),
   updateProfile: (data) => request({url:'/api/ops/user/profile',method:'PUT',data}),
   // 商品
   productPage: (params) => request({url:'/api/ops/product/page',data:params}),
