@@ -1,13 +1,12 @@
 /**
  * 微信 JSSDK 初始化模块
  *
- * 自动检测微信环境，获取 JSSDK 签名并调用 wx.config。
+ * 自动检测微信环境，等待 jweixin-1.6.0.js 加载完成后获取 JSSDK 签名并调用 wx.config。
  * 公众号选择规则：URL 参数 corpId > uni.storage corp_id > config DEFAULT_CORP_ID
  */
 
 import { DEFAULT_CORP_ID } from '@/config'
 
-// 是否在微信浏览器中
 function isWechat() {
   // #ifdef H5
   const ua = navigator.userAgent.toLowerCase()
@@ -18,28 +17,45 @@ function isWechat() {
   // #endif
 }
 
-/**
- * 获取当前生效的 corpId
- */
 function getCorpId() {
   // #ifdef H5
-  // 1. URL 参数 ?corpId=4
   const params = new URLSearchParams(location.search)
   if (params.get('corpId')) return params.get('corpId')
-  // 2. uni storage
   try {
     const stored = uni.getStorageSync('corp_id')
     if (stored) return String(stored)
   } catch (_) {}
-  // 3. 默认
   return String(DEFAULT_CORP_ID)
   // #endif
   return String(DEFAULT_CORP_ID)
 }
 
 /**
- * 初始化 JSSDK — 在页面 onReady 或 app onLaunch 中调用。
- * @param {string} url - 当前页 URL（不传则自动取 location.href 去 hash）
+ * 等待 wx.config 方法就绪。
+ * jweixin-1.6.0.js 通过 CDN 加载，在 WeChat DevTools 中可能延迟。
+ * 最长等待 5 秒，超时放弃。
+ */
+function waitForWxConfig(timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    if (typeof wx !== 'undefined' && typeof wx.config === 'function') {
+      return resolve(true)
+    }
+    const start = Date.now()
+    const timer = setInterval(() => {
+      if (typeof wx !== 'undefined' && typeof wx.config === 'function') {
+        clearInterval(timer)
+        resolve(true)
+      } else if (Date.now() - start > timeoutMs) {
+        clearInterval(timer)
+        console.error('[JSSDK] wx.config 未就绪，jweixin-1.6.0.js 可能未加载 — timeout ' + timeoutMs + 'ms')
+        resolve(false)
+      }
+    }, 200)
+  })
+}
+
+/**
+ * 初始化 JSSDK
  */
 export async function initJssdk(url) {
   // #ifdef H5
@@ -48,8 +64,16 @@ export async function initJssdk(url) {
     return
   }
 
-  console.log('[JSSDK] 微信环境，开始初始化...')
-  // 取 url 不带 #hash，微信 JSSDK 签名要求完全相同
+  console.log('[JSSDK] 微信环境，等待 jweixin 加载...')
+
+  // 等待 jweixin-1.6.0.js 完全加载（wx.config 方法可用）
+  const ready = await waitForWxConfig()
+  if (!ready) {
+    console.error('[JSSDK] 放弃初始化：jweixin-1.6.0.js 无法加载，请检查网络或 CDN')
+    return
+  }
+
+  console.log('[JSSDK] wx.config 就绪，获取签名...')
   const configUrl = url || location.href.split('#')[0]
   const corpId = getCorpId()
   console.log('[JSSDK] url=', configUrl, 'corpId=', corpId)
@@ -65,10 +89,10 @@ export async function initJssdk(url) {
     }
 
     const { appId, timestamp, nonceStr, signature } = json.data
-    console.log('[JSSDK] 签名获取成功, appId:', appId, 'sig:', signature.slice(0, 12) + '…')
+    console.log('[JSSDK] 签名获取成功, appId:', appId)
 
     wx.config({
-      debug: true, // true 会弹窗显示每一步结果，调试完改回 false
+      debug: false, // 关掉弹窗，看 Console 即可
       appId,
       timestamp,
       nonceStr,
@@ -95,14 +119,11 @@ export async function initJssdk(url) {
       console.error('[JSSDK] ❌ error:', JSON.stringify(err))
     })
   } catch (e) {
-    console.error('[JSSDK] 请求失败:', e)
+    console.error('[JSSDK] 签名请求失败:', e)
   }
   // #endif
 }
 
-/**
- * 获取当前公众号配置
- */
 export async function fetchPublicAccountConfig(corpId) {
   const cid = corpId || getCorpId()
   try {
