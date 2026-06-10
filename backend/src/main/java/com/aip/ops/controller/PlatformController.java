@@ -80,11 +80,12 @@ public class PlatformController {
     public R<?> productPage(@RequestParam(defaultValue="1") int pageNum,
             @RequestParam(defaultValue="10") int pageSize,
             @RequestParam(required=false) String name,
-            @RequestParam(required=false) Long categoryId) {
+            @RequestParam(required=false) Long categoryId,
+            @RequestParam(required=false) Integer status) {
         Long corpId = getCorpId();
         Page<GsProduct> page = productMapper.selectPage(new Page<>(pageNum, pageSize),
                 new LambdaQueryWrapper<GsProduct>().eq(GsProduct::getCorpId, corpId)
-                        .eq(GsProduct::getStatus, 1)
+                        .eq(status != null, GsProduct::getStatus, status)
                         .like(name != null && !name.isEmpty(), GsProduct::getName, name)
                         .eq(categoryId != null, GsProduct::getCategoryId, categoryId)
                         .orderByDesc(GsProduct::getId));
@@ -102,6 +103,35 @@ public class PlatformController {
         p.setClickCount((p.getClickCount() != null ? p.getClickCount() : 0) + 1);
         productMapper.updateById(p);
         return R.ok(p);
+    }
+
+    @PostMapping("/product")
+    public R<?> createProduct(@RequestBody GsProduct product) {
+        product.setCorpId(getCorpId());
+        product.setStatus(1);
+        productMapper.insert(product);
+        return R.ok();
+    }
+
+    @PutMapping("/product/{id}")
+    public R<?> updateProduct(@PathVariable Long id, @RequestBody GsProduct product) {
+        product.setId(id);
+        productMapper.updateById(product);
+        return R.ok();
+    }
+
+    @PutMapping("/product/{id}/status")
+    public R<?> productStatus(@PathVariable Long id, @RequestBody Map<String,Object> body) {
+        GsProduct p = new GsProduct(); p.setId(id);
+        p.setStatus(Integer.valueOf(body.get("status").toString()));
+        productMapper.updateById(p);
+        return R.ok();
+    }
+
+    @DeleteMapping("/product/{id}")
+    public R<?> deleteProduct(@PathVariable Long id) {
+        productMapper.deleteById(id);
+        return R.ok();
     }
 
     // ═══ 积分兑换订单 (预扣积分，跳转第三方) ═══
@@ -174,9 +204,11 @@ public class PlatformController {
     @GetMapping("/activity/page")
     public R<?> activityPage(@RequestParam(defaultValue="1") int pageNum,
             @RequestParam(defaultValue="10") int pageSize,
-            @RequestParam(required=false) String category) {
+            @RequestParam(required=false) String category,
+            @RequestParam(required=false) Integer status) {
         Page<GsActivity> page = activityMapper.selectPage(new Page<>(pageNum, pageSize),
-                new LambdaQueryWrapper<GsActivity>().eq(GsActivity::getStatus, 1)
+                new LambdaQueryWrapper<GsActivity>()
+                        .eq(status != null, GsActivity::getStatus, status)
                         .eq(category != null && !category.isEmpty(), GsActivity::getCategory, category)
                         .orderByDesc(GsActivity::getId));
         return R.ok(page);
@@ -185,6 +217,35 @@ public class PlatformController {
     @GetMapping("/activity/{id}")
     public R<?> activityDetail(@PathVariable Long id) {
         return R.ok(activityMapper.selectById(id));
+    }
+
+    @PostMapping("/activity")
+    public R<?> createActivity(@RequestBody GsActivity activity) {
+        activity.setCorpId(getCorpId());
+        activity.setStatus(1);
+        activityMapper.insert(activity);
+        return R.ok();
+    }
+
+    @PutMapping("/activity/{id}")
+    public R<?> updateActivity(@PathVariable Long id, @RequestBody GsActivity activity) {
+        activity.setId(id);
+        activityMapper.updateById(activity);
+        return R.ok();
+    }
+
+    @PutMapping("/activity/{id}/status")
+    public R<?> activityStatus(@PathVariable Long id, @RequestBody Map<String,Object> body) {
+        GsActivity a = new GsActivity(); a.setId(id);
+        a.setStatus(Integer.valueOf(body.get("status").toString()));
+        activityMapper.updateById(a);
+        return R.ok();
+    }
+
+    @DeleteMapping("/activity/{id}")
+    public R<?> deleteActivity(@PathVariable Long id) {
+        activityMapper.deleteById(id);
+        return R.ok();
     }
 
     // ═══ 地址 ═══
@@ -231,10 +292,13 @@ public class PlatformController {
     // ═══ 积分 ═══
     @GetMapping("/points/log")
     public R<?> pointsLog(@RequestParam(defaultValue="1") int pageNum,
-                          @RequestParam(defaultValue="20") int pageSize) {
+                          @RequestParam(defaultValue="20") int pageSize,
+                          @RequestParam(required=false) String changeType) {
         Page<GsPointsLog> page = pointsLogMapper.selectPage(new Page<>(pageNum, pageSize),
                 new LambdaQueryWrapper<GsPointsLog>().eq(GsPointsLog::getUserId,
-                        SecurityUtils.getCurrentUserId()).orderByDesc(GsPointsLog::getId));
+                        SecurityUtils.getCurrentUserId())
+                        .eq(changeType != null && !changeType.isEmpty(), GsPointsLog::getChangeType, changeType)
+                        .orderByDesc(GsPointsLog::getId));
         return R.ok(page);
     }
 
