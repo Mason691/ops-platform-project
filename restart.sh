@@ -41,6 +41,8 @@ build_frontend_h5() {
     [ -d node_modules ] || npm install --silent
     export NODE_OPTIONS='--max-old-space-size=512'
     npx uni build
+    # 下载 jweixin-1.6.0.js 到 H5 产物根目录（本地托管，不走 CDN）
+    curl -sL 'https://res.wx.qq.com/open/js/jweixin-1.6.0.js' -o "$PROJECT_DIR/frontend/dist/build/h5/jweixin-1.6.0.js"
     log "H5 打包完成 → $PROJECT_DIR/frontend/dist/build/h5/"
 }
 
