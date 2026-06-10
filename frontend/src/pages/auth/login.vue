@@ -1,25 +1,51 @@
 <template>
   <view class="page">
-    <view class="logo-area">
-      <text class="logo">🔥</text>
-      <text class="title">金地燃气</text>
-      <text class="subtitle">积分商城·精彩活动</text>
+    <view class="brand">
+      <text class="brand-icon">⛽</text>
+      <text class="brand-name">金地燃气</text>
+      <text class="brand-desc">便民服务 · 积分商城</text>
     </view>
 
-    <view class="form">
-      <!-- 手机号 -->
-      <text class="label">手机号</text>
-      <input class="input" v-model="phone" type="number" maxlength="11" placeholder="请输入手机号"/>
+    <view class="card">
+      <view class="field">
+        <text class="field-label">手机号</text>
+        <view class="field-box">
+          <text class="field-prefix">+86</text>
+          <input
+            class="field-input"
+            v-model="phone"
+            type="number"
+            maxlength="11"
+            placeholder="请输入手机号"
+            :disabled="submitting"
+          />
+        </view>
+        <text v-if="phoneErr" class="field-hint">{{ phoneErr }}</text>
+      </view>
 
-      <!-- 密码 -->
-      <text class="label">密码</text>
-      <input class="input" v-model="password" type="password" placeholder="请输入密码"/>
+      <view class="field">
+        <text class="field-label">密码</text>
+        <view class="field-box">
+          <input
+            class="field-input full"
+            v-model="password"
+            :type="showPwd ? 'text' : 'password'"
+            placeholder="请输入密码"
+            :disabled="submitting"
+          />
+          <text class="field-eye" @click="showPwd = !showPwd">{{ showPwd ? '🙈' : '👁' }}</text>
+        </view>
+      </view>
 
-      <!-- 登录按钮 -->
-      <view class="login-btn" @click="doLogin">登录</view>
+      <view
+        class="submit-btn"
+        :class="{ disabled: !canSubmit || submitting }"
+        @click="doLogin"
+      >
+        {{ submitting ? '登录中...' : '登录' }}
+      </view>
 
-      <!-- 切换注册 -->
-      <view class="switch-link" @click="toRegister">
+      <view class="footer-link" @click="toRegister">
         还没有账号？<text class="link">立即注册</text>
       </view>
     </view>
@@ -27,55 +53,87 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { api } from '@/api/index'
 
-const phone    = ref('')
-const password = ref('')
-const loading  = ref(false)
+const phone      = ref('')
+const password   = ref('')
+const showPwd    = ref(false)
+const submitting = ref(false)
 
-function validatePhone(v) {
-  if (!v) return '请输入手机号'
-  if (!/^1[3-9]\d{9}$/.test(v)) return '请输入正确的手机号'
-  return ''
-}
+const phoneErr = computed(() => {
+  if (!phone.value) return ''
+  return /^1[3-9]\d{9}$/.test(phone.value) ? '' : '请输入正确的11位手机号'
+})
+const canSubmit = computed(() => {
+  return /^1[3-9]\d{9}$/.test(phone.value) && password.value.length >= 6
+})
 
 async function doLogin() {
-  if (loading.value) return
-  const err = validatePhone(phone.value)
-  if (err) { uni.showToast({title:err,icon:'none'}); return }
-  if (!password.value) { uni.showToast({title:'请输入密码',icon:'none'}); return }
-
-  loading.value = true
+  if (!canSubmit.value || submitting.value) return
+  submitting.value = true
   try {
     const r = await api.login(phone.value, password.value)
     uni.setStorageSync('ops_token', r.token)
     uni.setStorageSync('corp_id', String(r.corpId))
     uni.setStorageSync('ops_user', JSON.stringify(r))
-    uni.showToast({title:'登录成功',icon:'success'})
-    setTimeout(() => uni.switchTab({url:'/pages/index/index'}), 600)
+    uni.showToast({ title: '登录成功', icon: 'success' })
+    setTimeout(() => uni.switchTab({ url: '/pages/index/index' }), 500)
   } catch (e) {
-    uni.showToast({title: e.msg || '登录失败', icon:'none'})
-  } finally { loading.value = false }
+    uni.showToast({ title: e.msg || '登录失败', icon: 'none' })
+  } finally {
+    submitting.value = false
+  }
 }
 
 function toRegister() {
-  uni.navigateTo({url:'/pages/auth/register'})
+  uni.navigateTo({ url: '/pages/auth/register' })
 }
 </script>
 
 <style scoped>
-.page{min-height:100vh;background:linear-gradient(180deg,#FF6B35 0%,#FF8C5A 40%,#f5f5f5 40%);padding:60rpx 40rpx}
-.logo-area{text-align:center;margin-bottom:80rpx}
-.logo{font-size:80rpx}
-.title{font-size:40rpx;color:#fff;font-weight:700;display:block;margin-top:16rpx}
-.subtitle{font-size:26rpx;color:rgba(255,255,255,.8);margin-top:8rpx;display:block}
-.form{background:#fff;border-radius:24rpx;padding:40rpx}
-.label{font-size:28rpx;color:#333;display:block;margin:24rpx 0 12rpx}
-.label:first-child{margin-top:0}
-.input{width:100%;background:#f5f5f5;border-radius:12rpx;padding:24rpx;font-size:30rpx;box-sizing:border-box}
-.login-btn{background:#FF6B35;color:#fff;text-align:center;padding:28rpx;border-radius:48rpx;margin-top:40rpx;font-size:32rpx;font-weight:600}
-.login-btn:active{opacity:.8}
-.switch-link{text-align:center;margin-top:32rpx;font-size:26rpx;color:#999}
-.link{color:#FF6B35}
+.page {
+  min-height: 100vh;
+  background: linear-gradient(160deg, #1a73e8 0%, #0d47a1 50%, #f0f4f8 50%);
+  padding: 80rpx 40rpx 40rpx;
+}
+
+/* Brand */
+.brand { text-align: center; margin-bottom: 64rpx }
+.brand-icon { font-size: 72rpx }
+.brand-name { display: block; font-size: 44rpx; color: #fff; font-weight: 700; margin-top: 16rpx }
+.brand-desc { display: block; font-size: 26rpx; color: rgba(255,255,255,.75); margin-top: 8rpx }
+
+/* Card */
+.card { background: #fff; border-radius: 24rpx; padding: 48rpx 36rpx; box-shadow: 0 8rpx 40rpx rgba(0,0,0,.08) }
+
+/* Field */
+.field { margin-bottom: 32rpx }
+.field-label { display: block; font-size: 28rpx; color: #333; font-weight: 600; margin-bottom: 16rpx }
+.field-box { display: flex; align-items: center; background: #f5f7fa; border-radius: 16rpx; padding: 0 24rpx; border: 2rpx solid transparent; transition: border-color .2s }
+.field-box:focus-within { border-color: #1a73e8; background: #fff }
+.field-prefix { font-size: 28rpx; color: #999; padding-right: 16rpx; flex-shrink: 0 }
+.field-input { flex: 1; height: 96rpx; font-size: 30rpx; color: #333; border: none; background: transparent; outline: none; width: 0; min-width: 0 }
+.field-input.full { width: 100% }
+.field-eye { font-size: 36rpx; flex-shrink: 0; padding-left: 8rpx }
+.field-hint { display: block; font-size: 22rpx; color: #e53935; margin-top: 8rpx; padding-left: 4rpx }
+
+/* Submit */
+.submit-btn {
+  height: 96rpx;
+  line-height: 96rpx;
+  text-align: center;
+  border-radius: 48rpx;
+  background: linear-gradient(135deg, #1a73e8, #0d47a1);
+  color: #fff;
+  font-size: 32rpx;
+  font-weight: 600;
+  margin-top: 48rpx;
+  transition: opacity .2s;
+}
+.submit-btn:active { opacity: .85 }
+.submit-btn.disabled { background: #ccc; pointer-events: none }
+
+.footer-link { text-align: center; margin-top: 36rpx; font-size: 26rpx; color: #999 }
+.link { color: #1a73e8; font-weight: 500 }
 </style>
