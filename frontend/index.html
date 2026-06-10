@@ -4,24 +4,37 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>金地燃气聚合展示引流平台</title>
-    <!-- 微信 JS-SDK（同步加载，在页面所有脚本之前） -->
+    <!-- 微信 JS-SDK（同步加载，在所有脚本之前） -->
     <script src="/subsystem/ops/jweixin-1.6.0.js"></script>
     <script>
-      // ═══ 微信 JSSDK 初始化（内联同步脚本，在模块脚本之前执行）═══
+      // ═══ 微信 JSSDK 初始化 ═══
       (function() {
         if (!/micromessenger/i.test(navigator.userAgent)) return;
-        var DONE = false;
+        var url = location.href.split('#')[0];
+        var corpId = (new URLSearchParams(location.search)).get('corpId') || '4';
 
-        function doConfig() {
-          if (DONE) return; DONE = true;
-          var url = location.href.split('#')[0];
-          var corpId = (new URLSearchParams(location.search)).get('corpId') || '4';
+        // 等待 wx.config 就绪 + 拿到签名后再配置
+        var retry = 0;
+        function tryConfig() {
+          // 每次调用前实时检查 wx.config 是否可用
+          if (typeof wx === 'undefined' || typeof wx.config !== 'function') {
+            if (++retry > 30) return console.error('[JSSDK] 超时：wx.config 始终不可用');
+            console.log('[JSSDK] 等待 wx 就绪... (' + retry + ')');
+            return setTimeout(tryConfig, 200);
+          }
+
+          // wx.config 就绪，获取签名
           fetch('/api/public-account/js-config?url=' + encodeURIComponent(url) + '&corpId=' + corpId)
             .then(function(r) { return r.json(); })
             .then(function(d) {
               if (!d.ok || !d.data) return console.error('[JSSDK] 签名失败:', d.msg);
               var s = d.data;
-              console.log('[JSSDK] 签名获取成功, appId:', s.appId);
+              console.log('[JSSDK] 签名成功, appId:', s.appId);
+
+              // 再次检查（fetch 期间 wx 可能变化）
+              if (typeof wx.config !== 'function')
+                return console.error('[JSSDK] wx.config 在 fetch 后丢失，请刷新重试');
+
               wx.config({
                 debug: false, appId: s.appId, timestamp: s.timestamp,
                 nonceStr: s.nonceStr, signature: s.signature,
@@ -31,20 +44,15 @@
               wx.ready(function() { console.log('[JSSDK] ✅ ready'); });
               wx.error(function(e) { console.error('[JSSDK] ❌', JSON.stringify(e)); });
             })
-            .catch(function(e) { console.error('[JSSDK] 请求失败:', e); });
+            .catch(function(e) { console.error('[JSSDK] 获取签名失败:', e); });
         }
 
-        // jweixin-1.6.0.js 已同步加载，wx.config 应立即就绪
-        if (typeof wx !== 'undefined' && typeof wx.config === 'function') {
-          doConfig();
-        } else {
-          // 若仍未就绪，等 WeixinJSBridge 事件
-          document.addEventListener('WeixinJSBridgeReady', doConfig, false);
-          // 也监听 DOMContentLoaded 兜底
-          document.addEventListener('DOMContentLoaded', function() {
-            setTimeout(function() { if (!DONE) doConfig(); }, 500);
-          }, false);
-        }
+        // 立即尝试，失败则轮询
+        document.addEventListener('WeixinJSBridgeReady', function() {
+          console.log('[JSSDK] WeixinJSBridgeReady 触发');
+          retry = 0; tryConfig();
+        }, false);
+        tryConfig();
       })();
     </script>
     <script>
