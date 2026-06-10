@@ -92,6 +92,20 @@ ops-platform-project/
 
 ---
 
+## 环境配置
+
+前端入口地址通过 `.env` 配置：
+
+| 变量 | 说明 | 示例 |
+|---|---|---|
+| `VITE_OPS_ENTRY` | 运营平台入口地址（供 qiankun 主应用加载） | `https://a.15891589.xyz` |
+| `VITE_CORP_ID` | 默认组织 ID | `3` |
+
+**API 协议统一**：
+- H5 模式：使用相对路径（`/api`），由 Nginx 反代统一 HTTPS 协议，避免混合内容拦截
+- 小程序模式：使用完整 URL（`https://a.15891589.xyz/api`），微信强制 HTTPS
+- 本地 dev：Vite proxy 将 `/api` 转发到 `localhost:8084`
+
 ## 启动方式
 
 ```bash
