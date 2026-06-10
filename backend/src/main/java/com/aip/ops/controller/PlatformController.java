@@ -2,6 +2,7 @@ package com.aip.ops.controller;
 
 import com.aip.ops.entity.*;
 import com.aip.ops.mapper.*;
+import com.aip.ops.service.IGsProductService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -16,12 +17,14 @@ import java.util.*;
 /**
  * 金地燃气聚合展示引流平台 — 核心 Controller。
  * 定位: 商品/活动展示 + 积分消耗 + 引流跳转第三方小程序，不提供交易功能。
+ *
+ * 商品数据通过 gs_product（映射表）JOIN mall_product 获取。
  */
 @RestController @RequestMapping("/api/ops") @RequiredArgsConstructor
 public class PlatformController {
 
     private final GsUserMapper userMapper;
-    private final GsProductMapper productMapper;
+    private final IGsProductService productService;
     private final GsOrderMapper orderMapper;
     private final GsActivityMapper activityMapper;
     private final GsAddressMapper addressMapper;
@@ -57,6 +60,10 @@ public class PlatformController {
     }
 
     // ═══ 商品 (展示，非交易) ═══
+
+    /**
+     * 用户端商品列表 — 仅展示已上架且通过 gs_product 映射引入的商品。
+     */
     @GetMapping("/product/page")
     public R<?> productPage(@RequestParam(defaultValue="1") int pageNum,
             @RequestParam(defaultValue="10") int pageSize,
@@ -64,55 +71,47 @@ public class PlatformController {
             @RequestParam(required=false) Long categoryId,
             @RequestParam(required=false) Integer status) {
         Long corpId = getCorpId();
-        Page<GsProduct> page = productMapper.selectPage(new Page<>(pageNum, pageSize),
-                new LambdaQueryWrapper<GsProduct>().eq(GsProduct::getCorpId, corpId)
-                        .eq(status != null, GsProduct::getStatus, status)
-                        .like(name != null && !name.isEmpty(), GsProduct::getName, name)
-                        .eq(categoryId != null, GsProduct::getCategoryId, categoryId)
-                        .orderByDesc(GsProduct::getId));
-        return R.ok(page);
+        return R.ok(productService.publishedProductPage(
+                corpId, pageNum, pageSize, categoryId, name));
     }
 
+    /**
+     * 用户端商品详情 — 通过 gs_product 映射ID获取 mall_product 商品信息。
+     */
     @GetMapping("/product/{id}")
     public R<?> productDetail(@PathVariable Long id) {
-        GsProduct p = productMapper.selectById(id);
-        if (p == null) return R.fail("商品不存在");
+        Map<String, Object> product = productService.productDetailByMappingId(id);
+        if (product == null) return R.fail("商品不存在");
         // 点击统计
-        GsClickLog cl = new GsClickLog(); cl.setCorpId(p.getCorpId());
+        Long corpId = getCorpId();
+        GsClickLog cl = new GsClickLog(); cl.setCorpId(corpId);
         cl.setUserId(getUserIdOrNull()); cl.setTargetType("PRODUCT"); cl.setTargetId(id);
         clickLogMapper.insert(cl);
-        p.setClickCount((p.getClickCount() != null ? p.getClickCount() : 0) + 1);
-        productMapper.updateById(p);
-        return R.ok(p);
+        return R.ok(product);
     }
 
+    /**
+     * 新增商品 — 仅用于兼容，实际商品在 mall_product 中管理。
+     * 映射关系由管理员在后台通过绑定销售商后引入。
+     */
     @PostMapping("/product")
-    public R<?> createProduct(@RequestBody GsProduct product) {
-        product.setCorpId(getCorpId());
-        product.setStatus(1);
-        productMapper.insert(product);
-        return R.ok();
+    public R<?> createProduct(@RequestBody Map<String,Object> body) {
+        return R.fail("商品由销售商(mall_product)提供，请通过管理员后台引入商品");
     }
 
     @PutMapping("/product/{id}")
-    public R<?> updateProduct(@PathVariable Long id, @RequestBody GsProduct product) {
-        product.setId(id);
-        productMapper.updateById(product);
-        return R.ok();
+    public R<?> updateProduct(@PathVariable Long id, @RequestBody Map<String,Object> body) {
+        return R.fail("商品由销售商(mall_product)提供，请通过管理员后台管理");
     }
 
     @PutMapping("/product/{id}/status")
     public R<?> productStatus(@PathVariable Long id, @RequestBody Map<String,Object> body) {
-        GsProduct p = new GsProduct(); p.setId(id);
-        p.setStatus(Integer.valueOf(body.get("status").toString()));
-        productMapper.updateById(p);
-        return R.ok();
+        return R.fail("请使用上下架接口 /api/ops/admin/products/{id}/shelf-status");
     }
 
     @DeleteMapping("/product/{id}")
     public R<?> deleteProduct(@PathVariable Long id) {
-        productMapper.deleteById(id);
-        return R.ok();
+        return R.fail("商品由销售商(mall_product)提供，请通过管理员后台管理");
     }
 
     // ═══ 积分兑换订单 (预扣积分，跳转第三方) ═══
@@ -120,24 +119,41 @@ public class PlatformController {
     public R<?> createOrder(@RequestBody Map<String,Object> body) {
         Long userId = SecurityUtils.getCurrentUserId();
         Long corpId = SecurityUtils.getCurrentCorpId();
-        Long productId = Long.valueOf(body.get("productId").toString());
-        GsProduct p = productMapper.selectById(productId);
-        if (p == null || p.getStatus() != 1) return R.fail("商品不存在或已下架");
-        GsUser u = userMapper.selectById(userId);
-        int pointsSpent = p.getPointsPrice();
-        if (u.getPointsBalance() < pointsSpent) return R.fail("积分不足，当前余额" + u.getPointsBalance());
+        Long mappingId = Long.valueOf(body.get("productId").toString());
 
-        u.setPointsBalance(u.getPointsBalance() - pointsSpent); userMapper.updateById(u);
+        // 通过映射关系获取商品信息
+        Map<String, Object> product = productService.productDetailByMappingId(mappingId);
+        if (product == null) return R.fail("商品不存在或已下架");
+
+        Integer status = (Integer) product.get("status");
+        Integer shelfStatus = (Integer) product.get("shelfStatus");
+        if (status == null || status != 1 || shelfStatus == null || shelfStatus != 1)
+            return R.fail("商品不存在或已下架");
+
+        GsUser u = userMapper.selectById(userId);
+        int pointsSpent = product.get("pointsPrice") != null ?
+                ((Number) product.get("pointsPrice")).intValue() : 0;
+        if (u.getPointsBalance() < pointsSpent)
+            return R.fail("积分不足，当前余额" + u.getPointsBalance());
+
+        String productName = (String) product.get("name");
+        u.setPointsBalance(u.getPointsBalance() - pointsSpent);
+        userMapper.updateById(u);
+
         GsPointsLog log = new GsPointsLog(); log.setCorpId(corpId); log.setUserId(userId);
         log.setChangeType("CONSUME"); log.setAmount(pointsSpent);
-        log.setBalanceAfter(u.getPointsBalance()); log.setRemark("兑换商品：" + p.getName());
+        log.setBalanceAfter(u.getPointsBalance()); log.setRemark("兑换商品：" + productName);
         pointsLogMapper.insert(log);
 
         String orderNo = "OPS" + System.currentTimeMillis() + userId;
         GsOrder order = new GsOrder(); order.setCorpId(corpId); order.setUserId(userId);
-        order.setOrderNo(orderNo); order.setProductId(productId);
-        order.setProductName(p.getName()); order.setProductImage(p.getCoverImage());
-        order.setPointsSpent(pointsSpent); order.setCashAmount(p.getCashPrice());
+        order.setOrderNo(orderNo); order.setProductId(mappingId);
+        order.setProductName(productName);
+        order.setProductImage((String) product.get("coverImage"));
+        order.setPointsSpent(pointsSpent);
+        int cashAmount = product.get("cashPrice") != null ?
+                ((Number) product.get("cashPrice")).intValue() : 0;
+        order.setCashAmount(new java.math.BigDecimal(cashAmount));
         order.setStatus("PENDING");
         order.setExpireTime(LocalDateTime.now().plusMinutes(30));
         orderMapper.insert(order);

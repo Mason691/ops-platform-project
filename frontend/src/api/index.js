@@ -12,6 +12,16 @@ export const api = {
   // 商品
   productPage: (params) => request({url:'/api/ops/product/page',data:params}),
   productDetail: (id) => request({url:'/api/ops/product/'+id}),
+
+  // 运营商管理后台 — 商品展示管理
+  adminProductPage: (params) => request({url:'/api/ops/admin/products',data:params}),
+  adminProductShelf: (id, shelfStatus) => request({url:'/api/ops/admin/products/'+id+'/shelf-status',method:'PUT',data:{shelfStatus}}),
+  adminProductBatchShelf: (ids, shelfStatus) => request({url:'/api/ops/admin/products/batch-shelf',method:'POST',data:{ids,shelfStatus}}),
+  adminProductBatchCategory: (ids, categoryId) => request({url:'/api/ops/admin/products/batch-category',method:'PUT',data:{ids,categoryId}}),
+  adminProductCategories: () => request({url:'/api/ops/admin/product-categories'}),
+  adminCreateCategory: (data) => request({url:'/api/ops/admin/product-categories',method:'POST',data}),
+  adminUpdateCategory: (id,data) => request({url:'/api/ops/admin/product-categories/'+id,method:'PUT',data}),
+  adminDeleteCategory: (id) => request({url:'/api/ops/admin/product-categories/'+id,method:'DELETE'}),
   // 订单
   createOrder: (data) => request({url:'/api/ops/order/create',method:'POST',data}),
   myOrders: (params) => request({url:'/api/ops/order/my',data:params}),

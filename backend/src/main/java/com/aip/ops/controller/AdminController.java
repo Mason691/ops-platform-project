@@ -2,10 +2,10 @@ package com.aip.ops.controller;
 
 import com.aip.ops.entity.*;
 import com.aip.ops.mapper.*;
+import com.aip.ops.service.IGsProductService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -17,31 +17,35 @@ import java.util.stream.Collectors;
  * 运营商管理后台 — 绑定销售商、商品管理、分类管理。
  *
  * 销售商来源：底座平台 sys_corp 表中，在 sys_corp_role 中拥有 role_name='销售商' 的组织。
- * 角色名称通过 platform.merchant-role-name 配置，默认为"销售商"。
+ * 商品数据：通过 gs_product（映射表）JOIN mall_product 获取完整商品信息。
  */
 @RestController
 @RequestMapping("/api/ops/admin")
 public class AdminController {
 
     private final OperatorMerchantMapper omMapper;
-    private final GsProductMapper productMapper;
+    private final IGsProductService productService;
     private final ProductCategoryMapper categoryMapper;
     private final MerchantMapper merchantMapper;
     private final String merchantRoleName;
 
     public AdminController(OperatorMerchantMapper omMapper,
-                           GsProductMapper productMapper,
+                           IGsProductService productService,
                            ProductCategoryMapper categoryMapper,
                            MerchantMapper merchantMapper,
                            @Value("${platform.merchant-role-name:销售商}") String merchantRoleName) {
         this.omMapper = omMapper;
-        this.productMapper = productMapper;
+        this.productService = productService;
         this.categoryMapper = categoryMapper;
         this.merchantMapper = merchantMapper;
         this.merchantRoleName = merchantRoleName;
     }
 
+    /** 当前用户ID（用于个人身份） */
     private Long currentUserId() { return SecurityUtils.getCurrentUserId(); }
+
+    /** 当前运营商组织ID（corp_id），用于商品/销售商等运营操作 */
+    private Long currentOperatorId() { return SecurityUtils.getCurrentCorpId(); }
 
     // ═══ 绑定销售商 ═══
 
@@ -53,7 +57,7 @@ public class AdminController {
     public R<?> merchantList(@RequestParam(defaultValue="1") int pageNum,
                              @RequestParam(defaultValue="20") int pageSize,
                              @RequestParam(required=false) String keyword) {
-        Long operatorId = currentUserId();
+        Long operatorId = currentOperatorId();
 
         Set<Long> bound = omMapper.selectList(new LambdaQueryWrapper<OperatorMerchant>()
                 .eq(OperatorMerchant::getOperatorId, operatorId)
@@ -75,7 +79,7 @@ public class AdminController {
     @PostMapping("/bind-merchants")
     @Transactional
     public R<?> bindMerchants(@RequestBody Map<String,Object> body) {
-        Long operatorId = currentUserId();
+        Long operatorId = currentOperatorId();
         @SuppressWarnings("unchecked")
         List<Integer> ids = (List<Integer>) body.get("merchantIds");
         if (ids == null || ids.isEmpty()) return R.fail("请选择销售商");
@@ -99,7 +103,7 @@ public class AdminController {
     /** 解绑单个销售商 */
     @DeleteMapping("/bind-merchants/{merchantId}")
     public R<?> unbind(@PathVariable Long merchantId) {
-        Long operatorId = currentUserId();
+        Long operatorId = currentOperatorId();
         OperatorMerchant om = omMapper.selectOne(new LambdaQueryWrapper<OperatorMerchant>()
                 .eq(OperatorMerchant::getOperatorId, operatorId)
                 .eq(OperatorMerchant::getMerchantId, merchantId)
@@ -112,77 +116,54 @@ public class AdminController {
 
     // ═══ 商品展示管理 ═══
 
+    /**
+     * 获取当前运营商的商品展示列表。
+     * 通过 gs_product 映射表 JOIN mall_product 获取完整商品信息。
+     */
     @GetMapping("/products")
     public R<?> products(@RequestParam(defaultValue="1") int pageNum,
                          @RequestParam(defaultValue="10") int pageSize,
                          @RequestParam(required=false) Long merchantId,
                          @RequestParam(required=false) Long categoryId,
-                         @RequestParam(required=false) Integer shelfStatus) {
-        Long operatorId = currentUserId();
-        Set<Long> boundMerchants = omMapper.selectList(new LambdaQueryWrapper<OperatorMerchant>()
-                .eq(OperatorMerchant::getOperatorId, operatorId)
-                .eq(OperatorMerchant::getStatus, 1))
-                .stream().map(OperatorMerchant::getMerchantId).collect(Collectors.toSet());
-
-        LambdaQueryWrapper<GsProduct> qw = new LambdaQueryWrapper<GsProduct>();
-        if (!boundMerchants.isEmpty()) qw.in(GsProduct::getMerchantId, boundMerchants);
-        else qw.eq(GsProduct::getMerchantId, -1L);
-        if (merchantId != null) qw.eq(GsProduct::getMerchantId, merchantId);
-        if (categoryId != null) qw.eq(GsProduct::getCategoryId, categoryId);
-        if (shelfStatus != null) qw.eq(GsProduct::getShelfStatus, shelfStatus);
-        qw.orderByDesc(GsProduct::getId);
-
-        Page<GsProduct> page = productMapper.selectPage(new Page<>(pageNum, pageSize), qw);
-        List<Map<String,Object>> enriched = page.getRecords().stream().map(p -> {
-            Map<String,Object> m = new LinkedHashMap<>();
-            m.put("id", p.getId()); m.put("name", p.getName());
-            m.put("coverImage", p.getCoverImage()); m.put("pointsPrice", p.getPointsPrice());
-            m.put("cashPrice", p.getCashPrice()); m.put("shelfStatus", p.getShelfStatus());
-            m.put("status", p.getStatus()); m.put("clickCount", p.getClickCount());
-            m.put("merchantId", p.getMerchantId()); m.put("categoryId", p.getCategoryId());
-            if (p.getCategoryId() != null) {
-                ProductCategory c = categoryMapper.selectById(p.getCategoryId());
-                m.put("categoryName", c != null ? c.getName() : "-");
-            } else m.put("categoryName", "-");
-            return m;
-        }).collect(Collectors.toList());
-
-        Map<String,Object> result = new LinkedHashMap<>();
-        result.put("records", enriched);
-        result.put("total", page.getTotal());
-        result.put("size", page.getSize());
-        result.put("current", page.getCurrent());
-        return R.ok(result);
+                         @RequestParam(required=false) Integer shelfStatus,
+                         @RequestParam(required=false) String keyword) {
+        Long operatorId = currentOperatorId();
+        return R.ok(productService.adminProductPage(
+                operatorId, pageNum, pageSize, shelfStatus, categoryId, keyword));
     }
 
+    /** 单个商品上下架 */
     @PutMapping("/products/{id}/shelf-status")
     public R<?> toggleShelf(@PathVariable Long id, @RequestBody Map<String,Object> body) {
-        GsProduct p = new GsProduct();
-        p.setId(id); p.setShelfStatus(Integer.valueOf(body.getOrDefault("shelfStatus", 1).toString()));
-        productMapper.updateById(p);
+        Integer shelfStatus = Integer.valueOf(body.getOrDefault("shelfStatus", 1).toString());
+        productService.updateShelfStatus(id, shelfStatus);
         return R.ok();
     }
 
+    /** 批量上下架 */
     @PostMapping("/products/batch-shelf")
     public R<?> batchShelf(@RequestBody Map<String,Object> body) {
+        Long operatorId = currentOperatorId();
         Integer shelfStatus = Integer.valueOf(body.getOrDefault("shelfStatus", 1).toString());
         @SuppressWarnings("unchecked")
         List<Integer> ids = (List<Integer>) body.get("ids");
         if (ids == null || ids.isEmpty()) return R.fail("请选择商品");
-        GsProduct p = new GsProduct(); p.setShelfStatus(shelfStatus);
-        for (Integer id : ids) { p.setId(Long.valueOf(id)); productMapper.updateById(p); }
-        return R.ok(Map.of("count", ids.size()));
+        List<Long> longIds = ids.stream().map(Long::valueOf).collect(Collectors.toList());
+        int count = productService.batchUpdateShelfStatus(longIds, shelfStatus, operatorId);
+        return R.ok(Map.of("count", count));
     }
 
+    /** 批量设置分类 */
     @PutMapping("/products/batch-category")
     public R<?> batchCategory(@RequestBody Map<String,Object> body) {
+        Long operatorId = currentOperatorId();
         Long categoryId = Long.valueOf(body.getOrDefault("categoryId", 0).toString());
         @SuppressWarnings("unchecked")
         List<Integer> ids = (List<Integer>) body.get("ids");
         if (ids == null || ids.isEmpty()) return R.fail("请选择商品");
-        GsProduct p = new GsProduct(); p.setCategoryId(categoryId);
-        for (Integer id : ids) { p.setId(Long.valueOf(id)); productMapper.updateById(p); }
-        return R.ok(Map.of("count", ids.size()));
+        List<Long> longIds = ids.stream().map(Long::valueOf).collect(Collectors.toList());
+        int count = productService.batchUpdateCategory(longIds, categoryId, operatorId);
+        return R.ok(Map.of("count", count));
     }
 
     // ═══ 商品分类 CRUD ═══
