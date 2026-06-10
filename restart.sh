@@ -11,7 +11,7 @@
 # H5 产物： frontend/dist/build/h5/ → Nginx /subsystem/ops/
 # ═══════════════════════════════════════════════════════════════════════════════
 
-set -euo pipefail
+set -eu
 
 # ── 环境变量 ──────────────────────────────────────────────────────────────────
 export JAVA_HOME="${JAVA_HOME:-/home/jason/.local/jdk17}"
@@ -69,8 +69,11 @@ fi
 echo ""
 warn "拉取最新代码..."
 cd "$PROJECT_DIR"
-git pull origin main 2>&1 | tail -1
-ok "代码已更新"
+if git pull origin main >/dev/null 2>&1; then
+    ok "代码已更新"
+else
+    warn "代码拉取失败，使用本地代码继续"
+fi
 
 # ── 4. 编译后端 ──────────────────────────────────────────────────────────────
 echo ""
