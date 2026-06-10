@@ -4,37 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>金地燃气聚合展示引流平台</title>
-    <!-- 微信 JS-SDK（同步加载，在所有脚本之前） -->
-    <script src="/subsystem/ops/jweixin-1.6.0.js"></script>
+    <!-- WeixinJSBridge 是微信 WebView 内置 API，无需加载外部 SDK -->
     <script>
-      // ═══ 微信 JSSDK 初始化 ═══
+      // ═══ 微信 JSSDK 初始化 — 使用 WeixinJSBridge 底层 API ═══
       (function() {
         if (!/micromessenger/i.test(navigator.userAgent)) return;
         var url = location.href.split('#')[0];
         var corpId = (new URLSearchParams(location.search)).get('corpId') || '4';
 
-        var wxConfig, wxReady, wxError;
-        var retry = 0;
-
-        function captureWx() {
-          if (typeof wx !== 'undefined' && typeof wx.config === 'function') {
-            // 抓住引用！后续模块覆盖 wx 也不影响
-            wxConfig = wx.config;
-            wxReady  = wx.ready;
-            wxError  = wx.error;
-            return true;
-          }
-          return false;
-        }
-
-        function tryConfig() {
-          if (!captureWx()) {
-            if (++retry > 30) return console.error('[JSSDK] 超时：wx.config 始终不可用');
-            console.log('[JSSDK] 等待 wx 就绪... (' + retry + ')');
-            return setTimeout(tryConfig, 200);
+        function init() {
+          // 走 WeixinJSBridge 底层，完全不依赖 wx 对象
+          if (typeof WeixinJSBridge === 'undefined') {
+            document.addEventListener('WeixinJSBridgeReady', init, false);
+            return;
           }
 
-          console.log('[JSSDK] wx 引用已捕获，获取签名...');
+          console.log('[JSSDK] WeixinJSBridge 就绪，获取签名...');
           fetch('/api/public-account/js-config?url=' + encodeURIComponent(url) + '&corpId=' + corpId)
             .then(function(r) { return r.json(); })
             .then(function(d) {
@@ -42,24 +27,42 @@
               var s = d.data;
               console.log('[JSSDK] 签名成功, appId:', s.appId);
 
-              // 使用捕获的引用，不依赖全局 wx
-              wxReady(function() { console.log('[JSSDK] ✅ ready'); });
-              wxError(function(e) { console.error('[JSSDK] ❌', JSON.stringify(e)); });
-              wxConfig.call(wx, {
-                debug: false, appId: s.appId, timestamp: s.timestamp,
-                nonceStr: s.nonceStr, signature: s.signature,
-                jsApiList: ['updateAppMessageShareData','updateTimelineShareData','getLocation','openLocation','chooseImage','previewImage','miniProgram'],
-                openTagList: ['wx-open-launch-weapp']
+              // 直接调用 WeixinJSBridge.invoke('preVerifyJSAPI', ...)
+              // 等价于 wx.config()，但不依赖 wx 对象
+              WeixinJSBridge.invoke('preVerifyJSAPI', {
+                appId: s.appId,
+                verifyAppId: s.appId,
+                verifySignType: 'sha1',
+                verifyTimestamp: String(s.timestamp),
+                verifyNonceStr: s.nonceStr,
+                verifySignature: s.signature,
+                jsApiList: [
+                  'updateAppMessageShareData','updateTimelineShareData',
+                  'onMenuShareTimeline','onMenuShareAppMessage',
+                  'getLocation','openLocation','chooseImage','previewImage',
+                  'miniProgram','onSearchBeacons'
+                ]
+              }, function(res) {
+                var err = res.err_msg || res.errMsg || '';
+                if (err.indexOf(':ok') !== -1) {
+                  console.log('[JSSDK] ✅ ready (via WeixinJSBridge)');
+                } else {
+                  console.error('[JSSDK] ❌', err);
+                }
+              });
+
+              // 始终监听 WeixinJSBridge 事件以防万一
+              WeixinJSBridge.on('menu:share:timeline', function() {
+                console.log('[JSSDK] 分享到朋友圈事件');
+              });
+              WeixinJSBridge.on('menu:share:appmessage', function() {
+                console.log('[JSSDK] 分享给朋友事件');
               });
             })
             .catch(function(e) { console.error('[JSSDK] 获取签名失败:', e); });
         }
 
-        document.addEventListener('WeixinJSBridgeReady', function() {
-          console.log('[JSSDK] WeixinJSBridgeReady 触发');
-          retry = 0; tryConfig();
-        }, false);
-        tryConfig();
+        init();
       })();
     </script>
     <script>
