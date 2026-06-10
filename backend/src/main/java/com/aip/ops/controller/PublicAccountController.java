@@ -7,19 +7,81 @@ import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 多公众号运营配置管理 + H5公开查询接口
  */
+@Slf4j
 @RestController @RequiredArgsConstructor
 public class PublicAccountController {
 
     private final PublicAccountConfigServiceImpl configService;
     private final RestTemplate restTemplate;
+
+    // ── access_token / jsapi_ticket 缓存 ──
+    private final Map<String, String>  tokenCache  = new ConcurrentHashMap<>();
+    private final Map<String, Long>    tokenExpire = new ConcurrentHashMap<>();
+    private final Map<String, String>  ticketCache = new ConcurrentHashMap<>();
+    private final Map<String, Long>    ticketExpire= new ConcurrentHashMap<>();
+
+    private String getAccessToken(PublicAccountConfig cfg) {
+        String key = cfg.getAppId();
+        Long expire = tokenExpire.getOrDefault(key, 0L);
+        if (System.currentTimeMillis() < expire) return tokenCache.get(key);
+        String url = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential"
+                + "&appid=" + cfg.getAppId() + "&secret=" + cfg.getAppSecret();
+        try {
+            var resp = restTemplate.getForObject(url, Map.class);
+            if (resp != null && resp.containsKey("access_token")) {
+                String token = (String) resp.get("access_token");
+                int expiresIn = ((Number) resp.get("expires_in")).intValue();
+                tokenCache.put(key, token);
+                tokenExpire.put(key, System.currentTimeMillis() + (expiresIn - 300) * 1000L);
+                return token;
+            }
+            log.warn("getAccessToken failed: {}", resp);
+        } catch (Exception e) { log.error("getAccessToken error", e); }
+        return null;
+    }
+
+    private String getJsapiTicket(PublicAccountConfig cfg) {
+        String key = cfg.getAppId();
+        Long expire = ticketExpire.getOrDefault(key, 0L);
+        if (System.currentTimeMillis() < expire) return ticketCache.get(key);
+        String token = getAccessToken(cfg);
+        if (token == null) return null;
+        try {
+            var resp = restTemplate.getForObject(
+                    "https://api.weixin.qq.com/cgi-bin/ticket/getticket?access_token="
+                    + token + "&type=jsapi", Map.class);
+            if (resp != null && "ok".equals(resp.get("errmsg")) && resp.containsKey("ticket")) {
+                String ticket = (String) resp.get("ticket");
+                int expiresIn = ((Number) resp.get("expires_in")).intValue();
+                ticketCache.put(key, ticket);
+                ticketExpire.put(key, System.currentTimeMillis() + (expiresIn - 300) * 1000L);
+                return ticket;
+            }
+        } catch (Exception e) { log.error("getJsapiTicket error", e); }
+        return null;
+    }
+
+    private String sha1(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-1");
+            byte[] digest = md.digest(s.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) { throw new RuntimeException(e); }
+    }
 
     // ═══ 管理后台 CRUD ═══
     @GetMapping("/api/ops/public-account-config")
@@ -130,6 +192,36 @@ public class PublicAccountController {
                 ? cfg.getJsDomain() : "a.15891589.xyz");
         r.put("name", cfg != null && cfg.getName() != null ? cfg.getName() : "金地燃气");
         r.put("debug", cfg == null);
+        return R.ok(r);
+    }
+
+    // ═══ JSSDK 签名 (公开，H5 前端调用) ═══
+    @GetMapping("/api/public-account/js-config")
+    public R<?> jsConfig(@RequestParam String url,
+                         @RequestParam(required = false) Long corpId) {
+        PublicAccountConfig cfg = configService.getOne(new LambdaQueryWrapper<PublicAccountConfig>()
+                .eq(corpId != null, PublicAccountConfig::getCorpId, corpId)
+                .eq(PublicAccountConfig::getIsDefault, 1)
+                .eq(PublicAccountConfig::getStatus, 1).last("LIMIT 1"));
+        if (cfg == null) cfg = configService.getOne(new LambdaQueryWrapper<PublicAccountConfig>()
+                .eq(corpId != null, PublicAccountConfig::getCorpId, corpId)
+                .eq(PublicAccountConfig::getStatus, 1).last("LIMIT 1"));
+        if (cfg == null) return R.fail("无可用公众号配置");
+
+        String ticket = getJsapiTicket(cfg);
+        if (ticket == null) return R.fail("获取 jsapi_ticket 失败，请检查 appId/appSecret");
+
+        String nonceStr = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        long timestamp   = System.currentTimeMillis() / 1000;
+        String signStr   = "jsapi_ticket=" + ticket + "&noncestr=" + nonceStr
+                         + "&timestamp=" + timestamp + "&url=" + url;
+        String signature = sha1(signStr);
+
+        Map<String,Object> r = new LinkedHashMap<>();
+        r.put("appId",     cfg.getAppId());
+        r.put("timestamp", timestamp);
+        r.put("nonceStr",  nonceStr);
+        r.put("signature", signature);
         return R.ok(r);
     }
 }
