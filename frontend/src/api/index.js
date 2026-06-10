@@ -1,8 +1,9 @@
 import { request } from '@/utils/request'
 
 export const api = {
-  // 登录
-  login: (phone, code) => request({url:'/api/ops/auth/login',method:'POST',data:{phone,code}}),
+  // 登录 & 注册
+  login: (phone, password) => request({url:'/api/ops/auth/login',method:'POST',data:{phone,password}}),
+  register: (phone, password, confirmPassword) => request({url:'/api/ops/auth/register',method:'POST',data:{phone,password,confirmPassword}}),
   getMe: () => request({url:'/api/ops/user/me'}),
   updateProfile: (data) => request({url:'/api/ops/user/profile',method:'PUT',data}),
   // 商品

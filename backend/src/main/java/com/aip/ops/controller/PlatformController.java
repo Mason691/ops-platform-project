@@ -31,26 +31,7 @@ public class PlatformController {
     private final GsClickLogMapper clickLogMapper;
 
     // ═══ 用户登录 ═══
-    @PostMapping("/auth/login")
-    public R<?> login(@RequestBody Map<String,String> body) {
-        String phone = body.get("phone");
-        Long corpId = body.get("corpId") != null ? Long.valueOf(body.get("corpId")) : 3L;
-        if (phone == null || phone.isEmpty()) return R.fail("手机号不能为空");
-        GsUser user = userMapper.selectOne(new LambdaQueryWrapper<GsUser>()
-                .eq(GsUser::getCorpId, corpId).eq(GsUser::getPhone, phone));
-        if (user == null) {
-            user = new GsUser(); user.setCorpId(corpId); user.setPhone(phone);
-            user.setNickname("燃气用户"); user.setPointsBalance(500);
-            user.setStatus(1); user.setLastLoginTime(LocalDateTime.now());
-            userMapper.insert(user);
-        } else { user.setLastLoginTime(LocalDateTime.now()); userMapper.updateById(user); }
-        Map<String,Object> r = new LinkedHashMap<>();
-        r.put("userId", user.getId()); r.put("phone", user.getPhone());
-        r.put("nickname", user.getNickname()); r.put("pointsBalance", user.getPointsBalance());
-        r.put("token", "ops-token-" + user.getId());
-        r.put("corpId", corpId);
-        return R.ok(r);
-    }
+    // 登录接口已迁移至 AuthController：POST /api/ops/auth/login
 
     @GetMapping("/user/me")
     public R<?> me() {

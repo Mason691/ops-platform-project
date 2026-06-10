@@ -8,6 +8,7 @@ public class GsUser {
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;
     @TableField("phone") private String phone;
+    @TableField("password") private String password;
     @TableField("openid") private String openid;
     @TableField("unionid") private String unionid;
     @TableField("nickname") private String nickname;

@@ -12,7 +12,8 @@
     {"path":"pages/address/add","style":{"navigationBarTitleText":"编辑地址"}},
     {"path":"pages/points/log","style":{"navigationBarTitleText":"积分明细"}},
     {"path":"pages/coupon/list","style":{"navigationBarTitleText":"优惠券"}},
-    {"path":"pages/auth/login","style":{"navigationBarTitleText":"登录"}}
+    {"path":"pages/auth/login","style":{"navigationBarTitleText":"登录"}},
+    {"path":"pages/auth/register","style":{"navigationBarTitleText":"注册"}}
   ],
   "tabBar": {"color":"#999","selectedColor":"#FF6B35","backgroundColor":"#fff","list":[
     {"pagePath":"pages/index/index","text":"首页","iconPath":"static/tab-home.png","selectedIconPath":"static/tab-home-active.png"},
