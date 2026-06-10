@@ -6,7 +6,7 @@ import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,40 +14,54 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * 运营商管理后台 — 绑定销售商、商品管理、分类管理
+ * 运营商管理后台 — 绑定销售商、商品管理、分类管理。
+ *
+ * 销售商来源：底座平台 sys_corp 表中，在 sys_corp_role 中拥有 role_name='销售商' 的组织。
+ * 角色名称通过 platform.merchant-role-name 配置，默认为"销售商"。
  */
 @RestController
 @RequestMapping("/api/ops/admin")
-@RequiredArgsConstructor
 public class AdminController {
 
     private final OperatorMerchantMapper omMapper;
     private final GsProductMapper productMapper;
     private final ProductCategoryMapper categoryMapper;
-    private final GsUserMapper userMapper;
+    private final MerchantMapper merchantMapper;
+    private final String merchantRoleName;
+
+    public AdminController(OperatorMerchantMapper omMapper,
+                           GsProductMapper productMapper,
+                           ProductCategoryMapper categoryMapper,
+                           MerchantMapper merchantMapper,
+                           @Value("${platform.merchant-role-name:销售商}") String merchantRoleName) {
+        this.omMapper = omMapper;
+        this.productMapper = productMapper;
+        this.categoryMapper = categoryMapper;
+        this.merchantMapper = merchantMapper;
+        this.merchantRoleName = merchantRoleName;
+    }
 
     private Long currentUserId() { return SecurityUtils.getCurrentUserId(); }
 
     // ═══ 绑定销售商 ═══
 
-    /** 获取销售商列表（含已绑定状态） */
+    /**
+     * 获取销售商列表（含已绑定状态）。
+     * 销售商 = 底座平台中拥有"销售商"企业角色的组织（sys_corp × sys_corp_role）。
+     */
     @GetMapping("/merchants")
     public R<?> merchantList(@RequestParam(defaultValue="1") int pageNum,
                              @RequestParam(defaultValue="20") int pageSize,
                              @RequestParam(required=false) String keyword) {
         Long operatorId = currentUserId();
 
-        // 已绑定的 merchant 集合
         Set<Long> bound = omMapper.selectList(new LambdaQueryWrapper<OperatorMerchant>()
                 .eq(OperatorMerchant::getOperatorId, operatorId)
                 .eq(OperatorMerchant::getStatus, 1))
                 .stream().map(OperatorMerchant::getMerchantId).collect(Collectors.toSet());
 
-        // 从已有的 mall_product 中按 merchant_id 汇总 + mall_station_master
-        // 简化实现：直接用 mall_station_master 作为销售商来源（需要从 mall_db 库查询）
-        // 由于本平台和 mall 共享 mall_db，可直接跨表查询
-        List<Map<String,Object>> merchants = userMapper.selectJoinedMerchants(
-                (pageNum - 1) * pageSize, pageSize, keyword);
+        List<Map<String,Object>> merchants = merchantMapper.selectMerchants(
+                (pageNum - 1) * pageSize, pageSize, merchantRoleName, keyword);
 
         merchants.forEach(m -> {
             Long mid = Long.valueOf(m.get("id").toString());
@@ -111,9 +125,8 @@ public class AdminController {
                 .stream().map(OperatorMerchant::getMerchantId).collect(Collectors.toSet());
 
         LambdaQueryWrapper<GsProduct> qw = new LambdaQueryWrapper<GsProduct>();
-        // 只展示已绑定销售商的商品
         if (!boundMerchants.isEmpty()) qw.in(GsProduct::getMerchantId, boundMerchants);
-        else qw.eq(GsProduct::getMerchantId, -1L); // 无绑定则无商品
+        else qw.eq(GsProduct::getMerchantId, -1L);
         if (merchantId != null) qw.eq(GsProduct::getMerchantId, merchantId);
         if (categoryId != null) qw.eq(GsProduct::getCategoryId, categoryId);
         if (shelfStatus != null) qw.eq(GsProduct::getShelfStatus, shelfStatus);
@@ -127,7 +140,6 @@ public class AdminController {
             m.put("cashPrice", p.getCashPrice()); m.put("shelfStatus", p.getShelfStatus());
             m.put("status", p.getStatus()); m.put("clickCount", p.getClickCount());
             m.put("merchantId", p.getMerchantId()); m.put("categoryId", p.getCategoryId());
-            // 分类名称
             if (p.getCategoryId() != null) {
                 ProductCategory c = categoryMapper.selectById(p.getCategoryId());
                 m.put("categoryName", c != null ? c.getName() : "-");
@@ -143,16 +155,14 @@ public class AdminController {
         return R.ok(result);
     }
 
-    /** 单个商品上架/下架 */
     @PutMapping("/products/{id}/shelf-status")
     public R<?> toggleShelf(@PathVariable Long id, @RequestBody Map<String,Object> body) {
-        Integer shelfStatus = Integer.valueOf(body.getOrDefault("shelfStatus", 1).toString());
-        GsProduct p = new GsProduct(); p.setId(id); p.setShelfStatus(shelfStatus);
+        GsProduct p = new GsProduct();
+        p.setId(id); p.setShelfStatus(Integer.valueOf(body.getOrDefault("shelfStatus", 1).toString()));
         productMapper.updateById(p);
         return R.ok();
     }
 
-    /** 批量上下架 */
     @PostMapping("/products/batch-shelf")
     public R<?> batchShelf(@RequestBody Map<String,Object> body) {
         Integer shelfStatus = Integer.valueOf(body.getOrDefault("shelfStatus", 1).toString());
@@ -164,7 +174,6 @@ public class AdminController {
         return R.ok(Map.of("count", ids.size()));
     }
 
-    /** 批量设置分类 */
     @PutMapping("/products/batch-category")
     public R<?> batchCategory(@RequestBody Map<String,Object> body) {
         Long categoryId = Long.valueOf(body.getOrDefault("categoryId", 0).toString());
@@ -182,7 +191,6 @@ public class AdminController {
     public R<?> categories() {
         List<ProductCategory> list = categoryMapper.selectList(
                 new LambdaQueryWrapper<ProductCategory>().orderByAsc(ProductCategory::getSortOrder));
-        // 构建树形
         List<Map<String,Object>> roots = new ArrayList<>();
         Map<Long,List<ProductCategory>> childrenMap = new LinkedHashMap<>();
         for (ProductCategory c : list) {
@@ -200,22 +208,15 @@ public class AdminController {
     }
 
     @PostMapping("/product-categories")
-    public R<?> createCategory(@RequestBody ProductCategory cat) {
-        categoryMapper.insert(cat);
-        return R.ok();
-    }
+    public R<?> createCategory(@RequestBody ProductCategory cat) { categoryMapper.insert(cat); return R.ok(); }
 
     @PutMapping("/product-categories/{id}")
     public R<?> updateCategory(@PathVariable Long id, @RequestBody ProductCategory cat) {
-        cat.setId(id); categoryMapper.updateById(cat);
-        return R.ok();
+        cat.setId(id); categoryMapper.updateById(cat); return R.ok();
     }
 
     @DeleteMapping("/product-categories/{id}")
-    public R<?> deleteCategory(@PathVariable Long id) {
-        categoryMapper.deleteById(id);
-        return R.ok();
-    }
+    public R<?> deleteCategory(@PathVariable Long id) { categoryMapper.deleteById(id); return R.ok(); }
 
     private Map<String,Object> catToMap(ProductCategory c) {
         Map<String,Object> m = new LinkedHashMap<>();

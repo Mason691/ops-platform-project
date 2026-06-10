@@ -29,6 +29,7 @@ platform:
   jwt-secret: aip-jwt-secret-key-2024-must-be-at-least-32-bytes-long!
   jwt-expiration: 43200
   internal-token: aip-internal-svc-token-2026
+  merchant-role-name: 销售商
   sdk-permit-paths:
     - /actuator/**
     - /api/public-account/**
