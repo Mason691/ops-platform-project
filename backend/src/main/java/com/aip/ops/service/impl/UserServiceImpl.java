@@ -7,7 +7,7 @@ import com.aip.ops.mapper.GsUserMapper;
 import com.aip.ops.service.IUserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.nimbusds.jose.*;
-import com.nimbusds.jose.crypto.MacSigner;
+import com.nimbusds.jose.crypto.MACSigner;
 import com.nimbusds.jwt.JWTClaimsSet;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -145,7 +145,7 @@ public class UserServiceImpl implements IUserService {
                     .expirationTime(new Date(System.currentTimeMillis() + jwtExpiration * 1000))
                     .build();
 
-            JWSSigner signer = new MacSigner(jwtSecret.getBytes(StandardCharsets.UTF_8));
+            JWSSigner signer = new MACSigner(jwtSecret.getBytes(StandardCharsets.UTF_8));
             JWSObject jws = new JWSObject(
                     new JWSHeader.Builder(JWSAlgorithm.HS256).type(JOSEObjectType.JWT).build(),
                     new Payload(claims.toJSONObject()));
