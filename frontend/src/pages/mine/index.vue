@@ -15,7 +15,12 @@
 <script setup>
 import {ref,onMounted} from 'vue';import {api} from '@/api/index';import {onShow} from '@dcloudio/uni-app'
 const isLogin=ref(false),user=ref({})
-async function loadUser(){try{user.value=await api.getMe();isLogin.value=true}catch{isLogin.value=false}}
+async function loadUser(){
+  const token = uni.getStorageSync('ops_token')
+  if (!token) { isLogin.value = false; return }
+  try { user.value = await api.getMe(); isLogin.value = true }
+  catch { isLogin.value = false; uni.removeStorageSync('ops_token') }
+}
 onMounted(loadUser);onShow(loadUser)
 function goLogin(){uni.navigateTo({url:'/pages/auth/login'})}
 function goPage(url){if(!isLogin.value){goLogin();return};uni.navigateTo({url})}
