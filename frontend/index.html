@@ -36,12 +36,13 @@
                 verifyTimestamp: String(s.timestamp),
                 verifyNonceStr: s.nonceStr,
                 verifySignature: s.signature,
-                jsApiList: [
+                verifyJsApiList: [
                   'updateAppMessageShareData','updateTimelineShareData',
                   'onMenuShareTimeline','onMenuShareAppMessage',
                   'getLocation','openLocation','chooseImage','previewImage',
-                  'miniProgram','onSearchBeacons'
-                ]
+                  'miniProgram'
+                ],
+                verifyOpenTagList: ['wx-open-launch-weapp']
               }, function(res) {
                 var err = res.err_msg || res.errMsg || '';
                 if (err.indexOf(':ok') !== -1) {
