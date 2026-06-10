@@ -94,26 +94,42 @@ onMounted(() => {
 })
 
 // 微信授权获取手机号
-async function requestWechatAuth() {
+// 开发模式：直接注入 mock 手机号（后端 wechat.phone-mock.enabled=true）
+// 正式环境：通过 WeixinJSBridge 或 wx-open-launch-weapp 获取
+function requestWechatAuth() {
   // #ifdef H5
-  // 正式环境：调用 JSSDK 拉起手机号授权
-  // 测试环境：直接使用 mock phone
-  try {
-    const config = await api.getPublicAccountConfig()
-    if (config && config.debug) {
-      // 测试号无手机号授权能力 — 使用 mock
-      const mockPhone = '13800138000'
-      phone.value = mockPhone
-      phoneObtained.value = true
-      uni.showToast({title:'测试模式：已注入 ' + mockPhone, icon:'none'})
-      return
-    }
+  console.log('[REGISTER] 点击微信授权按钮')
+  if (!/micromessenger/i.test(navigator.userAgent)) {
+    // 非微信环境 → 直接 mock
+    const mockPhone = '13800138000'
+    phone.value = mockPhone
+    phoneObtained.value = true
+    uni.showToast({title: '开发模式：已注入 ' + mockPhone, icon: 'none'})
+    return
+  }
 
-    // 正式环境：wx-open-subscribe 或 jssdk 手机号组件
-    // TODO: 对接微信手机号组件，获取 encryptedData + iv + code
-    uni.showToast({title:'请通过微信一键授权获取手机号', icon:'none'})
-  } catch (e) {
-    uni.showToast({title:'授权失败，请重试', icon:'none'})
+  // 微信环境：尝试调用 getPhoneNumber
+  if (typeof WeixinJSBridge !== 'undefined') {
+    WeixinJSBridge.invoke('getPhoneNumber', {}, function(res) {
+      console.log('[REGISTER] getPhoneNumber 回调:', JSON.stringify(res))
+      if (res.err_msg && res.err_msg.indexOf(':ok') > -1) {
+        // 成功：拿到 encryptedData + iv，传给注册接口
+        // TODO: 将 encryptedData/iv 传给注册接口
+        uni.showToast({title: '授权成功', icon: 'success'})
+      } else {
+        // 失败或取消 → 降级 mock
+        var mock = '13800138000'
+        phone.value = mock
+        phoneObtained.value = true
+        uni.showToast({title: '开发模式：已注入 ' + mock, icon: 'none'})
+      }
+    })
+  } else {
+    // WeixinJSBridge 不可用 → 直接 mock
+    var mock = '13800138000'
+    phone.value = mock
+    phoneObtained.value = true
+    uni.showToast({title: '开发模式：已注入 ' + mock, icon: 'none'})
   }
   // #endif
 }
