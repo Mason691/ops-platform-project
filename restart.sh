@@ -15,7 +15,9 @@
 set -eu
 
 # ── 环境变量 ──────────────────────────────────────────────────────────────────
+# JDK 17 放 PATH 最前面，确保 mvn / java / jar 全部使用 JDK 17（系统默认是 1.8）
 export JAVA_HOME="${JAVA_HOME:-/home/jason/.local/jdk17}"
+export PATH="$JAVA_HOME/bin:$PATH"
 NODE_BIN="${NODE_BIN:-/home/jason/nodejs/bin}"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$PROJECT_DIR/backend"
@@ -57,8 +59,9 @@ check_env() {
     echo ""
     warn "检查运行环境..."
 
-    [ -x "$JAVA_HOME/bin/java" ] || die "JDK 17 未找到：$JAVA_HOME"
-    JAVA_VER=$("$JAVA_HOME/bin/java" -version 2>&1 | head -1)
+    java -version >/dev/null 2>&1 || die "JDK 17 未找到：$JAVA_HOME"
+    JAVA_VER=$(java -version 2>&1 | head -1)
+    [[ "$JAVA_VER" == *"17."* ]] || die "需要 JDK 17，当前：$JAVA_VER"
     ok "JDK：$JAVA_VER"
 
     [ -x /usr/bin/mvn ] || die "Maven 未安装"
@@ -156,7 +159,7 @@ start_backend() {
 
     :> "$LOG_FILE"
 
-    nohup "$JAVA_HOME/bin/java" \
+    nohup java \
         -Xms128m -Xmx256m \
         -jar "$JAR_FILE" \
         --server.port="$BACKEND_PORT" \
