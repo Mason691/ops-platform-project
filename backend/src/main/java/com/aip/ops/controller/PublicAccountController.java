@@ -24,18 +24,22 @@ public class PublicAccountController {
     // ═══ 管理后台 CRUD ═══
     @GetMapping("/api/ops/public-account-config")
     public R<?> list() {
-        List<PublicAccountConfig> list = configService.list(
-                new LambdaQueryWrapper<PublicAccountConfig>()
-                        .eq(PublicAccountConfig::getCorpId, SecurityUtils.getCurrentCorpId())
-                        .orderByDesc(PublicAccountConfig::getIsDefault)
-                        .orderByAsc(PublicAccountConfig::getId));
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        LambdaQueryWrapper<PublicAccountConfig> qw = new LambdaQueryWrapper<PublicAccountConfig>()
+                .orderByDesc(PublicAccountConfig::getIsDefault)
+                .orderByAsc(PublicAccountConfig::getId);
+        // 超管可见所有配置，普通用户仅见本组织
+        if (corpId != null && corpId != 0) qw.eq(PublicAccountConfig::getCorpId, corpId);
+        List<PublicAccountConfig> list = configService.list(qw);
         list.forEach(c -> c.setAppSecret("******"));
         return R.ok(list);
     }
 
     @PostMapping("/api/ops/public-account-config")
     public R<?> create(@RequestBody PublicAccountConfig config) {
-        config.setCorpId(SecurityUtils.getCurrentCorpId());
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        // 超管可指定组织，普通用户强制使用自身组织
+        if (config.getCorpId() == null || config.getCorpId() == 0) config.setCorpId(corpId);
         configService.save(config);
         return R.ok();
     }
@@ -43,42 +47,51 @@ public class PublicAccountController {
     @PutMapping("/api/ops/public-account-config/{id}")
     public R<?> update(@PathVariable Long id, @RequestBody PublicAccountConfig config) {
         Long corpId = SecurityUtils.getCurrentCorpId();
-        PublicAccountConfig existing = configService.getOne(
-                new LambdaQueryWrapper<PublicAccountConfig>()
-                        .eq(PublicAccountConfig::getId, id).eq(PublicAccountConfig::getCorpId, corpId));
+        LambdaQueryWrapper<PublicAccountConfig> qw = new LambdaQueryWrapper<PublicAccountConfig>()
+                .eq(PublicAccountConfig::getId, id);
+        if (corpId != null && corpId != 0) qw.eq(PublicAccountConfig::getCorpId, corpId);
+        PublicAccountConfig existing = configService.getOne(qw);
         if (existing == null) return R.fail("配置不存在");
         if (config.getAppSecret() == null || "******".equals(config.getAppSecret()))
             config.setAppSecret(existing.getAppSecret());
-        config.setId(id); config.setCorpId(corpId);
+        config.setId(id);
+        // 超管可修改归属组织
+        if (config.getCorpId() == null || config.getCorpId() == 0) config.setCorpId(existing.getCorpId());
         configService.updateById(config);
         return R.ok();
     }
 
     @DeleteMapping("/api/ops/public-account-config/{id}")
     public R<?> delete(@PathVariable Long id) {
-        configService.remove(new LambdaQueryWrapper<PublicAccountConfig>()
-                .eq(PublicAccountConfig::getId, id)
-                .eq(PublicAccountConfig::getCorpId, SecurityUtils.getCurrentCorpId()));
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        LambdaQueryWrapper<PublicAccountConfig> qw = new LambdaQueryWrapper<PublicAccountConfig>()
+                .eq(PublicAccountConfig::getId, id);
+        if (corpId != null && corpId != 0) qw.eq(PublicAccountConfig::getCorpId, corpId);
+        configService.remove(qw);
         return R.ok();
     }
 
     @PutMapping("/api/ops/public-account-config/{id}/set-default")
     public R<?> setDefault(@PathVariable Long id) {
         Long corpId = SecurityUtils.getCurrentCorpId();
-        PublicAccountConfig cfg = configService.getOne(new LambdaQueryWrapper<PublicAccountConfig>()
-                .eq(PublicAccountConfig::getId, id).eq(PublicAccountConfig::getCorpId, corpId));
+        LambdaQueryWrapper<PublicAccountConfig> qw = new LambdaQueryWrapper<PublicAccountConfig>()
+                .eq(PublicAccountConfig::getId, id);
+        if (corpId != null && corpId != 0) qw.eq(PublicAccountConfig::getCorpId, corpId);
+        PublicAccountConfig cfg = configService.getOne(qw);
         if (cfg == null) return R.fail("配置不存在");
         configService.update(new LambdaUpdateWrapper<PublicAccountConfig>()
-                .eq(PublicAccountConfig::getCorpId, corpId).set(PublicAccountConfig::getIsDefault, 0));
+                .eq(PublicAccountConfig::getCorpId, cfg.getCorpId()).set(PublicAccountConfig::getIsDefault, 0));
         cfg.setIsDefault(1); configService.updateById(cfg);
         return R.ok();
     }
 
     @PostMapping("/api/ops/public-account-config/{id}/test")
     public R<?> testConnection(@PathVariable Long id) {
-        PublicAccountConfig cfg = configService.getOne(new LambdaQueryWrapper<PublicAccountConfig>()
-                .eq(PublicAccountConfig::getId, id)
-                .eq(PublicAccountConfig::getCorpId, SecurityUtils.getCurrentCorpId()));
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        LambdaQueryWrapper<PublicAccountConfig> qw = new LambdaQueryWrapper<PublicAccountConfig>()
+                .eq(PublicAccountConfig::getId, id);
+        if (corpId != null && corpId != 0) qw.eq(PublicAccountConfig::getCorpId, corpId);
+        PublicAccountConfig cfg = configService.getOne(qw);
         if (cfg == null) return R.fail("配置不存在");
         String url = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential"
                 + "&appid=" + cfg.getAppId() + "&secret=" + cfg.getAppSecret();
