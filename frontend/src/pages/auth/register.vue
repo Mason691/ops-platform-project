@@ -52,7 +52,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '@/api/index'
 
 const phone       = ref('')
@@ -61,17 +61,6 @@ const confirmPwd  = ref('')
 const nickname    = ref('')
 const loading     = ref(false)
 const phoneObtained = ref(false)
-
-// 手机号获取后自动聚焦密码输入框（修复 WeChat DevTools 输入框不可用）
-watch(phoneObtained, (v) => {
-  if (!v) return
-  nextTick(() => {
-    setTimeout(() => {
-      const inner = document.querySelector('.uni-input-input')
-      if (inner) inner.focus()
-    }, 300)
-  })
-})
 
 // 密码强度
 const strengthClass = computed(() => {

@@ -27,20 +27,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { api } from '@/api/index'
 
 const phone    = ref('')
 const password = ref('')
 const loading  = ref(false)
-
-// WeChat DevTools 中手动 focus 输入框确保键盘可用
-onMounted(() => {
-  setTimeout(() => {
-    const el = document.querySelector('.input[type="number"]') || document.querySelector('uni-input')
-    if (el) { el.focus(); try { el.querySelector('input')?.focus() } catch(_) {} }
-  }, 500)
-})
 
 function validatePhone(v) {
   if (!v) return '请输入手机号'
