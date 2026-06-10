@@ -4,8 +4,49 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>金地燃气聚合展示引流平台</title>
-    <!-- 微信 JS-SDK（本地托管，避免 CDN 加载延迟导致 wx.config 不可用） -->
+    <!-- 微信 JS-SDK（同步加载，在页面所有脚本之前） -->
     <script src="/subsystem/ops/jweixin-1.6.0.js"></script>
+    <script>
+      // ═══ 微信 JSSDK 初始化（内联同步脚本，在模块脚本之前执行）═══
+      (function() {
+        if (!/micromessenger/i.test(navigator.userAgent)) return;
+        var DONE = false;
+
+        function doConfig() {
+          if (DONE) return; DONE = true;
+          var url = location.href.split('#')[0];
+          var corpId = (new URLSearchParams(location.search)).get('corpId') || '4';
+          fetch('/api/public-account/js-config?url=' + encodeURIComponent(url) + '&corpId=' + corpId)
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+              if (!d.ok || !d.data) return console.error('[JSSDK] 签名失败:', d.msg);
+              var s = d.data;
+              console.log('[JSSDK] 签名获取成功, appId:', s.appId);
+              wx.config({
+                debug: false, appId: s.appId, timestamp: s.timestamp,
+                nonceStr: s.nonceStr, signature: s.signature,
+                jsApiList: ['updateAppMessageShareData','updateTimelineShareData','getLocation','openLocation','chooseImage','previewImage','miniProgram'],
+                openTagList: ['wx-open-launch-weapp']
+              });
+              wx.ready(function() { console.log('[JSSDK] ✅ ready'); });
+              wx.error(function(e) { console.error('[JSSDK] ❌', JSON.stringify(e)); });
+            })
+            .catch(function(e) { console.error('[JSSDK] 请求失败:', e); });
+        }
+
+        // jweixin-1.6.0.js 已同步加载，wx.config 应立即就绪
+        if (typeof wx !== 'undefined' && typeof wx.config === 'function') {
+          doConfig();
+        } else {
+          // 若仍未就绪，等 WeixinJSBridge 事件
+          document.addEventListener('WeixinJSBridgeReady', doConfig, false);
+          // 也监听 DOMContentLoaded 兜底
+          document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() { if (!DONE) doConfig(); }, 500);
+          }, false);
+        }
+      })();
+    </script>
     <script>
       (function() {
         if (typeof WeixinJSBridge === 'object' && typeof WeixinJSBridge.invoke === 'function') {
