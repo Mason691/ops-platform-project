@@ -13,17 +13,28 @@
         var url = location.href.split('#')[0];
         var corpId = (new URLSearchParams(location.search)).get('corpId') || '4';
 
-        // 等待 wx.config 就绪 + 拿到签名后再配置
+        var wxConfig, wxReady, wxError;
         var retry = 0;
+
+        function captureWx() {
+          if (typeof wx !== 'undefined' && typeof wx.config === 'function') {
+            // 抓住引用！后续模块覆盖 wx 也不影响
+            wxConfig = wx.config;
+            wxReady  = wx.ready;
+            wxError  = wx.error;
+            return true;
+          }
+          return false;
+        }
+
         function tryConfig() {
-          // 每次调用前实时检查 wx.config 是否可用
-          if (typeof wx === 'undefined' || typeof wx.config !== 'function') {
+          if (!captureWx()) {
             if (++retry > 30) return console.error('[JSSDK] 超时：wx.config 始终不可用');
             console.log('[JSSDK] 等待 wx 就绪... (' + retry + ')');
             return setTimeout(tryConfig, 200);
           }
 
-          // wx.config 就绪，获取签名
+          console.log('[JSSDK] wx 引用已捕获，获取签名...');
           fetch('/api/public-account/js-config?url=' + encodeURIComponent(url) + '&corpId=' + corpId)
             .then(function(r) { return r.json(); })
             .then(function(d) {
@@ -31,23 +42,19 @@
               var s = d.data;
               console.log('[JSSDK] 签名成功, appId:', s.appId);
 
-              // 再次检查（fetch 期间 wx 可能变化）
-              if (typeof wx.config !== 'function')
-                return console.error('[JSSDK] wx.config 在 fetch 后丢失，请刷新重试');
-
-              wx.config({
+              // 使用捕获的引用，不依赖全局 wx
+              wxReady(function() { console.log('[JSSDK] ✅ ready'); });
+              wxError(function(e) { console.error('[JSSDK] ❌', JSON.stringify(e)); });
+              wxConfig.call(wx, {
                 debug: false, appId: s.appId, timestamp: s.timestamp,
                 nonceStr: s.nonceStr, signature: s.signature,
                 jsApiList: ['updateAppMessageShareData','updateTimelineShareData','getLocation','openLocation','chooseImage','previewImage','miniProgram'],
                 openTagList: ['wx-open-launch-weapp']
               });
-              wx.ready(function() { console.log('[JSSDK] ✅ ready'); });
-              wx.error(function(e) { console.error('[JSSDK] ❌', JSON.stringify(e)); });
             })
             .catch(function(e) { console.error('[JSSDK] 获取签名失败:', e); });
         }
 
-        // 立即尝试，失败则轮询
         document.addEventListener('WeixinJSBridgeReady', function() {
           console.log('[JSSDK] WeixinJSBridgeReady 触发');
           retry = 0; tryConfig();
