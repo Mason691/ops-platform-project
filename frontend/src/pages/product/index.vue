@@ -1,14 +1,22 @@
 <template>
   <view class="page">
-    <view class="top-bar"><input class="search-input" v-model="keyword" placeholder="搜索商品" @confirm="load(true)"/></view>
-    <view class="product-grid">
+    <!-- 分类标签栏 -->
+    <view class="cat-tabs">
+      <view
+        v-for="c in categories" :key="c.id"
+        class="cat-tab"
+        :class="{ active: activeCatId === c.id }"
+        @click="switchCat(c.id)"
+      >{{ c.name }}</view>
+    </view>
+
+    <!-- 商品网格 -->
+    <view class="product-grid" v-if="products.length > 0">
       <view v-for="p in products" :key="p.id" class="p-card" @click="onProductClick(p)">
         <image :src="p.coverImage||'/static/gas-default.png'" class="p-img" mode="aspectFill"/>
         <view v-if="p.miniappConfig" class="p-tag">小程序</view>
         <view class="p-body">
-          <text class="p-merchant">{{p.merchantName||''}}</text>
           <text class="p-name">{{p.name}}</text>
-          <!-- 积分兑换价格 -->
           <view class="p-price" v-if="p.points > 0">
             <view class="price-main">
               <text class="points-num">{{p.points}}</text><text class="points-unit">积分</text>
@@ -17,22 +25,18 @@
             </view>
             <text class="price-original">¥{{fmtCash(p.salePrice)}}</text>
           </view>
-          <!-- 无积分兑换：显示销售价 -->
           <view class="p-price" v-else>
             <view class="price-main">
               <text class="cash-num plain">¥{{fmtCash(p.salePrice||p.cashPrice)}}</text>
             </view>
           </view>
-          <!-- 积分兑换标签 -->
-          <view class="points-badge" v-if="p.points > 0">
-            <text>积分兑</text>
-          </view>
+          <view class="points-badge" v-if="p.points > 0"><text>积分兑</text></view>
         </view>
       </view>
     </view>
-    <view class="no-more" v-if="noMore">— 没有更多了 —</view>
+    <view class="empty" v-else-if="!loading">暂无商品</view>
 
-    <!-- 非微信环境引导蒙层 -->
+    <!-- 非微信引导 -->
     <view class="mask" v-if="showGuide" @click="showGuide=false">
       <view class="guide" @click.stop>
         <text class="guide-icon">📱</text>
@@ -45,17 +49,23 @@
 </template>
 <script setup>
 import {ref,onMounted} from 'vue';import {api} from '@/api/index'
-const keyword=ref(''),products=ref([]),page=ref(1),noMore=ref(false),showGuide=ref(false)
-onMounted(()=>load(true))
-async function load(reset){
-  if(reset){products.value=[];page.value=1;noMore.value=false}
-  try{const r=await api.productPage({pageNum:page.value,pageSize:20,name:keyword.value||undefined});const recs=r.records||[];if(recs.length<20)noMore.value=true;products.value=reset?recs:[...products.value,...recs];page.value++}catch{}
+const categories=ref([]),activeCatId=ref(null),products=ref([]),loading=ref(false),showGuide=ref(false)
+onMounted(async()=>{
+  try{const cats=await api.productCategories();categories.value=cats||[];if(categories.value.length>0){activeCatId.value=categories.value[0].id;loadProducts()}}catch{}
+})
+async function switchCat(id){activeCatId.value=id;loadProducts()}
+async function loadProducts(){
+  loading.value=true
+  try{
+    const r=await api.productPage({pageNum:1,pageSize:50,categoryId:activeCatId.value})
+    products.value=r.records||[]
+  }catch{}finally{loading.value=false}
 }
 function fmtCash(v){if(v==null)return'0.00';const n=Number(v);return n.toFixed(n===Math.floor(n)?0:2)}
 function isWechat(){return /micromessenger/i.test(navigator.userAgent)}
 function onProductClick(p){
   if(isWechat() && p.miniappConfig && p.miniappConfig.appId){jumpToMiniProgram(p.miniappConfig);return}
-  goDetail(p.id)
+  uni.navigateTo({url:'/pages/product/detail?id='+p.id})
 }
 function jumpToMiniProgram(cfg){
   try{
@@ -68,16 +78,17 @@ function jumpToMiniProgram(cfg){
     showGuide.value=true
   }catch(e){showGuide.value=true}
 }
-function goDetail(id){uni.navigateTo({url:'/pages/product/detail?id='+id})}
 </script>
 <style scoped>
-.page{min-height:100vh;background:#f5f5f5}.top-bar{padding:16rpx 24rpx;background:#fff}.search-input{background:#f5f5f5;border-radius:32rpx;padding:16rpx 24rpx;font-size:28rpx}
+.page{min-height:100vh;background:#f5f5f5}
+.cat-tabs{display:flex;background:#fff;padding:12rpx 16rpx;gap:8rpx;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch}
+.cat-tab{flex-shrink:0;padding:14rpx 28rpx;border-radius:32rpx;font-size:26rpx;color:#666;background:#f5f5f5;transition:all .2s}
+.cat-tab.active{background:#FF6B35;color:#fff;font-weight:600}
 .product-grid{display:grid;grid-template-columns:1fr 1fr;gap:16rpx;padding:16rpx 24rpx}
 .p-card{background:#fff;border-radius:16rpx;overflow:hidden;position:relative}
 .p-img{width:100%;height:280rpx;display:block}
 .p-tag{position:absolute;top:8rpx;right:8rpx;background:#07c160;color:#fff;font-size:20rpx;padding:4rpx 12rpx;border-radius:8rpx;z-index:2}
 .p-body{padding:12rpx 16rpx 16rpx}
-.p-merchant{font-size:20rpx;color:#999;display:block;margin-bottom:4rpx}
 .p-name{font-size:26rpx;color:#333;display:block;margin-bottom:8rpx;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .p-price{display:flex;flex-direction:column;gap:4rpx}
 .price-main{display:flex;align-items:baseline;gap:4rpx}
@@ -88,6 +99,6 @@ function goDetail(id){uni.navigateTo({url:'/pages/product/detail?id='+id})}
 .cash-num.plain{font-size:32rpx;color:#FF6B35}
 .price-original{font-size:22rpx;color:#c0c4cc;text-decoration:line-through}
 .points-badge{position:absolute;bottom:8rpx;right:8rpx;background:linear-gradient(135deg,#FF6B35,#f56c6c);color:#fff;font-size:18rpx;padding:2rpx 10rpx;border-radius:6rpx}
-.no-more{text-align:center;padding:32rpx;color:#999;font-size:26rpx}
+.empty{text-align:center;padding:120rpx 0;color:#999;font-size:28rpx}
 .mask{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:999}.guide{background:#fff;border-radius:24rpx;padding:48rpx 40rpx;width:80%;text-align:center}.guide-icon{font-size:64rpx;display:block;margin-bottom:20rpx}.guide-title{font-size:34rpx;font-weight:600;color:#333;display:block;margin-bottom:12rpx}.guide-desc{font-size:26rpx;color:#999;display:block;margin-bottom:32rpx;line-height:1.5}.guide-btn{background:#FF6B35;color:#fff;padding:20rpx 48rpx;border-radius:48rpx;font-size:28rpx;display:inline-block}
 </style>

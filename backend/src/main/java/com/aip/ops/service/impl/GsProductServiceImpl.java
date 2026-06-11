@@ -267,6 +267,17 @@ public class GsProductServiceImpl implements IGsProductService {
             m.put("productId", rec.get("productId"));
             m.put("name", rec.get("name"));
             m.put("coverImage", rec.get("coverImage"));
+            // 分类
+            Object cidObj = rec.get("categoryId");
+            if (cidObj != null) {
+                Long cid = Long.valueOf(cidObj.toString());
+                m.put("categoryId", cid);
+                ProductCategory cat = categoryMapper.selectById(cid);
+                m.put("categoryName", cat != null ? cat.getName() : "-");
+            } else {
+                m.put("categoryId", null);
+                m.put("categoryName", "-");
+            }
             m.put("pointsPrice", rec.get("pointsPrice"));
             // 销售价 + 积分兑换配置
             Object spObj = rec.get("salePrice");

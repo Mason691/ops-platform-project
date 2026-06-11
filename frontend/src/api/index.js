@@ -12,6 +12,7 @@ export const api = {
   // 商品
   productPage: (params) => request({url:'/api/ops/product/page',data:params}),
   productDetail: (id) => request({url:'/api/ops/product/'+id}),
+  productCategories: () => request({url:'/api/ops/product/categories'}),
 
   // 运营商管理后台 — 商品展示管理
   adminProductPage: (params) => request({url:'/api/ops/admin/products',data:params}),

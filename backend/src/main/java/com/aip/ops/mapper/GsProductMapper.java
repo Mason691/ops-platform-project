@@ -134,6 +134,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
      */
     @Select("<script>"
             + "SELECT gp.id AS mappingId, "
+            + "       gp.category_id AS categoryId, "
             + "       mp.id AS productId, "
             + "       mp.corp_id AS merchantId, "
             + "       mp.name, "

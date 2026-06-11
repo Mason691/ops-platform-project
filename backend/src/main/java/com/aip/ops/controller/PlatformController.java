@@ -32,6 +32,7 @@ public class PlatformController {
     private final GsCouponMapper couponMapper;
     private final GsUserCouponMapper userCouponMapper;
     private final GsClickLogMapper clickLogMapper;
+    private final ProductCategoryMapper categoryMapper;
 
     // ═══ 用户登录 ═══
     // 登录接口已迁移至 AuthController：POST /api/ops/auth/login
@@ -60,6 +61,18 @@ public class PlatformController {
     }
 
     // ═══ 商品 (展示，非交易) ═══
+
+    /**
+     * 公众号端商品分类 — 公开接口，按 sort 排序返回所有分类。
+     */
+    @GetMapping("/product/categories")
+    public R<?> productCategories() {
+        List<ProductCategory> list = categoryMapper.selectList(
+                new LambdaQueryWrapper<ProductCategory>()
+                        .eq(ProductCategory::getStatus, 1)
+                        .orderByAsc(ProductCategory::getSortOrder));
+        return R.ok(list);
+    }
 
     /**
      * 用户端商品列表 — 仅展示已上架且通过 gs_product 映射引入的商品。
