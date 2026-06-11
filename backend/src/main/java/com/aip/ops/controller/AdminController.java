@@ -225,6 +225,32 @@ public class AdminController {
         return R.ok(Map.of("count", count));
     }
 
+    /** 设置单个商品积分配额 */
+    @PutMapping("/products/{id}/points-config")
+    public R<?> updatePointsConfig(@PathVariable Long id, @RequestBody Map<String,Object> body) {
+        Long operatorId = currentOperatorId();
+        Integer points = body.get("points") != null ? Integer.valueOf(body.get("points").toString()) : 0;
+        java.math.BigDecimal exchangeAmount = body.get("exchangeAmount") != null
+                ? new java.math.BigDecimal(body.get("exchangeAmount").toString()) : java.math.BigDecimal.ZERO;
+        productService.updatePointsConfig(id, points, exchangeAmount, operatorId);
+        return R.ok();
+    }
+
+    /** 批量设置积分配额 */
+    @PostMapping("/products/batch-points-config")
+    public R<?> batchPointsConfig(@RequestBody Map<String,Object> body) {
+        Long operatorId = currentOperatorId();
+        Integer points = body.get("points") != null ? Integer.valueOf(body.get("points").toString()) : 0;
+        java.math.BigDecimal exchangeAmount = body.get("exchangeAmount") != null
+                ? new java.math.BigDecimal(body.get("exchangeAmount").toString()) : java.math.BigDecimal.ZERO;
+        @SuppressWarnings("unchecked")
+        List<Integer> ids = (List<Integer>) body.get("ids");
+        if (ids == null || ids.isEmpty()) return R.fail("请选择商品");
+        List<Long> longIds = ids.stream().map(Long::valueOf).collect(Collectors.toList());
+        int count = productService.batchUpdatePointsConfig(longIds, points, exchangeAmount, operatorId);
+        return R.ok(Map.of("count", count));
+    }
+
     // ═══ 商品分类 CRUD ═══
 
     @GetMapping("/product-categories")

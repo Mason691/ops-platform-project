@@ -28,6 +28,14 @@ public class GsProduct {
     @TableField("category_id")
     private Long categoryId;
 
+    /** 积分配额（运营配置） */
+    @TableField("points")
+    private Integer points;
+
+    /** 兑换金额（运营配置） */
+    @TableField("exchange_amount")
+    private java.math.BigDecimal exchangeAmount;
+
     /** 引入时间 */
     @TableField("create_time")
     private LocalDateTime createTime;

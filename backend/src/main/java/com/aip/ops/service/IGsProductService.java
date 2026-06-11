@@ -1,5 +1,6 @@
 package com.aip.ops.service;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +27,12 @@ public interface IGsProductService {
 
     /** 批量设置分类 */
     int batchUpdateCategory(List<Long> ids, Long categoryId, Long operatorId);
+
+    /** 设置单个商品积分配额 */
+    void updatePointsConfig(Long mappingId, Integer points, BigDecimal exchangeAmount, Long operatorId);
+
+    /** 批量设置积分配额 */
+    int batchUpdatePointsConfig(List<Long> ids, Integer points, BigDecimal exchangeAmount, Long operatorId);
 
     /**
      * 用户端分页查询已上架商品。

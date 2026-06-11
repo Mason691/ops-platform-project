@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -89,7 +90,18 @@ public class GsProductServiceImpl implements IGsProductService {
             m.put("videoUrl", rec.get("videoUrl"));
             m.put("description", rec.get("description"));
             m.put("pointsPrice", rec.get("pointsPrice"));
-            m.put("cashPrice", rec.get("cashPrice"));
+            // 销售价 + 积分兑换配置
+            Object salePriceObj = rec.get("salePrice");
+            BigDecimal salePrice = salePriceObj != null ? new BigDecimal(salePriceObj.toString()) : BigDecimal.ZERO;
+            m.put("salePrice", salePrice);
+            Object ptsObj = rec.get("points");
+            Object excObj = rec.get("exchangeAmount");
+            int pts = ptsObj != null ? Integer.parseInt(ptsObj.toString()) : 0;
+            BigDecimal exc = excObj != null ? new BigDecimal(excObj.toString()) : BigDecimal.ZERO;
+            m.put("points", pts);
+            m.put("exchangeAmount", exc);
+            BigDecimal cash = pts > 0 ? salePrice.subtract(exc) : salePrice;
+            m.put("cashPrice", cash.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : cash);
             m.put("maxPointsDeduct", rec.get("maxPointsDeduct"));
             m.put("clickCount", rec.get("clickCount") != null ? rec.get("clickCount") : 0);
             m.put("status", rec.get("status"));
@@ -196,6 +208,33 @@ public class GsProductServiceImpl implements IGsProductService {
         return count;
     }
 
+    @Override
+    @Transactional
+    public void updatePointsConfig(Long mappingId, Integer points, BigDecimal exchangeAmount, Long operatorId) {
+        assertProductsBelongToOperator(Collections.singletonList(mappingId), operatorId);
+        GsProduct p = new GsProduct();
+        p.setId(mappingId);
+        p.setPoints(points != null ? points : 0);
+        p.setExchangeAmount(exchangeAmount != null ? exchangeAmount : BigDecimal.ZERO);
+        productMapper.updateById(p);
+    }
+
+    @Override
+    @Transactional
+    public int batchUpdatePointsConfig(List<Long> ids, Integer points, BigDecimal exchangeAmount, Long operatorId) {
+        assertProductsBelongToOperator(ids, operatorId);
+        GsProduct p = new GsProduct();
+        p.setPoints(points != null ? points : 0);
+        p.setExchangeAmount(exchangeAmount != null ? exchangeAmount : BigDecimal.ZERO);
+        int count = 0;
+        for (Long id : ids) {
+            p.setId(id);
+            productMapper.updateById(p);
+            count++;
+        }
+        return count;
+    }
+
     // ═══ 用户端商品浏览 ═══
 
     @Override
@@ -229,7 +268,18 @@ public class GsProductServiceImpl implements IGsProductService {
             m.put("name", rec.get("name"));
             m.put("coverImage", rec.get("coverImage"));
             m.put("pointsPrice", rec.get("pointsPrice"));
-            m.put("cashPrice", rec.get("cashPrice"));
+            // 销售价 + 积分兑换配置
+            Object spObj = rec.get("salePrice");
+            BigDecimal sp = spObj != null ? new BigDecimal(spObj.toString()) : BigDecimal.ZERO;
+            m.put("salePrice", sp);
+            Object pObj = rec.get("points");
+            Object eObj = rec.get("exchangeAmount");
+            int pv = pObj != null ? Integer.parseInt(pObj.toString()) : 0;
+            BigDecimal ev = eObj != null ? new BigDecimal(eObj.toString()) : BigDecimal.ZERO;
+            m.put("points", pv);
+            m.put("exchangeAmount", ev);
+            BigDecimal cp = pv > 0 ? sp.subtract(ev) : sp;
+            m.put("cashPrice", cp.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : cp);
             m.put("maxPointsDeduct", rec.get("maxPointsDeduct"));
             m.put("description", rec.get("description"));
             m.put("clickCount", rec.get("clickCount") != null ? rec.get("clickCount") : 0);
