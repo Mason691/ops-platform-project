@@ -143,7 +143,9 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.shelf_status = 1 "
             + "  AND mp.status = 1 "
-            + "  AND mp.corp_id = #{corpId} "            + "<if test='categoryId != null'>"
+            + "  AND mp.corp_id IN "
+            + "  <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach>"
+            + "<if test='categoryId != null'>"
             + "  AND gp.category_id = #{categoryId} "
             + "</if>"
             + "<if test='keyword != null and keyword != \"\"'>"
@@ -152,7 +154,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "ORDER BY gp.id DESC "
             + "LIMIT #{offset}, #{size}"
             + "</script>")
-    List<Map<String, Object>> selectPublishedProducts(@Param("corpId") Long corpId,
+    List<Map<String, Object>> selectPublishedProducts(@Param("corpIds") List<Long> corpIds,
                                                        @Param("offset") int offset,
                                                        @Param("size") int size,
                                                        @Param("categoryId") Long categoryId,
@@ -165,7 +167,8 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.shelf_status = 1 "
             + "  AND mp.status = 1 "
-            + "  AND mp.corp_id = #{corpId} "
+            + "  AND mp.corp_id IN "
+            + "  <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach>"
             + "<if test='categoryId != null'>"
             + "  AND gp.category_id = #{categoryId} "
             + "</if>"
@@ -173,7 +176,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "  AND mp.name LIKE CONCAT('%', #{keyword}, '%') "
             + "</if>"
             + "</script>")
-    long countPublishedProducts(@Param("corpId") Long corpId,
+    long countPublishedProducts(@Param("corpIds") List<Long> corpIds,
                                 @Param("categoryId") Long categoryId,
                                 @Param("keyword") String keyword);
 }

@@ -202,12 +202,16 @@ public class GsProductServiceImpl implements IGsProductService {
     public Map<String, Object> publishedProductPage(Long corpId, int pageNum, int pageSize,
                                                      Long categoryId, String keyword) {
         int offset = (pageNum - 1) * pageSize;
-        // 用户端默认使用 corpId=3（金粮源公司1），若前端传入 corpId 则使用传入值
         long effectiveCorpId = (corpId != null) ? corpId : 3L;
 
+        // 解析目标销售商 ID 列表：
+        // 若传入的 corpId 是运营商（在 biz_operator_merchant 中有绑定记录），
+        // 则展示所有已绑定销售商的商品；否则按原始 corpId 过滤（兼容直接指定销售商）
+        List<Long> targetCorpIds = resolveTargetMerchantIds(effectiveCorpId);
+
         List<Map<String, Object>> records = productMapper.selectPublishedProducts(
-                effectiveCorpId, offset, pageSize, categoryId, keyword);
-        long total = productMapper.countPublishedProducts(effectiveCorpId, categoryId, keyword);
+                targetCorpIds, offset, pageSize, categoryId, keyword);
+        long total = productMapper.countPublishedProducts(targetCorpIds, categoryId, keyword);
 
         // 收集唯一的销售商ID，加载小程序跳转配置
         Set<Long> merchantIds = records.stream()
@@ -253,6 +257,19 @@ public class GsProductServiceImpl implements IGsProductService {
     }
 
     // ═══ 私有辅助方法 ═══
+
+    /**
+     * 解析用户端商品查询的目标销售商 ID 列表。
+     * 若 corpId 是运营商（在 biz_operator_merchant 中绑定了销售商），
+     * 返回所有已绑定销售商 ID；否则返回原始 corpId 作为单元素列表。
+     */
+    private List<Long> resolveTargetMerchantIds(Long corpId) {
+        Set<Long> bound = getBoundMerchantIds(corpId);
+        if (!bound.isEmpty()) {
+            return new ArrayList<>(bound);
+        }
+        return Collections.singletonList(corpId);
+    }
 
     /**
      * 获取运营商绑定的所有激活销售商 ID 集合。
