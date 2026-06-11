@@ -23,7 +23,7 @@ import java.util.*;
 @RestController @RequestMapping("/api/ops") @RequiredArgsConstructor
 public class PlatformController {
 
-    private final GsUserMapper userMapper;
+    private final OpsMemberMapper userMapper;
     private final IGsProductService productService;
     private final GsOrderMapper orderMapper;
     private final GsActivityMapper activityMapper;
@@ -41,8 +41,8 @@ public class PlatformController {
     public R<?> me() {
         Long userId = SecurityUtils.getCurrentUserId();
         Long corpId = SecurityUtils.getCurrentCorpId();
-        GsUser u = userMapper.selectOne(new LambdaQueryWrapper<GsUser>()
-                .eq(GsUser::getId, userId).eq(GsUser::getCorpId, corpId));
+        OpsMember u = userMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
+                .eq(OpsMember::getId, userId).eq(OpsMember::getCorpId, corpId));
         if (u == null) return R.fail("用户不存在");
         Map<String,Object> r = new LinkedHashMap<>();
         r.put("id",u.getId()); r.put("phone",u.getPhone());
@@ -53,7 +53,7 @@ public class PlatformController {
 
     @PutMapping("/user/profile")
     public R<?> updateProfile(@RequestBody Map<String,String> body) {
-        GsUser u = new GsUser(); u.setId(SecurityUtils.getCurrentUserId());
+        OpsMember u = new OpsMember(); u.setId(SecurityUtils.getCurrentUserId());
         if (body.containsKey("nickname")) u.setNickname(body.get("nickname"));
         if (body.containsKey("avatar")) u.setAvatar(body.get("avatar"));
         userMapper.updateById(u);
@@ -143,7 +143,7 @@ public class PlatformController {
         if (status == null || status != 1 || shelfStatus == null || shelfStatus != 1)
             return R.fail("商品不存在或已下架");
 
-        GsUser u = userMapper.selectById(userId);
+        OpsMember u = userMapper.selectById(userId);
         int pointsSpent = product.get("pointsPrice") != null ?
                 ((Number) product.get("pointsPrice")).intValue() : 0;
         if (u.getPointsBalance() < pointsSpent)
@@ -198,7 +198,7 @@ public class PlatformController {
             o.setStatus("PAID"); o.setThirdPartyOrderNo((String)body.get("thirdPartyOrderNo"));
         } else {
             o.setStatus("CANCELLED");
-            GsUser u = userMapper.selectById(o.getUserId());
+            OpsMember u = userMapper.selectById(o.getUserId());
             u.setPointsBalance(u.getPointsBalance() + o.getPointsSpent()); userMapper.updateById(u);
             GsPointsLog log = new GsPointsLog(); log.setCorpId(o.getCorpId());
             log.setUserId(o.getUserId()); log.setChangeType("REFUND");

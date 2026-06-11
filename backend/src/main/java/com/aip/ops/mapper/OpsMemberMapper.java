@@ -1,5 +1,9 @@
 package com.aip.ops.mapper;
-import com.aip.ops.entity.GsUser;
+
+import com.aip.ops.entity.OpsMember;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
-@Mapper public interface GsUserMapper extends BaseMapper<GsUser> {}
+
+@Mapper
+public interface OpsMemberMapper extends BaseMapper<OpsMember> {
+}

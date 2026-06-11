@@ -4,24 +4,27 @@
 -- ===========================================================
 USE `mall_db`;
 
--- 1. 用户表
-CREATE TABLE IF NOT EXISTS `gs_user` (
-    `id`              BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    `corp_id`         BIGINT       NOT NULL DEFAULT 3,
-    `phone`           VARCHAR(20)  NOT NULL COMMENT '手机号',
-    `openid`          VARCHAR(100) DEFAULT NULL COMMENT '微信openid',
-    `unionid`         VARCHAR(100) DEFAULT NULL COMMENT '微信unionid',
-    `nickname`        VARCHAR(64)  DEFAULT '燃气用户',
-    `avatar`          VARCHAR(500) DEFAULT NULL,
-    `points_balance`  INT          NOT NULL DEFAULT 0,
-    `status`          TINYINT      NOT NULL DEFAULT 1,
-    `last_login_time` DATETIME     DEFAULT NULL,
-    `create_time`     DATETIME     DEFAULT CURRENT_TIMESTAMP,
-    `modify_time`     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    `delete_flag`     INT          NOT NULL DEFAULT 0,
+-- 1. 公众号平台会员表（关联底座 sys_member.platform_member_id）
+CREATE TABLE IF NOT EXISTS `ops_member` (
+    `id`                  BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `corp_id`             BIGINT       NOT NULL DEFAULT 3,
+    `phone`               VARCHAR(20)  NOT NULL COMMENT '手机号',
+    `password`            VARCHAR(255) DEFAULT NULL COMMENT 'BCrypt加密密码',
+    `openid`              VARCHAR(100) DEFAULT NULL COMMENT '微信openid',
+    `unionid`             VARCHAR(100) DEFAULT NULL COMMENT '微信unionid',
+    `nickname`            VARCHAR(64)  DEFAULT '燃气用户',
+    `avatar`              VARCHAR(500) DEFAULT NULL,
+    `points_balance`      INT          NOT NULL DEFAULT 0,
+    `platform_member_id`  BIGINT       DEFAULT NULL COMMENT '底座平台会员ID(sys_member.id)',
+    `status`              TINYINT      NOT NULL DEFAULT 1,
+    `last_login_time`     DATETIME     DEFAULT NULL,
+    `create_time`         DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    `modify_time`         DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `delete_flag`         INT          NOT NULL DEFAULT 0,
     UNIQUE KEY `uk_corp_phone` (`corp_id`, `phone`),
-    INDEX `idx_corp_openid` (`corp_id`, `openid`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
+    INDEX `idx_corp_openid` (`corp_id`, `openid`),
+    INDEX `idx_platform_member` (`platform_member_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='公众号平台会员';
 
 -- 2. 积分流水
 CREATE TABLE IF NOT EXISTS `gs_points_log` (

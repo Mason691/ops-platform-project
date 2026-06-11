@@ -3,8 +3,8 @@ package com.aip.ops.service.impl;
 import com.aip.ops.client.MemberSyncClient;
 import com.aip.ops.dto.LoginRequest;
 import com.aip.ops.dto.RegisterRequest;
-import com.aip.ops.entity.GsUser;
-import com.aip.ops.mapper.GsUserMapper;
+import com.aip.ops.entity.OpsMember;
+import com.aip.ops.mapper.OpsMemberMapper;
 import com.aip.ops.service.IUserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.nimbusds.jose.*;
@@ -23,7 +23,7 @@ import java.util.*;
 @Service
 public class UserServiceImpl implements IUserService {
 
-    private final GsUserMapper userMapper;
+    private final OpsMemberMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final MemberSyncClient memberSyncClient;
 
@@ -36,7 +36,7 @@ public class UserServiceImpl implements IUserService {
             java.util.regex.Pattern.compile("^1[3-9]\\d{9}$");
 
     public UserServiceImpl(
-            GsUserMapper userMapper,
+            OpsMemberMapper userMapper,
             PasswordEncoder passwordEncoder,
             MemberSyncClient memberSyncClient,
             @Value("${platform.jwt-secret}") String jwtSecret,
@@ -77,18 +77,18 @@ public class UserServiceImpl implements IUserService {
         log.info("注册: phone={}, mock={}, corpId={}", phone, phoneMockEnabled, corpId);
 
         // ── 检查是否已注册 ──
-        GsUser exist = userMapper.selectOne(new LambdaQueryWrapper<GsUser>()
-                .eq(GsUser::getPhone, phone)
-                .eq(GsUser::getCorpId, corpId));
+        OpsMember exist = userMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
+                .eq(OpsMember::getPhone, phone)
+                .eq(OpsMember::getCorpId, corpId));
         if (exist != null && exist.getPassword() != null)
             throw new IllegalArgumentException("该手机号已注册，请直接登录");
 
         // ── 创建/更新用户 ──
-        GsUser user;
+        OpsMember user;
         if (exist != null) {
             user = exist;
         } else {
-            user = new GsUser();
+            user = new OpsMember();
             user.setPhone(phone);
             user.setCorpId(corpId);
             user.setPointsBalance(200);
@@ -107,7 +107,8 @@ public class UserServiceImpl implements IUserService {
         // ── 同步到底座平台会员 ──
         syncToBasePlatform(user);
 
-        log.info("用户注册成功: phone={}, userId={}, memberId={}", phone, user.getId(), user.getPlatformMemberId());
+        log.info("用户注册成功: phone={}, userId={}, platformMemberId={}",
+                phone, user.getId(), user.getPlatformMemberId());
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("userId", user.getId());
@@ -128,9 +129,9 @@ public class UserServiceImpl implements IUserService {
         if (phone == null || password == null || password.isEmpty())
             throw new IllegalArgumentException("手机号或密码不能为空");
 
-        GsUser user = userMapper.selectOne(new LambdaQueryWrapper<GsUser>()
-                .eq(GsUser::getPhone, phone)
-                .eq(GsUser::getCorpId, corpId));
+        OpsMember user = userMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
+                .eq(OpsMember::getPhone, phone)
+                .eq(OpsMember::getCorpId, corpId));
 
         if (user == null || user.getPassword() == null
                 || !passwordEncoder.matches(password, user.getPassword())) {
@@ -162,14 +163,8 @@ public class UserServiceImpl implements IUserService {
 
     // ═══ 私有方法 ═══
 
-    /**
-     * 获取手机号。优先级：
-     * 1. 前端传入 mockPhone（开发模式）
-     * 2. 微信 encryptedData + iv 解密（正式环境）
-     * 3. 配置中的默认 mock 手机号
-     */
+    /** 获取手机号（mock 模式优先） */
     private String resolvePhone(RegisterRequest req) {
-        // 开发模式：前端或配置注入的 mock 手机号
         if (phoneMockEnabled) {
             if (req.getMockPhone() != null && PHONE_PATTERN.matcher(req.getMockPhone()).matches()) {
                 log.info("使用前端 mock 手机号: {}", req.getMockPhone());
@@ -178,30 +173,20 @@ public class UserServiceImpl implements IUserService {
             log.info("使用配置 mock 手机号: {}", phoneMockPhone);
             return phoneMockPhone;
         }
-
-        // 正式环境：解密微信加密数据
         if (req.getEncryptedData() != null && req.getIv() != null && req.getCode() != null) {
             return decryptWechatPhone(req.getCode(), req.getEncryptedData(), req.getIv());
         }
-
         return null;
     }
 
-    /**
-     * 从微信解密手机号（正式环境实现）。
-     * 步骤：code → access_token + session_key → AES 解密 encryptedData
-     */
+    /** 从微信解密手机号（正式环境实现） */
     private String decryptWechatPhone(String code, String encryptedData, String iv) {
-        // TODO: 实现微信 code→session_key 换取 + AES-CBC 解密
-        // 需要先用 appId+appSecret 换 access_token，再拿 code 换 session_key
-        // 然后用 session_key 做 AES-128-CBC 解密 encryptedData
-        // 返回解密后的 JSON 中的 phoneNumber 字段
         log.warn("微信手机号解密尚未实现（需认证服务号），当前仅 mock 模式可用");
         return null;
     }
 
     /** 同步会员信息到底座平台（非致命，失败不阻塞注册） */
-    private void syncToBasePlatform(GsUser user) {
+    private void syncToBasePlatform(OpsMember user) {
         if (user.getPlatformMemberId() != null) return; // 已同步
         try {
             Map<String, Object> sync = memberSyncClient.sync(
@@ -217,7 +202,7 @@ public class UserServiceImpl implements IUserService {
         }
     }
 
-    private String generateJwt(GsUser user) {
+    private String generateJwt(OpsMember user) {
         try {
             JWTClaimsSet claims = new JWTClaimsSet.Builder()
                     .subject(String.valueOf(user.getId()))
