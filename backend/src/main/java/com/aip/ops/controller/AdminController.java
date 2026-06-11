@@ -129,7 +129,7 @@ public class AdminController {
                          @RequestParam(required=false) String keyword) {
         Long operatorId = currentOperatorId();
         return R.ok(productService.adminProductPage(
-                operatorId, pageNum, pageSize, shelfStatus, categoryId, keyword));
+                operatorId, pageNum, pageSize, shelfStatus, categoryId, merchantId, keyword));
     }
 
     /** 单个商品上下架 */

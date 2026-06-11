@@ -13,7 +13,7 @@ public interface IGsProductService {
      * @return { records, total, size, current }
      */
     Map<String, Object> adminProductPage(Long operatorId, int pageNum, int pageSize,
-                                          Integer shelfStatus, Long categoryId, String keyword);
+                                          Integer shelfStatus, Long categoryId, Long merchantId, String keyword);
 
     /** 单个商品详情（通过映射ID） */
     Map<String, Object> productDetailByMappingId(Long mappingId);

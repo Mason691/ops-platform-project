@@ -36,4 +36,16 @@ public interface MerchantMapper {
                                               @Param("size") int size,
                                               @Param("roleName") String roleName,
                                               @Param("keyword") String keyword);
+
+    /**
+     * 批量查询组织名称（用于商品列表中展示所属销售商名称）。
+     * 不限定角色，仅通过组织 ID 查询。
+     */
+    @Select("<script>"
+            + "SELECT id, name FROM ai_platform.sys_corp "
+            + "WHERE delete_flag = 0 "
+            + "AND id IN "
+            + "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach>"
+            + "</script>")
+    List<Map<String, Object>> selectCorpNamesByIds(@Param("ids") java.util.Set<Long> ids);
 }

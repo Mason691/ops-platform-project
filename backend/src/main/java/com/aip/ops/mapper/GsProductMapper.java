@@ -15,7 +15,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
 
     /**
      * 分页查询运营商关联的商品列表（JOIN mall_product）。
-     * 仅返回当前运营商通过 gs_product 引入的商品。
+     * 仅返回当前运营商通过 gs_product 引入、且所属销售商在绑定列表中的商品。
      */
     @Select("<script>"
             + "SELECT gp.id AS mappingId, "
@@ -24,6 +24,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "       gp.category_id AS categoryId, "
             + "       gp.create_time AS createTime, "
             + "       mp.id AS productId, "
+            + "       mp.corp_id AS merchantId, "
             + "       mp.name, "
             + "       mp.cover_image AS coverImage, "
             + "       mp.images, "
@@ -37,7 +38,8 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "FROM gs_product gp "
             + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.operator_id = #{operatorId} "
-            + "  AND mp.corp_id = #{corpId} "
+            + "  AND mp.corp_id IN "
+            + "  <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach>"
             + "<if test='shelfStatus != null'>"
             + "  AND gp.shelf_status = #{shelfStatus} "
             + "</if>"
@@ -51,7 +53,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "LIMIT #{offset}, #{size}"
             + "</script>")
     List<Map<String, Object>> selectProductList(@Param("operatorId") Long operatorId,
-                                                 @Param("corpId") Long corpId,
+                                                 @Param("corpIds") List<Long> corpIds,
                                                  @Param("offset") int offset,
                                                  @Param("size") int size,
                                                  @Param("shelfStatus") Integer shelfStatus,
@@ -64,7 +66,8 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "FROM gs_product gp "
             + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.operator_id = #{operatorId} "
-            + "  AND mp.corp_id = #{corpId} "
+            + "  AND mp.corp_id IN "
+            + "  <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach>"
             + "<if test='shelfStatus != null'>"
             + "  AND gp.shelf_status = #{shelfStatus} "
             + "</if>"
@@ -76,10 +79,25 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "</if>"
             + "</script>")
     long countProductList(@Param("operatorId") Long operatorId,
-                          @Param("corpId") Long corpId,
+                          @Param("corpIds") List<Long> corpIds,
                           @Param("shelfStatus") Integer shelfStatus,
                           @Param("categoryId") Long categoryId,
                           @Param("keyword") String keyword);
+
+    /**
+     * 权限校验：检查指定 mappingId 列表中的商品是否都属于给定的销售商集合。
+     * 返回属于绑定销售商的 mappingId 列表，调用方通过比较列表大小判断是否有越权操作。
+     */
+    @Select("<script>"
+            + "SELECT gp.id FROM gs_product gp "
+            + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
+            + "WHERE gp.id IN "
+            + "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach>"
+            + " AND mp.corp_id IN "
+            + "<foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach>"
+            + "</script>")
+    List<Long> selectIdsInMerchants(@Param("ids") List<Long> ids,
+                                     @Param("corpIds") List<Long> corpIds);
 
     /**
      * 通过映射ID查询单个商品详情（JOIN mall_product）
@@ -90,7 +108,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "       gp.category_id AS categoryId, "
             + "       gp.create_time AS createTime, "
             + "       mp.id AS productId, "
-            + "       mp.corp_id AS corpId, "
+            + "       mp.corp_id AS merchantId, "
             + "       mp.name, "
             + "       mp.cover_image AS coverImage, "
             + "       mp.images, "
