@@ -48,4 +48,12 @@ public interface MerchantMapper {
             + "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach>"
             + "</script>")
     List<Map<String, Object>> selectCorpNamesByIds(@Param("ids") java.util.Set<Long> ids);
+
+    /**
+     * 校验指定组织是否拥有指定角色。
+     * 返回 ID 表示该组织确实有该角色，否则返回 null/空。
+     */
+    @Select("SELECT cr.corp_id FROM ai_platform.sys_corp_role cr "
+            + "WHERE cr.corp_id = #{corpId} AND cr.role_name = #{roleName} AND cr.delete_flag = 0 LIMIT 1")
+    Long checkMerchantRole(@Param("corpId") Long corpId, @Param("roleName") String roleName);
 }

@@ -90,6 +90,10 @@ public class AdminController {
         int count = 0;
         for (Integer id : ids) {
             Long merchantId = Long.valueOf(id);
+            // 校验该组织确实拥有销售商角色
+            if (merchantMapper.checkMerchantRole(merchantId, merchantRoleName) == null) {
+                throw new IllegalArgumentException("组织ID " + merchantId + " 不是销售商，无法绑定");
+            }
             Long exist = omMapper.selectCount(new LambdaQueryWrapper<OperatorMerchant>()
                     .eq(OperatorMerchant::getOperatorId, operatorId)
                     .eq(OperatorMerchant::getMerchantId, merchantId)
@@ -107,6 +111,10 @@ public class AdminController {
     @DeleteMapping("/bind-merchants/{merchantId}")
     public R<?> unbind(@PathVariable Long merchantId) {
         Long operatorId = currentOperatorId();
+        // 双重校验：该组织确实是销售商
+        if (merchantMapper.checkMerchantRole(merchantId, merchantRoleName) == null) {
+            throw new IllegalArgumentException("组织ID " + merchantId + " 不是销售商");
+        }
         OperatorMerchant om = omMapper.selectOne(new LambdaQueryWrapper<OperatorMerchant>()
                 .eq(OperatorMerchant::getOperatorId, operatorId)
                 .eq(OperatorMerchant::getMerchantId, merchantId)
