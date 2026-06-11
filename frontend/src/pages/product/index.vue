@@ -5,8 +5,10 @@
     <view class="product-grid">
       <view v-for="p in products" :key="p.id" class="p-card" @click="onProductClick(p)">
         <image :src="p.coverImage||'/static/gas-default.png'" class="p-img" mode="aspectFill"/>
+        <text class="p-merchant">{{p.merchantName||''}}</text>
         <text class="p-name">{{p.name}}</text>
         <view class="p-price"><text class="points">{{p.pointsPrice}}积分</text><text v-if="p.cashPrice>0" class="cash">+¥{{p.cashPrice}}</text></view>
+        <view v-if="p.miniappConfig" class="p-tag">小程序</view>
       </view>
     </view>
     <view class="no-more" v-if="noMore">— 没有更多了 —</view>
@@ -64,6 +66,6 @@ function jumpToMiniProgram(cfg){
 function goDetail(id){uni.navigateTo({url:'/pages/product/detail?id='+id})}
 </script>
 <style scoped>
-.page{min-height:100vh;background:#f5f5f5}.top-bar{padding:16rpx 24rpx;background:#fff}.search-input{background:#f5f5f5;border-radius:32rpx;padding:16rpx 24rpx;font-size:28rpx}.filters{display:flex;gap:16rpx;padding:16rpx 24rpx;background:#fff}.cat{padding:12rpx 24rpx;border-radius:24rpx;font-size:26rpx;color:#666;background:#f5f5f5}.cat.on{background:#FF6B35;color:#fff}.product-grid{display:grid;grid-template-columns:1fr 1fr;gap:16rpx;padding:16rpx 24rpx}.p-card{background:#fff;border-radius:16rpx;overflow:hidden}.p-img{width:100%;height:260rpx}.p-name{font-size:26rpx;color:#333;padding:12rpx 16rpx 4rpx;display:block}.p-price{display:flex;align-items:baseline;gap:8rpx;padding:0 16rpx 16rpx}.points{font-size:30rpx;color:#FF6B35;font-weight:600}.cash{font-size:24rpx;color:#999}.no-more{text-align:center;padding:32rpx;color:#999;font-size:26rpx}
+.page{min-height:100vh;background:#f5f5f5}.top-bar{padding:16rpx 24rpx;background:#fff}.search-input{background:#f5f5f5;border-radius:32rpx;padding:16rpx 24rpx;font-size:28rpx}.filters{display:flex;gap:16rpx;padding:16rpx 24rpx;background:#fff}.cat{padding:12rpx 24rpx;border-radius:24rpx;font-size:26rpx;color:#666;background:#f5f5f5}.cat.on{background:#FF6B35;color:#fff}.product-grid{display:grid;grid-template-columns:1fr 1fr;gap:16rpx;padding:16rpx 24rpx}.p-card{background:#fff;border-radius:16rpx;overflow:hidden;position:relative}.p-img{width:100%;height:260rpx}.p-merchant{font-size:20rpx;color:#999;padding:8rpx 16rpx 0;display:block}.p-name{font-size:26rpx;color:#333;padding:4rpx 16rpx 4rpx;display:block}.p-tag{position:absolute;top:8rpx;right:8rpx;background:#07c160;color:#fff;font-size:20rpx;padding:2rpx 10rpx;border-radius:8rpx}.p-price{display:flex;align-items:baseline;gap:8rpx;padding:0 16rpx 16rpx}.points{font-size:30rpx;color:#FF6B35;font-weight:600}.cash{font-size:24rpx;color:#999}.no-more{text-align:center;padding:32rpx;color:#999;font-size:26rpx}
 .mask{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:999}.guide{background:#fff;border-radius:24rpx;padding:48rpx 40rpx;width:80%;text-align:center}.guide-icon{font-size:64rpx;display:block;margin-bottom:20rpx}.guide-title{font-size:34rpx;font-weight:600;color:#333;display:block;margin-bottom:12rpx}.guide-desc{font-size:26rpx;color:#999;display:block;margin-bottom:32rpx;line-height:1.5}.guide-btn{background:#FF6B35;color:#fff;padding:20rpx 48rpx;border-radius:48rpx;font-size:28rpx;display:inline-block}
 </style>

@@ -213,12 +213,13 @@ public class GsProductServiceImpl implements IGsProductService {
                 targetCorpIds, offset, pageSize, categoryId, keyword);
         long total = productMapper.countPublishedProducts(targetCorpIds, categoryId, keyword);
 
-        // 收集唯一的销售商ID，加载小程序跳转配置
+        // 收集唯一的销售商ID，加载名称和小程序跳转配置
         Set<Long> merchantIds = records.stream()
                 .map(r -> r.get("merchantId"))
                 .filter(Objects::nonNull)
                 .map(mid -> Long.valueOf(mid.toString()))
                 .collect(Collectors.toSet());
+        Map<Long, String> merchantNameMap = loadMerchantNames(merchantIds);
         Map<Long, Map<String, Object>> miniappConfigMap = loadMiniappConfigs(merchantIds);
 
         List<Map<String, Object>> mapped = records.stream().map(rec -> {
@@ -232,8 +233,14 @@ public class GsProductServiceImpl implements IGsProductService {
             m.put("maxPointsDeduct", rec.get("maxPointsDeduct"));
             m.put("description", rec.get("description"));
             m.put("clickCount", rec.get("clickCount") != null ? rec.get("clickCount") : 0);
-            // 小程序跳转配置
+            // 所属销售商
             Object midObj = rec.get("merchantId");
+            if (midObj != null) {
+                Long mid = Long.valueOf(midObj.toString());
+                m.put("merchantId", mid);
+                m.put("merchantName", merchantNameMap.getOrDefault(mid, "未知销售商"));
+            }
+            // 小程序跳转配置
             if (midObj != null) {
                 Long mid = Long.valueOf(midObj.toString());
                 if (miniappConfigMap.containsKey(mid)) {
