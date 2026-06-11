@@ -44,4 +44,7 @@ export const api = {
   myCoupons: () => request({url:'/api/ops/coupon/my'}),
   // 历史
   history: (params) => request({url:'/api/ops/history',data:params}),
+  // AI 助手
+  aiChat: (data) => request({url:'/api/ops/ai/chat',method:'POST',data}),
+  aiConfig: () => request({url:'/api/ops/ai/config'}),
 }
