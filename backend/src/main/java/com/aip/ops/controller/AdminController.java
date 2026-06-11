@@ -27,17 +27,20 @@ public class AdminController {
     private final IGsProductService productService;
     private final ProductCategoryMapper categoryMapper;
     private final MerchantMapper merchantMapper;
+    private final MerchantMiniappConfigMapper miniappConfigMapper;
     private final String merchantRoleName;
 
     public AdminController(OperatorMerchantMapper omMapper,
                            IGsProductService productService,
                            ProductCategoryMapper categoryMapper,
                            MerchantMapper merchantMapper,
+                           MerchantMiniappConfigMapper miniappConfigMapper,
                            @Value("${platform.merchant-role-name:销售商}") String merchantRoleName) {
         this.omMapper = omMapper;
         this.productService = productService;
         this.categoryMapper = categoryMapper;
         this.merchantMapper = merchantMapper;
+        this.miniappConfigMapper = miniappConfigMapper;
         this.merchantRoleName = merchantRoleName;
     }
 
@@ -112,6 +115,62 @@ public class AdminController {
         om.setStatus(0);
         omMapper.updateById(om);
         return R.ok();
+    }
+
+    // ═══ 小程序跳转配置 ═══
+
+    /**
+     * 获取指定销售商的小程序跳转配置。
+     * 仅允许当前运营商已绑定的销售商。
+     */
+    @GetMapping("/merchant/{merchantId}/miniapp-config")
+    public R<?> getMiniappConfig(@PathVariable Long merchantId) {
+        Long operatorId = currentOperatorId();
+        assertMerchantBound(operatorId, merchantId);
+        MerchantMiniappConfig cfg = miniappConfigMapper.selectOne(
+                new LambdaQueryWrapper<MerchantMiniappConfig>()
+                        .eq(MerchantMiniappConfig::getMerchantId, merchantId));
+        return R.ok(cfg != null ? cfg : new MerchantMiniappConfig());
+    }
+
+    /**
+     * 新增或更新指定销售商的小程序跳转配置（upsert）。
+     * 仅允许当前运营商已绑定的销售商。
+     */
+    @PutMapping("/merchant/{merchantId}/miniapp-config")
+    @Transactional
+    public R<?> saveMiniappConfig(@PathVariable Long merchantId,
+                                   @RequestBody MerchantMiniappConfig body) {
+        Long operatorId = currentOperatorId();
+        assertMerchantBound(operatorId, merchantId);
+
+        MerchantMiniappConfig existing = miniappConfigMapper.selectOne(
+                new LambdaQueryWrapper<MerchantMiniappConfig>()
+                        .eq(MerchantMiniappConfig::getMerchantId, merchantId));
+
+        if (existing != null) {
+            existing.setAppId(body.getAppId());
+            existing.setPathTemplate(body.getPathTemplate());
+            existing.setEnvVersion(body.getEnvVersion());
+            existing.setRemark(body.getRemark());
+            miniappConfigMapper.updateById(existing);
+        } else {
+            body.setMerchantId(merchantId);
+            body.setId(null);
+            miniappConfigMapper.insert(body);
+        }
+        return R.ok();
+    }
+
+    /** 校验当前运营商是否已绑定指定销售商，未绑定则抛出权限异常 */
+    private void assertMerchantBound(Long operatorId, Long merchantId) {
+        Long count = omMapper.selectCount(new LambdaQueryWrapper<OperatorMerchant>()
+                .eq(OperatorMerchant::getOperatorId, operatorId)
+                .eq(OperatorMerchant::getMerchantId, merchantId)
+                .eq(OperatorMerchant::getStatus, 1));
+        if (count == null || count == 0) {
+            throw new IllegalArgumentException("无权操作：当前运营商未绑定该销售商");
+        }
     }
 
     // ═══ 商品展示管理 ═══

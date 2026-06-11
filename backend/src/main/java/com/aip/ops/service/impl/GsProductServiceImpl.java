@@ -1,6 +1,7 @@
 package com.aip.ops.service.impl;
 
 import com.aip.ops.entity.GsProduct;
+import com.aip.ops.entity.MerchantMiniappConfig;
 import com.aip.ops.entity.OperatorMerchant;
 import com.aip.ops.entity.ProductCategory;
 import com.aip.ops.mapper.*;
@@ -30,6 +31,7 @@ public class GsProductServiceImpl implements IGsProductService {
     private final ProductCategoryMapper categoryMapper;
     private final OperatorMerchantMapper omMapper;
     private final MerchantMapper merchantMapper;
+    private final MerchantMiniappConfigMapper miniappConfigMapper;
 
     // ═══ 管理员商品管理 ═══
 
@@ -72,8 +74,9 @@ public class GsProductServiceImpl implements IGsProductService {
                 operatorId, corpIds, offset, pageSize, shelfStatus, categoryId, keyword);
         long total = productMapper.countProductList(operatorId, corpIds, shelfStatus, categoryId, keyword);
 
-        // 5. 批量加载销售商名称（id → name）
+        // 5. 批量加载销售商名称（id → name）和小程序跳转配置
         Map<Long, String> merchantNameMap = loadMerchantNames(boundMerchantIds);
+        Map<Long, Map<String, Object>> miniappConfigMap = loadMiniappConfigs(boundMerchantIds);
 
         // 6. 富化每条记录
         List<Map<String, Object>> enriched = records.stream().map(rec -> {
@@ -109,6 +112,18 @@ public class GsProductServiceImpl implements IGsProductService {
             }
             m.put("merchantId", merchantIdObj);
             m.put("merchantName", merchantName);
+            // 小程序跳转配置（路径模板中 {productId} 替换为 mall_product.id）
+            if (merchantIdObj != null) {
+                Long mid = Long.valueOf(merchantIdObj.toString());
+                if (miniappConfigMap.containsKey(mid)) {
+                    Map<String, Object> cfg = new LinkedHashMap<>(miniappConfigMap.get(mid));
+                    Object pid = rec.get("productId");
+                    if (pid != null && cfg.containsKey("path")) {
+                        cfg.put("path", cfg.get("path").toString().replace("{productId}", pid.toString()));
+                    }
+                    m.put("miniappConfig", cfg);
+                }
+            }
             m.put("createTime", rec.get("createTime"));
             return m;
         }).collect(Collectors.toList());
@@ -123,7 +138,23 @@ public class GsProductServiceImpl implements IGsProductService {
 
     @Override
     public Map<String, Object> productDetailByMappingId(Long mappingId) {
-        return productMapper.selectProductByMappingId(mappingId);
+        Map<String, Object> detail = productMapper.selectProductByMappingId(mappingId);
+        if (detail != null) {
+            Object midObj = detail.get("merchantId");
+            if (midObj != null) {
+                Long mid = Long.valueOf(midObj.toString());
+                Map<Long, Map<String, Object>> configs = loadMiniappConfigs(Collections.singleton(mid));
+                if (configs.containsKey(mid)) {
+                    Map<String, Object> cfg = new LinkedHashMap<>(configs.get(mid));
+                    Object pid = detail.get("productId");
+                    if (pid != null && cfg.containsKey("path")) {
+                        cfg.put("path", cfg.get("path").toString().replace("{productId}", pid.toString()));
+                    }
+                    detail.put("miniappConfig", cfg);
+                }
+            }
+        }
+        return detail;
     }
 
     @Override
@@ -178,6 +209,14 @@ public class GsProductServiceImpl implements IGsProductService {
                 effectiveCorpId, offset, pageSize, categoryId, keyword);
         long total = productMapper.countPublishedProducts(effectiveCorpId, categoryId, keyword);
 
+        // 收集唯一的销售商ID，加载小程序跳转配置
+        Set<Long> merchantIds = records.stream()
+                .map(r -> r.get("merchantId"))
+                .filter(Objects::nonNull)
+                .map(mid -> Long.valueOf(mid.toString()))
+                .collect(Collectors.toSet());
+        Map<Long, Map<String, Object>> miniappConfigMap = loadMiniappConfigs(merchantIds);
+
         List<Map<String, Object>> mapped = records.stream().map(rec -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", rec.get("mappingId"));
@@ -189,6 +228,19 @@ public class GsProductServiceImpl implements IGsProductService {
             m.put("maxPointsDeduct", rec.get("maxPointsDeduct"));
             m.put("description", rec.get("description"));
             m.put("clickCount", rec.get("clickCount") != null ? rec.get("clickCount") : 0);
+            // 小程序跳转配置
+            Object midObj = rec.get("merchantId");
+            if (midObj != null) {
+                Long mid = Long.valueOf(midObj.toString());
+                if (miniappConfigMap.containsKey(mid)) {
+                    Map<String, Object> cfg = new LinkedHashMap<>(miniappConfigMap.get(mid));
+                    Object pid = rec.get("productId");
+                    if (pid != null && cfg.containsKey("path")) {
+                        cfg.put("path", cfg.get("path").toString().replace("{productId}", pid.toString()));
+                    }
+                    m.put("miniappConfig", cfg);
+                }
+            }
             return m;
         }).collect(Collectors.toList());
 
@@ -210,6 +262,25 @@ public class GsProductServiceImpl implements IGsProductService {
                 .eq(OperatorMerchant::getOperatorId, operatorId)
                 .eq(OperatorMerchant::getStatus, 1))
                 .stream().map(OperatorMerchant::getMerchantId).collect(Collectors.toSet());
+    }
+
+    /**
+     * 批量查询小程序跳转配置，返回 merchantId → {appId, path, envVersion} 映射。
+     */
+    private Map<Long, Map<String, Object>> loadMiniappConfigs(Set<Long> merchantIds) {
+        if (merchantIds.isEmpty()) return Collections.emptyMap();
+        List<MerchantMiniappConfig> configs = miniappConfigMapper.selectList(
+                new LambdaQueryWrapper<MerchantMiniappConfig>()
+                        .in(MerchantMiniappConfig::getMerchantId, merchantIds));
+        Map<Long, Map<String, Object>> map = new LinkedHashMap<>();
+        for (MerchantMiniappConfig cfg : configs) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("appId", cfg.getAppId());
+            entry.put("path", cfg.getPathTemplate() != null ? cfg.getPathTemplate() : "");
+            entry.put("envVersion", cfg.getEnvVersion() != null ? cfg.getEnvVersion() : "release");
+            map.put(cfg.getMerchantId(), entry);
+        }
+        return map;
     }
 
     /**
