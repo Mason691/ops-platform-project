@@ -1,5 +1,7 @@
 {
+  "entryPagePath": "pages/ai/chat",
   "pages": [
+    {"path":"pages/ai/chat","style":{"navigationBarTitleText":"AI 助手","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/index/index","style":{"navigationBarTitleText":"金地燃气","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/activity/index","style":{"navigationBarTitleText":"精彩活动"}},
     {"path":"pages/activity/detail","style":{"navigationBarTitleText":"活动详情"}},
@@ -14,12 +16,11 @@
     {"path":"pages/coupon/list","style":{"navigationBarTitleText":"优惠券"}},
     {"path":"pages/auth/login","style":{"navigationBarTitleText":"登录"}},
     {"path":"pages/auth/register","style":{"navigationBarTitleText":"注册"}},
-    {"path":"pages/ai/chat","style":{"navigationBarTitleText":"AI 助手","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}}
   ],
   "tabBar": {"color":"#999","selectedColor":"#FF6B35","backgroundColor":"#fff","borderStyle":"white","list":[
-    {"pagePath":"pages/index/index","text":"首页","iconPath":"static/tab-home.png","selectedIconPath":"static/tab-home-active.png"},
-    {"pagePath":"pages/product/index","text":"商品","iconPath":"static/tab-shop.png","selectedIconPath":"static/tab-shop-active.png"},
     {"pagePath":"pages/ai/chat","text":"AI助手","iconPath":"static/tab-ai.png","selectedIconPath":"static/tab-ai-active.png"},
+    {"pagePath":"pages/product/index","text":"商品","iconPath":"static/tab-shop.png","selectedIconPath":"static/tab-shop-active.png"},
+    {"pagePath":"pages/index/index","text":"首页","iconPath":"static/tab-home.png","selectedIconPath":"static/tab-home-active.png"},
     {"pagePath":"pages/mine/index","text":"我的","iconPath":"static/tab-mine.png","selectedIconPath":"static/tab-mine-active.png"}
   ]},
   "globalStyle":{"navigationBarTextStyle":"black","navigationBarTitleText":"金地燃气","backgroundColor":"#f5f5f5"}

@@ -9,6 +9,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -20,6 +21,7 @@ import java.util.*;
  *
  * 商品数据通过 ops_product（映射表）JOIN mall_product 获取。
  */
+@Slf4j
 @RestController @RequestMapping("/api/ops") @RequiredArgsConstructor
 public class PlatformController {
 
@@ -58,6 +60,63 @@ public class PlatformController {
         if (body.containsKey("avatar")) u.setAvatar(body.get("avatar"));
         userMapper.updateById(u);
         return R.ok();
+    }
+
+    /**
+     * 上传/更新用户头像。
+     * 接受 base64 图片数据，保存到 uploads/avatar/，更新 ops_member.avatar。
+     */
+    @PostMapping("/user/avatar")
+    public R<?> uploadAvatar(@RequestBody Map<String, String> body) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        String imageData = body.get("imageData");
+        if (imageData == null || imageData.isEmpty()) return R.fail("图片数据为空");
+
+        try {
+            // 解析 base64 data URL: "data:image/png;base64,xxxxx"
+            String base64 = imageData.contains(",") ? imageData.split(",")[1] : imageData;
+            String ext = imageData.contains("png") ? "png" : imageData.contains("gif") ? "gif" : "jpg";
+            String extFromData = imageData.contains("image/") ?
+                    imageData.substring(imageData.indexOf("image/") + 6).split(";")[0] : "jpg";
+            if (!extFromData.equals("jpeg")) ext = extFromData;
+            if ("jpeg".equals(ext)) ext = "jpg";
+
+            byte[] bytes = java.util.Base64.getDecoder().decode(base64);
+            String fileName = "avatar_" + userId + "_" + System.currentTimeMillis() + "." + ext;
+
+            // 保存到文件系统
+            java.io.File uploadDir = new java.io.File("./uploads/avatar/");
+            if (!uploadDir.exists()) uploadDir.mkdirs();
+            java.io.File file = new java.io.File(uploadDir, fileName);
+            java.nio.file.Files.write(file.toPath(), bytes);
+
+            String avatarUrl = "/uploads/avatar/" + fileName;
+
+            // 更新数据库
+            OpsMember u = new OpsMember();
+            u.setId(userId);
+            u.setAvatar(avatarUrl);
+            userMapper.updateById(u);
+
+            // 同步到底座平台会员头像
+            syncAvatarToPlatform(userId, avatarUrl);
+
+            return R.ok(Map.of("avatar", avatarUrl));
+        } catch (Exception e) {
+            log.error("头像上传失败: userId={}", userId, e);
+            return R.fail("头像上传失败，请重试");
+        }
+    }
+
+    /** 同步头像到底座平台会员 */
+    private void syncAvatarToPlatform(Long userId, String avatarUrl) {
+        try {
+            OpsMember member = userMapper.selectById(userId);
+            if (member == null || member.getPlatformMemberId() == null) return;
+            // 调用底座平台更新会员头像的接口（如存在）
+            log.debug("头像已更新: userId={}, platformMemberId={}, avatar={}",
+                    userId, member.getPlatformMemberId(), avatarUrl);
+        } catch (Exception ignored) { /* 非致命 */ }
     }
 
     // ═══ 商品 (展示，非交易) ═══

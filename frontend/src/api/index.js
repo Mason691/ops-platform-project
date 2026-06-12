@@ -47,4 +47,8 @@ export const api = {
   // AI 助手
   aiChat: (data) => request({url:'/api/ops/ai/chat',method:'POST',data}),
   aiConfig: () => request({url:'/api/ops/ai/config'}),
+  aiVoiceRecognize: (data) => request({url:'/api/ops/ai/voice/recognize',method:'POST',data}),
+  aiVoiceSynthesize: (data) => request({url:'/api/ops/ai/voice/synthesize',method:'POST',data}),
+  // 用户头像
+  uploadAvatar: (imageData) => request({url:'/api/ops/user/avatar',method:'POST',data:{imageData}}),
 }
