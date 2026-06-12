@@ -72,21 +72,20 @@ function openLive(room) {
     return
   }
 
-  // WeChat JSSDK may expose wx through different scopes
-  var _wx = (typeof wx !== 'undefined') ? wx
-          : (typeof window !== 'undefined' && window.wx) ? window.wx : null
+  // uni-app shadows global wx — reach through window.wx
+  var realWx = window.wx || window.WX
+            || (typeof wx !== 'undefined' && wx.openChannelsLive ? wx : null)
 
-  if (_wx && typeof _wx.openChannelsLive === 'function') {
-    _wx.openChannelsLive({
+  if (realWx && typeof realWx.openChannelsLive === 'function') {
+    realWx.openChannelsLive({
       finderUserName: room.finderUsername,
       success: function(){},
       fail: function(err) {
-        console.warn('openChannelsLive fail:', err)
+        console.warn('[Live] fail:', err)
         uni.showToast({ title: '请在微信中搜索视频号观看直播', icon: 'none', duration: 3000 })
       }
     })
   } else {
-    // Environment where JSSDK not loaded or WeChat devtools
     uni.showToast({ title: '请在微信中搜索视频号 "'+room.finderUsername+'" 观看直播', icon: 'none', duration: 3000 })
   }
 }

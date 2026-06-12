@@ -68,33 +68,28 @@ function goProduct(id){uni.navigateTo({url:'/pages/product/detail?id='+id})}
 function goAiChat(){uni.navigateTo({url:'/pages/ai/chat'})}
 function search(){uni.showToast({title:'搜索功能开发中',icon:'none'})}
 function openLive(room){
-  // Check if we're inside WeChat WebView
   if(!/micromessenger/i.test(navigator.userAgent)){
     uni.showToast({title:'请在微信中打开直播间',icon:'none'});return
   }
   if(!room.finderUsername){uni.showToast({title:'直播信息不完整',icon:'none'});return}
 
-  // WeChat JSSDK may provide wx through global / window.wx / WeixinJSBridge
-  var _wx = (typeof wx !== 'undefined') ? wx
-          : (typeof window !== 'undefined' && window.wx) ? window.wx
-          : null
+  // uni-app's module named 'wx' shadows window.wx. Must reach through window.
+  var realWx = window.wx       // WeChat WebView global
+            || window.WX        // some builds use WX
+            || (typeof wx !== 'undefined' && wx.openChannelsLive ? wx : null)
+  console.log('[Live] realWx:', typeof realWx, 'openChannelsLive:', typeof (realWx && realWx.openChannelsLive))
 
-  if (_wx && typeof _wx.openChannelsLive === 'function'){
-    _wx.openChannelsLive({
+  if (realWx && typeof realWx.openChannelsLive === 'function'){
+    realWx.openChannelsLive({
       finderUserName: room.finderUsername,
-      success: function(){},
+      success: function(){ console.log('[Live] openChannelsLive success') },
       fail: function(err){
-        console.warn('openChannelsLive fail:', err)
-        // Distinguish: config error vs real call failure
-        var msg = err && err.errMsg ? err.errMsg.toLowerCase() : ''
-        if(msg.indexOf('config')!==-1 || msg.indexOf('invalid')!==-1)
-          uni.showToast({title:'请在微信中搜索视频号 "'+room.finderUsername+'" 观看',icon:'none'})
-        else
-          uni.showToast({title:'请在微信中搜索视频号观看',icon:'none',duration:2500})
+        console.warn('[Live] openChannelsLive fail:', err)
+        uni.showToast({title:'请在微信中搜索视频号 "'+room.finderUsername+'" 观看',icon:'none'})
       }
     })
   } else {
-    // env where openChannelsLive truly not available (devtools, old WeChat)
+    console.log('[Live] openChannelsLive not available, window.wx='+typeof window.wx)
     uni.showToast({title:'请在微信中搜索视频号 "'+room.finderUsername+'" 观看直播',icon:'none',duration:3000})
   }
 }

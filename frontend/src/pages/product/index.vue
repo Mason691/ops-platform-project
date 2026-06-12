@@ -89,20 +89,19 @@ function openLive(room){
   if(!isWechat()){uni.showToast({title:'请在微信中打开直播间',icon:'none'});return}
   if(!room.finderUsername){uni.showToast({title:'直播信息不完整',icon:'none'});return}
 
-  var _wx = (typeof wx !== 'undefined') ? wx
-          : (typeof window !== 'undefined' && window.wx) ? window.wx : null
-
-  if (_wx && typeof _wx.openChannelsLive === 'function'){
-    _wx.openChannelsLive({
+  var realWx = window.wx || window.WX
+            || (typeof wx !== 'undefined' && wx.openChannelsLive ? wx : null)
+  if (realWx && typeof realWx.openChannelsLive === 'function'){
+    realWx.openChannelsLive({
       finderUserName: room.finderUsername,
       success: function(){},
       fail: function(err){
-        console.warn('openChannelsLive fail:', err)
-        uni.showToast({title:'请在微信中搜索视频号 "'+room.finderUsername+'" 观看',icon:'none',duration:3000})
+        console.warn('[Live] fail:', err)
+        uni.showToast({title:'请在微信中搜索视频号观看',icon:'none',duration:3000})
       }
     })
   } else {
-    uni.showToast({title:'请在微信中搜索视频号 "'+room.finderUsername+'" 观看直播',icon:'none',duration:3000})
+    uni.showToast({title:'请在微信中搜索视频号 "'+room.finderUsername+'" 观看',icon:'none',duration:3000})
   }
 }
 </script>
