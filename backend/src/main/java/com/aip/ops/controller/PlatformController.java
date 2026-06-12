@@ -35,6 +35,7 @@ public class PlatformController {
     private final GsUserCouponMapper userCouponMapper;
     private final GsClickLogMapper clickLogMapper;
     private final ProductCategoryMapper categoryMapper;
+    private final OpsLiveRoomMapper liveRoomMapper;
 
     // ═══ 用户登录 ═══
     // 登录接口已迁移至 AuthController：POST /api/ops/auth/login
@@ -409,6 +410,20 @@ public class PlatformController {
         return R.ok(clickLogMapper.selectPage(new Page<>(pageNum, pageSize),
                 new LambdaQueryWrapper<GsClickLog>().eq(GsClickLog::getUserId,
                         SecurityUtils.getCurrentUserId()).orderByDesc(GsClickLog::getId)));
+    }
+
+    // ═══ 视频直播 ═══
+
+    /** 公众号端：获取正在直播/预告的直播间列表 */
+    @GetMapping("/live-rooms/active")
+    public R<?> activeLiveRooms(@RequestParam(defaultValue="10") int limit) {
+        List<OpsLiveRoom> list = liveRoomMapper.selectList(
+                new LambdaQueryWrapper<OpsLiveRoom>()
+                        .in(OpsLiveRoom::getStatus, 0, 1)
+                        .orderByAsc(OpsLiveRoom::getStatus)
+                        .orderByAsc(OpsLiveRoom::getSortOrder)
+                        .last("LIMIT " + limit));
+        return R.ok(list);
     }
 
     // ═══ 辅助 ═══

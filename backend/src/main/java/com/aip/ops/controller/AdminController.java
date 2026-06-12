@@ -28,6 +28,7 @@ public class AdminController {
     private final ProductCategoryMapper categoryMapper;
     private final MerchantMapper merchantMapper;
     private final MerchantMiniappConfigMapper miniappConfigMapper;
+    private final OpsLiveRoomMapper liveRoomMapper;
     private final String merchantRoleName;
 
     public AdminController(OperatorMerchantMapper omMapper,
@@ -35,12 +36,14 @@ public class AdminController {
                            ProductCategoryMapper categoryMapper,
                            MerchantMapper merchantMapper,
                            MerchantMiniappConfigMapper miniappConfigMapper,
+                           OpsLiveRoomMapper liveRoomMapper,
                            @Value("${platform.merchant-role-name:销售商}") String merchantRoleName) {
         this.omMapper = omMapper;
         this.productService = productService;
         this.categoryMapper = categoryMapper;
         this.merchantMapper = merchantMapper;
         this.miniappConfigMapper = miniappConfigMapper;
+        this.liveRoomMapper = liveRoomMapper;
         this.merchantRoleName = merchantRoleName;
     }
 
@@ -297,5 +300,56 @@ public class AdminController {
         m.put("id", c.getId()); m.put("name", c.getName());
         m.put("parentId", c.getParentId()); m.put("sortOrder", c.getSortOrder());
         return m;
+    }
+
+    // ═══ 视频直播管理 ═══
+
+    @GetMapping("/live-rooms")
+    public R<?> liveRoomList(@RequestParam(defaultValue="20") int pageSize) {
+        Long operatorId = currentOperatorId();
+        // 仅返回当前运营商绑定的销售商的直播间
+        Set<Long> boundMerchantIds = omMapper.selectList(new LambdaQueryWrapper<OperatorMerchant>()
+                .eq(OperatorMerchant::getOperatorId, operatorId)
+                .eq(OperatorMerchant::getStatus, 1))
+                .stream().map(OperatorMerchant::getMerchantId).collect(Collectors.toSet());
+        if (boundMerchantIds.isEmpty()) return R.ok(Collections.emptyList());
+
+        List<OpsLiveRoom> list = liveRoomMapper.selectList(
+                new LambdaQueryWrapper<OpsLiveRoom>()
+                        .in(OpsLiveRoom::getMerchantId, boundMerchantIds)
+                        .orderByDesc(OpsLiveRoom::getStatus)
+                        .orderByAsc(OpsLiveRoom::getSortOrder)
+                        .last("LIMIT " + pageSize));
+        return R.ok(list);
+    }
+
+    @PostMapping("/live-rooms")
+    public R<?> createLiveRoom(@RequestBody OpsLiveRoom room) {
+        Long operatorId = currentOperatorId();
+        assertMerchantBound(operatorId, room.getMerchantId());
+        room.setId(null);
+        liveRoomMapper.insert(room);
+        return R.ok();
+    }
+
+    @PutMapping("/live-rooms/{id}")
+    public R<?> updateLiveRoom(@PathVariable Long id, @RequestBody OpsLiveRoom room) {
+        Long operatorId = currentOperatorId();
+        OpsLiveRoom existing = liveRoomMapper.selectById(id);
+        if (existing == null) return R.fail("直播间不存在");
+        assertMerchantBound(operatorId, existing.getMerchantId());
+        room.setId(id);
+        liveRoomMapper.updateById(room);
+        return R.ok();
+    }
+
+    @DeleteMapping("/live-rooms/{id}")
+    public R<?> deleteLiveRoom(@PathVariable Long id) {
+        Long operatorId = currentOperatorId();
+        OpsLiveRoom existing = liveRoomMapper.selectById(id);
+        if (existing == null) return R.fail("直播间不存在");
+        assertMerchantBound(operatorId, existing.getMerchantId());
+        liveRoomMapper.deleteById(id);
+        return R.ok();
     }
 }

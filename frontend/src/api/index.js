@@ -68,4 +68,6 @@ export const api = {
   aiVoiceSynthesize: (data) => request({url:'/api/ops/ai/voice/synthesize',method:'POST',data}),
   // 用户头像
   uploadAvatar: (imageData) => request({url:'/api/ops/user/avatar',method:'POST',data:{imageData}}),
+  // 视频直播
+  activeLiveRooms: () => request({url:'/api/ops/live-rooms/active',data:{limit:20}}),
 }
