@@ -337,9 +337,9 @@ function request(opts) {
 </script>
 
 <style scoped>
-/* ── Root — fixed to viewport, 105vh ── */
+/* ── Root — fill space above tab bar, adaptive ── */
 .ai-chat-page{
-  position:fixed; top:0; right:0; left:0; height:105vh;
+  position:fixed; top:0; right:0; bottom:100rpx; left:0;
   display:flex; flex-direction:column;
   background:#f0f2f5;
 }
