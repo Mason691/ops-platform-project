@@ -10,6 +10,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -38,6 +39,12 @@ public class PlatformController {
     private final OpsLiveRoomMapper liveRoomMapper;
     private final OpsActivityBookingMapper bookingMapper;
     private final OpsRemindLogMapper remindLogMapper;
+    private final org.springframework.web.client.RestTemplate restTemplate;
+
+    @org.springframework.beans.factory.annotation.Value("${platform.base-url}")
+    private String platformBaseUrl;
+    @org.springframework.beans.factory.annotation.Value("${platform.internal-token}")
+    private String internalToken;
 
     // ═══ 用户登录 ═══
     // 登录接口已迁移至 AuthController：POST /api/ops/auth/login
@@ -111,15 +118,26 @@ public class PlatformController {
         }
     }
 
-    /** 同步头像到底座平台会员 */
+    /** 同步头像到底座平台 sys_member */
     private void syncAvatarToPlatform(Long userId, String avatarUrl) {
         try {
             OpsMember member = userMapper.selectById(userId);
             if (member == null || member.getPlatformMemberId() == null) return;
-            // 调用底座平台更新会员头像的接口（如存在）
-            log.debug("头像已更新: userId={}, platformMemberId={}, avatar={}",
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("X-Internal-Token", internalToken);
+
+            Map<String, String> body = Map.of("avatar", avatarUrl);
+            HttpEntity<Map<String, String>> req = new HttpEntity<>(body, headers);
+            String url = platformBaseUrl + "/api/internal/member/" + member.getPlatformMemberId() + "/avatar";
+
+            restTemplate.exchange(url, HttpMethod.PUT, req, Map.class);
+            log.info("头像已同步到底座: userId={}, platformMemberId={}, avatar={}",
                     userId, member.getPlatformMemberId(), avatarUrl);
-        } catch (Exception ignored) { /* 非致命 */ }
+        } catch (Exception e) {
+            log.warn("同步头像到底座失败（非致命）: userId={}, error={}", userId, e.getMessage());
+        }
     }
 
     // ═══ 商品 (展示，非交易) ═══
