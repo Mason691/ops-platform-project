@@ -36,4 +36,3 @@ function request(){
 <style scoped>
 .page{min-height:100vh;background:#f5f5f5;padding:24rpx}.list{display:flex;flex-direction:column;gap:16rpx}.item{background:#fff;border-radius:12rpx;padding:24rpx}.item-title{font-size:30rpx;color:#333;font-weight:600;display:block}.item-time{font-size:24rpx;color:#999;margin-top:8rpx;display:block}.item-status{margin-top:12rpx}.tag{padding:4rpx 16rpx;border-radius:8rpx;font-size:24rpx}.tag.active{color:#FF6B35;background:#FFF3EE}.tag.done{color:#999;background:#f5f5f5}.empty{text-align:center;padding:120rpx 0;color:#999;font-size:28rpx}
 </style>
-</template>
