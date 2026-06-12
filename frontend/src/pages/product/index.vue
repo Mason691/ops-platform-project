@@ -1,5 +1,11 @@
 <template>
   <view class="page">
+    <!-- 直播横幅 -->
+    <view class="live-banner" v-if="liveRoom" @click="openLive(liveRoom)">
+      <view class="lb-badge"><view class="lb-dot"></view><text>LIVE</text></view>
+      <text class="lb-title">{{ liveRoom.liveTitle }}</text>
+      <text class="lb-arrow">›</text>
+    </view>
     <!-- 分类标签栏 -->
     <view class="cat-tabs">
       <view
@@ -49,8 +55,9 @@
 </template>
 <script setup>
 import {ref,onMounted} from 'vue';import {api} from '@/api/index'
-const categories=ref([]),activeCatId=ref(null),products=ref([]),loading=ref(false),showGuide=ref(false)
+const categories=ref([]),activeCatId=ref(null),products=ref([]),loading=ref(false),showGuide=ref(false),liveRoom=ref(null)
 onMounted(async()=>{
+  try{const lr=await api.activeLiveRooms();liveRoom.value=(lr||[])[0]||null}catch{}
   try{const cats=await api.productCategories();categories.value=cats||[];if(categories.value.length>0){activeCatId.value=categories.value[0].id;loadProducts()}}catch{}
 })
 async function switchCat(id){activeCatId.value=id;loadProducts()}
@@ -78,8 +85,18 @@ function jumpToMiniProgram(cfg){
     showGuide.value=true
   }catch(e){showGuide.value=true}
 }
+function openLive(room){
+  if(!isWechat()){uni.showToast({title:'请在微信中打开直播间',icon:'none'});return}
+  try{
+    if(typeof wx!=='undefined'&&wx.openChannelsLive){
+      wx.openChannelsLive({finderUserName:room.finderUsername,success:()=>{},fail:()=>{uni.showToast({title:'请搜索视频号观看',icon:'none'})}})
+    }else{uni.showToast({title:'请更新微信版本',icon:'none'})}
+  }catch(e){uni.showToast({title:'跳转失败',icon:'none'})}
+}
 </script>
 <style scoped>
+.live-banner{display:flex;align-items:center;gap:16rpx;padding:18rpx 24rpx;margin:16rpx 24rpx 0;background:linear-gradient(135deg,#ff2d2d,#ff4444);border-radius:12rpx}.lb-badge{display:flex;align-items:center;gap:6rpx;padding:4rpx 12rpx;background:rgba(255,255,255,.2);border-radius:6rpx;font-size:20rpx;color:#fff;font-weight:700;flex-shrink:0}.lb-dot{width:10rpx;height:10rpx;background:#fff;border-radius:50%;animation:lpulse .8s infinite}@keyframes lpulse{0%,100%{opacity:1}50%{opacity:.2}}.lb-title{flex:1;font-size:26rpx;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lb-arrow{color:rgba(255,255,255,.7);font-size:32rpx}
+
 .page{min-height:100vh;background:#f5f5f5}
 .cat-tabs{display:flex;background:#fff;padding:12rpx 16rpx;gap:8rpx;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch}
 .cat-tab{flex-shrink:0;padding:14rpx 28rpx;border-radius:32rpx;font-size:26rpx;color:#666;background:#f5f5f5;transition:all .2s}

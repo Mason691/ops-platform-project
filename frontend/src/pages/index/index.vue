@@ -11,6 +11,15 @@
       <swiper class="banner" indicator-dots autoplay circular><swiper-item v-for="b in banners" :key="b"><image :src="b" class="banner-img" mode="aspectFill"/></swiper-item></swiper>
       <!-- 优惠券弹窗入口 -->
       <view class="coupon-entry" @click="showCoupons=true"><text>🎫</text><text>新人专享积分券，点击领取 ›</text></view>
+      <!-- 直播入口 -->
+      <view class="live-entry" v-if="liveRoom" @click="openLive(liveRoom)">
+        <view class="live-badge"><view class="live-dot"></view><text>LIVE</text></view>
+        <view class="live-info">
+          <text class="live-title">{{ liveRoom.liveTitle }}</text>
+          <text class="live-sub">点击进入视频号直播间 ›</text>
+        </view>
+        <image v-if="liveRoom.coverUrl" :src="liveRoom.coverUrl" class="live-cover" mode="aspectFill"/>
+      </view>
       <!-- 视频信息流 -->
       <view class="section-title"><text>📹 精彩视频</text></view>
       <view v-for="(p,i) in products" :key="'v'+i" class="video-card">
@@ -43,11 +52,12 @@
 </template>
 <script setup>
 import {ref,onMounted} from 'vue';import {api} from '@/api/index'
-const isLogin=ref(false),points=ref(0),products=ref([]),banners=ref(['/static/gas-banner1.png','/static/gas-banner2.png']),coupons=ref([]),showCoupons=ref(false)
+const isLogin=ref(false),points=ref(0),products=ref([]),banners=ref(['/static/gas-banner1.png','/static/gas-banner2.png']),coupons=ref([]),showCoupons=ref(false),liveRoom=ref(null)
 onMounted(async()=>{
   const u=uni.getStorageSync('gas_user');if(u){isLogin.value=true;try{const m=await api.getMe();points.value=m.pointsBalance||0}catch{isLogin.value=false}}
   try{const r=await api.productPage({pageNum:1,pageSize:10});products.value=r.records||[]}catch{}
   try{coupons.value=await api.couponList()||[]}catch{}
+  try{const lr=await api.activeLiveRooms();liveRoom.value=(lr||[])[0]||null}catch{}
   // 首次进入弹优惠券
   if(!uni.getStorageSync('gas_coupon_shown')&&coupons.value.length){showCoupons.value=true;uni.setStorageSync('gas_coupon_shown','1')}
 })
@@ -57,9 +67,19 @@ function goMine(){uni.switchTab({url:'/pages/mine/index'})}
 function goProduct(id){uni.navigateTo({url:'/pages/product/detail?id='+id})}
 function goAiChat(){uni.navigateTo({url:'/pages/ai/chat'})}
 function search(){uni.showToast({title:'搜索功能开发中',icon:'none'})}
+function openLive(room){
+  const isWx=function(){return /micromessenger/i.test(navigator.userAgent)}
+  if(!isWx()){uni.showToast({title:'请在微信中打开直播间',icon:'none'});return}
+  try{
+    if(typeof wx!=='undefined'&&wx.openChannelsLive){
+      wx.openChannelsLive({finderUserName:room.finderUsername,success:()=>{},fail:(err)=>{console.warn('openChannelsLive fail',err);uni.showToast({title:'请在微信中搜索视频号观看',icon:'none'})}})
+    }else{uni.showToast({title:'请更新微信版本后观看直播',icon:'none'})}
+  }catch(e){uni.showToast({title:'跳转失败',icon:'none'})}
+}
 </script>
 <style scoped>
 .page{min-height:100vh;background:#f5f5f5}.content{padding:0 24rpx 120rpx}.top-bar{display:flex;align-items:center;gap:16rpx;padding:16rpx 24rpx;background:#FF6B35}.search-box{flex:1;background:rgba(255,255,255,.2);border-radius:32rpx;padding:16rpx 24rpx;display:flex;align-items:center;gap:12rpx}.search-icon{font-size:28rpx}.search-placeholder{font-size:26rpx;color:rgba(255,255,255,.7)}.user-btn{color:#fff;font-size:26rpx;white-space:nowrap}.banner{height:320rpx;margin:24rpx 0}.banner-img{width:100%;height:100%;border-radius:16rpx}.coupon-entry{background:linear-gradient(90deg,#FFF3EE,#FFE8D6);padding:20rpx 24rpx;border-radius:12rpx;margin-bottom:24rpx;display:flex;align-items:center;gap:16rpx;font-size:26rpx;color:#FF6B35}.section-title{font-size:32rpx;font-weight:600;color:#333;margin:32rpx 0 16rpx}.video-card{background:#fff;border-radius:16rpx;overflow:hidden;margin-bottom:16rpx}.video-placeholder{height:400rpx;background:#333;display:flex;align-items:center;justify-content:center}.play-icon{font-size:60rpx;color:rgba(255,255,255,.8)}.video-info{padding:16rpx 20rpx}.v-title{font-size:28rpx;color:#333;display:block}.v-points{font-size:26rpx;color:#FF6B35;font-weight:600}.product-grid{display:grid;grid-template-columns:1fr 1fr;gap:16rpx}.p-card{background:#fff;border-radius:16rpx;overflow:hidden}.p-img{width:100%;height:260rpx}.p-name{font-size:26rpx;color:#333;padding:12rpx 16rpx 4rpx;display:block}.p-bottom{display:flex;align-items:baseline;gap:8rpx;padding:0 16rpx 16rpx}.p-points{font-size:30rpx;color:#FF6B35;font-weight:600}.p-cash{font-size:24rpx;color:#999}
+.live-entry{display:flex;align-items:center;gap:20rpx;padding:24rpx;margin-bottom:24rpx;background:linear-gradient(135deg,#ff2d2d,#ff4444);border-radius:16rpx;position:relative;overflow:hidden}.live-badge{display:flex;align-items:center;gap:8rpx;padding:8rpx 16rpx;background:rgba(255,255,255,.2);border-radius:8rpx;font-size:22rpx;color:#fff;font-weight:700;flex-shrink:0}.live-dot{width:12rpx;height:12rpx;background:#fff;border-radius:50%;animation:ld-pulse .8s infinite}@keyframes ld-pulse{0%,100%{opacity:1}50%{opacity:.2}}.live-info{flex:1;min-width:0}.live-title{font-size:28rpx;color:#fff;font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.live-sub{font-size:22rpx;color:rgba(255,255,255,.8);margin-top:4rpx;display:block}.live-cover{width:120rpx;height:80rpx;border-radius:8rpx;flex-shrink:0}
 .ai-float-btn{position:fixed;right:24rpx;bottom:160rpx;width:100rpx;height:100rpx;background:#FF6B35;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4rpx 16rpx rgba(255,107,53,.4);z-index:99}.ai-btn-icon{font-size:48rpx}
 .mask{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:999}.coupon-modal{background:#fff;border-radius:24rpx;padding:40rpx;width:80%}.modal-title{font-size:34rpx;font-weight:600;text-align:center;display:block;margin-bottom:24rpx}.coupon-item{display:flex;align-items:center;gap:16rpx;padding:20rpx;background:#FFF3EE;border-radius:12rpx;margin-bottom:16rpx}.c-name{font-size:26rpx;color:#333;flex:1}.c-value{font-size:32rpx;color:#FF6B35;font-weight:600}.c-draw{background:#FF6B35;color:#fff;padding:12rpx 24rpx;border-radius:24rpx;font-size:24rpx}.modal-close{text-align:center;padding:16rpx;color:#999;font-size:28rpx;margin-top:16rpx}
 </style>
