@@ -68,7 +68,7 @@
             @touchstart.prevent="onMicDown" @touchend.prevent="onMicUp"
             @mousedown.prevent="onMicDown" @mouseup.prevent="onMicUp"
             @touchcancel="onMicCancel">
-        <text class="mic-emoji">🎤</text>
+        <view class="mic-icon"></view>
       </view>
       <view class="input-wrap">
         <input class="chat-input" v-model="inputText"
@@ -151,11 +151,18 @@ async function sendMsg() {
   loading.value = true; scrollToBottom()
   try {
     const res = await api.aiChat({ message: text, conversationId })
-    const reply = res?.reply || res?.data?.reply || '抱歉，AI 服务暂时不可用。'
-    messages.value.push({ role: 'assistant', content: reply })
-    if (res?.conversationId) conversationId = res.conversationId
-  } catch (_) {
-    messages.value.push({ role: 'assistant', content: '网络异常，请稍后重试。' })
+    // R.ok() data from backend → request.js resolves with d.data
+    const reply = res?.reply || res?.data?.reply
+    if (reply) {
+      messages.value.push({ role: 'assistant', content: reply })
+      if (res?.conversationId) conversationId = res.conversationId
+    } else {
+      messages.value.push({ role: 'assistant', content: '抱歉，AI 助手暂时无响应，请稍后重试。' })
+    }
+  } catch (e) {
+    console.warn('[AI] chat失败:', e?.msg || e)
+    const errMsg = e?.msg || '请求超时，请检查网络后重试'
+    messages.value.push({ role: 'assistant', content: errMsg })
   } finally { loading.value = false; scrollToBottom() }
 }
 
@@ -351,9 +358,26 @@ function request(opts) {
   border-radius:50%;background:#f5f5f5;transition:all .2s;flex-shrink:0;
   box-shadow:0 2rpx 8rpx rgba(0,0,0,.08);
 }
-.mic-emoji{font-size:40rpx;line-height:1}
-.voice-main-btn:active,.voice-main-btn.active{background:#FF6B35;transform:scale(.92)}
-.voice-main-btn:active .mic-emoji,.voice-main-btn.active .mic-emoji{color:#fff}
+/* Mic icon — CSS-drawn (no emoji dependency, renders reliably everywhere) */
+.mic-icon{
+  width:36rpx;height:44rpx;position:relative;
+  border:3rpx solid #666;border-radius:20rpx 20rpx 0 0;
+  background:#666;
+  transition:all .2s;
+}
+.mic-icon::after{
+  content:'';position:absolute;left:50%;bottom:-18rpx;
+  transform:translateX(-50%);
+  width:6rpx;height:14rpx;background:#666;border-radius:0 0 4rpx 4rpx;
+  transition:all .2s;
+}
+.voice-main-btn:active,.voice-main-btn.active{background:#FF6B35}
+.voice-main-btn:active .mic-icon,.voice-main-btn.active .mic-icon{
+  border-color:#fff;background:#fff;
+}
+.voice-main-btn:active .mic-icon::after,.voice-main-btn.active .mic-icon::after{
+  background:#fff;
+}
 .input-wrap{flex:1}
 .chat-input{width:100%;height:64rpx;padding:0 20rpx;background:#f5f5f5;border-radius:32rpx;font-size:28rpx}
 .send-main-btn{width:64rpx;height:64rpx;display:flex;align-items:center;justify-content:center;border-radius:50%;background:linear-gradient(135deg,#FF6B35,#FF8C5A);transition:all .2s;flex-shrink:0}
