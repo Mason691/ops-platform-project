@@ -7,6 +7,8 @@ import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,6 +31,8 @@ public class AdminController {
     private final MerchantMapper merchantMapper;
     private final MerchantMiniappConfigMapper miniappConfigMapper;
     private final OpsLiveRoomMapper liveRoomMapper;
+    private final PublicAccountConfigMapper publicAccountConfigMapper;
+    private final org.springframework.web.client.RestTemplate restTemplate;
     private final String merchantRoleName;
 
     public AdminController(OperatorMerchantMapper omMapper,
@@ -37,6 +41,8 @@ public class AdminController {
                            MerchantMapper merchantMapper,
                            MerchantMiniappConfigMapper miniappConfigMapper,
                            OpsLiveRoomMapper liveRoomMapper,
+                           PublicAccountConfigMapper publicAccountConfigMapper,
+                           org.springframework.web.client.RestTemplate restTemplate,
                            @Value("${platform.merchant-role-name:销售商}") String merchantRoleName) {
         this.omMapper = omMapper;
         this.productService = productService;
@@ -44,6 +50,8 @@ public class AdminController {
         this.merchantMapper = merchantMapper;
         this.miniappConfigMapper = miniappConfigMapper;
         this.liveRoomMapper = liveRoomMapper;
+        this.publicAccountConfigMapper = publicAccountConfigMapper;
+        this.restTemplate = restTemplate;
         this.merchantRoleName = merchantRoleName;
     }
 
@@ -351,5 +359,67 @@ public class AdminController {
         assertMerchantBound(operatorId, existing.getMerchantId());
         liveRoomMapper.deleteById(id);
         return R.ok();
+    }
+
+    /**
+     * 测试直播 API 连通性。
+     * 接收 finderUserName，通过微信 access_token 验证配置是否有效。
+     */
+    @PostMapping("/live-rooms/test-connection")
+    public R<?> testLiveConnection(@RequestBody Map<String, String> body) {
+        String finderUsername = body.get("finderUsername");
+        if (finderUsername == null || finderUsername.isBlank()) return R.fail("视频号 ID 不能为空");
+
+        Long operatorId = currentOperatorId();
+        // Verify operator has bound merchants
+        Set<Long> bound = omMapper.selectList(new LambdaQueryWrapper<OperatorMerchant>()
+                .eq(OperatorMerchant::getOperatorId, operatorId)
+                .eq(OperatorMerchant::getStatus, 1))
+                .stream().map(OperatorMerchant::getMerchantId).collect(Collectors.toSet());
+        if (bound.isEmpty()) return R.fail("当前运营商未绑定任何销售商");
+
+        // Fetch public account config for the first bound merchant
+        Long merchantId = bound.iterator().next();
+        PublicAccountConfig pubCfg = publicAccountConfigMapper.selectOne(
+                new LambdaQueryWrapper<PublicAccountConfig>()
+                        .eq(PublicAccountConfig::getCorpId, merchantId)
+                        .eq(PublicAccountConfig::getStatus, 1));
+
+        if (pubCfg == null || pubCfg.getAppId() == null)
+            return R.fail("公众号未配置 appId，请先在「公众号配置」中完成配置");
+
+        // Try to fetch access_token to verify credentials
+        try {
+            String appId = pubCfg.getAppId();
+            String appSecret = pubCfg.getAppSecret();
+
+            if (appSecret == null || appSecret.isBlank())
+                return R.fail("公众号 appSecret 未配置，无法获取 access_token。请先在「公众号配置」中完善");
+
+            // Call WeChat token API
+            String tokenUrl = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid="
+                    + appId + "&secret=" + appSecret;
+
+            @SuppressWarnings("rawtypes")
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    tokenUrl, HttpMethod.GET, null, Map.class);
+
+            if (resp.getBody() != null && resp.getBody().get("access_token") != null) {
+                String accessToken = resp.getBody().get("access_token").toString();
+                return R.ok(Map.of(
+                        "success", true,
+                        "message", "微信 API 连通正常（access_token 获取成功），finderUserName=" + finderUsername,
+                        "tokenPrefix", accessToken.length() > 10
+                                ? accessToken.substring(0, 10) + "..." : accessToken
+                ));
+            } else {
+                Object errcode = resp.getBody() != null ? resp.getBody().get("errcode") : "unknown";
+                Object errmsg = resp.getBody() != null ? resp.getBody().get("errmsg") : "unknown";
+                return R.fail("微信返回错误 [" + errcode + "]: " + errmsg);
+            }
+        } catch (Exception e) {
+            String errStr = e.getMessage() != null ? e.getMessage() : "未知错误";
+            return R.fail("网络请求失败: " + (errStr.length() > 100 ? errStr.substring(0, 100) : errStr));
+        }
     }
 }
