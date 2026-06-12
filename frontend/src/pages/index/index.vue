@@ -89,15 +89,10 @@ function openLive(room){
       }
     })
   } else {
-    // openChannelsLive not available — likely WeChat platform limitation
-    // Requires: verified service account linked to 视频号 in WeChat backend
-    console.warn(
-      '[Live] openChannelsLive=undefined. ' +
-      'This API requires the official account to be linked to a 视频号. ' +
-      'Please verify in WeChat Official Platform (mp.weixin.qq.com) that ' +
-      'account wx095b91409f8ecbfe is linked to 视频号 ' + room.finderUsername
-    )
-    uni.showToast({title:'请在微信中搜索视频号 "'+room.finderUsername+'" 观看直播',icon:'none',duration:3000})
+    // openChannelsLive = undefined: 测试号(wxe0eb0deb7d251505)不支持视频号API。
+    // 正式环境需: 1)认证公众号(wx095b91409f8ecbfe) 2)在mp.weixin.qq.com关联视频号sphaxIEW2Etr8EL
+    console.warn('[Live] openChannelsLive=undefined — 测试号限制, 请在微信中搜索视频号观看')
+    uni.showToast({title:'请在微信中搜索视频号观看',icon:'none',duration:2000})
   }
 }
 </script>
