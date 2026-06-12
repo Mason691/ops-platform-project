@@ -297,9 +297,9 @@ function request(opts) {
 </script>
 
 <style scoped>
-/* ── Root — fixed to viewport edges ── */
+/* ── Root — fixed to viewport, 90vh (10% reduction) ── */
 .ai-chat-page{
-  position:fixed; top:0; right:0; bottom:0; left:0;
+  position:fixed; top:0; right:0; left:0; height:90vh;
   display:flex; flex-direction:column;
   background:#f0f2f5;
 }
