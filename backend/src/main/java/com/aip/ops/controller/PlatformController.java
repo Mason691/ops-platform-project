@@ -36,6 +36,8 @@ public class PlatformController {
     private final GsClickLogMapper clickLogMapper;
     private final ProductCategoryMapper categoryMapper;
     private final OpsLiveRoomMapper liveRoomMapper;
+    private final OpsActivityBookingMapper bookingMapper;
+    private final OpsRemindLogMapper remindLogMapper;
 
     // ═══ 用户登录 ═══
     // 登录接口已迁移至 AuthController：POST /api/ops/auth/login
@@ -401,6 +403,69 @@ public class PlatformController {
         return R.ok(userCouponMapper.selectList(new LambdaQueryWrapper<GsUserCoupon>()
                 .eq(GsUserCoupon::getUserId, SecurityUtils.getCurrentUserId())
                 .orderByDesc(GsUserCoupon::getId)));
+    }
+
+    // ═══ 活动预约 ═══
+
+    @PostMapping("/activity/{activityId}/book")
+    public R<?> bookActivity(@PathVariable Long activityId) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        Long corpId = SecurityUtils.getCurrentCorpId();
+
+        GsActivity activity = activityMapper.selectById(activityId);
+        if (activity == null || activity.getStatus() == null || activity.getStatus() != 1)
+            return R.fail("活动不存在或已结束");
+
+        // Check not already booked
+        Long exist = bookingMapper.selectCount(new LambdaQueryWrapper<OpsActivityBooking>()
+                .eq(OpsActivityBooking::getActivityId, activityId)
+                .eq(OpsActivityBooking::getUserId, userId)
+                .eq(OpsActivityBooking::getStatus, 0));
+        if (exist > 0) return R.fail("您已预约该活动");
+
+        OpsMember member = userMapper.selectById(userId);
+        OpsActivityBooking booking = new OpsActivityBooking();
+        booking.setActivityId(activityId);
+        booking.setUserId(userId);
+        booking.setPhone(member != null ? member.getPhone() : null);
+        booking.setStatus(0);
+        bookingMapper.insert(booking);
+        return R.ok(Map.of("bookingId", booking.getId()));
+    }
+
+    @GetMapping("/activity/{activityId}/bookings")
+    public R<?> activityBookings(@PathVariable Long activityId,
+                                  @RequestParam(defaultValue="1") int pageNum,
+                                  @RequestParam(defaultValue="20") int pageSize) {
+        Page<OpsActivityBooking> page = bookingMapper.selectPage(
+                new Page<>(pageNum, pageSize),
+                new LambdaQueryWrapper<OpsActivityBooking>()
+                        .eq(OpsActivityBooking::getActivityId, activityId)
+                        .orderByDesc(OpsActivityBooking::getCreateTime));
+        return R.ok(page);
+    }
+
+    @GetMapping("/my-bookings")
+    public R<?> myBookings() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        List<OpsActivityBooking> bookings = bookingMapper.selectList(
+                new LambdaQueryWrapper<OpsActivityBooking>()
+                        .eq(OpsActivityBooking::getUserId, userId)
+                        .orderByDesc(OpsActivityBooking::getCreateTime));
+        // Enrich with activity titles
+        List<Map<String,Object>> result = new ArrayList<>();
+        for (OpsActivityBooking b : bookings) {
+            GsActivity act = activityMapper.selectById(b.getActivityId());
+            Map<String,Object> m = new LinkedHashMap<>();
+            m.put("id", b.getId());
+            m.put("activityId", b.getActivityId());
+            m.put("status", b.getStatus());
+            m.put("createTime", b.getCreateTime());
+            m.put("activityTitle", act != null ? act.getTitle() : "活动已删除");
+            m.put("activityTime", act != null ? act.getStartTime() : null);
+            result.add(m);
+        }
+        return R.ok(result);
     }
 
     // ═══ 浏览历史 ═══

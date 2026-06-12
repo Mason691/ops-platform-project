@@ -37,6 +37,11 @@ platform:
     - /api/ops/product/**
     - /api/ops/activity/**
 
+# 活动预约提醒配置
+ops:
+  remind:
+    hours-before: 24,1
+
 # 微信手机号获取 — 开发阶段 mock 开关
 wechat:
   phone-mock:

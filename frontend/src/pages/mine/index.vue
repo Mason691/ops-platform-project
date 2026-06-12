@@ -10,6 +10,7 @@
       <view class="menu-item" @click="goPage('/pages/points/log')"><text>📊 积分明细</text><text class="arrow">›</text></view>
       <view class="menu-item" @click="goPage('/pages/order/list')"><text>📦 兑换记录</text><text class="arrow">›</text></view>
       <view class="menu-item" @click="goPage('/pages/coupon/list')"><text>🎫 我的优惠券</text><text class="arrow">›</text></view>
+      <view class="menu-item" @click="goPage('/pages/booking/list')"><text>📅 我的预约</text><text class="arrow">›</text></view>
       <view class="menu-item" @click="goPage('/pages/address/list')"><text>📍 收货地址</text><text class="arrow">›</text></view>
     </view>
     <view class="logout" v-if="isLogin" @click="doLogout"><text>退出登录</text></view>
