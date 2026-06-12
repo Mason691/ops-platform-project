@@ -44,25 +44,23 @@
         </view>
       </view>
 
-      <!-- bottom spacer so last message isn't hidden behind quick bar -->
       <view style="height:12rpx"></view>
     </scroll-view>
+
+    <!-- Recording indicator — small floating bar, NOT a full-screen overlay -->
+    <view class="recording-bar" v-if="recording">
+      <view class="rec-wave-bars">
+        <view class="rw-bar" v-for="b in 5" :key="b"
+              :style="{ animationDelay: (b * 0.15) + 's' }"></view>
+      </view>
+      <text class="rec-text">{{ recordingHint }}</text>
+    </view>
 
     <view class="quick-bar" v-if="quickQuestions.length && messages.length <= 2">
       <scroll-view scroll-x="true" :show-scrollbar="false" class="quick-scroll">
         <view class="quick-chip" v-for="(q, i) in quickQuestions" :key="i"
               @tap="sendQuick(q)">{{ q }}</view>
       </scroll-view>
-    </view>
-
-    <view class="recording-overlay" v-if="recording">
-      <view class="recording-popup">
-        <view class="recording-wave">
-          <view class="wave-bar" v-for="b in 7" :key="b"
-                :style="{ animationDelay: (b * 0.12) + 's' }"></view>
-        </view>
-        <text class="recording-hint">{{ recordingHint }}</text>
-      </view>
     </view>
 
     <view class="chat-input-bar">
@@ -145,7 +143,6 @@ onMounted(async () => {
   } catch (_) {}
 })
 
-// ── Text ──
 async function sendMsg() {
   const text = inputText.value.trim()
   if (!text || loading.value) return
@@ -164,34 +161,18 @@ async function sendMsg() {
 
 function sendQuick(q) { inputText.value = q; sendMsg() }
 
-// ── Voice input (hold-to-record with timing gate) ──
-// Key fix: getUserMedia is async. A quick tap fires touchstart then
-// touchend before mic permission is granted → recorder never starts.
-// Solution: 300ms hold threshold. Only start mic after hold confirmed.
-
+// ── Voice input ──
 function onMicDown(e) {
   e.preventDefault()
   cancelled = false
   recording.value = true
   recordingHint.value = '松开发送，上滑取消'
-
-  // 300ms gate — user must hold for 300ms before recording actually starts
-  holdTimer = setTimeout(() => {
-    holdTimer = null
-    startRecording()
-  }, 300)
+  holdTimer = setTimeout(() => { holdTimer = null; startRecording() }, 300)
 }
 
 function onMicUp(e) {
   e.preventDefault()
-  // If still in timer phase (quick tap) — cancel
-  if (holdTimer) {
-    clearTimeout(holdTimer)
-    holdTimer = null
-    recording.value = false
-    return
-  }
-  // Actually recording — stop
+  if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; recording.value = false; return }
   stopRecording()
 }
 
@@ -202,29 +183,17 @@ function startRecording() {
       navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
         if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
         audioStream = stream
-        try {
-          const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-            ? 'audio/webm;codecs=opus' : 'audio/webm'
-          mediaRecorder = new MediaRecorder(stream, { mimeType })
-        } catch (_) {
-          mediaRecorder = new MediaRecorder(stream)
-        }
+        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm'
+        try { mediaRecorder = new MediaRecorder(stream, { mimeType: mime }) } catch (_) { mediaRecorder = new MediaRecorder(stream) }
         audioChunks = []
         mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data) }
         mediaRecorder.onstop = () => {
           if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null }
-          if (cancelled) return
-          const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' })
-          processAudio(blob)
+          if (!cancelled) { const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' }); processAudio(blob) }
         }
-        mediaRecorder.onerror = () => {
-          recording.value = false
-          uni.showToast({ title: '录音出错，请重试', icon: 'none' })
-        }
-        mediaRecorder.start(250) // 250ms timeslice for dataavailable events
-        console.log('[Voice] 录音中...')
+        mediaRecorder.onerror = () => { recording.value = false; uni.showToast({ title: '录音出错', icon: 'none' }) }
+        mediaRecorder.start(250)
       }).catch(err => {
-        console.warn('[Voice] 麦克风权限被拒绝:', err.message)
         recording.value = false
         uni.showToast({ title: '麦克风权限未开启，请在设置中允许', icon: 'none' })
       })
@@ -232,26 +201,16 @@ function startRecording() {
       recording.value = false
       uni.showToast({ title: '当前浏览器不支持录音', icon: 'none' })
     }
-  } catch (e) {
-    console.error('[Voice] 录音启动异常:', e)
-    recording.value = false
-  }
+  } catch (e) { recording.value = false }
 }
 
 function stopRecording() {
-  console.log('[Voice] 停止录音')
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop()
-  } else {
-    // Recorder not started yet (still in mic prompt), mark cancelled
-    cancelled = true
-    recording.value = false
-  }
+  if (mediaRecorder && mediaRecorder.state === 'recording') { mediaRecorder.stop() }
+  else { cancelled = true; recording.value = false }
 }
 
 async function processAudio(blob) {
   recording.value = false
-  recordingHint.value = '识别中...'
   uni.showToast({ title: '识别中...', icon: 'loading', duration: 3000 })
   try {
     const r = await api.aiVoiceRecognize(blob)
@@ -259,21 +218,11 @@ async function processAudio(blob) {
     const text = r?.text || ''
     if (text) {
       messages.value.push({ role: 'user', content: text })
-      loading.value = true; scrollToBottom()
-      try {
-        const res = await api.aiChat({ message: text, conversationId })
-        const reply = res?.reply || res?.data?.reply || '抱歉，AI 服务暂时不可用。'
-        messages.value.push({ role: 'assistant', content: reply })
-        if (res?.conversationId) conversationId = res.conversationId
-      } catch (_) {
-        messages.value.push({ role: 'assistant', content: '网络异常，请稍后重试。' })
-      } finally { loading.value = false; scrollToBottom() }
-    } else {
-      uni.showToast({ title: '未识别到语音内容', icon: 'none' })
-    }
+      inputText.value = text
+      sendMsg()
+    } else { uni.showToast({ title: '未识别到语音内容', icon: 'none' }) }
   } catch (e) {
     uni.hideToast()
-    console.warn('[Voice] ASR失败:', e)
     uni.showToast({ title: '语音识别失败，请重试', icon: 'none' })
   }
 }
@@ -289,7 +238,6 @@ async function playVoice(msg, i) {
     const r = await api.aiVoiceSynthesize({ text: msg.content })
     if (r?.audioUrl) { msg._audioUrl = r.audioUrl; playAudioUrl(r.audioUrl, i); return }
   } catch (_) {}
-  // Fallback: browser SpeechSynthesis
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel()
     const u = new SpeechSynthesisUtterance(msg.content)
@@ -334,11 +282,13 @@ function request(opts) {
 </script>
 
 <style scoped>
+/* ── Root — fixed to viewport edges ── */
 .ai-chat-page{
-  display:flex; flex-direction:column; height:100%; overflow:hidden;
+  position:fixed; top:0; right:0; bottom:0; left:0;
+  display:flex; flex-direction:column;
   background:#f0f2f5;
 }
-/* welcome */
+/* welcome card */
 .welcome-card{
   display:flex; flex-direction:column; align-items:center;
   padding:64rpx 48rpx 48rpx; margin:24rpx; background:#fff;
@@ -350,7 +300,7 @@ function request(opts) {
 .wc-desc{font-size:26rpx;color:#999;margin-bottom:24rpx}
 .wc-features{display:flex;flex-wrap:wrap;gap:12rpx;justify-content:center}
 .wc-feat{display:flex;align-items:center;gap:6rpx;padding:10rpx 20rpx;background:#FFF3EE;border-radius:12rpx;font-size:24rpx;color:#FF6B35}
-/* chat area — flex:1 with height:0 is the key trick for uni-app H5 */
+/* chat area */
 .chat-body{flex:1;height:0;padding:16rpx 24rpx;overflow-y:auto}
 .msg-item{display:flex;align-items:flex-start;margin-bottom:24rpx}
 .msg-left{flex-direction:row}.msg-right{flex-direction:row-reverse}
@@ -373,15 +323,21 @@ function request(opts) {
 .quick-scroll{white-space:nowrap;display:flex;gap:12rpx}
 .quick-chip{display:inline-flex;padding:14rpx 24rpx;background:#fff;border-radius:32rpx;font-size:26rpx;color:#FF6B35;box-shadow:0 2rpx 8rpx rgba(0,0,0,.05);transition:all .2s}
 .quick-chip:active{background:#FF6B35;color:#fff;transform:scale(.96)}
-/* recording */
-.recording-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:999}
-.recording-popup{background:#fff;border-radius:24rpx;padding:48rpx 64rpx;display:flex;flex-direction:column;align-items:center;gap:24rpx;box-shadow:0 16rpx 48rpx rgba(0,0,0,.15)}
-.recording-wave{display:flex;align-items:flex-end;gap:6rpx;height:80rpx}
-.wave-bar{width:8rpx;background:linear-gradient(180deg,#FF6B35,#FF8C5A);border-radius:4rpx;animation:wave .8s infinite alternate}
-@keyframes wave{0%{height:12rpx}100%{height:52rpx}}
-.recording-hint{font-size:24rpx;color:#999}
+/* ── Recording bar — compact inline, NO full-screen overlay ── */
+.recording-bar{
+  display:flex; align-items:center; justify-content:center;
+  gap:12rpx; padding:16rpx 24rpx; flex-shrink:0;
+  background:linear-gradient(90deg,#FFF3EE,#fff,#FFF3EE);
+}
+.rec-wave-bars{display:flex;align-items:flex-end;gap:4rpx;height:32rpx}
+.rw-bar{
+  width:6rpx; background:#FF6B35; border-radius:3rpx;
+  animation:rw-wave .6s infinite alternate;
+}
+@keyframes rw-wave{0%{height:8rpx}100%{height:28rpx}}
+.rec-text{font-size:24rpx;color:#FF6B35;font-weight:600}
 /* input bar */
-.chat-input-bar{display:flex;align-items:center;padding:10rpx 16rpx;background:#fff;gap:10rpx;border-top:2rpx solid #f0f0f0;box-shadow:0 -2rpx 8rpx rgba(0,0,0,.04);flex-shrink:0}
+.chat-input-bar{display:flex;align-items:center;padding:10rpx 16rpx;background:#fff;gap:10rpx;border-top:2rpx solid #f0f0f0;flex-shrink:0}
 .voice-main-btn{width:64rpx;height:64rpx;display:flex;align-items:center;justify-content:center;font-size:32rpx;border-radius:50%;background:#f5f5f5;transition:all .2s;flex-shrink:0}
 .voice-main-btn:active,.voice-main-btn.active{background:#FF6B35;transform:scale(.92)}
 .input-wrap{flex:1}
