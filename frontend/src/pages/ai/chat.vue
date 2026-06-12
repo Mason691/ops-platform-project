@@ -4,7 +4,6 @@
     <scroll-view class="chat-body" scroll-y :scroll-top="scrollTop"
                  :scroll-with-animation="true" :enhanced="true"
                  :show-scrollbar="false">
-      <!-- Welcome card (shown when no messages yet) -->
       <view class="welcome-card" v-if="messages.length===0 && !loading">
         <view class="wc-avatar">
           <image class="wc-avatar-img" :src="aiAvatar" mode="aspectFill"/>
@@ -44,6 +43,9 @@
           <view class="typing-dots"><view class="dot" v-for="d in 3" :key="d"></view></view>
         </view>
       </view>
+
+      <!-- bottom spacer so last message isn't hidden behind quick bar -->
+      <view style="height:12rpx"></view>
     </scroll-view>
 
     <view class="quick-bar" v-if="quickQuestions.length && messages.length <= 2">
@@ -53,22 +55,20 @@
       </scroll-view>
     </view>
 
-    <!-- Recording overlay -->
     <view class="recording-overlay" v-if="recording">
       <view class="recording-popup">
         <view class="recording-wave">
           <view class="wave-bar" v-for="b in 7" :key="b"
                 :style="{ animationDelay: (b * 0.12) + 's' }"></view>
         </view>
-        <text class="recording-hint">松开发送，上滑取消</text>
+        <text class="recording-hint">{{ recordingHint }}</text>
       </view>
     </view>
 
-    <!-- Input bar — compact -->
     <view class="chat-input-bar">
-      <view class="voice-main-btn" @touchstart.prevent="startRecord"
-            @touchend.prevent="stopRecord" @touchmove.prevent="onRecordMove"
-            @mousedown.prevent="startRecord" @mouseup.prevent="stopRecord"
+      <view class="voice-main-btn"
+            @touchstart="onMicDown" @touchend="onMicUp"
+            @mousedown="onMicDown" @mouseup="onMicUp"
             :class="{ active: recording }">
         <text>🎤</text>
       </view>
@@ -101,6 +101,7 @@ const inputText     = ref('')
 const loading       = ref(false)
 const scrollTop     = ref(0)
 const recording     = ref(false)
+const recordingHint = ref('松开发送，上滑取消')
 const playingIdx    = ref(-1)
 const voiceEnabled  = ref(true)
 const quickQuestions = ref([
@@ -108,21 +109,17 @@ const quickQuestions = ref([
   '我的积分有多少？', '如何兑换商品？',
 ])
 let conversationId = null
-let recordTimer = null
-let recordCancelled = false
+let holdTimer = null
+let cancelled = false
 let mediaRecorder = null
+let audioStream = null
 let audioChunks = []
 let currentAudio = null
 
-// 每次 tab 切换时刷新头像
 onShow(async () => {
   const token = uni.getStorageSync('ops_token')
   if (token) {
-    try {
-      const me = await api.getMe()
-      if (me?.avatar) userAvatar.value = me.avatar
-      if (me?.nickname) {} // nickname may update too
-    } catch (_) {}
+    try { const me = await api.getMe(); if (me?.avatar) userAvatar.value = me.avatar } catch (_) {}
   }
 })
 
@@ -135,7 +132,6 @@ onMounted(async () => {
     if (cfg?.quickQuestions) quickQuestions.value = cfg.quickQuestions
   } catch (_) {}
 
-  // Personalized greeting
   try {
     if (token) {
       const r = await request({ url: '/api/ops/ai/profile', method: 'GET' })
@@ -144,23 +140,18 @@ onMounted(async () => {
     }
   } catch (_) {}
 
-  // Load user avatar
   try {
-    if (token) {
-      const me = await api.getMe()
-      if (me?.avatar) userAvatar.value = me.avatar
-    }
+    if (token) { const me = await api.getMe(); if (me?.avatar) userAvatar.value = me.avatar }
   } catch (_) {}
 })
 
-// Text chat
+// ── Text ──
 async function sendMsg() {
   const text = inputText.value.trim()
   if (!text || loading.value) return
   messages.value.push({ role: 'user', content: text })
   inputText.value = ''
-  loading.value = true
-  scrollToBottom()
+  loading.value = true; scrollToBottom()
   try {
     const res = await api.aiChat({ message: text, conversationId })
     const reply = res?.reply || res?.data?.reply || '抱歉，AI 服务暂时不可用。'
@@ -168,133 +159,145 @@ async function sendMsg() {
     if (res?.conversationId) conversationId = res.conversationId
   } catch (_) {
     messages.value.push({ role: 'assistant', content: '网络异常，请稍后重试。' })
-  } finally {
-    loading.value = false
-    scrollToBottom()
-  }
+  } finally { loading.value = false; scrollToBottom() }
 }
 
 function sendQuick(q) { inputText.value = q; sendMsg() }
 
-// ── Voice input (MediaRecorder with base64 upload) ──
-function isWechat() { return /micromessenger/i.test(navigator.userAgent) }
+// ── Voice input (hold-to-record with timing gate) ──
+// Key fix: getUserMedia is async. A quick tap fires touchstart then
+// touchend before mic permission is granted → recorder never starts.
+// Solution: 300ms hold threshold. Only start mic after hold confirmed.
 
-function startRecord(e) {
-  e && e.preventDefault()
+function onMicDown(e) {
+  e.preventDefault()
+  cancelled = false
   recording.value = true
-  recordCancelled = false
+  recordingHint.value = '松开发送，上滑取消'
 
-  // Try MediaRecorder API
+  // 300ms gate — user must hold for 300ms before recording actually starts
+  holdTimer = setTimeout(() => {
+    holdTimer = null
+    startRecording()
+  }, 300)
+}
+
+function onMicUp(e) {
+  e.preventDefault()
+  // If still in timer phase (quick tap) — cancel
+  if (holdTimer) {
+    clearTimeout(holdTimer)
+    holdTimer = null
+    recording.value = false
+    return
+  }
+  // Actually recording — stop
+  stopRecording()
+}
+
+function startRecording() {
+  console.log('[Voice] 开始录音...')
   try {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-        if (!recordCancelled) {
-          mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
-          audioChunks = []
-          mediaRecorder.ondataavailable = e => { audioChunks.push(e.data) }
-          mediaRecorder.onstop = () => {
-            stream.getTracks().forEach(t => t.stop())
-            const blob = new Blob(audioChunks, { type: 'audio/webm' })
-            processAudio(blob)
-          }
-          mediaRecorder.start()
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
+        audioStream = stream
+        try {
+          const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus' : 'audio/webm'
+          mediaRecorder = new MediaRecorder(stream, { mimeType })
+        } catch (_) {
+          mediaRecorder = new MediaRecorder(stream)
         }
-      }).catch(() => {
-        // Permission denied — use simulated fallback
-        startSimulated()
+        audioChunks = []
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data) }
+        mediaRecorder.onstop = () => {
+          if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null }
+          if (cancelled) return
+          const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' })
+          processAudio(blob)
+        }
+        mediaRecorder.onerror = () => {
+          recording.value = false
+          uni.showToast({ title: '录音出错，请重试', icon: 'none' })
+        }
+        mediaRecorder.start(250) // 250ms timeslice for dataavailable events
+        console.log('[Voice] 录音中...')
+      }).catch(err => {
+        console.warn('[Voice] 麦克风权限被拒绝:', err.message)
+        recording.value = false
+        uni.showToast({ title: '麦克风权限未开启，请在设置中允许', icon: 'none' })
       })
     } else {
-      startSimulated()
+      recording.value = false
+      uni.showToast({ title: '当前浏览器不支持录音', icon: 'none' })
     }
-  } catch (_) {
-    startSimulated()
+  } catch (e) {
+    console.error('[Voice] 录音启动异常:', e)
+    recording.value = false
   }
 }
 
-function startSimulated() {
-  recordTimer = setTimeout(() => {
-    if (recordCancelled) return
+function stopRecording() {
+  console.log('[Voice] 停止录音')
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop()
+  } else {
+    // Recorder not started yet (still in mic prompt), mark cancelled
+    cancelled = true
     recording.value = false
-    uni.showToast({ title: '语音识别中...', icon: 'loading', duration: 1500 })
-    setTimeout(() => {
-      messages.value.push({ role: 'user', content: '[语音]' })
-      loading.value = true; scrollToBottom()
-      setTimeout(() => {
-        messages.value.push({ role: 'assistant', content: '语音输入需要微信环境权限。请在微信中打开，或使用文字输入获得更准确的回复。' })
-        loading.value = false; scrollToBottom()
-      }, 800)
-    }, 1500)
-  }, 2000)
+  }
 }
 
 async function processAudio(blob) {
   recording.value = false
-  uni.showToast({ title: '识别中...', icon: 'loading' })
+  recordingHint.value = '识别中...'
+  uni.showToast({ title: '识别中...', icon: 'loading', duration: 3000 })
   try {
-    // Upload blob as multipart to backend ASR endpoint
     const r = await api.aiVoiceRecognize(blob)
-    const text = r?.text || ''
     uni.hideToast()
+    const text = r?.text || ''
     if (text) {
       messages.value.push({ role: 'user', content: text })
-      inputText.value = text
-      sendMsg()
+      loading.value = true; scrollToBottom()
+      try {
+        const res = await api.aiChat({ message: text, conversationId })
+        const reply = res?.reply || res?.data?.reply || '抱歉，AI 服务暂时不可用。'
+        messages.value.push({ role: 'assistant', content: reply })
+        if (res?.conversationId) conversationId = res.conversationId
+      } catch (_) {
+        messages.value.push({ role: 'assistant', content: '网络异常，请稍后重试。' })
+      } finally { loading.value = false; scrollToBottom() }
     } else {
       uni.showToast({ title: '未识别到语音内容', icon: 'none' })
     }
   } catch (e) {
     uni.hideToast()
+    console.warn('[Voice] ASR失败:', e)
     uni.showToast({ title: '语音识别失败，请重试', icon: 'none' })
   }
 }
 
-function stopRecord(e) {
-  e && e.preventDefault()
-  if (recordTimer) { clearTimeout(recordTimer); recordTimer = null }
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop()
-  } else if (!mediaRecorder) {
-    // Was simulated
-    recording.value = false
-  }
-}
-
-function onRecordMove(e) {
-  if (e.touches && e.touches[0]) {
-    recordCancelled = e.touches[0].clientY < 80
-  }
-}
-
-// ── Voice playback (TTS API first, SpeechSynthesis fallback) ──
+// ── Voice playback ──
 async function playVoice(msg, i) {
   if (playingIdx.value >= 0) {
     if (playingIdx.value === i) { stopPlayback(); return }
     stopPlayback()
   }
   playingIdx.value = i
-
-  // 1) Try backend TTS API for high-quality synthetic voice
   try {
     const r = await api.aiVoiceSynthesize({ text: msg.content })
-    if (r?.audioUrl) {
-      msg._audioUrl = r.audioUrl
-      playAudioUrl(r.audioUrl, i)
-      return
-    }
-  } catch (_) { /* fall through to SpeechSynthesis */ }
-
-  // 2) Browser SpeechSynthesis fallback
+    if (r?.audioUrl) { msg._audioUrl = r.audioUrl; playAudioUrl(r.audioUrl, i); return }
+  } catch (_) {}
+  // Fallback: browser SpeechSynthesis
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(msg.content)
-    utterance.lang = 'zh-CN'; utterance.rate = 1.0; utterance.pitch = 1.1
-    utterance.onend = () => { playingIdx.value = -1 }
-    utterance.onerror = () => { playingIdx.value = -1 }
-    window.speechSynthesis.speak(utterance)
-  } else {
-    playingIdx.value = -1
-    uni.showToast({ title: '语音播报不可用', icon: 'none' })
-  }
+    const u = new SpeechSynthesisUtterance(msg.content)
+    u.lang = 'zh-CN'; u.rate = 1.0; u.pitch = 1.1
+    u.onend = () => { playingIdx.value = -1 }
+    u.onerror = () => { playingIdx.value = -1 }
+    window.speechSynthesis.speak(u)
+  } else { playingIdx.value = -1; uni.showToast({ title: '语音播报不可用', icon: 'none' }) }
 }
 
 function playAudioUrl(url, i) {
@@ -314,7 +317,7 @@ function stopPlayback() {
 }
 
 function scrollToBottom() {
-  nextTick(() => { setTimeout(() => { scrollTop.value = 999999 }, 100) })
+  nextTick(() => { setTimeout(() => { scrollTop.value = 999999 }, 150) })
 }
 
 function request(opts) {
@@ -331,14 +334,24 @@ function request(opts) {
 </script>
 
 <style scoped>
-.ai-chat-page{display:flex;flex-direction:column;height:100vh;background:#f0f2f5}
-.welcome-card{display:flex;flex-direction:column;align-items:center;padding:64rpx 48rpx 48rpx;margin:24rpx;background:#fff;border-radius:24rpx;box-shadow:0 2rpx 16rpx rgba(0,0,0,.06)}
-.wc-avatar{margin-bottom:20rpx}.wc-avatar-img{width:120rpx;height:120rpx;border-radius:50%;border:4rpx solid #FF6B35}
+.ai-chat-page{
+  display:flex; flex-direction:column; height:100%; overflow:hidden;
+  background:#f0f2f5;
+}
+/* welcome */
+.welcome-card{
+  display:flex; flex-direction:column; align-items:center;
+  padding:64rpx 48rpx 48rpx; margin:24rpx; background:#fff;
+  border-radius:24rpx; box-shadow:0 2rpx 16rpx rgba(0,0,0,.06);
+}
+.wc-avatar{margin-bottom:20rpx}
+.wc-avatar-img{width:120rpx;height:120rpx;border-radius:50%;border:4rpx solid #FF6B35}
 .wc-title{font-size:38rpx;color:#333;font-weight:700;margin-bottom:8rpx}
 .wc-desc{font-size:26rpx;color:#999;margin-bottom:24rpx}
 .wc-features{display:flex;flex-wrap:wrap;gap:12rpx;justify-content:center}
 .wc-feat{display:flex;align-items:center;gap:6rpx;padding:10rpx 20rpx;background:#FFF3EE;border-radius:12rpx;font-size:24rpx;color:#FF6B35}
-.chat-body{flex:1;padding:16rpx 24rpx;overflow-y:auto}
+/* chat area — flex:1 with height:0 is the key trick for uni-app H5 */
+.chat-body{flex:1;height:0;padding:16rpx 24rpx;overflow-y:auto}
 .msg-item{display:flex;align-items:flex-start;margin-bottom:24rpx}
 .msg-left{flex-direction:row}.msg-right{flex-direction:row-reverse}
 .msg-avatar{width:72rpx;height:72rpx;border-radius:50%;flex-shrink:0;background:#fff;box-shadow:0 2rpx 8rpx rgba(0,0,0,.08)}
@@ -355,17 +368,19 @@ function request(opts) {
 .dot{width:14rpx;height:14rpx;background:#ccc;border-radius:50%;animation:bounce 1.4s infinite both}
 .dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
 @keyframes bounce{0%,80%,100%{transform:scale(.6);opacity:.4}40%{transform:scale(1);opacity:1}}
-.quick-bar{padding:16rpx 24rpx;background:transparent}.quick-scroll{white-space:nowrap;display:flex;gap:12rpx}
+/* quick bar */
+.quick-bar{flex-shrink:0;padding:16rpx 24rpx;background:transparent}
+.quick-scroll{white-space:nowrap;display:flex;gap:12rpx}
 .quick-chip{display:inline-flex;padding:14rpx 24rpx;background:#fff;border-radius:32rpx;font-size:26rpx;color:#FF6B35;box-shadow:0 2rpx 8rpx rgba(0,0,0,.05);transition:all .2s}
 .quick-chip:active{background:#FF6B35;color:#fff;transform:scale(.96)}
+/* recording */
 .recording-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:999}
 .recording-popup{background:#fff;border-radius:24rpx;padding:48rpx 64rpx;display:flex;flex-direction:column;align-items:center;gap:24rpx;box-shadow:0 16rpx 48rpx rgba(0,0,0,.15)}
 .recording-wave{display:flex;align-items:flex-end;gap:6rpx;height:80rpx}
 .wave-bar{width:8rpx;background:linear-gradient(180deg,#FF6B35,#FF8C5A);border-radius:4rpx;animation:wave .8s infinite alternate}
 @keyframes wave{0%{height:12rpx}100%{height:52rpx}}
 .recording-hint{font-size:24rpx;color:#999}
-
-/* ── Input bar (compact) ── */
+/* input bar */
 .chat-input-bar{display:flex;align-items:center;padding:10rpx 16rpx;background:#fff;gap:10rpx;border-top:2rpx solid #f0f0f0;box-shadow:0 -2rpx 8rpx rgba(0,0,0,.04);flex-shrink:0}
 .voice-main-btn{width:64rpx;height:64rpx;display:flex;align-items:center;justify-content:center;font-size:32rpx;border-radius:50%;background:#f5f5f5;transition:all .2s;flex-shrink:0}
 .voice-main-btn:active,.voice-main-btn.active{background:#FF6B35;transform:scale(.92)}
