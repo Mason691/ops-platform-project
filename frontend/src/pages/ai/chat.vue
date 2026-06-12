@@ -28,8 +28,8 @@
             <text class="msg-text" :selectable="true">{{ m.content }}</text>
           </view>
           <view v-if="m.role === 'assistant' && voiceEnabled" class="msg-actions">
-            <view class="voice-btn-sm" @tap="playVoice(m, i)">
-              <text class="voice-icon">{{ playingIdx === i ? '⏹' : '🔈' }}</text>
+            <view class="voice-btn-sm" :class="{ 'playing': playingIdx === i }" @tap="toggleVoice(m, i)">
+              <text class="voice-icon">{{ playingIdx === i ? '⏹' : '🔊' }}</text>
             </view>
           </view>
         </view>
@@ -158,13 +158,20 @@ async function sendMsg() {
   messages.value.push({ role: 'user', content: text })
   inputText.value = ''
   loading.value = true; scrollToBottom()
+
+  // Stop any currently playing audio
+  stopPlayback()
+
   try {
     const res = await api.aiChat({ message: text, conversationId })
-    // R.ok() data from backend → request.js resolves with d.data
     const reply = res?.reply || res?.data?.reply
     if (reply) {
+      const idx = messages.value.length
       messages.value.push({ role: 'assistant', content: reply })
       if (res?.conversationId) conversationId = res.conversationId
+
+      // Auto-play: fetch TTS and play while still in user-gesture context
+      if (voiceEnabled.value) autoPlayReply(reply, idx)
     } else {
       messages.value.push({ role: 'assistant', content: '抱歉，AI 助手暂时无响应，请稍后重试。' })
     }
@@ -173,6 +180,26 @@ async function sendMsg() {
     const errMsg = e?.msg || '请求超时，请检查网络后重试'
     messages.value.push({ role: 'assistant', content: errMsg })
   } finally { loading.value = false; scrollToBottom() }
+}
+
+/** Auto-play TTS for assistant reply. Must be called within a user-gesture
+ *  chain (i.e., right after sendMsg) so WeChat allows autoplay. */
+async function autoPlayReply(text, msgIdx) {
+  try {
+    const r = await api.aiVoiceSynthesize({ text })
+    if (r?.audioUrl) {
+      stopPlayback()
+      currentAudio = new Audio(r.audioUrl)
+      playingIdx.value = msgIdx
+      currentAudio.onended = () => { playingIdx.value = -1; currentAudio = null }
+      currentAudio.onerror = () => { playingIdx.value = -1; currentAudio = null }
+      // .play() rejected → WeChat blocked autoplay; show speaker icon but don't error
+      currentAudio.play().catch(() => { playingIdx.value = -1; currentAudio = null })
+      return
+    }
+  } catch (_) {}
+  // TTS failed or unavailable: fall through silently, user can tap speaker to retry
+  playingIdx.value = -1
 }
 
 function sendQuick(q) { inputText.value = q; sendMsg() }
@@ -251,17 +278,21 @@ async function processAudio(blob) {
   }
 }
 
-// ── Voice playback ──
-async function playVoice(msg, i) {
-  if (playingIdx.value >= 0) {
-    if (playingIdx.value === i) { stopPlayback(); return }
+// ── Voice toggle (stop active or replay this message) ──
+async function toggleVoice(msg, i) {
+  if (playingIdx.value === i) {
+    // This message is the active one — stop it
     stopPlayback()
+    return
   }
+  // Stop current, then play this message
+  stopPlayback()
   playingIdx.value = i
   try {
     const r = await api.aiVoiceSynthesize({ text: msg.content })
     if (r?.audioUrl) { msg._audioUrl = r.audioUrl; playAudioUrl(r.audioUrl, i); return }
   } catch (_) {}
+  // Fallback SpeechSynthesis
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel()
     const u = new SpeechSynthesisUtterance(msg.content)
@@ -336,8 +367,11 @@ function request(opts) {
 .bubble-ai{background:#fff;color:#333;border-radius:4rpx 16rpx 16rpx 16rpx}
 .bubble-user{background:linear-gradient(135deg,#FF6B35,#FF8C5A);color:#fff;border-radius:16rpx 4rpx 16rpx 16rpx}
 .msg-actions{display:flex;padding-top:8rpx}
-.voice-btn-sm{width:48rpx;height:48rpx;display:flex;align-items:center;justify-content:center;font-size:28rpx;opacity:.6}
+.voice-btn-sm{width:48rpx;height:48rpx;display:flex;align-items:center;justify-content:center;font-size:28rpx;opacity:.6;transition:all .15s}
 .voice-btn-sm:active{opacity:1;transform:scale(1.15)}
+.voice-btn-sm.playing{opacity:1;animation:speaker-pulse .8s infinite}
+.voice-btn-sm.playing .voice-icon{transform:scale(1.1)}
+@keyframes speaker-pulse{0%,100%{color:#FF6B35}50%{color:#ff8c5a}}
 .typing-bubble{padding:24rpx 36rpx}.typing-dots{display:flex;gap:8rpx}
 .dot{width:14rpx;height:14rpx;background:#ccc;border-radius:50%;animation:bounce 1.4s infinite both}
 .dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
