@@ -7,7 +7,7 @@ import java.time.LocalDateTime;
  * 运营商商品关系映射表。
  * 定位: 关系映射表而非全量同步 — 一条记录代表运营商引入了一个 mall_product 商品。
  */
-@Data @TableName("gs_product")
+@Data @TableName("ops_product")
 public class GsProduct {
     @TableId(type = IdType.AUTO)
     private Long id;

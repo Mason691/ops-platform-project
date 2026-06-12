@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 商品展示管理 Service — 处理 gs_product 映射与 mall_product 联表逻辑。
+ * 商品展示管理 Service — 处理 ops_product 映射与 mall_product 联表逻辑。
  */
 public interface IGsProductService {
 

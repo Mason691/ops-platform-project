@@ -18,7 +18,7 @@ import java.util.*;
  * 金地燃气聚合展示引流平台 — 核心 Controller。
  * 定位: 商品/活动展示 + 积分消耗 + 引流跳转第三方小程序，不提供交易功能。
  *
- * 商品数据通过 gs_product（映射表）JOIN mall_product 获取。
+ * 商品数据通过 ops_product（映射表）JOIN mall_product 获取。
  */
 @RestController @RequestMapping("/api/ops") @RequiredArgsConstructor
 public class PlatformController {
@@ -75,7 +75,7 @@ public class PlatformController {
     }
 
     /**
-     * 用户端商品列表 — 仅展示已上架且通过 gs_product 映射引入的商品。
+     * 用户端商品列表 — 仅展示已上架且通过 ops_product 映射引入的商品。
      */
     @GetMapping("/product/page")
     public R<?> productPage(@RequestParam(defaultValue="1") int pageNum,
@@ -89,7 +89,7 @@ public class PlatformController {
     }
 
     /**
-     * 用户端商品详情 — 通过 gs_product 映射ID获取 mall_product 商品信息。
+     * 用户端商品详情 — 通过 ops_product 映射ID获取 mall_product 商品信息。
      */
     @GetMapping("/product/{id}")
     public R<?> productDetail(@PathVariable Long id) {

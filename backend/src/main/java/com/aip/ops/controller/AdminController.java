@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
  * 运营商管理后台 — 绑定销售商、商品管理、分类管理。
  *
  * 销售商来源：底座平台 sys_corp 表中，在 sys_corp_role 中拥有 role_name='销售商' 的组织。
- * 商品数据：通过 gs_product（映射表）JOIN mall_product 获取完整商品信息。
+ * 商品数据：通过 ops_product（映射表）JOIN mall_product 获取完整商品信息。
  */
 @RestController
 @RequestMapping("/api/ops/admin")
@@ -185,7 +185,7 @@ public class AdminController {
 
     /**
      * 获取当前运营商的商品展示列表。
-     * 通过 gs_product 映射表 JOIN mall_product 获取完整商品信息。
+     * 通过 ops_product 映射表 JOIN mall_product 获取完整商品信息。
      */
     @GetMapping("/products")
     public R<?> products(@RequestParam(defaultValue="1") int pageNum,

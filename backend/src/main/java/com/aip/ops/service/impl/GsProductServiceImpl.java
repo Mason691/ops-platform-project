@@ -19,9 +19,9 @@ import java.util.stream.Collectors;
  * 商品展示管理 Service 实现。
  *
  * 核心逻辑：
- * 1. 管理员看到的商品 = gs_product JOIN mall_product，按 operator_id 过滤，
+ * 1. 管理员看到的商品 = ops_product JOIN mall_product，按 operator_id 过滤，
  *    且仅显示已绑定销售商（biz_operator_merchant）的商品
- * 2. 用户端看到的商品 = gs_product JOIN mall_product，按 shelf_status=1 过滤
+ * 2. 用户端看到的商品 = ops_product JOIN mall_product，按 shelf_status=1 过滤
  * 3. 上下架/分类操作前校验商品是否属于当前运营商绑定的销售商
  */
 @Service
@@ -385,7 +385,7 @@ public class GsProductServiceImpl implements IGsProductService {
 
     /**
      * 校验待操作的商品是否属于当前运营商绑定的销售商。
-     * 通过 gs_product JOIN mall_product，检查 mall_product.corp_id 是否在绑定列表中。
+     * 通过 ops_product JOIN mall_product，检查 mall_product.corp_id 是否在绑定列表中。
      *
      * @param mappingIds 要操作的商品映射 ID 列表
      * @param operatorId 当前运营商组织 ID

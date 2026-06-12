@@ -5,7 +5,7 @@ import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-@Data @TableName("gs_order")
+@Data @TableName("ops_order")
 public class GsOrder {
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;

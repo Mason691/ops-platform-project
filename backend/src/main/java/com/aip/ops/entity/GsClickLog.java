@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 import java.time.LocalDateTime;
 
-@Data @TableName("gs_click_log")
+@Data @TableName("ops_click_log")
 public class GsClickLog {
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;

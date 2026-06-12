@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS `ops_member` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='公众号平台会员';
 
 -- 2. 积分流水
-CREATE TABLE IF NOT EXISTS `gs_points_log` (
+CREATE TABLE IF NOT EXISTS `ops_points_log` (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY, `corp_id` BIGINT NOT NULL DEFAULT 3,
     `user_id` BIGINT NOT NULL, `change_type` VARCHAR(20) NOT NULL COMMENT 'GAIN/CONSUME/REFUND',
     `amount` INT NOT NULL, `balance_after` INT NOT NULL,
@@ -36,8 +36,8 @@ CREATE TABLE IF NOT EXISTS `gs_points_log` (
     INDEX `idx_user_time` (`user_id`, `create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 3. 商品关系映射表（gs_product：运营商引入 mall_product 商品的关联记录）
-CREATE TABLE IF NOT EXISTS `gs_product` (
+-- 3. 商品关系映射表（ops_product：运营商引入 mall_product 商品的关联记录）
+CREATE TABLE IF NOT EXISTS `ops_product` (
     `id`              BIGINT   NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '映射记录主键',
     `mall_product_id` BIGINT   NOT NULL                         COMMENT '关联 mall_product.id',
     `operator_id`     BIGINT   NOT NULL                         COMMENT '运营商ID（引入该商品的组织）',
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS `mall_product` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商城商品主表（所有销售商共用）';
 
 -- 4. 活动
-CREATE TABLE IF NOT EXISTS `gs_activity` (
+CREATE TABLE IF NOT EXISTS `ops_activity` (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY, `corp_id` BIGINT NOT NULL DEFAULT 3,
     `title` VARCHAR(128) NOT NULL, `cover_image` VARCHAR(500) DEFAULT NULL,
     `images` TEXT DEFAULT NULL, `video_url` VARCHAR(500) DEFAULT NULL,
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS `gs_activity` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 5. 订单
-CREATE TABLE IF NOT EXISTS `gs_order` (
+CREATE TABLE IF NOT EXISTS `ops_order` (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY, `corp_id` BIGINT NOT NULL DEFAULT 3,
     `user_id` BIGINT NOT NULL, `order_no` VARCHAR(64) NOT NULL,
     `product_id` BIGINT NOT NULL, `product_name` VARCHAR(128) DEFAULT NULL,
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS `gs_order` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 6. 优惠券
-CREATE TABLE IF NOT EXISTS `gs_coupon` (
+CREATE TABLE IF NOT EXISTS `ops_coupon` (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY, `corp_id` BIGINT NOT NULL DEFAULT 3,
     `name` VARCHAR(64) NOT NULL, `type` VARCHAR(20) NOT NULL DEFAULT 'POINTS',
     `value` INT NOT NULL, `min_points` INT DEFAULT 0,
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS `gs_coupon` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 7. 用户优惠券
-CREATE TABLE IF NOT EXISTS `gs_user_coupon` (
+CREATE TABLE IF NOT EXISTS `ops_user_coupon` (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY, `corp_id` BIGINT NOT NULL DEFAULT 3,
     `user_id` BIGINT NOT NULL, `coupon_id` BIGINT NOT NULL,
     `status` VARCHAR(20) NOT NULL DEFAULT 'UNUSED',
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS `gs_user_coupon` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 8. 收货地址
-CREATE TABLE IF NOT EXISTS `gs_address` (
+CREATE TABLE IF NOT EXISTS `ops_address` (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY, `corp_id` BIGINT NOT NULL DEFAULT 3,
     `user_id` BIGINT NOT NULL, `name` VARCHAR(20) NOT NULL,
     `phone` VARCHAR(20) NOT NULL,
@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS `gs_address` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 9. 点击统计
-CREATE TABLE IF NOT EXISTS `gs_click_log` (
+CREATE TABLE IF NOT EXISTS `ops_click_log` (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY, `corp_id` BIGINT NOT NULL DEFAULT 3,
     `user_id` BIGINT DEFAULT NULL, `target_type` VARCHAR(20) NOT NULL,
     `target_id` BIGINT NOT NULL, `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -156,17 +156,17 @@ INSERT IGNORE INTO mall_product (id, corp_id, name, cover_image, points_price, c
 (1004, 3, '金粮源优选大米5kg', '/static/product/rice-5kg.png', 300, 0, '金粮源公司精选东北优质大米，5公斤装，颗粒饱满，口感香糯', 1),
 (1005, 3, '金粮源食用油4L', '/static/product/oil-4l.png', 500, 0, '金粮源公司高品质食用植物油，4升装，非转基因，健康之选', 1);
 
--- gs_product 映射种子数据（运营商引入商品关联）
+-- ops_product 映射种子数据（运营商引入商品关联）
 -- operator_id=4 = 金厨美家运营商，引入销售商 金粮源公司1 (corp_id=3) 的商品
-INSERT IGNORE INTO gs_product (mall_product_id, operator_id, shelf_status, category_id) VALUES
+INSERT IGNORE INTO ops_product (mall_product_id, operator_id, shelf_status, category_id) VALUES
 (1004, 4, 1, NULL),
 (1005, 4, 1, NULL);
 
-INSERT IGNORE INTO gs_activity (corp_id, title, cover_image, category, start_time, end_time, location, points_reward, detail, status) VALUES
+INSERT IGNORE INTO ops_activity (corp_id, title, cover_image, category, start_time, end_time, location, points_reward, detail, status) VALUES
 (3, '社区安全用气讲座', '/static/activity1.png', 'OFFLINE', '2026-06-15', '2026-06-15 18:00:00', '各社区服务中心', 100, '免费燃气安全知识讲座', 1),
 (3, '亲子农场体验日', '/static/activity2.png', 'FAMILY', '2026-06-20', '2026-06-20 17:00:00', '金地生态农场', 200, '亲子采摘+DIY厨艺体验', 1);
 
-INSERT IGNORE INTO gs_coupon (corp_id, name, type, value, min_points, total_qty, remain_qty, expire_days) VALUES
+INSERT IGNORE INTO ops_coupon (corp_id, name, type, value, min_points, total_qty, remain_qty, expire_days) VALUES
 (3, '新人50积分券', 'POINTS', 50, 0, 1000, 1000, 30),
 (3, '满500减30积分券', 'POINTS', 30, 500, 500, 500, 30);
 

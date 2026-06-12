@@ -1,11 +1,11 @@
 -- 积分兑换配置迁移
--- 1. gs_product 增加运营配置字段
+-- 1. ops_product 增加运营配置字段
 -- 2. mall_product 增加 sale_price（如不存在）
 
 -- ============================================================
 -- 运营商商品映射表：增加积分兑换配置
 -- ============================================================
-ALTER TABLE `gs_product`
+ALTER TABLE `ops_product`
     ADD COLUMN `points`          INT          NOT NULL DEFAULT 0       COMMENT '积分数量（运营配置）' AFTER `category_id`,
     ADD COLUMN `exchange_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00   COMMENT '兑换金额（运营配置）' AFTER `points`;
 

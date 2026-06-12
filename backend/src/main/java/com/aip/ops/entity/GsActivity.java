@@ -3,7 +3,7 @@ import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 import java.time.LocalDateTime;
 
-@Data @TableName("gs_activity")
+@Data @TableName("ops_activity")
 public class GsActivity {
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;

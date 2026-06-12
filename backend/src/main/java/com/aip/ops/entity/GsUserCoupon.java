@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 import java.time.LocalDateTime;
 
-@Data @TableName("gs_user_coupon")
+@Data @TableName("ops_user_coupon")
 public class GsUserCoupon {
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;

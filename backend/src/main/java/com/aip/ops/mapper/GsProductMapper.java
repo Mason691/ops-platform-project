@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * gs_product 关系映射表 Mapper。
+ * ops_product 关系映射表 Mapper。
  * 提供 JOIN mall_product 的查询方法，获取完整商品信息。
  */
 @Mapper
@@ -15,7 +15,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
 
     /**
      * 分页查询运营商关联的商品列表（JOIN mall_product）。
-     * 仅返回当前运营商通过 gs_product 引入、且所属销售商在绑定列表中的商品。
+     * 仅返回当前运营商通过 ops_product 引入、且所属销售商在绑定列表中的商品。
      */
     @Select("<script>"
             + "SELECT gp.id AS mappingId, "
@@ -37,7 +37,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "       COALESCE(mp.max_points_deduct, 0) AS maxPointsDeduct, "
             + "       COALESCE(mp.click_count, 0) AS clickCount, "
             + "       mp.status "
-            + "FROM gs_product gp "
+            + "FROM ops_product gp "
             + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.operator_id = #{operatorId} "
             + "  AND mp.corp_id IN "
@@ -65,7 +65,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
     /** 统计总数（与 selectProductList 相同的过滤条件） */
     @Select("<script>"
             + "SELECT COUNT(*) "
-            + "FROM gs_product gp "
+            + "FROM ops_product gp "
             + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.operator_id = #{operatorId} "
             + "  AND mp.corp_id IN "
@@ -91,7 +91,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
      * 返回属于绑定销售商的 mappingId 列表，调用方通过比较列表大小判断是否有越权操作。
      */
     @Select("<script>"
-            + "SELECT gp.id FROM gs_product gp "
+            + "SELECT gp.id FROM ops_product gp "
             + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.id IN "
             + "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach>"
@@ -123,7 +123,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "       COALESCE(mp.max_points_deduct, 0) AS maxPointsDeduct, "
             + "       COALESCE(mp.click_count, 0) AS clickCount, "
             + "       mp.status "
-            + "FROM gs_product gp "
+            + "FROM ops_product gp "
             + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.id = #{mappingId}")
     Map<String, Object> selectProductByMappingId(@Param("mappingId") Long mappingId);
@@ -146,7 +146,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "       gp.exchange_amount AS exchangeAmount, "
             + "       mp.description, "
             + "       COALESCE(mp.click_count, 0) AS clickCount "
-            + "FROM gs_product gp "
+            + "FROM ops_product gp "
             + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.shelf_status = 1 "
             + "  AND mp.status = 1 "
@@ -170,7 +170,7 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
     /** 上架商品总数 */
     @Select("<script>"
             + "SELECT COUNT(*) "
-            + "FROM gs_product gp "
+            + "FROM ops_product gp "
             + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.shelf_status = 1 "
             + "  AND mp.status = 1 "
