@@ -76,7 +76,7 @@ async function doLogin() {
     const r = await api.login(phone.value, password.value)
     uni.setStorageSync('ops_token', r.token)
     uni.setStorageSync('corp_id', String(r.corpId))
-    uni.setStorageSync('ops_user', JSON.stringify(r))
+    uni.setStorageSync('ops_member', JSON.stringify(r))
     uni.showToast({ title: '登录成功', icon: 'success' })
     setTimeout(() => uni.switchTab({ url: '/pages/index/index' }), 500)
   } catch (e) {
