@@ -34,7 +34,8 @@ public class SecurityConfig {
                     "/api/public-account/**",
                     "/api/ops/auth/**", "/api/ops/product/**",
                     "/api/ops/activity/**",
-                    "/api/ops/coupon/list"
+                    "/api/ops/coupon/list",
+                    "/api/ops/ai/config"
                 ).permitAll()
                 .anyRequest().authenticated())
             .exceptionHandling(exh -> exh
