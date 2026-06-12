@@ -115,4 +115,3 @@ function openLive(room) {
 .guide-desc{font-size:26rpx;color:#999;display:block;margin-bottom:32rpx;line-height:1.5}
 .guide-btn{background:#FF6B35;color:#fff;padding:20rpx 48rpx;border-radius:48rpx;font-size:28rpx;display:inline-block}
 </style>
-</template>
