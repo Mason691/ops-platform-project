@@ -378,12 +378,20 @@ public class AdminController {
                 .stream().map(OperatorMerchant::getMerchantId).collect(Collectors.toSet());
         if (bound.isEmpty()) return R.fail("当前运营商未绑定任何销售商");
 
-        // Fetch public account config for the first bound merchant
-        Long merchantId = bound.iterator().next();
+        // Fetch public account config — try operator's own org ID first,
+        // then fall back to bound merchant's org ID
         PublicAccountConfig pubCfg = publicAccountConfigMapper.selectOne(
                 new LambdaQueryWrapper<PublicAccountConfig>()
-                        .eq(PublicAccountConfig::getCorpId, merchantId)
+                        .eq(PublicAccountConfig::getCorpId, operatorId)
                         .eq(PublicAccountConfig::getStatus, 1));
+
+        if (pubCfg == null) {
+            Long merchantId = bound.iterator().next();
+            pubCfg = publicAccountConfigMapper.selectOne(
+                    new LambdaQueryWrapper<PublicAccountConfig>()
+                            .eq(PublicAccountConfig::getCorpId, merchantId)
+                            .eq(PublicAccountConfig::getStatus, 1));
+        }
 
         if (pubCfg == null || pubCfg.getAppId() == null)
             return R.fail("公众号未配置 appId，请先在「公众号配置」中完成配置");
