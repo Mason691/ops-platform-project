@@ -6,6 +6,7 @@ import com.aip.ops.service.IGsProductService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +22,7 @@ import java.util.stream.Collectors;
  * 销售商来源：底座平台 sys_corp 表中，在 sys_corp_role 中拥有 role_name='销售商' 的组织。
  * 商品数据：通过 ops_product（映射表）JOIN mall_product 获取完整商品信息。
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/ops/admin")
 public class AdminController {
@@ -408,26 +410,50 @@ public class AdminController {
             String tokenUrl = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid="
                     + appId + "&secret=" + appSecret;
 
+            log.info("测试连接: finderUsername={}, appId={}", finderUsername, appId);
             @SuppressWarnings("rawtypes")
             ResponseEntity<Map> resp = restTemplate.exchange(
                     tokenUrl, HttpMethod.GET, null, Map.class);
 
             if (resp.getBody() != null && resp.getBody().get("access_token") != null) {
                 String accessToken = resp.getBody().get("access_token").toString();
+                log.info("测试连接成功: access_token 获取成功, finderUsername={}", finderUsername);
                 return R.ok(Map.of(
                         "success", true,
                         "message", "微信 API 连通正常（access_token 获取成功），finderUserName=" + finderUsername,
+                        "detail", "appId=" + appId.substring(0, Math.min(appId.length(), 10)) + "...",
                         "tokenPrefix", accessToken.length() > 10
                                 ? accessToken.substring(0, 10) + "..." : accessToken
                 ));
             } else {
                 Object errcode = resp.getBody() != null ? resp.getBody().get("errcode") : "unknown";
                 Object errmsg = resp.getBody() != null ? resp.getBody().get("errmsg") : "unknown";
-                return R.fail("微信返回错误 [" + errcode + "]: " + errmsg);
+                log.error("测试连接失败: finderUsername={}, 微信返回 errcode={}, errmsg={}",
+                        finderUsername, errcode, errmsg);
+                String hint = resolveWechatErrorHint(errcode, errmsg);
+                return R.fail("微信API调用失败: " + hint + " [errcode=" + errcode + ", errmsg=" + errmsg + "]");
             }
         } catch (Exception e) {
             String errStr = e.getMessage() != null ? e.getMessage() : "未知错误";
-            return R.fail("网络请求失败: " + (errStr.length() > 100 ? errStr.substring(0, 100) : errStr));
+            log.error("测试连接异常: finderUsername={}, error={}", finderUsername, errStr);
+            String shortErr = errStr.length() > 100 ? errStr.substring(0, 100) + "..." : errStr;
+            return R.fail("网络请求失败: " + shortErr);
+        }
+    }
+
+    /** Map common WeChat API error codes to human-readable hints */
+    private String resolveWechatErrorHint(Object errcode, Object errmsg) {
+        String code = errcode != null ? errcode.toString() : "";
+        String msg = errmsg != null ? errmsg.toString() : "未知错误";
+        switch (code) {
+            case "40125": return "appSecret 无效（40125）— 请检查公众号配置中的 appSecret 是否正确";
+            case "40001": return "access_token 无效（40001）— appSecret 可能被刷新，请重新测试";
+            case "40013": return "无效的 appId（40013）— 请检查公众号配置中的 appId";
+            case "48001": return "API 功能未授权（48001）— 公众号未获得该接口权限，请检查公众平台授权";
+            case "41001": return "缺少 access_token 参数（41001）";
+            case "42001": return "access_token 已过期（42001）";
+            case "41002": return "缺少 appId 参数（41002）";
+            default: return "errcode=" + code + ", errmsg=" + msg;
         }
     }
 }
