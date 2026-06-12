@@ -268,7 +268,6 @@ async function processAudio(blob) {
     uni.hideToast()
     const text = r?.text || ''
     if (text) {
-      messages.value.push({ role: 'user', content: text })
       inputText.value = text
       sendMsg()
     } else { uni.showToast({ title: '未识别到语音内容', icon: 'none' }) }
