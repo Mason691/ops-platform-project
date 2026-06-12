@@ -231,26 +231,20 @@ async function processAudio(blob) {
   recording.value = false
   uni.showToast({ title: '识别中...', icon: 'loading' })
   try {
-    // Read as base64
-    const reader = new FileReader()
-    reader.readAsDataURL(blob)
-    reader.onload = async () => {
-      const base64 = reader.result
-      const r = await api.aiVoiceRecognize({ audio: base64 })
-      const text = r?.text || ''
-      if (text) {
-        messages.value.push({ role: 'user', content: text.length > 50 ? text.substring(0, 50) + '...' : text })
-        inputText.value = text
-        sendMsg()
-      } else {
-        uni.showToast({ title: '未识别到语音内容', icon: 'none' })
-      }
+    // Upload blob as multipart to backend ASR endpoint
+    const r = await api.aiVoiceRecognize(blob)
+    const text = r?.text || ''
+    uni.hideToast()
+    if (text) {
+      messages.value.push({ role: 'user', content: text })
+      inputText.value = text
+      sendMsg()
+    } else {
+      uni.showToast({ title: '未识别到语音内容', icon: 'none' })
     }
-  } catch (_) {
-    uni.showToast({ title: '语音识别失败', icon: 'none' })
-  } finally {
-    // Stop any toasts
-    setTimeout(() => uni.hideToast(), 1000)
+  } catch (e) {
+    uni.hideToast()
+    uni.showToast({ title: '语音识别失败，请重试', icon: 'none' })
   }
 }
 
@@ -271,36 +265,35 @@ function onRecordMove(e) {
   }
 }
 
-// ── Voice playback (SpeechSynthesis with HTML5 Audio fallback) ──
-function playVoice(msg, i) {
-  // Stop current
+// ── Voice playback (TTS API first, SpeechSynthesis fallback) ──
+async function playVoice(msg, i) {
   if (playingIdx.value >= 0) {
-    if (playingIdx.value === i) {
-      stopPlayback()
-      return
-    }
+    if (playingIdx.value === i) { stopPlayback(); return }
     stopPlayback()
   }
-  // Try SpeechSynthesis first, then Audio fallback
+  playingIdx.value = i
+
+  // 1) Try backend TTS API for high-quality synthetic voice
+  try {
+    const r = await api.aiVoiceSynthesize({ text: msg.content })
+    if (r?.audioUrl) {
+      msg._audioUrl = r.audioUrl
+      playAudioUrl(r.audioUrl, i)
+      return
+    }
+  } catch (_) { /* fall through to SpeechSynthesis */ }
+
+  // 2) Browser SpeechSynthesis fallback
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel()
     const utterance = new SpeechSynthesisUtterance(msg.content)
     utterance.lang = 'zh-CN'; utterance.rate = 1.0; utterance.pitch = 1.1
-    playingIdx.value = i
     utterance.onend = () => { playingIdx.value = -1 }
     utterance.onerror = () => { playingIdx.value = -1 }
     window.speechSynthesis.speak(utterance)
-  } else if (msg._audioUrl) {
-    // Backend-synthesized audio
-    playAudioUrl(msg._audioUrl, i)
   } else {
-    // Try backend synthesis
-    api.aiVoiceSynthesize({ text: msg.content }).then(r => {
-      if (r?.audioUrl) { msg._audioUrl = r.audioUrl; playAudioUrl(r.audioUrl, i) }
-      else { uni.showToast({ title: '语音播报不可用', icon: 'none' }) }
-    }).catch(() => {
-      uni.showToast({ title: '语音播报不可用', icon: 'none' })
-    })
+    playingIdx.value = -1
+    uni.showToast({ title: '语音播报不可用', icon: 'none' })
   }
 }
 

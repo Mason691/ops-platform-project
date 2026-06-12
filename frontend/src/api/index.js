@@ -47,7 +47,24 @@ export const api = {
   // AI 助手
   aiChat: (data) => request({url:'/api/ops/ai/chat',method:'POST',data}),
   aiConfig: () => request({url:'/api/ops/ai/config'}),
-  aiVoiceRecognize: (data) => request({url:'/api/ops/ai/voice/recognize',method:'POST',data}),
+  aiVoiceRecognize: (blob) => {
+    // Upload audio blob as multipart/form-data via XMLHttpRequest
+    // (uni.uploadFile requires filePath, not blob; XHR works in H5)
+    return new Promise((resolve, reject) => {
+      const token = uni.getStorageSync('ops_token') || ''
+      const formData = new FormData()
+      formData.append('audio', blob, 'recording.webm')
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', '/api/ops/ai/voice/recognize')
+      if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token)
+      xhr.onload = () => {
+        try { const d = JSON.parse(xhr.responseText); if (d.ok) resolve(d.data); else reject(d) }
+        catch(e) { reject(xhr) }
+      }
+      xhr.onerror = () => reject(new Error('网络错误'))
+      xhr.send(formData)
+    })
+  },
   aiVoiceSynthesize: (data) => request({url:'/api/ops/ai/voice/synthesize',method:'POST',data}),
   // 用户头像
   uploadAvatar: (imageData) => request({url:'/api/ops/user/avatar',method:'POST',data:{imageData}}),

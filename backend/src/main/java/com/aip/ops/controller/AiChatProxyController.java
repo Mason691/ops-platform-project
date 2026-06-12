@@ -8,13 +8,18 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.*;
 
 /**
- * AI 助手对话代理 — 将公众号端用户消息转发到底座平台统一 AI 引擎。
+ * AI 助手代理 — 对接底座平台 AI 引擎（对话、ASR、TTS）。
  * <p>
- * 底座通过 JWT 中的 member_id 自动关联会员记忆，实现跨子系统一致的 AI 体验。
+ * 底座通过内部 API（X-Internal-Token 鉴权）提供语音识别和合成能力。
+ * 对话使用 JWT 透传，底座根据 member_id 关联长期记忆。
+ * <p>
+ * 实现参照：mall-project MiniAiController。
  */
 @Slf4j
 @RestController
@@ -22,12 +27,16 @@ import java.util.*;
 @RequiredArgsConstructor
 public class AiChatProxyController {
 
-    private final org.springframework.web.client.RestTemplate restTemplate;
+    private final RestTemplate restTemplate;
 
     @Value("${platform.base-url}")
     private String platformBaseUrl;
 
-    /** 公众号端 AI 助手对话（非流式） */
+    @Value("${platform.internal-token}")
+    private String internalToken;
+
+    // ═══ 对话 ═══
+
     @PostMapping("/chat")
     public R<?> chat(@RequestBody Map<String, Object> body, HttpServletRequest request) {
         String message = (String) body.get("message");
@@ -60,7 +69,8 @@ public class AiChatProxyController {
         }
     }
 
-    /** 公众号端 AI 助手配置（昵称、头像、语音开关） */
+    // ═══ 配置与问候 ═══
+
     @GetMapping("/config")
     public R<Map<String, Object>> aiConfig() {
         return R.ok(Map.of(
@@ -70,17 +80,11 @@ public class AiChatProxyController {
         ));
     }
 
-    /**
-     * AI 助手个性化问候 — 结合会员偏好生成专属问候语。
-     * 未登录返回通用问候。
-     */
     @GetMapping("/profile")
     public R<Map<String, Object>> aiProfile() {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
             Long userId = SecurityUtils.getCurrentUserId();
-            // 查询会员信息
-            // 注意：这里要用 OpsMemberMapper，但为简化暂时返回通用信息
             result.put("nickname", "燃气用户");
             result.put("avatar", null);
             result.put("greeting", "您好！我是小金，您的燃气生活助手～\n可以帮您查积分、兑商品、看活动，有什么需要？");
@@ -91,22 +95,108 @@ public class AiChatProxyController {
         return R.ok(result);
     }
 
-    /** 语音识别代理 — 转发音频到底座 AI 引擎识别 */
+    // ═══ 语音识别（ASR）— 参照 MiniAiController.asr() ═══
+
+    /**
+     * 语音识别中转：接收前端上传的音频 → 转发到底座 /api/internal/asr/recognize。
+     * 接受 multipart/form-data（与 mall 项目一致）：前端用 FormData 上传 blob。
+     */
     @PostMapping("/voice/recognize")
-    public R<?> voiceRecognize(@RequestBody Map<String, Object> body) {
-        // 语音识别：暂时返回模拟识别结果
-        // 后续可对接底座 TTS/ASR 服务
-        String base64Audio = (String) body.get("audio");
-        if (base64Audio == null || base64Audio.isEmpty()) return R.fail("音频数据为空");
-        return R.ok(Map.of("text", "语音识别功能已就绪"));
+    public R<?> voiceRecognize(@RequestParam("audio") MultipartFile audio,
+                                HttpServletRequest request) {
+        if (audio.isEmpty()) return R.fail("音频数据为空");
+        try {
+            Long corpId = resolveCorpId(request);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Internal-Token", internalToken);
+            headers.set("X-Corp-Id", String.valueOf(corpId));
+            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+            org.springframework.core.io.ByteArrayResource resource =
+                    new org.springframework.core.io.ByteArrayResource(audio.getBytes()) {
+                        @Override public String getFilename() {
+                            return audio.getOriginalFilename() != null
+                                    ? audio.getOriginalFilename() : "audio.webm";
+                        }
+                    };
+            org.springframework.util.MultiValueMap<String, Object> parts =
+                    new org.springframework.util.LinkedMultiValueMap<>();
+            parts.add("audio", resource);
+
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    platformBaseUrl + "/api/internal/asr/recognize",
+                    HttpMethod.POST, new HttpEntity<>(parts, headers), Map.class);
+
+            if (resp.getBody() != null) {
+                Object data = resp.getBody().get("data");
+                if (data instanceof Map) {
+                    Object text = ((Map<?, ?>) data).get("text");
+                    if (text != null) return R.ok(Map.of("text", text.toString()));
+                }
+                return R.ok(data);
+            }
+            return R.fail("语音识别服务返回空结果");
+        } catch (Exception e) {
+            log.warn("ASR 识别失败 corpId={}: {}", resolveCorpId(request), e.getMessage());
+            if (e.getMessage() != null && e.getMessage().contains("401")) {
+                return R.fail("ASR API Key 无效，请联系管理员配置语音识别服务");
+            }
+            return R.fail("语音识别服务暂不可用，请稍后重试");
+        }
     }
 
-    /** 语音合成代理 — 转发文本到底座 AI 引擎合成语音 */
+    // ═══ 语音合成（TTS）— 参照 MiniAiController.tts() ═══
+
+    /**
+     * TTS 语音合成中转：接收文本 → 转发到底座 /api/internal/tts/synthesize。
+     * 返回 base64 data URL 可直接播放。
+     */
     @PostMapping("/voice/synthesize")
-    public R<?> voiceSynthesize(@RequestBody Map<String, Object> body) {
+    public R<?> voiceSynthesize(@RequestBody Map<String, Object> body,
+                                 HttpServletRequest request) {
         String text = (String) body.get("text");
-        if (text == null || text.isBlank()) return R.fail("文本为空");
-        // 语音合成：返回文本，前端浏览器TTS兜底
-        return R.ok(Map.of("audioUrl", null, "text", text));
+        if (text == null || text.isBlank()) return R.fail("合成文本不能为空");
+
+        Long corpId = resolveCorpId(request);
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Internal-Token", internalToken);
+        headers.set("X-Corp-Id", String.valueOf(corpId));
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        try {
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    platformBaseUrl + "/api/internal/tts/synthesize",
+                    HttpMethod.POST, new HttpEntity<>(Map.of("text", text), headers), Map.class);
+
+            if (resp.getBody() != null) {
+                Object data = resp.getBody().get("data");
+                if (data instanceof Map) {
+                    Object audioUrl = ((Map<?, ?>) data).get("audioUrl");
+                    if (audioUrl != null) return R.ok(Map.of("audioUrl", audioUrl.toString()));
+                }
+                // 平台返回了错误信息
+                String errMsg = resp.getBody().get("msg") != null
+                        ? resp.getBody().get("msg").toString() : "TTS 服务异常";
+                return R.fail(errMsg);
+            }
+            return R.fail("TTS 服务暂不可用");
+        } catch (Exception e) {
+            log.warn("TTS 合成失败 corpId={}: {}", resolveCorpId(request), e.getMessage());
+            if (e.getMessage() != null && e.getMessage().contains("401")) {
+                return R.fail("TTS API Key 无效，请联系管理员更新语音配置");
+            }
+            return R.fail("语音合成暂不可用");
+        }
+    }
+
+    // ═══ 辅助 ═══
+
+    private Long resolveCorpId(HttpServletRequest request) {
+        try { return SecurityUtils.getCurrentCorpId(); } catch (Exception e) { /* no JWT */ }
+        String headerVal = request.getHeader("X-Corp-Id");
+        if (headerVal != null) {
+            try { return Long.valueOf(headerVal); } catch (NumberFormatException ignored) {}
+        }
+        return 4L; // 默认金厨美家运营商
     }
 }
