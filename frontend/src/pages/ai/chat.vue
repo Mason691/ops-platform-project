@@ -64,11 +64,11 @@
     </view>
 
     <view class="chat-input-bar">
-      <view class="voice-main-btn"
-            @touchstart="onMicDown" @touchend="onMicUp"
-            @mousedown="onMicDown" @mouseup="onMicUp"
-            :class="{ active: recording }">
-        <text>🎤</text>
+      <view class="voice-main-btn" :class="{ active: recording }"
+            @touchstart.prevent="onMicDown" @touchend.prevent="onMicUp"
+            @mousedown.prevent="onMicDown" @mouseup.prevent="onMicUp"
+            @touchcancel="onMicCancel">
+        <text class="mic-emoji">🎤</text>
       </view>
       <view class="input-wrap">
         <input class="chat-input" v-model="inputText"
@@ -174,6 +174,14 @@ function onMicUp(e) {
   e.preventDefault()
   if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; recording.value = false; return }
   stopRecording()
+}
+
+function onMicCancel() {
+  cancelled = true
+  recording.value = false
+  if (holdTimer) { clearTimeout(holdTimer); holdTimer = null }
+  if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop()
+  if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null }
 }
 
 function startRecording() {
@@ -338,8 +346,14 @@ function request(opts) {
 .rec-text{font-size:24rpx;color:#FF6B35;font-weight:600}
 /* input bar */
 .chat-input-bar{display:flex;align-items:center;padding:10rpx 16rpx;background:#fff;gap:10rpx;border-top:2rpx solid #f0f0f0;flex-shrink:0}
-.voice-main-btn{width:64rpx;height:64rpx;display:flex;align-items:center;justify-content:center;font-size:32rpx;border-radius:50%;background:#f5f5f5;transition:all .2s;flex-shrink:0}
+.voice-main-btn{
+  width:80rpx;height:80rpx;display:flex;align-items:center;justify-content:center;
+  border-radius:50%;background:#f5f5f5;transition:all .2s;flex-shrink:0;
+  box-shadow:0 2rpx 8rpx rgba(0,0,0,.08);
+}
+.mic-emoji{font-size:40rpx;line-height:1}
 .voice-main-btn:active,.voice-main-btn.active{background:#FF6B35;transform:scale(.92)}
+.voice-main-btn:active .mic-emoji,.voice-main-btn.active .mic-emoji{color:#fff}
 .input-wrap{flex:1}
 .chat-input{width:100%;height:64rpx;padding:0 20rpx;background:#f5f5f5;border-radius:32rpx;font-size:28rpx}
 .send-main-btn{width:64rpx;height:64rpx;display:flex;align-items:center;justify-content:center;border-radius:50%;background:linear-gradient(135deg,#FF6B35,#FF8C5A);transition:all .2s;flex-shrink:0}
