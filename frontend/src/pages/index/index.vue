@@ -68,13 +68,35 @@ function goProduct(id){uni.navigateTo({url:'/pages/product/detail?id='+id})}
 function goAiChat(){uni.navigateTo({url:'/pages/ai/chat'})}
 function search(){uni.showToast({title:'搜索功能开发中',icon:'none'})}
 function openLive(room){
-  const isWx=function(){return /micromessenger/i.test(navigator.userAgent)}
-  if(!isWx()){uni.showToast({title:'请在微信中打开直播间',icon:'none'});return}
-  try{
-    if(typeof wx!=='undefined'&&wx.openChannelsLive){
-      wx.openChannelsLive({finderUserName:room.finderUsername,success:()=>{},fail:(err)=>{console.warn('openChannelsLive fail',err);uni.showToast({title:'请在微信中搜索视频号观看',icon:'none'})}})
-    }else{uni.showToast({title:'请更新微信版本后观看直播',icon:'none'})}
-  }catch(e){uni.showToast({title:'跳转失败',icon:'none'})}
+  // Check if we're inside WeChat WebView
+  if(!/micromessenger/i.test(navigator.userAgent)){
+    uni.showToast({title:'请在微信中打开直播间',icon:'none'});return
+  }
+  if(!room.finderUsername){uni.showToast({title:'直播信息不完整',icon:'none'});return}
+
+  // WeChat JSSDK may provide wx through global / window.wx / WeixinJSBridge
+  var _wx = (typeof wx !== 'undefined') ? wx
+          : (typeof window !== 'undefined' && window.wx) ? window.wx
+          : null
+
+  if (_wx && typeof _wx.openChannelsLive === 'function'){
+    _wx.openChannelsLive({
+      finderUserName: room.finderUsername,
+      success: function(){},
+      fail: function(err){
+        console.warn('openChannelsLive fail:', err)
+        // Distinguish: config error vs real call failure
+        var msg = err && err.errMsg ? err.errMsg.toLowerCase() : ''
+        if(msg.indexOf('config')!==-1 || msg.indexOf('invalid')!==-1)
+          uni.showToast({title:'请在微信中搜索视频号 "'+room.finderUsername+'" 观看',icon:'none'})
+        else
+          uni.showToast({title:'请在微信中搜索视频号观看',icon:'none',duration:2500})
+      }
+    })
+  } else {
+    // env where openChannelsLive truly not available (devtools, old WeChat)
+    uni.showToast({title:'请在微信中搜索视频号 "'+room.finderUsername+'" 观看直播',icon:'none',duration:3000})
+  }
 }
 </script>
 <style scoped>

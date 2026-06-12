@@ -71,22 +71,23 @@ function openLive(room) {
     uni.showToast({ title: '直播信息不完整，请联系管理员', icon: 'none' })
     return
   }
-  try {
-    // Use WeChat JSSDK openChannelsLive to jump to Channels live room
-    if (typeof wx !== 'undefined' && wx.openChannelsLive) {
-      wx.openChannelsLive({
-        finderUserName: room.finderUsername,
-        success: () => {},
-        fail: (err) => {
-          console.warn('openChannelsLive失败:', err)
-          uni.showToast({ title: '请在微信中打开视频号观看直播', icon: 'none' })
-        }
-      })
-    } else {
-      uni.showToast({ title: '请更新微信版本后观看直播', icon: 'none' })
-    }
-  } catch (e) {
-    uni.showToast({ title: '跳转失败，请稍后重试', icon: 'none' })
+
+  // WeChat JSSDK may expose wx through different scopes
+  var _wx = (typeof wx !== 'undefined') ? wx
+          : (typeof window !== 'undefined' && window.wx) ? window.wx : null
+
+  if (_wx && typeof _wx.openChannelsLive === 'function') {
+    _wx.openChannelsLive({
+      finderUserName: room.finderUsername,
+      success: function(){},
+      fail: function(err) {
+        console.warn('openChannelsLive fail:', err)
+        uni.showToast({ title: '请在微信中搜索视频号观看直播', icon: 'none', duration: 3000 })
+      }
+    })
+  } else {
+    // Environment where JSSDK not loaded or WeChat devtools
+    uni.showToast({ title: '请在微信中搜索视频号 "'+room.finderUsername+'" 观看直播', icon: 'none', duration: 3000 })
   }
 }
 </script>
