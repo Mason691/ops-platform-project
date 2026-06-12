@@ -89,7 +89,14 @@ function openLive(room){
       }
     })
   } else {
-    console.log('[Live] openChannelsLive not available, window.wx='+typeof window.wx)
+    // openChannelsLive not available — likely WeChat platform limitation
+    // Requires: verified service account linked to 视频号 in WeChat backend
+    console.warn(
+      '[Live] openChannelsLive=undefined. ' +
+      'This API requires the official account to be linked to a 视频号. ' +
+      'Please verify in WeChat Official Platform (mp.weixin.qq.com) that ' +
+      'account wx095b91409f8ecbfe is linked to 视频号 ' + room.finderUsername
+    )
     uni.showToast({title:'请在微信中搜索视频号 "'+room.finderUsername+'" 观看直播',icon:'none',duration:3000})
   }
 }

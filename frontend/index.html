@@ -15,7 +15,7 @@
       (function() {
         if (!/micromessenger/i.test(navigator.userAgent)) return;
         var url = location.href.split('#')[0];
-        var corpId = (new URLSearchParams(location.search)).get('corpId') || '4';
+        var corpId = (new URLSearchParams(location.search)).get('corpId') || '3';
 
         function initWx() {
           console.log('[JSSDK] 获取签名, corpId=' + corpId);
