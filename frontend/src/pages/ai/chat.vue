@@ -68,7 +68,10 @@
             @touchstart.prevent="onMicDown" @touchend.prevent="onMicUp"
             @mousedown.prevent="onMicDown" @mouseup.prevent="onMicUp"
             @touchcancel="onMicCancel">
-        <view class="mic-icon"></view>
+        <svg class="mic-svg" viewBox="0 0 24 24" width="22" height="22">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="#666"/>
+          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="#666"/>
+        </svg>
       </view>
       <view class="input-wrap">
         <input class="chat-input" v-model="inputText"
@@ -116,6 +119,11 @@ let currentAudio = null
 
 onShow(async () => {
   const token = uni.getStorageSync('ops_token')
+  // Fast: check locally stored avatar first (updated by mine page after upload)
+  const savedUser = uni.getStorageSync('ops_user')
+  if (savedUser) {
+    try { const su = JSON.parse(savedUser); if (su?.avatar) userAvatar.value = su.avatar } catch (_) {}
+  }
   if (token) {
     try { const me = await api.getMe(); if (me?.avatar) userAvatar.value = me.avatar } catch (_) {}
   }
@@ -351,37 +359,21 @@ function request(opts) {
 }
 @keyframes rw-wave{0%{height:8rpx}100%{height:28rpx}}
 .rec-text{font-size:24rpx;color:#FF6B35;font-weight:600}
-/* input bar */
-.chat-input-bar{display:flex;align-items:center;padding:10rpx 16rpx;background:#fff;gap:10rpx;border-top:2rpx solid #f0f0f0;flex-shrink:0}
+/* input bar — compact: components ~50% smaller than original */
+.chat-input-bar{display:flex;align-items:center;padding:6rpx 10rpx;background:#fff;gap:6rpx;border-top:1rpx solid #f0f0f0;flex-shrink:0}
 .voice-main-btn{
-  width:80rpx;height:80rpx;display:flex;align-items:center;justify-content:center;
+  width:44rpx;height:44rpx;display:flex;align-items:center;justify-content:center;
   border-radius:50%;background:#f5f5f5;transition:all .2s;flex-shrink:0;
-  box-shadow:0 2rpx 8rpx rgba(0,0,0,.08);
+  box-shadow:0 1rpx 4rpx rgba(0,0,0,.08);
 }
-/* Mic icon — CSS-drawn (no emoji dependency, renders reliably everywhere) */
-.mic-icon{
-  width:36rpx;height:44rpx;position:relative;
-  border:3rpx solid #666;border-radius:20rpx 20rpx 0 0;
-  background:#666;
-  transition:all .2s;
-}
-.mic-icon::after{
-  content:'';position:absolute;left:50%;bottom:-18rpx;
-  transform:translateX(-50%);
-  width:6rpx;height:14rpx;background:#666;border-radius:0 0 4rpx 4rpx;
-  transition:all .2s;
-}
+/* SVG mic icon — switches to white on active press */
+.mic-svg path{transition:fill .2s}
 .voice-main-btn:active,.voice-main-btn.active{background:#FF6B35}
-.voice-main-btn:active .mic-icon,.voice-main-btn.active .mic-icon{
-  border-color:#fff;background:#fff;
-}
-.voice-main-btn:active .mic-icon::after,.voice-main-btn.active .mic-icon::after{
-  background:#fff;
-}
+.voice-main-btn:active .mic-svg path,.voice-main-btn.active .mic-svg path{fill:#fff}
 .input-wrap{flex:1}
-.chat-input{width:100%;height:64rpx;padding:0 20rpx;background:#f5f5f5;border-radius:32rpx;font-size:28rpx}
-.send-main-btn{width:64rpx;height:64rpx;display:flex;align-items:center;justify-content:center;border-radius:50%;background:linear-gradient(135deg,#FF6B35,#FF8C5A);transition:all .2s;flex-shrink:0}
+.chat-input{width:100%;height:40rpx;padding:0 14rpx;background:#f5f5f5;border-radius:20rpx;font-size:24rpx}
+.send-main-btn{width:44rpx;height:44rpx;display:flex;align-items:center;justify-content:center;border-radius:50%;background:linear-gradient(135deg,#FF6B35,#FF8C5A);transition:all .2s;flex-shrink:0}
 .send-main-btn:active{transform:scale(.92)}
 .send-main-btn.disabled{background:#e0e0e0}
-.send-arrow{color:#fff;font-size:28rpx;font-weight:bold}
+.send-arrow{color:#fff;font-size:22rpx;font-weight:bold}
 </style>

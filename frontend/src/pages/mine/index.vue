@@ -69,6 +69,10 @@ async function changeAvatar(){
         fail:reject
       })
     })
+    // Save to global storage so AI chat picks up the new avatar
+    const savedUser=uni.getStorageSync('ops_user')
+    const newUser={...(savedUser?JSON.parse(savedUser):{}),avatar:uploadRes.avatar}
+    uni.setStorageSync('ops_user',JSON.stringify(newUser))
     avatarKey.value++
     uni.showToast({title:'头像已更新',icon:'success'})
     loadUser()
