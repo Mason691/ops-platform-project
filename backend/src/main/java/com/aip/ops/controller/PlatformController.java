@@ -485,7 +485,7 @@ public class PlatformController {
         List<OpsLiveRoom> list = liveRoomMapper.selectList(
                 new LambdaQueryWrapper<OpsLiveRoom>()
                         .in(OpsLiveRoom::getStatus, 0, 1)
-                        .orderByAsc(OpsLiveRoom::getStatus)
+                        .orderByDesc(OpsLiveRoom::getStatus)
                         .orderByAsc(OpsLiveRoom::getSortOrder)
                         .last("LIMIT " + limit));
         return R.ok(list);
