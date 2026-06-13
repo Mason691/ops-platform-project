@@ -9,8 +9,11 @@ public class GsActivity {
     @TableField("corp_id") private Long corpId;
     @TableField("title") private String title;
     @TableField("cover_image") private String coverImage;
+    @TableField("cover_url") private String coverUrl;
     @TableField("images") private String images;
     @TableField("video_url") private String videoUrl;
+    @TableField("detail_video_url") private String detailVideoUrl;
+    @TableField("detail_images") private String detailImages;
     @TableField("detail") private String detail;
     @TableField("category") private String category;
     @TableField("start_time") private LocalDateTime startTime;
