@@ -31,6 +31,9 @@
           <text class="card-title">{{ a.title }}</text>
 
           <view class="card-tags">
+            <view :class="['tag', a.type === 'live_reserve' ? 'tag-live' : 'tag-normal']">
+              {{ a.type === 'live_reserve' ? '📺 直播预约' : '活动' }}
+            </view>
             <view class="tag cat-tag">{{ categoryLabel(a.category) }}</view>
             <view v-if="a.pointsReward > 0" class="tag points-tag">
               🎁 +{{ a.pointsReward }} 积分
@@ -93,6 +96,11 @@ function categoryLabel(v) {
 }
 
 function statusLabel(a) {
+  if (a.type === 'live_reserve') {
+    const start = a.startTime ? new Date(a.startTime.replace(/-/g, '/')) : null
+    if (start && new Date() < start) return '预约中'
+    return '直播中'
+  }
   const now = new Date()
   const start = a.startTime ? new Date(a.startTime.replace(/-/g, '/')) : null
   const end = a.endTime ? new Date(a.endTime.replace(/-/g, '/')) : null
@@ -264,6 +272,14 @@ function api(url, method, data) {
   padding: 4rpx 16rpx;
   border-radius: 6rpx;
   font-size: 22rpx;
+}
+.tag-live {
+  background: #FFF3E0;
+  color: #E65100;
+}
+.tag-normal {
+  background: #E8F5E9;
+  color: #2E7D32;
 }
 .cat-tag {
   background: #EEF2FF;

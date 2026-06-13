@@ -73,13 +73,14 @@
     <view v-if="products.length" class="section">
       <text class="sec-title">关联商品</text>
       <scroll-view scroll-x class="prod-scroll" :show-scrollbar="false">
-        <view v-for="p in products" :key="p.product_id" class="prod-card" @click="goProduct(p)">
-          <image :src="p.cover_image||'/static/gas-default.png'" class="prod-img" mode="aspectFill"/>
+        <view v-for="p in products" :key="p.product_id" class="prod-card">
+          <image :src="p.cover_image||'/static/gas-default.png'" class="prod-img" mode="aspectFill" @click="goProduct(p)"/>
           <text class="prod-name">{{ p.name }}</text>
           <view class="prod-price">
             <text v-if="p.points_price>0" class="p-points">{{ p.points_price }}积分</text>
             <text v-if="p.cash_price>0" class="p-cash">¥{{ p.cash_price }}</text>
           </view>
+          <view class="prod-buy-btn" @click.stop="goProduct(p)">立即抢购</view>
         </view>
       </scroll-view>
     </view>
@@ -372,6 +373,15 @@ function req(url, method, data) {
 .prod-price { display: flex; gap: 8rpx; padding: 0 12rpx 12rpx; align-items: baseline; }
 .p-points { font-size: 24rpx; color: #FF6B35; font-weight: 600; }
 .p-cash { font-size: 22rpx; color: #999; }
+.prod-buy-btn {
+  margin: 8rpx 12rpx 12rpx;
+  padding: 8rpx 0;
+  background: #FF6B35;
+  color: #fff;
+  font-size: 22rpx;
+  text-align: center;
+  border-radius: 8rpx;
+}
 
 /* ── Live room ── */
 .live-section { background: linear-gradient(135deg, #fff5f0, #fff); border: 2rpx solid #FF6B35; }
