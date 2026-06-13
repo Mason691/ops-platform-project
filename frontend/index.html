@@ -11,82 +11,123 @@
     <!-- ═══ 微信 JSSDK — 加载官方 jweixin SDK ═══ -->
     <script src="https://res.wx.qq.com/open/js/jweixin-1.6.0.js"></script>
     <script>
-      // ═══ 微信 JSSDK 初始化 — 双通道：wx.config() + WeixinJSBridge 兜底 ═══
+      // ═══ 微信 JSSDK 初始化 — 等待 wx 可用后注入签名 ═══
+      // 核心修复：不再立即调用 initWx()，而是监听 WeixinJSBridgeReady 事件，
+      // 确保微信 WebView 环境就绪后再 fetch 签名并执行 wx.config()。
       (function() {
         if (!/micromessenger/i.test(navigator.userAgent)) return;
         var url = location.href.split('#')[0];
         var corpId = (new URLSearchParams(location.search)).get('corpId') || '4';
+        var sigData = null;       // 缓存签名结果，避免重复 fetch
+        var configured = false;
 
-        function initWx() {
-          console.log('[JSSDK] 获取签名, corpId=' + corpId);
+        // ── 获取 JSSDK 签名 ──
+        function fetchSignature(callback) {
+          if (sigData) return callback(sigData);
+          console.log('[JSSDK] fetchSignature, corpId=' + corpId);
           fetch('/api/public-account/js-config?url=' + encodeURIComponent(url) + '&corpId=' + corpId)
             .then(function(r) { return r.json(); })
             .then(function(d) {
-              if (!d.ok || !d.data) return console.error('[JSSDK] 签名失败:', d.msg);
-              var s = d.data;
-              console.log('[JSSDK] 签名成功, appId:', s.appId);
-
-              // ═══ 主通道: wx.config() — 需要 jweixin SDK 已加载 ═══
-              function doWxConfig(retry) {
-                var n = retry || 0
-                if (typeof wx !== 'undefined' && typeof wx.config === 'function') {
-                  wx.config({
-                    debug: s.debug || false,
-                    appId: s.appId,
-                    timestamp: s.timestamp,
-                    nonceStr: s.nonceStr,
-                    signature: s.signature,
-                    jsApiList: [
-                      'updateAppMessageShareData','updateTimelineShareData',
-                      'onMenuShareTimeline','onMenuShareAppMessage',
-                      'getLocation','openLocation','chooseImage','previewImage',
-                      'miniProgram','openChannelsLive'
-                    ],
-                    openTagList: ['wx-open-launch-weapp']
-                  })
-                  wx.ready(function() {
-                    console.log('[JSSDK] ✅ wx.ready (openChannelsLive available)');
-                  })
-                  wx.error(function(res) {
-                    console.error('[JSSDK] ❌ wx.error:', res.errMsg || res);
-                  })
-                } else if (n < 50) {
-                  setTimeout(function(){ doWxConfig(n+1) }, 100)
-                } else {
-                  console.error('[JSSDK] wx.config not available after 5s, giving up')
-                }
+              if (!d.ok || !d.data) {
+                console.error('[JSSDK] 签名接口返回失败:', d.msg);
+                // 5s 后重试一次（可能是 access_token 未就绪）
+                setTimeout(function() { fetchSignature(callback); }, 5000);
+                return;
               }
-              doWxConfig(0)
-
-              // ═══ 兜底通道: WeixinJSBridge — 用于分享等老 API ═══
-              if (typeof WeixinJSBridge !== 'undefined' && typeof WeixinJSBridge.invoke === 'function') {
-                WeixinJSBridge.invoke('preVerifyJSAPI', {
-                  appId: s.appId, verifyAppId: s.appId,
-                  verifySignType: 'sha1',
-                  verifyTimestamp: String(s.timestamp),
-                  verifyNonceStr: s.nonceStr,
-                  verifySignature: s.signature,
-                  verifyJsApiList: [
-                    'updateAppMessageShareData','updateTimelineShareData',
-                    'onMenuShareTimeline','onMenuShareAppMessage',
-                    'getLocation','openLocation','chooseImage','previewImage',
-                    'miniProgram','openChannelsLive'
-                  ],
-                  verifyOpenTagList: ['wx-open-launch-weapp']
-                }, function(res) {
-                  var err = res.err_msg || res.errMsg || ''
-                  if (err.indexOf(':ok') !== -1)
-                    console.log('[JSSDK] ✅ WeixinJSBridge ready')
-                  else
-                    console.error('[JSSDK] ❌ WeixinJSBridge:', err)
-                })
-                WeixinJSBridge.on('menu:share:timeline', function() {})
-                WeixinJSBridge.on('menu:share:appmessage', function() {})
-              }
+              sigData = d.data;
+              console.log('[JSSDK] 签名成功, appId:', sigData.appId);
+              callback(sigData);
             })
-            .catch(function(e) { console.error('[JSSDK] 获取签名失败:', e); })
+            .catch(function(e) {
+              console.error('[JSSDK] 获取签名网络失败:', e);
+              // 网络恢复后重试
+              setTimeout(function() { fetchSignature(callback); }, 3000);
+            });
         }
-        initWx()
+
+        // ── 执行 wx.config ──
+        function doWxConfig(s) {
+          if (configured) return;
+          configured = true;
+          if (typeof wx === 'undefined' || typeof wx.config !== 'function') {
+            console.error('[JSSDK] wx.config not a function — jweixin SDK may not have loaded');
+            return;
+          }
+          var jsApiList = [
+            'updateAppMessageShareData','updateTimelineShareData',
+            'onMenuShareTimeline','onMenuShareAppMessage',
+            'chooseImage','previewImage'
+          ];
+          // 仅当需要跳转小程序时申请 miniProgram
+          if (typeof wx.miniProgram !== 'undefined' || navigator.userAgent.indexOf('miniProgram') > -1) {
+            jsApiList.push('miniProgram');
+          }
+          // 仅当需要打开视频号直播时申请
+          jsApiList.push('openChannelsLive');
+
+          wx.config({
+            debug: s.debug || false,
+            appId: s.appId,
+            timestamp: s.timestamp,
+            nonceStr: s.nonceStr,
+            signature: s.signature,
+            jsApiList: jsApiList,
+            openTagList: ['wx-open-launch-weapp']
+          });
+
+          wx.ready(function() {
+            console.log('[JSSDK] ✅ wx.ready');
+          });
+
+          wx.error(function(res) {
+            console.error('[JSSDK] ❌ wx.error:', res.errMsg || res);
+            // 常见错误：invalid signature → 可能是 url 参数不对（应去除 # 后部分）
+            // config:fail → 签名时间戳过期或 appId 不匹配
+            if (res.errMsg && res.errMsg.indexOf('invalid signature') > -1) {
+              console.warn('[JSSDK] 签名无效，正在重试... url=' + url);
+              sigData = null;
+              configured = false;
+              setTimeout(function() { fetchSignature(doWxConfig); }, 1000);
+            }
+          });
+        }
+
+        // ── 启动流程：优先等 WeixinJSBridgeReady，兜底轮询 wx 就绪 ──
+        function startJssdk() {
+          fetchSignature(function(s) {
+            // 一旦签名就绪，若 wx 已可用立刻 config；否则轮询最多 10s
+            if (typeof wx !== 'undefined' && typeof wx.config === 'function') {
+              doWxConfig(s);
+              return;
+            }
+            var retries = 0;
+            var maxRetries = 100; // 100 × 100ms = 10s
+            var timer = setInterval(function() {
+              retries++;
+              if (typeof wx !== 'undefined' && typeof wx.config === 'function') {
+                clearInterval(timer);
+                doWxConfig(s);
+              } else if (retries >= maxRetries) {
+                clearInterval(timer);
+                console.error('[JSSDK] wx 未就绪（10s 超时），放弃。请检查 jweixin-1.6.0.js 是否加载成功');
+              }
+            }, 100);
+          });
+        }
+
+        // WeixinJSBridgeReady 是微信官方推荐的初始化时机
+        if (typeof WeixinJSBridge === 'object' && typeof WeixinJSBridge.invoke === 'function') {
+          startJssdk();
+        } else {
+          document.addEventListener('WeixinJSBridgeReady', startJssdk, false);
+          // 兜底：5s 后若事件未触发，直接启动
+          setTimeout(function() {
+            if (!configured && !sigData) {
+              console.warn('[JSSDK] WeixinJSBridgeReady 未触发，兜底启动');
+              startJssdk();
+            }
+          }, 5000);
+        }
       })();
     </script>
     <script>

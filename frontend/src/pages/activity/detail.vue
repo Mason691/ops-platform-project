@@ -1,72 +1,293 @@
 <template>
-  <view class="page" v-if="a">
-    <image :src="a.coverImage||'/static/gas-default.png'" class="cover" mode="aspectFill"/>
-    <view class="info">
-      <text class="title">{{a.title}}</text>
-      <text class="time">🕐 {{a.startTime}} ~ {{a.endTime}}</text>
-      <text v-if="a.location" class="loc">📍 {{a.location}}</text>
-      <view class="reward" v-if="a.pointsReward">🎁 参加可获得 <text class="r-points">{{a.pointsReward}} 积分</text></view>
-      <view class="detail"><rich-text :nodes="a.detail||'暂无详情'"/></view>
-    </view>
-    <view class="bottom-bar">
-      <view class="join-btn" :class="{ disabled: booked }" @click="doBook">
-        {{ booked ? '已预约 ✓' : '预约参加' }}
-      </view>
+  <view class="page" v-if="act">
+    <!-- ═══ Cover — video or image ═══ -->
+    <view class="cover-area">
+      <video
+        v-if="act.detailVideoUrl || act.videoUrl"
+        :src="act.detailVideoUrl || act.videoUrl"
+        class="cover-video"
+        controls
+        object-fit="contain"
+        :poster="act.coverUrl || act.coverImage"
+      />
+      <image
+        v-else
+        :src="act.coverUrl || act.coverImage || '/static/gas-default.png'"
+        class="cover-img"
+        mode="aspectFill"
+      />
+      <!-- Status badge -->
+      <view class="hero-badge" :class="badgeClass">{{ statusText }}</view>
     </view>
 
-    <!-- WeChat follow guide -->
-    <view class="mask" v-if="showFollowGuide" @click="showFollowGuide=false">
-      <view class="guide" @click.stop>
-        <text class="guide-icon">📢</text>
-        <text class="guide-title">关注公众号</text>
-        <text class="guide-desc">关注公众号后，我们会在活动开始前通过模板消息提醒您，不错过精彩活动！</text>
-        <view class="guide-btns">
-          <view class="g-btn cancel" @click="showFollowGuide=false">暂不关注</view>
-          <view class="g-btn ok" @click="doBookAfterFollow">已关注，去预约</view>
+    <!-- ═══ Info ═══ -->
+    <view class="section">
+      <text class="title">{{ act.title }}</text>
+
+      <view class="tags-row">
+        <view class="t-tag cat">{{ categoryLabel(act.category) }}</view>
+        <view v-if="act.pointsReward > 0" class="t-tag points">🎁 +{{ act.pointsReward }} 积分</view>
+      </view>
+
+      <view class="meta-list">
+        <view class="meta-item">
+          <text class="m-label">活动时间</text>
+          <text class="m-value">{{ fmtFull(act.startTime) }} ~ {{ fmtFull(act.endTime) }}</text>
+        </view>
+        <view v-if="act.location" class="meta-item">
+          <text class="m-label">活动地点</text>
+          <text class="m-value">{{ act.location }}</text>
+        </view>
+        <view v-if="act.maxParticipants" class="meta-item">
+          <text class="m-label">参与人数</text>
+          <text class="m-value">限 {{ act.maxParticipants }} 人</text>
         </view>
       </view>
     </view>
+
+    <!-- ═══ Detail images gallery ═══ -->
+    <view v-if="detailImages.length" class="section">
+      <text class="sec-title">活动图片</text>
+      <scroll-view scroll-x class="img-gallery" :show-scrollbar="false">
+        <image
+          v-for="(url, i) in detailImages"
+          :key="i"
+          :src="url"
+          class="gallery-img"
+          mode="aspectFill"
+          @click="previewImages(i)"
+        />
+      </scroll-view>
+    </view>
+
+    <!-- ═══ Detail text ═══ -->
+    <view v-if="act.detail" class="section">
+      <text class="sec-title">活动详情</text>
+      <view class="detail-text"><rich-text :nodes="act.detail" /></view>
+    </view>
+
+    <view style="height:140rpx" />
+
+    <!-- ═══ Bottom bar ═══ -->
+    <view class="bottom-bar">
+      <view class="share-btn" @click="doShare">
+        <text class="share-icon">↗</text>
+        <text>分享</text>
+      </view>
+      <view class="action-btn" :class="btnClass" @click="handleAction">
+        {{ btnText }}
+      </view>
+    </view>
+  </view>
+
+  <!-- Loading / Error -->
+  <view v-else class="empty-page">
+    <text>{{ loadErr || '加载中...' }}</text>
   </view>
 </template>
+
 <script setup>
-import {ref,onMounted} from 'vue'
-const a=ref(null),booked=ref(false),showFollowGuide=ref(false)
-onMounted(async()=>{
-  const id=(getCurrentPages().pop())?.options?.id
-  if(id){try{a.value=await request({url:'/api/ops/activity/'+id})}catch{};if(id)checkBooked(Number(id))}
+import { ref, onMounted, computed } from 'vue'
+
+const act = ref(null)
+const loadErr = ref('')
+const booked = ref(false)
+
+onMounted(async () => {
+  const pages = getCurrentPages()
+  const id = pages[pages.length - 1]?.options?.id
+  if (!id) { loadErr.value = '缺少活动ID'; return }
+  try {
+    act.value = await req('/api/ops/activity/' + id)
+    checkBooked(Number(id))
+  } catch (e) {
+    loadErr.value = '加载失败，请返回重试'
+    console.error(e)
+  }
 })
-async function checkBooked(activityId){
-  const token=uni.getStorageSync('ops_token')
-  if(!token)return
-  try{const r=await request({url:'/api/ops/my-bookings'});booked.value=(r||[]).some(b=>b.activityId===activityId&&b.status===0)}catch{}
+
+async function checkBooked(activityId) {
+  const token = uni.getStorageSync('ops_token')
+  if (!token) return
+  try {
+    const bookings = await req('/api/ops/my-bookings')
+    booked.value = (bookings || []).some(b => b.activityId === activityId && b.status === 0)
+  } catch (_) {}
 }
-function doBook(){
-  const token=uni.getStorageSync('ops_token')
-  if(!token){uni.navigateTo({url:'/pages/auth/login'});return}
-  // Show follow guide (WeChat follow needed for template messages)
-  showFollowGuide.value=true
+
+// ── Derived ──
+const detailImages = computed(() => {
+  if (!act.value) return []
+  const di = act.value.detailImages
+  if (typeof di === 'string') {
+    try { return JSON.parse(di) } catch (_) { return [] }
+  }
+  return Array.isArray(di) ? di : []
+})
+
+const now = computed(() => new Date())
+const statusText = computed(() => {
+  if (!act.value) return ''
+  const s = act.value.startTime ? new Date(act.value.startTime.replace(/-/g, '/')) : null
+  const e = act.value.endTime ? new Date(act.value.endTime.replace(/-/g, '/')) : null
+  if (!s || !e) return '进行中'
+  if (now.value < s) return '即将开始'
+  if (now.value > e || act.value.status === 0) return '已结束'
+  return '进行中'
+})
+const badgeClass = computed(() => {
+  if (statusText.value === '进行中') return 'badge-live'
+  if (statusText.value === '即将开始') return 'badge-upcoming'
+  return 'badge-ended'
+})
+const btnText = computed(() => {
+  if (booked.value) return '已预约 ✓'
+  if (statusText.value === '即将开始') return '预约参加'
+  if (statusText.value === '进行中') return '立即参与'
+  return '已结束'
+})
+const btnClass = computed(() => {
+  if (booked.value) return 'btn-done'
+  if (statusText.value === '已结束') return 'btn-disabled'
+  return 'btn-active'
+})
+
+// ── Actions ──
+function handleAction() {
+  if (statusText.value === '已结束' || booked.value) return
+  const token = uni.getStorageSync('ops_token')
+  if (!token) { uni.navigateTo({ url: '/pages/auth/login' }); return }
+  doBook()
 }
-async function doBookAfterFollow(){
-  showFollowGuide.value=false
-  try{
-    await request({url:'/api/ops/activity/'+a.value.id+'/book',method:'POST'})
-    booked.value=true
-    uni.showToast({title:'预约成功！活动开始前会提醒您',icon:'success',duration:2000})
-  }catch(e){uni.showToast({title:e?.msg||'预约失败',icon:'none'})}
+
+async function doBook() {
+  try {
+    await req('/api/ops/activity/' + act.value.id + '/book', 'POST')
+    booked.value = true
+    uni.showToast({ title: '预约成功！', icon: 'success', duration: 2000 })
+  } catch (e) {
+    uni.showToast({ title: e?.msg || '预约失败', icon: 'none' })
+  }
 }
-function request(opts){
-  return new Promise((resolve,reject)=>{
-    const token=uni.getStorageSync('ops_token')||''
+
+function doShare() {
+  // Use JSSDK if available
+  if (typeof wx !== 'undefined' && wx.ready && typeof wx.updateAppMessageShareData === 'function') {
+    wx.ready(function() {
+      wx.updateAppMessageShareData({
+        title: act.value?.title || '精彩活动',
+        desc: (act.value?.detail || '').substring(0, 50),
+        link: location.href,
+        imgUrl: act.value?.coverUrl || act.value?.coverImage || ''
+      })
+    })
+    uni.showToast({ title: '已设置分享信息', icon: 'success' })
+  } else {
+    // Fallback: show tip
+    uni.showToast({ title: '点击右上角 ··· 分享给朋友', icon: 'none', duration: 2500 })
+  }
+}
+
+function previewImages(index) {
+  uni.previewImage({
+    urls: detailImages.value,
+    current: detailImages.value[index] || detailImages.value[0]
+  })
+}
+
+// ── Helpers ──
+function fmtFull(t) {
+  if (!t) return ''
+  return t.substring(0, 16).replace(' ', ' ')
+}
+function categoryLabel(v) {
+  const m = { OFFLINE: '线下', FAMILY: '亲子', POINTS: '积分' }
+  return m[v] || v || '其他'
+}
+
+function req(url, method, data) {
+  return new Promise((resolve, reject) => {
+    const token = uni.getStorageSync('ops_token') || ''
+    const header = token
+      ? { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' }
     uni.request({
-      url:'/api/ops'+opts.url,method:opts.method||'GET',data:opts.data||{},
-      header:token?{'Authorization':'Bearer '+token,'Content-Type':'application/json'}:{'Content-Type':'application/json'},
-      success(r){if(r.data?.code===200)resolve(r.data.data);else reject(r.data)},
-      fail:reject
+      url, method: method || 'GET', data: data || {}, header,
+      success(r) {
+        if (r.data && r.data.code === 200) resolve(r.data.data)
+        else reject(r.data)
+      },
+      fail: reject
     })
   })
 }
 </script>
+
 <style scoped>
-.page{min-height:100vh;background:#f5f5f5;padding-bottom:120rpx}.cover{width:100%;height:400rpx}.info{background:#fff;padding:32rpx;margin-top:-24rpx;border-radius:24rpx 24rpx 0 0}.title{font-size:34rpx;color:#333;font-weight:600;display:block}.time,.loc{font-size:26rpx;color:#999;display:block;margin-top:12rpx}.reward{margin-top:20rpx;background:#FFF3EE;padding:16rpx 24rpx;border-radius:12rpx;font-size:28rpx}.r-points{color:#FF6B35;font-weight:600}.detail{margin-top:24rpx;font-size:28rpx;color:#666;line-height:1.8}.bottom-bar{position:fixed;bottom:0;left:0;right:0;padding:16rpx 32rpx calc(env(safe-area-inset-bottom)+16rpx);background:#fff;border-top:1rpx solid #eee}.join-btn{background:#FF6B35;color:#fff;text-align:center;padding:24rpx;border-radius:48rpx;font-size:32rpx;font-weight:600}.join-btn.disabled{background:#ccc}
-.mask{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:999}.guide{background:#fff;border-radius:24rpx;padding:48rpx 40rpx;width:80%;text-align:center}.guide-icon{font-size:64rpx;display:block;margin-bottom:20rpx}.guide-title{font-size:34rpx;font-weight:600;color:#333;display:block;margin-bottom:12rpx}.guide-desc{font-size:26rpx;color:#999;display:block;margin-bottom:32rpx;line-height:1.5}.guide-btns{display:flex;gap:20rpx}.g-btn{flex:1;padding:20rpx;border-radius:48rpx;font-size:28rpx;text-align:center}.g-btn.cancel{border:2rpx solid #ddd;color:#666}.g-btn.ok{background:#FF6B35;color:#fff}
+.page { min-height: 100vh; background: #f5f5f5; padding-bottom: 140rpx; }
+
+/* Cover */
+.cover-area { position: relative; width: 100%; height: 500rpx; }
+.cover-img { width: 100%; height: 100%; }
+.cover-video { width: 100%; height: 500rpx; }
+.hero-badge {
+  position: absolute; top: 20rpx; left: 20rpx;
+  padding: 8rpx 24rpx; border-radius: 12rpx; font-size: 24rpx; color: #fff;
+}
+.badge-live { background: #FF6B35; }
+.badge-upcoming { background: #4CAF50; }
+.badge-ended { background: #999; }
+
+/* Sections */
+.section {
+  background: #fff;
+  margin: 20rpx 24rpx;
+  padding: 28rpx;
+  border-radius: 16rpx;
+}
+.title { font-size: 34rpx; font-weight: 600; color: #222; line-height: 1.4; }
+.sec-title { font-size: 30rpx; font-weight: 600; color: #333; margin-bottom: 20rpx; display: block; }
+
+/* Tags */
+.tags-row { display: flex; gap: 12rpx; margin-top: 20rpx; }
+.t-tag { padding: 6rpx 20rpx; border-radius: 8rpx; font-size: 24rpx; }
+.t-tag.cat { background: #EEF2FF; color: #6366F1; }
+.t-tag.points { background: #FFF3EE; color: #FF6B35; }
+
+/* Meta */
+.meta-list { margin-top: 24rpx; }
+.meta-item { display: flex; justify-content: space-between; padding: 16rpx 0; border-bottom: 1rpx solid #f5f5f5; }
+.m-label { font-size: 26rpx; color: #999; }
+.m-value { font-size: 26rpx; color: #333; text-align: right; flex: 1; }
+
+/* Image gallery */
+.img-gallery { white-space: nowrap; }
+.gallery-img { display: inline-block; width: 200rpx; height: 200rpx; margin-right: 16rpx; border-radius: 12rpx; }
+
+/* Detail text */
+.detail-text { font-size: 28rpx; color: #666; line-height: 1.8; }
+
+/* Bottom bar */
+.bottom-bar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  display: flex; gap: 16rpx; align-items: center;
+  padding: 16rpx 32rpx calc(env(safe-area-inset-bottom) + 16rpx);
+  background: #fff; border-top: 1rpx solid #eee;
+}
+.share-btn {
+  width: 120rpx; height: 80rpx; border-radius: 40rpx;
+  border: 2rpx solid #ddd; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; font-size: 22rpx; color: #666;
+}
+.share-icon { font-size: 28rpx; }
+.action-btn {
+  flex: 1; height: 80rpx; border-radius: 40rpx;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 30rpx; font-weight: 600; color: #fff;
+}
+.btn-active { background: #FF6B35; }
+.btn-done { background: #ccc; }
+.btn-disabled { background: #bbb; color: #fff; }
+
+.empty-page { display: flex; align-items: center; justify-content: center; height: 100vh; color: #999; font-size: 28rpx; }
 </style>

@@ -1,25 +1,303 @@
 <template>
   <view class="page">
-    <view class="filters"><view v-for="c in cats" :key="c" class="cat" :class="{on:cat===c}" @click="cat=c;load(true)">{{c}}</view></view>
-    <view v-for="a in list" :key="a.id" class="card" @click="goDetail(a.id)">
-      <image :src="a.coverImage||'/static/gas-default.png'" class="cover" mode="aspectFill"/>
-      <view class="info"><text class="title">{{a.title}}</text><text class="time">🕐 {{a.startTime}} ~ {{a.endTime}}</text><text class="location" v-if="a.location">📍 {{a.location}}</text>
-        <view class="reward" v-if="a.pointsReward>0"><text>🎁 参加即送 {{a.pointsReward}} 积分</text></view>
+    <!-- ── Filter tabs ── -->
+    <scroll-view scroll-x class="filter-bar" :show-scrollbar="false">
+      <view
+        v-for="c in categories"
+        :key="c.value"
+        class="filter-tag"
+        :class="{ active: currentCat === c.value }"
+        @click="switchCat(c.value)"
+      >{{ c.label }}</view>
+    </scroll-view>
+
+    <!-- ── Activity cards ── -->
+    <view class="card-list">
+      <view v-for="a in list" :key="a.id" class="card" @click="goDetail(a.id)">
+        <!-- Cover -->
+        <view class="card-cover">
+          <image
+            :src="a.coverUrl || a.coverImage || '/static/gas-default.png'"
+            mode="aspectFill"
+            class="cover-img"
+          />
+          <view class="status-badge" :class="statusClass(a)">
+            {{ statusLabel(a) }}
+          </view>
+        </view>
+
+        <!-- Info -->
+        <view class="card-body">
+          <text class="card-title">{{ a.title }}</text>
+
+          <view class="card-tags">
+            <view class="tag cat-tag">{{ categoryLabel(a.category) }}</view>
+            <view v-if="a.pointsReward > 0" class="tag points-tag">
+              🎁 +{{ a.pointsReward }} 积分
+            </view>
+          </view>
+
+          <view class="card-meta">
+            <view class="meta-row">
+              <text class="meta-icon">🕐</text>
+              <text class="meta-text">{{ fmtTime(a.startTime) }} ~ {{ fmtEndTime(a.endTime) }}</text>
+            </view>
+            <view v-if="a.location" class="meta-row">
+              <text class="meta-icon">📍</text>
+              <text class="meta-text">{{ a.location }}</text>
+            </view>
+          </view>
+        </view>
       </view>
     </view>
-    <view class="no-more" v-if="noMore">— 没有更多了 —</view>
+
+    <!-- ── States ── -->
+    <view v-if="loading" class="state-tip">加载中...</view>
+    <view v-else-if="!list.length" class="state-tip empty">
+      <text class="empty-icon">🎉</text>
+      <text class="empty-text">暂无活动，敬请期待更多精彩内容</text>
+    </view>
+    <view v-else-if="noMore && list.length" class="state-tip">— 已经到底啦 —</view>
   </view>
 </template>
+
 <script setup>
-import {ref,onMounted} from 'vue';import {api} from '@/api/index'
-const cat=ref('全部'),cats=ref(['全部','OFFLINE','FAMILY','OTHER']),list=ref([]),page=ref(1),noMore=ref(false)
-onMounted(()=>load(true))
-async function load(reset){
-  if(reset){list.value=[];page.value=1;noMore.value=false}
-  try{const r=await api.activityPage({pageNum:page.value,pageSize:10,category:cat.value==='全部'?undefined:cat.value});const recs=r.records||[];if(recs.length<10)noMore.value=true;list.value=reset?recs:[...list.value,...recs];page.value++}catch{}
+import { ref, onMounted, reactive } from 'vue'
+
+const list = ref([])
+const loading = ref(false)
+const pageNum = ref(1)
+const noMore = ref(false)
+const currentCat = ref('')
+const categories = [
+  { label: '全部', value: '' },
+  { label: '线下活动', value: 'OFFLINE' },
+  { label: '亲子活动', value: 'FAMILY' },
+  { label: '积分活动', value: 'POINTS' }
+]
+
+// ── Helpers ──
+function fmtTime(t) {
+  if (!t) return ''
+  // backend returns "yyyy-MM-dd HH:mm:ss" or similar
+  return t.substring(0, 16).replace(' ', ' ')
 }
-function goDetail(id){uni.navigateTo({url:'/pages/activity/detail?id='+id})}
+function fmtEndTime(t) {
+  if (!t) return ''
+  return t.substring(5, 16).replace(' ', ' ')
+}
+function categoryLabel(v) {
+  const m = { OFFLINE: '线下', FAMILY: '亲子', POINTS: '积分' }
+  return m[v] || v || '其他'
+}
+
+function statusLabel(a) {
+  const now = new Date()
+  const start = a.startTime ? new Date(a.startTime.replace(/-/g, '/')) : null
+  const end = a.endTime ? new Date(a.endTime.replace(/-/g, '/')) : null
+  if (!start || !end) return '进行中'
+  if (now < start) return '即将开始'
+  if (now > end) return '已结束'
+  if (a.status === 0) return '已结束'
+  return '进行中'
+}
+function statusClass(a) {
+  const s = statusLabel(a)
+  if (s === '进行中') return 'status-live'
+  if (s === '即将开始') return 'status-upcoming'
+  return 'status-ended'
+}
+
+// ── Load ──
+async function load(reset) {
+  if (loading.value) return
+  if (reset) {
+    list.value = []
+    pageNum.value = 1
+    noMore.value = false
+  }
+  loading.value = true
+  try {
+    const params = { pageNum: pageNum.value, pageSize: 10 }
+    if (currentCat.value) params.category = currentCat.value
+    const r = await api('/api/ops/activity/page', 'GET', params)
+    const records = r.records || []
+    if (records.length < 10) noMore.value = true
+    list.value = reset ? records : [...list.value, ...records]
+    pageNum.value++
+  } catch (e) {
+    // silently handled
+  } finally {
+    loading.value = false
+  }
+}
+
+function switchCat(v) {
+  if (currentCat.value === v) return
+  currentCat.value = v
+  load(true)
+}
+
+// ── Scroll load more ──
+let lastScrollY = 0
+function onPageScroll(e) {
+  // Approximate: if within 100px of bottom, load more
+}
+
+// We use onReachBottom from pages.json or manual
+function goDetail(id) {
+  uni.navigateTo({ url: '/pages/activity/detail?id=' + id })
+}
+
+import { onReachBottom } from '@dcloudio/uni-app'
+onReachBottom(() => {
+  if (!noMore.value && !loading.value) load(false)
+})
+
+onMounted(() => load(true))
+
+// ── Generic request helper ──
+function api(url, method, data) {
+  return new Promise((resolve, reject) => {
+    uni.request({
+      url: url,
+      method: method || 'GET',
+      data: data || {},
+      header: { 'Content-Type': 'application/json' },
+      success(r) {
+        if (r.data && r.data.code === 200) resolve(r.data.data)
+        else reject(r.data)
+      },
+      fail: reject
+    })
+  })
+}
 </script>
+
 <style scoped>
-.page{min-height:100vh;background:#f5f5f5}.filters{display:flex;gap:16rpx;padding:16rpx 24rpx;background:#fff}.cat{padding:12rpx 24rpx;border-radius:24rpx;font-size:26rpx;color:#666;background:#f5f5f5}.cat.on{background:#FF6B35;color:#fff}.card{background:#fff;border-radius:16rpx;overflow:hidden;margin:16rpx 24rpx;display:flex}.cover{width:200rpx;height:200rpx;flex-shrink:0}.info{flex:1;padding:20rpx}.title{font-size:28rpx;color:#333;font-weight:600;display:block}.time,.location{font-size:24rpx;color:#999;display:block;margin-top:8rpx}.reward{margin-top:12rpx;background:#FFF3EE;padding:8rpx 16rpx;border-radius:8rpx;display:inline-block}.reward text{font-size:24rpx;color:#FF6B35}.no-more{text-align:center;padding:32rpx;color:#999;font-size:26rpx}
+.page {
+  min-height: 100vh;
+  background: #f5f5f5;
+  padding-bottom: 48rpx;
+}
+
+/* ── Filter bar ── */
+.filter-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #fff;
+  white-space: nowrap;
+  padding: 20rpx 24rpx;
+  border-bottom: 1rpx solid #eee;
+}
+.filter-tag {
+  display: inline-block;
+  padding: 12rpx 28rpx;
+  margin-right: 16rpx;
+  border-radius: 32rpx;
+  font-size: 26rpx;
+  color: #666;
+  background: #f5f5f5;
+  transition: all .2s;
+}
+.filter-tag.active {
+  background: #FF6B35;
+  color: #fff;
+}
+
+/* ── Cards ── */
+.card-list {
+  padding: 20rpx 24rpx;
+}
+.card {
+  background: #fff;
+  border-radius: 16rpx;
+  overflow: hidden;
+  margin-bottom: 24rpx;
+  box-shadow: 0 2rpx 16rpx rgba(0,0,0,.04);
+}
+
+/* Cover */
+.card-cover {
+  position: relative;
+  width: 100%;
+  height: 340rpx;
+}
+.cover-img {
+  width: 100%;
+  height: 100%;
+}
+.status-badge {
+  position: absolute;
+  top: 16rpx;
+  left: 16rpx;
+  padding: 6rpx 20rpx;
+  border-radius: 8rpx;
+  font-size: 22rpx;
+  color: #fff;
+}
+.status-live { background: #FF6B35; }
+.status-upcoming { background: #4CAF50; }
+.status-ended { background: #999; }
+
+/* Body */
+.card-body { padding: 20rpx 24rpx 24rpx; }
+.card-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #333;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.4;
+}
+
+.card-tags {
+  display: flex;
+  gap: 12rpx;
+  margin-top: 16rpx;
+}
+.tag {
+  padding: 4rpx 16rpx;
+  border-radius: 6rpx;
+  font-size: 22rpx;
+}
+.cat-tag {
+  background: #EEF2FF;
+  color: #6366F1;
+}
+.points-tag {
+  background: #FFF3EE;
+  color: #FF6B35;
+}
+
+.card-meta {
+  margin-top: 18rpx;
+}
+.meta-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8rpx;
+}
+.meta-icon {
+  font-size: 24rpx;
+  margin-right: 8rpx;
+}
+.meta-text {
+  font-size: 24rpx;
+  color: #888;
+}
+
+/* ── States ── */
+.state-tip {
+  text-align: center;
+  padding: 48rpx;
+  color: #999;
+  font-size: 26rpx;
+}
+.empty { padding: 120rpx 48rpx; }
+.empty-icon { font-size: 64rpx; display: block; margin-bottom: 20rpx; }
+.empty-text { color: #999; }
 </style>
