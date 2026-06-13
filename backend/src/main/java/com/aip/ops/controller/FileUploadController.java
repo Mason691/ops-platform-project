@@ -41,7 +41,9 @@ public class FileUploadController {
         try {
             String subdir = isVideo ? "video/" : "img/";
             String datePart = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-            File dir = new File("./uploads/" + subdir + datePart + "/");
+            // Use absolute path to avoid Tomcat work-dir issues
+            String baseDir = System.getProperty("user.dir");
+            File dir = new File(baseDir, "uploads/" + subdir + datePart + "/");
             if (!dir.exists()) dir.mkdirs();
 
             String name = UUID.randomUUID().toString().substring(0,8) + "." + ext;
