@@ -304,16 +304,6 @@ public class PlatformController {
                         .eq(category != null && !category.isEmpty(), GsActivity::getCategory, category)
                         .eq(type != null && !type.isEmpty(), GsActivity::getType, type)
                         .orderByDesc(GsActivity::getId));
-        // 为每条活动填充关联商品和直播信息
-        List<GsActivity> records = page.getRecords();
-        if (!records.isEmpty()) {
-            for (GsActivity a : records) {
-                a.setDetail(getProductsJson(a.getId())); // 复用字段传递商品列表（前端解析）
-                if (a.getLiveRoomId() != null) {
-                    a.setDetailVideoUrl(getLiveRoomTitle(a.getLiveRoomId())); // 复用传递直播标题
-                }
-            }
-        }
         return R.ok(page);
     }
 
@@ -407,18 +397,6 @@ public class PlatformController {
             ap.setProductId(Long.valueOf(pid));
             activityProductMapper.insert(ap);
         }
-    }
-
-    private String getProductsJson(Long activityId) {
-        try {
-            return new com.fasterxml.jackson.databind.ObjectMapper()
-                    .writeValueAsString(activityProductMapper.selectProductsByActivityId(activityId));
-        } catch (Exception e) { return "[]"; }
-    }
-
-    private String getLiveRoomTitle(Long liveRoomId) {
-        OpsLiveRoom r = liveRoomMapper.selectById(liveRoomId);
-        return r != null ? r.getLiveTitle() : null;
     }
 
     private LocalDateTime parseDateTime(String s) {
