@@ -39,9 +39,10 @@ public class FileUploadController {
         }
 
         try {
-            String subdir = isVideo ? "video/" : "img/";
+            // Use ops/ prefix so Nginx can serve files directly from disk
+            // without conflicting with mall backend's /uploads/ route.
+            String subdir = isVideo ? "ops/video/" : "ops/img/";
             String datePart = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-            // Use absolute path to avoid Tomcat work-dir issues
             String baseDir = System.getProperty("user.dir");
             File dir = new File(baseDir, "uploads/" + subdir + datePart + "/");
             if (!dir.exists()) dir.mkdirs();
