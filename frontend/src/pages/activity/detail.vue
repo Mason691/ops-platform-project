@@ -2,14 +2,23 @@
   <view class="page" v-if="act">
     <!-- ═══ Cover — video or image ═══ -->
     <view class="cover-area">
-      <video
-        v-if="act.detailVideoUrl || act.videoUrl"
-        :src="act.detailVideoUrl || act.videoUrl"
-        class="cover-video"
-        controls
-        object-fit="contain"
-        :poster="act.coverUrl || act.coverImage"
-      />
+      <view v-if="videoSrc" class="cover-video-wrap">
+        <video
+          :key="videoSrc"
+          :src="videoSrc"
+          class="cover-video"
+          controls
+          playsinline
+          webkit-playsinline
+          x5-video-player-type="h5"
+          x5-video-player-fullscreen="true"
+          x5-video-orientation="portrait"
+          show-center-play-btn
+          enable-progress-gesture
+          :poster="act.coverUrl || act.coverImage"
+          @error="onVideoError"
+        />
+      </view>
       <image
         v-else
         :src="act.coverUrl || act.coverImage || '/static/gas-default.png'"
@@ -92,6 +101,7 @@ import { ref, onMounted, computed } from 'vue'
 const act = ref(null)
 const loadErr = ref('')
 const booked = ref(false)
+const videoFailed = ref(false)
 
 onMounted(async () => {
   const pages = getCurrentPages()
@@ -116,6 +126,17 @@ async function checkBooked(activityId) {
 }
 
 // ── Derived ──
+const videoSrc = computed(() => {
+  if (videoFailed.value) return ''
+  const raw = act.value?.detailVideoUrl || act.value?.videoUrl
+  if (!raw) return ''
+  // Trim whitespace and wrapping quotes sometimes present in DB data
+  let url = raw.trim()
+  if ((url.startsWith("'") && url.endsWith("'")) || (url.startsWith('"') && url.endsWith('"')))
+    url = url.slice(1, -1)
+  // H5 environment: relative paths are fine; uni-app handles them
+  return url
+})
 const detailImages = computed(() => {
   if (!act.value) return []
   const di = act.value.detailImages
@@ -168,6 +189,12 @@ async function doBook() {
   } catch (e) {
     uni.showToast({ title: e?.msg || '预约失败', icon: 'none' })
   }
+}
+
+function onVideoError(e) {
+  console.error('[activity-detail] 视频加载失败:', e.detail?.errMsg || e)
+  videoFailed.value = true
+  uni.showToast({ title: '视频暂无法播放', icon: 'none', duration: 2000 })
 }
 
 function doShare() {
@@ -227,9 +254,10 @@ function req(url, method, data) {
 .page { min-height: 100vh; background: #f5f5f5; padding-bottom: 140rpx; }
 
 /* Cover */
-.cover-area { position: relative; width: 100%; height: 500rpx; }
+.cover-area { position: relative; width: 100%; height: 500rpx; background: #000; }
 .cover-img { width: 100%; height: 100%; }
-.cover-video { width: 100%; height: 500rpx; }
+.cover-video-wrap { width: 100%; height: 100%; }
+.cover-video { width: 100%; height: 100%; }
 .hero-badge {
   position: absolute; top: 20rpx; left: 20rpx;
   padding: 8rpx 24rpx; border-radius: 12rpx; font-size: 24rpx; color: #fff;
