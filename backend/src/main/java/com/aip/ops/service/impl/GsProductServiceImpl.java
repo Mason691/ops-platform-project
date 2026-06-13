@@ -328,10 +328,18 @@ public class GsProductServiceImpl implements IGsProductService {
 
     /**
      * 解析用户端商品查询的目标销售商 ID 列表。
-     * 若 corpId 是运营商（在 biz_operator_merchant 中绑定了销售商），
-     * 返回所有已绑定销售商 ID；否则返回原始 corpId 作为单元素列表。
+     * corpId=0（平台管理员）：返回所有已绑定销售商 ID；
+     * 否则按运营商-销售商绑定关系解析。
      */
     private List<Long> resolveTargetMerchantIds(Long corpId) {
+        // 平台管理员：展示所有已绑定销售商的商品
+        if (corpId == 0L || corpId == null) {
+            List<Long> all = omMapper.selectList(new LambdaQueryWrapper<OperatorMerchant>()
+                    .eq(OperatorMerchant::getStatus, 1))
+                    .stream().map(OperatorMerchant::getMerchantId)
+                    .distinct().collect(Collectors.toList());
+            return all.isEmpty() ? Collections.singletonList(0L) : all;
+        }
         Set<Long> bound = getBoundMerchantIds(corpId);
         if (!bound.isEmpty()) {
             return new ArrayList<>(bound);
