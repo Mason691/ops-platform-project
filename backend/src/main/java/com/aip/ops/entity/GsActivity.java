@@ -14,6 +14,8 @@ public class GsActivity {
     @TableField("video_url") private String videoUrl;
     @TableField("detail_video_url") private String detailVideoUrl;
     @TableField("detail_images") private String detailImages;
+    @TableField("type") private String type;
+    @TableField("live_room_id") private Long liveRoomId;
     @TableField("detail") private String detail;
     @TableField("category") private String category;
     @TableField("start_time") private LocalDateTime startTime;

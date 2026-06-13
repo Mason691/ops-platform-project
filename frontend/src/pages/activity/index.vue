@@ -71,10 +71,11 @@ const noMore = ref(false)
 const currentCat = ref('')
 const categories = [
   { label: '全部', value: '' },
-  { label: '线下活动', value: 'OFFLINE' },
-  { label: '亲子活动', value: 'FAMILY' },
-  { label: '积分活动', value: 'POINTS' }
+  { label: '直播预约', value: 'live_reserve' },
+  { label: '活动展示', value: 'activity' }
 ]
+// Map old category values to display
+const TYPE_MAP = { live_reserve: '直播预约', activity: '活动' }
 
 // ── Helpers ──
 function fmtTime(t) {
@@ -119,7 +120,7 @@ async function load(reset) {
   loading.value = true
   try {
     const params = { pageNum: pageNum.value, pageSize: 10 }
-    if (currentCat.value) params.category = currentCat.value
+    if (currentCat.value) params.type = currentCat.value
     const r = await api('/api/ops/activity/page', 'GET', params)
     const records = r.records || []
     if (records.length < 10) noMore.value = true

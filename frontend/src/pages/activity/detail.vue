@@ -69,6 +69,30 @@
       </scroll-view>
     </view>
 
+    <!-- ═══ Associated products ═══ -->
+    <view v-if="products.length" class="section">
+      <text class="sec-title">关联商品</text>
+      <scroll-view scroll-x class="prod-scroll" :show-scrollbar="false">
+        <view v-for="p in products" :key="p.product_id" class="prod-card" @click="goProduct(p)">
+          <image :src="p.cover_image||'/static/gas-default.png'" class="prod-img" mode="aspectFill"/>
+          <text class="prod-name">{{ p.name }}</text>
+          <view class="prod-price">
+            <text v-if="p.points_price>0" class="p-points">{{ p.points_price }}积分</text>
+            <text v-if="p.cash_price>0" class="p-cash">¥{{ p.cash_price }}</text>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+
+    <!-- ═══ Live room info ═══ -->
+    <view v-if="liveRoom" class="section live-section">
+      <text class="sec-title">📺 直播预告</text>
+      <view class="live-info">
+        <text class="live-title-text">{{ liveRoom.liveTitle }}</text>
+        <text class="live-time">开播时间：{{ fmtFull(liveRoom.startTime) }}</text>
+      </view>
+    </view>
+
     <!-- ═══ Detail text ═══ -->
     <view v-if="act.detail" class="section">
       <text class="sec-title">活动详情</text>
@@ -98,7 +122,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 
-const act = ref(null)
+const act = ref(null), liveRoom = ref(null), products = ref([])
 const loadErr = ref('')
 const booked = ref(false)
 const videoFailed = ref(false)
@@ -108,7 +132,10 @@ onMounted(async () => {
   const id = pages[pages.length - 1]?.options?.id
   if (!id) { loadErr.value = '缺少活动ID'; return }
   try {
-    act.value = await req('/api/ops/activity/' + id)
+    const res = await req('/api/ops/activity/' + id)
+    act.value = res.activity
+    liveRoom.value = res.liveRoom || null
+    products.value = res.products || []
     checkBooked(Number(id))
   } catch (e) {
     loadErr.value = '加载失败，请返回重试'
@@ -215,6 +242,24 @@ function doShare() {
   }
 }
 
+function goProduct(p) {
+  if (p.miniapp_app_id) {
+    // Jump to merchant mini-program product page
+    if (typeof wx !== 'undefined' && wx.miniProgram) {
+      wx.miniProgram.navigateTo({
+        url: (p.miniapp_path || '/pages/index/index').replace('{productId}', p.product_id),
+        appId: p.miniapp_app_id,
+        success: () => {},
+        fail: () => uni.showToast({ title: '跳转失败', icon: 'none' })
+      })
+    } else {
+      uni.showToast({ title: '请在小程序中查看', icon: 'none' })
+    }
+  } else {
+    uni.showToast({ title: '暂不支持跳转', icon: 'none' })
+  }
+}
+
 function previewImages(index) {
   uni.previewImage({
     urls: detailImages.value,
@@ -318,4 +363,19 @@ function req(url, method, data) {
 .btn-disabled { background: #bbb; color: #fff; }
 
 .empty-page { display: flex; align-items: center; justify-content: center; height: 100vh; color: #999; font-size: 28rpx; }
+
+/* ── Product scroll ── */
+.prod-scroll { white-space: nowrap; }
+.prod-card { display: inline-block; width: 200rpx; margin-right: 20rpx; background: #f9f9f9; border-radius: 12rpx; overflow: hidden; }
+.prod-img { width: 200rpx; height: 200rpx; }
+.prod-name { display: block; padding: 8rpx 12rpx; font-size: 24rpx; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prod-price { display: flex; gap: 8rpx; padding: 0 12rpx 12rpx; align-items: baseline; }
+.p-points { font-size: 24rpx; color: #FF6B35; font-weight: 600; }
+.p-cash { font-size: 22rpx; color: #999; }
+
+/* ── Live room ── */
+.live-section { background: linear-gradient(135deg, #fff5f0, #fff); border: 2rpx solid #FF6B35; }
+.live-info { margin-top: 16rpx; }
+.live-title-text { font-size: 28rpx; font-weight: 600; color: #333; }
+.live-time { display: block; margin-top: 8rpx; font-size: 24rpx; color: #FF6B35; }
 </style>

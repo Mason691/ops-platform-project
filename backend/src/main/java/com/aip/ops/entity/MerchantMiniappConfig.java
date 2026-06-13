@@ -35,4 +35,8 @@ public class MerchantMiniappConfig {
 
     @TableField("update_time")
     private LocalDateTime updateTime;
+
+    // Explicit getters — workaround for Lombok annotation processor issue
+    public String getPathTemplate() { return pathTemplate; }
+    public String getEnvVersion() { return envVersion; }
 }

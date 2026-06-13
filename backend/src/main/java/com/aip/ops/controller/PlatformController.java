@@ -36,6 +36,7 @@ public class PlatformController {
     private final GsUserCouponMapper userCouponMapper;
     private final GsClickLogMapper clickLogMapper;
     private final ProductCategoryMapper categoryMapper;
+    private final OpsActivityProductMapper activityProductMapper;
     private final OpsLiveRoomMapper liveRoomMapper;
     private final OpsActivityBookingMapper bookingMapper;
     private final OpsRemindLogMapper remindLogMapper;
@@ -295,32 +296,57 @@ public class PlatformController {
     public R<?> activityPage(@RequestParam(defaultValue="1") int pageNum,
             @RequestParam(defaultValue="10") int pageSize,
             @RequestParam(required=false) String category,
+            @RequestParam(required=false) String type,
             @RequestParam(required=false) Integer status) {
         Page<GsActivity> page = activityMapper.selectPage(new Page<>(pageNum, pageSize),
                 new LambdaQueryWrapper<GsActivity>()
                         .eq(status != null, GsActivity::getStatus, status)
                         .eq(category != null && !category.isEmpty(), GsActivity::getCategory, category)
+                        .eq(type != null && !type.isEmpty(), GsActivity::getType, type)
                         .orderByDesc(GsActivity::getId));
+        // 为每条活动填充关联商品和直播信息
+        List<GsActivity> records = page.getRecords();
+        if (!records.isEmpty()) {
+            for (GsActivity a : records) {
+                a.setDetail(getProductsJson(a.getId())); // 复用字段传递商品列表（前端解析）
+                if (a.getLiveRoomId() != null) {
+                    a.setDetailVideoUrl(getLiveRoomTitle(a.getLiveRoomId())); // 复用传递直播标题
+                }
+            }
+        }
         return R.ok(page);
     }
 
     @GetMapping("/activity/{id}")
-    public R<?> activityDetail(@PathVariable Long id) {
-        return R.ok(activityMapper.selectById(id));
+    public R<Map<String, Object>> activityDetail(@PathVariable Long id) {
+        GsActivity a = activityMapper.selectById(id);
+        if (a == null) return R.fail("活动不存在");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("activity", a);
+        result.put("products", activityProductMapper.selectProductsByActivityId(id));
+        if (a.getLiveRoomId() != null) {
+            OpsLiveRoom lr = liveRoomMapper.selectById(a.getLiveRoomId());
+            result.put("liveRoom", lr);
+        }
+        return R.ok(result);
     }
 
     @PostMapping("/activity")
-    public R<?> createActivity(@RequestBody GsActivity activity) {
-        activity.setCorpId(getCorpId());
-        activity.setStatus(1);
-        activityMapper.insert(activity);
-        return R.ok();
+    public R<?> createActivity(@RequestBody Map<String, Object> body) {
+        GsActivity a = buildActivity(body);
+        a.setCorpId(getCorpId());
+        a.setStatus(1);
+        activityMapper.insert(a);
+        saveActivityProducts(a.getId(), body.get("productIds"));
+        return R.ok(Map.of("id", a.getId()));
     }
 
     @PutMapping("/activity/{id}")
-    public R<?> updateActivity(@PathVariable Long id, @RequestBody GsActivity activity) {
-        activity.setId(id);
-        activityMapper.updateById(activity);
+    public R<?> updateActivity(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        GsActivity a = buildActivity(body);
+        a.setId(id);
+        activityMapper.updateById(a);
+        saveActivityProducts(id, body.get("productIds"));
         return R.ok();
     }
 
@@ -335,7 +361,69 @@ public class PlatformController {
     @DeleteMapping("/activity/{id}")
     public R<?> deleteActivity(@PathVariable Long id) {
         activityMapper.deleteById(id);
+        activityProductMapper.deleteByActivityId(id);
         return R.ok();
+    }
+
+    // ── Activity helpers ───────────────────────────────────────────
+
+    private GsActivity buildActivity(Map<String, Object> body) {
+        GsActivity a = new GsActivity();
+        a.setTitle((String) body.get("title"));
+        a.setCategory((String) body.get("category"));
+        a.setType((String) body.getOrDefault("type", "activity"));
+        a.setLocation((String) body.get("location"));
+        a.setDetail((String) body.get("detail"));
+        a.setCoverImage((String) body.get("coverImage"));
+        a.setCoverUrl((String) body.get("coverUrl"));
+        a.setVideoUrl((String) body.get("videoUrl"));
+        a.setDetailVideoUrl((String) body.get("detailVideoUrl"));
+        a.setImages((String) body.get("images"));
+        a.setDetailImages((String) body.get("detailImages"));
+        a.setPointsReward(body.get("pointsReward") != null
+                ? Integer.valueOf(body.get("pointsReward").toString()) : 0);
+        a.setMaxParticipants(body.get("maxParticipants") != null
+                ? Integer.valueOf(body.get("maxParticipants").toString()) : null);
+        if (body.get("liveRoomId") != null)
+            a.setLiveRoomId(Long.valueOf(body.get("liveRoomId").toString()));
+        if (body.get("startTime") != null)
+            a.setStartTime(parseDateTime(body.get("startTime").toString()));
+        if (body.get("endTime") != null)
+            a.setEndTime(parseDateTime(body.get("endTime").toString()));
+        return a;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void saveActivityProducts(Long activityId, Object productIdsObj) {
+        activityProductMapper.deleteByActivityId(activityId);
+        if (productIdsObj == null) return;
+        List<Integer> ids;
+        if (productIdsObj instanceof List) {
+            ids = (List<Integer>) productIdsObj;
+        } else return;
+        for (Integer pid : ids) {
+            OpsActivityProduct ap = new OpsActivityProduct();
+            ap.setActivityId(activityId);
+            ap.setProductId(Long.valueOf(pid));
+            activityProductMapper.insert(ap);
+        }
+    }
+
+    private String getProductsJson(Long activityId) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper()
+                    .writeValueAsString(activityProductMapper.selectProductsByActivityId(activityId));
+        } catch (Exception e) { return "[]"; }
+    }
+
+    private String getLiveRoomTitle(Long liveRoomId) {
+        OpsLiveRoom r = liveRoomMapper.selectById(liveRoomId);
+        return r != null ? r.getLiveTitle() : null;
+    }
+
+    private LocalDateTime parseDateTime(String s) {
+        try { return LocalDateTime.parse(s.replace(" ", "T")); }
+        catch (Exception e) { return LocalDateTime.now(); }
     }
 
     // ═══ 地址 ═══
