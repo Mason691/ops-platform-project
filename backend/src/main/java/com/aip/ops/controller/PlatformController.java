@@ -158,7 +158,7 @@ public class PlatformController {
     /**
      * 用户端商品列表 — 仅展示已上架且通过 ops_product 映射引入的商品。
      */
-    @GetMapping("/product/page")
+    @GetMapping({"/product/page", "/product/list"})
     public R<?> productPage(@RequestParam(defaultValue="1") int pageNum,
             @RequestParam(defaultValue="10") int pageSize,
             @RequestParam(required=false) String name,

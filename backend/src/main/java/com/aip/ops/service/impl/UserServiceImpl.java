@@ -3,6 +3,7 @@ package com.aip.ops.service.impl;
 import com.aip.ops.client.MemberSyncClient;
 import com.aip.ops.dto.LoginRequest;
 import com.aip.ops.dto.RegisterRequest;
+import com.aip.ops.dto.WechatLoginRequest;
 import com.aip.ops.entity.OpsMember;
 import com.aip.ops.mapper.OpsMemberMapper;
 import com.aip.ops.service.IUserService;
@@ -159,6 +160,83 @@ public class UserServiceImpl implements IUserService {
 
         log.info("用户登录成功: phone={}, userId={}", phone, user.getId());
         return result;
+    }
+
+    // ═══ 微信登录 ═══
+
+    @Override
+    public Map<String, Object> wechatLogin(WechatLoginRequest req) {
+        Long corpId = req.getCorpId() != null ? req.getCorpId() : 4L;
+        String nickname = req.getNickname();
+
+        // ── 获取手机号（与注册相同的 mock/正式解析逻辑）──
+        String phone = resolvePhoneForWechat(req);
+        if (phone == null || !PHONE_PATTERN.matcher(phone).matches())
+            throw new IllegalArgumentException("未获取到手机号，请授权后重试");
+
+        if (nickname == null || nickname.isEmpty())
+            nickname = phone.substring(0, 3) + "****" + phone.substring(7);
+
+        log.info("微信登录: phone={}, mock={}, corpId={}", phone, phoneMockEnabled, corpId);
+
+        // ── 查找或创建用户 ──
+        OpsMember user = userMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
+                .eq(OpsMember::getPhone, phone)
+                .eq(OpsMember::getCorpId, corpId));
+
+        boolean isNew = false;
+        if (user == null) {
+            user = new OpsMember();
+            user.setPhone(phone);
+            user.setCorpId(corpId);
+            user.setPointsBalance(200);
+            user.setStatus(1);
+            user.setNickname(nickname);
+            userMapper.insert(user);
+            isNew = true;
+            // 同步到底座平台
+            syncToBasePlatform(user);
+            log.info("微信登录—新用户注册: phone={}, userId={}", phone, user.getId());
+        }
+
+        if (user.getStatus() == null || user.getStatus() != 1)
+            throw new IllegalArgumentException("账号已被禁用，请联系管理员");
+
+        user.setLastLoginTime(LocalDateTime.now());
+        if (!isNew) userMapper.updateById(user);
+
+        String token = generateJwt(user);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("userId", user.getId());
+        result.put("phone", user.getPhone());
+        result.put("nickname", user.getNickname());
+        result.put("avatar", user.getAvatar());
+        result.put("pointsBalance", user.getPointsBalance());
+        result.put("platformMemberId", user.getPlatformMemberId());
+        result.put("token", token);
+        result.put("corpId", user.getCorpId());
+        result.put("expiresIn", jwtExpiration);
+        result.put("isNewUser", isNew);
+
+        log.info("微信登录成功: phone={}, userId={}, isNew={}", phone, user.getId(), isNew);
+        return result;
+    }
+
+    /** 从 WechatLoginRequest 解析手机号（复用 RegisterRequest 解析路径） */
+    private String resolvePhoneForWechat(WechatLoginRequest req) {
+        if (phoneMockEnabled) {
+            if (req.getMockPhone() != null && PHONE_PATTERN.matcher(req.getMockPhone()).matches()) {
+                log.info("使用前端 mock 手机号: {}", req.getMockPhone());
+                return req.getMockPhone();
+            }
+            log.info("使用配置 mock 手机号: {}", phoneMockPhone);
+            return phoneMockPhone;
+        }
+        if (req.getEncryptedData() != null && req.getIv() != null && req.getCode() != null) {
+            return decryptWechatPhone(req.getCode(), req.getEncryptedData(), req.getIv());
+        }
+        return null;
     }
 
     // ═══ 私有方法 ═══
