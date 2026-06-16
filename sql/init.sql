@@ -1,6 +1,7 @@
 -- ===========================================================
 -- 金地燃气聚合展示引流平台 — 数据库初始化
 -- 目标库: mall_db (共用)
+-- 表数量: 17
 -- ===========================================================
 USE `mall_db`;
 
@@ -38,12 +39,14 @@ CREATE TABLE IF NOT EXISTS `ops_points_log` (
 
 -- 3. 商品关系映射表（ops_product：运营商引入 mall_product 商品的关联记录）
 CREATE TABLE IF NOT EXISTS `ops_product` (
-    `id`              BIGINT   NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '映射记录主键',
-    `mall_product_id` BIGINT   NOT NULL                         COMMENT '关联 mall_product.id',
-    `operator_id`     BIGINT   NOT NULL                         COMMENT '运营商ID（引入该商品的组织）',
-    `shelf_status`    TINYINT  NOT NULL DEFAULT 1               COMMENT '上下架状态 1=上架 0=下架',
-    `category_id`     BIGINT   DEFAULT NULL                     COMMENT '运营商自定义分类ID',
-    `create_time`     DATETIME DEFAULT CURRENT_TIMESTAMP        COMMENT '引入时间',
+    `id`              BIGINT          NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '映射记录主键',
+    `mall_product_id` BIGINT          NOT NULL                         COMMENT '关联 mall_product.id',
+    `operator_id`     BIGINT          NOT NULL                         COMMENT '运营商ID（引入该商品的组织）',
+    `shelf_status`    TINYINT         NOT NULL DEFAULT 1               COMMENT '上下架状态 1=上架 0=下架',
+    `category_id`     BIGINT          DEFAULT NULL                     COMMENT '运营商自定义分类ID',
+    `points`          INT             NOT NULL DEFAULT 0               COMMENT '积分配额',
+    `exchange_amount` DECIMAL(10,2)   NOT NULL DEFAULT 0.00            COMMENT '兑换金额',
+    `create_time`     DATETIME        DEFAULT CURRENT_TIMESTAMP        COMMENT '引入时间',
     UNIQUE KEY `uk_operator_product` (`operator_id`, `mall_product_id`),
     INDEX `idx_operator_shelf` (`operator_id`, `shelf_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='运营商商品关系映射表';
@@ -69,14 +72,30 @@ CREATE TABLE IF NOT EXISTS `mall_product` (
 
 -- 4. 活动
 CREATE TABLE IF NOT EXISTS `ops_activity` (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY, `corp_id` BIGINT NOT NULL DEFAULT 3,
-    `title` VARCHAR(128) NOT NULL, `cover_image` VARCHAR(500) DEFAULT NULL,
-    `images` TEXT DEFAULT NULL, `video_url` VARCHAR(500) DEFAULT NULL,
-    `detail` TEXT DEFAULT NULL, `category` VARCHAR(50) DEFAULT NULL,
-    `start_time` DATETIME DEFAULT NULL, `end_time` DATETIME DEFAULT NULL,
-    `location` VARCHAR(200) DEFAULT NULL, `points_reward` INT DEFAULT 0,
-    `max_participants` INT DEFAULT NULL, `status` TINYINT NOT NULL DEFAULT 1,
-    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP, `delete_flag` INT NOT NULL DEFAULT 0,
+    `id`                BIGINT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `corp_id`           BIGINT          NOT NULL DEFAULT 3,
+    `title`             VARCHAR(128)    NOT NULL,
+    `cover_image`       VARCHAR(500)    DEFAULT NULL,
+    `cover_url`         VARCHAR(500)    DEFAULT NULL                    COMMENT '直播封面图URL',
+    `images`            TEXT            DEFAULT NULL,
+    `video_url`         VARCHAR(500)    DEFAULT NULL,
+    `detail_video_url`  VARCHAR(500)    DEFAULT NULL                    COMMENT '详情视频URL',
+    `detail_images`     TEXT            DEFAULT NULL                    COMMENT '详情图片集（JSON数组）',
+    `detail`            TEXT            DEFAULT NULL,
+    `category`          VARCHAR(50)     DEFAULT NULL,
+    `type`              VARCHAR(20)     NOT NULL DEFAULT 'activity'     COMMENT 'activity | live_reserve',
+    `live_room_id`      BIGINT          DEFAULT NULL                    COMMENT '关联 ops_live_room.id',
+    `start_time`        DATETIME        DEFAULT NULL,
+    `end_time`          DATETIME        DEFAULT NULL,
+    `location`          VARCHAR(200)    DEFAULT NULL,
+    `points_reward`     INT             DEFAULT 0,
+    `max_participants`  INT             DEFAULT NULL,
+    `status`            TINYINT         NOT NULL DEFAULT 1,
+    `sort`              INT             DEFAULT 0,
+    `remark`            VARCHAR(500)    DEFAULT NULL,
+    `create_time`       DATETIME        DEFAULT CURRENT_TIMESTAMP,
+    `modify_time`       DATETIME        DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `delete_flag`       INT             NOT NULL DEFAULT 0,
     INDEX `idx_corp_status` (`corp_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -146,6 +165,97 @@ CREATE TABLE IF NOT EXISTS `sys_public_account_config` (
     `delete_flag` INT NOT NULL DEFAULT 0,
     UNIQUE KEY `uk_corp_appid` (`corp_id`, `app_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多公众号运营配置';
+
+-- 11. 活动关联商品表
+CREATE TABLE IF NOT EXISTS `ops_activity_product` (
+    `activity_id`   BIGINT   NOT NULL COMMENT '活动ID',
+    `product_id`    BIGINT   NOT NULL COMMENT 'ops_product映射ID',
+    `sort`          INT      NOT NULL DEFAULT 0 COMMENT '排序（数字越小越靠前）',
+    `create_time`   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`activity_id`, `product_id`),
+    INDEX `idx_product` (`product_id`),
+    INDEX `idx_activity_sort` (`activity_id`, `sort`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='活动关联商品';
+
+-- 12. 视频号直播配置
+CREATE TABLE IF NOT EXISTS `ops_live_room` (
+    `id`              BIGINT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `merchant_id`     BIGINT          NOT NULL COMMENT '运营商组织ID（关联 ai_platform.sys_corp.id）',
+    `finder_username` VARCHAR(128)    NOT NULL COMMENT '视频号 finderUserName',
+    `live_title`      VARCHAR(256)    NOT NULL COMMENT '直播标题',
+    `cover_url`       VARCHAR(500)    DEFAULT NULL COMMENT '直播封面图URL',
+    `start_time`      DATETIME        DEFAULT NULL COMMENT '预计开播时间',
+    `end_time`        DATETIME        DEFAULT NULL COMMENT '预计结束时间',
+    `status`          TINYINT         NOT NULL DEFAULT 0 COMMENT '0=预告 1=直播中 2=已结束',
+    `sort_order`      INT             NOT NULL DEFAULT 0 COMMENT '排序',
+    `remark`          VARCHAR(500)    DEFAULT NULL,
+    `create_time`     DATETIME        DEFAULT CURRENT_TIMESTAMP,
+    `update_time`     DATETIME        DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_merchant_status` (`merchant_id`, `status`),
+    INDEX `idx_status_time` (`status`, `start_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='视频号直播配置';
+
+-- 13. 活动预约记录
+CREATE TABLE IF NOT EXISTS `ops_activity_booking` (
+    `id`          BIGINT   NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `activity_id` BIGINT   NOT NULL COMMENT '活动ID',
+    `user_id`     BIGINT   NOT NULL COMMENT '会员ID',
+    `phone`       VARCHAR(20) DEFAULT NULL COMMENT '手机号',
+    `status`      TINYINT  NOT NULL DEFAULT 0 COMMENT '0=待参加 1=已参加 2=已取消',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uk_user_activity` (`user_id`, `activity_id`),
+    INDEX `idx_activity` (`activity_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='活动预约记录';
+
+-- 14. 预约提醒日志
+CREATE TABLE IF NOT EXISTS `ops_remind_log` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `booking_id`  BIGINT       NOT NULL,
+    `remind_type` VARCHAR(20)  NOT NULL COMMENT '24h / 1h / custom',
+    `status`      TINYINT      NOT NULL DEFAULT 0 COMMENT '0=待发送 1=已发送 2=失败',
+    `send_time`   DATETIME     DEFAULT NULL,
+    `create_time` DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_booking` (`booking_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='预约提醒日志';
+
+-- 15. 商品分类
+CREATE TABLE IF NOT EXISTS `biz_product_category` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `name`        VARCHAR(64)  NOT NULL,
+    `parent_id`   BIGINT       NOT NULL DEFAULT 0,
+    `sort_order`  INT          DEFAULT 0,
+    `status`      TINYINT      NOT NULL DEFAULT 1,
+    `create_time` DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    `modify_time` DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `delete_flag` INT          NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商品分类表';
+
+-- 16. 运营商绑定销售商
+CREATE TABLE IF NOT EXISTS `biz_operator_merchant` (
+    `id`          BIGINT   NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `operator_id` BIGINT   NOT NULL COMMENT '运营商ID',
+    `merchant_id` BIGINT   NOT NULL COMMENT '销售商ID',
+    `status`      TINYINT  NOT NULL DEFAULT 1 COMMENT '1=绑定 0=解绑',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `modify_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `delete_flag` INT      NOT NULL DEFAULT 0,
+    INDEX `idx_operator` (`operator_id`),
+    INDEX `idx_merchant` (`merchant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='运营商绑定销售商表';
+
+-- 17. 销售商小程序跳转配置
+CREATE TABLE IF NOT EXISTS `biz_merchant_miniapp_config` (
+    `id`             BIGINT        NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `merchant_id`    BIGINT        NOT NULL COMMENT '销售商组织ID',
+    `app_id`         VARCHAR(64)   NOT NULL COMMENT '微信小程序 AppID',
+    `path_template`  VARCHAR(256)  NOT NULL DEFAULT 'pages/index/index' COMMENT '跳转路径模板',
+    `env_version`    VARCHAR(16)   NOT NULL DEFAULT 'release' COMMENT 'release / trial / develop',
+    `remark`         VARCHAR(256)  DEFAULT NULL,
+    `create_time`    DATETIME      DEFAULT CURRENT_TIMESTAMP,
+    `update_time`    DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uk_merchant_id` (`merchant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='销售商小程序跳转配置';
 
 -- 种子数据
 -- mall_product 种子数据（销售商商品）
