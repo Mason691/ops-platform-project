@@ -52,15 +52,88 @@ public class FileUploadController {
             file.transferTo(dest);
             String url = "/uploads/" + subdir + datePart + "/" + name;
 
+            // Auto-transcode H.265/HEVC videos to H.264 for universal browser support
+            long fileSize = file.getSize();
+            if (isVideo) {
+                try {
+                    long newSize = transcodeToH264IfNeeded(dest);
+                    if (newSize > 0) {
+                        fileSize = newSize;
+                        log.info("视频已自动转码为 H.264: {} → {} ({} bytes)", orig, url, newSize);
+                    }
+                } catch (Exception te) {
+                    log.warn("视频转码失败（保留原始文件）: {} → {}, error={}", orig, url, te.getMessage());
+                }
+            }
+
             Map<String,Object> r = new LinkedHashMap<>();
             r.put("url", url);
             r.put("type", isVideo ? "video" : "image");
-            r.put("size", file.getSize());
-            log.info("文件上传成功: {} → {} ({} bytes)", orig, url, file.getSize());
+            r.put("size", fileSize);
+            log.info("文件上传成功: {} → {} ({} bytes)", orig, url, fileSize);
             return R.ok(r);
         } catch (Exception e) {
             log.error("文件上传失败: {}", orig, e);
             return R.fail("上传失败，请重试");
+        }
+    }
+
+    /**
+     * 检测视频编码，若为 H.265/HEVC 则自动转码为 H.264。
+     * @return 转码后的文件大小（字节），若无需转码或失败则返回 0
+     */
+    private long transcodeToH264IfNeeded(File videoFile) {
+        try {
+            // ── 1. 用 ffprobe 检测编码 ──
+            ProcessBuilder probePb = new ProcessBuilder(
+                    "ffprobe", "-v", "quiet",
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=codec_name",
+                    "-of", "csv=p=0",
+                    videoFile.getAbsolutePath());
+            probePb.redirectErrorStream(true);
+            Process probeProc = probePb.start();
+            String codec = new String(probeProc.getInputStream().readAllBytes()).trim();
+            probeProc.waitFor();
+
+            if (!"hevc".equalsIgnoreCase(codec)) {
+                return 0; // 已经是 H.264 或其他兼容格式
+            }
+
+            // ── 2. 转码 H.265 → H.264 ──
+            log.info("检测到 H.265 视频，开始转码 H.264: {}", videoFile.getAbsolutePath());
+            File tmpFile = new File(videoFile.getParentFile(), videoFile.getName() + ".tmp.mp4");
+
+            ProcessBuilder ffmpegPb = new ProcessBuilder(
+                    "ffmpeg", "-y", "-i", videoFile.getAbsolutePath(),
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                    "-c:a", "aac", "-b:a", "128k",
+                    "-movflags", "+faststart",
+                    tmpFile.getAbsolutePath());
+            ffmpegPb.redirectErrorStream(true);
+            Process ffmpegProc = ffmpegPb.start();
+            ffmpegProc.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+            int exitCode = ffmpegProc.waitFor();
+
+            if (exitCode != 0 || !tmpFile.exists() || tmpFile.length() == 0) {
+                tmpFile.delete();
+                return 0;
+            }
+
+            // ── 3. 用转码后的文件替换原文件 ──
+            long origSize = videoFile.length();
+            long newSize = tmpFile.length();
+            if (!videoFile.delete() || !tmpFile.renameTo(videoFile)) {
+                // fallback: keep original
+                tmpFile.delete();
+                log.warn("H.264 转码后文件替换失败，保留原始 H.265 文件");
+                return 0;
+            }
+            log.info("H.265→H.264 转码完成: {} → {} bytes", origSize, newSize);
+            return newSize;
+        } catch (Exception e) {
+            log.warn("视频转码异常: {}", e.getMessage());
+            return 0;
         }
     }
 }
