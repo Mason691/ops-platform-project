@@ -67,7 +67,7 @@ function goLogin(){uni.navigateTo({url:'/pages/auth/login'})}
 function goMine(){uni.switchTab({url:'/pages/mine/index'})}
 function goProduct(id){uni.navigateTo({url:'/pages/product/detail?id='+id})}
 function goAiChat(){uni.navigateTo({url:'/pages/ai/chat'})}
-function goActivityList(){uni.navigateTo({url:'/pages/activity/index'})}
+function goActivityList(){uni.switchTab({url:'/pages/activity/index'})}
 function search(){uni.showToast({title:'搜索功能开发中',icon:'none'})}
 function openLive(room){
   if(!/micromessenger/i.test(navigator.userAgent)){

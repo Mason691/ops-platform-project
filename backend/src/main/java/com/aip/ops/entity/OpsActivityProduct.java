@@ -16,6 +16,9 @@ public class OpsActivityProduct {
     @TableField("product_id")
     private Long productId;
 
+    @TableField("sort")
+    private Integer sort;
+
     @TableField("create_time")
     private LocalDateTime createTime;
 }

@@ -2,6 +2,7 @@ package com.aip.ops.controller;
 
 import com.aip.ops.entity.*;
 import com.aip.ops.mapper.*;
+import com.aip.ops.service.GsActivityService;
 import com.aip.ops.service.IGsProductService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
@@ -30,6 +31,7 @@ public class PlatformController {
     private final IGsProductService productService;
     private final GsOrderMapper orderMapper;
     private final GsActivityMapper activityMapper;
+    private final GsActivityService activityService;
     private final GsAddressMapper addressMapper;
     private final GsPointsLogMapper pointsLogMapper;
     private final GsCouponMapper couponMapper;
@@ -298,110 +300,43 @@ public class PlatformController {
             @RequestParam(required=false) String category,
             @RequestParam(required=false) String type,
             @RequestParam(required=false) Integer status) {
-        Page<GsActivity> page = activityMapper.selectPage(new Page<>(pageNum, pageSize),
-                new LambdaQueryWrapper<GsActivity>()
-                        .eq(status != null, GsActivity::getStatus, status)
-                        .eq(category != null && !category.isEmpty(), GsActivity::getCategory, category)
-                        .eq(type != null && !type.isEmpty(), GsActivity::getType, type)
-                        .orderByDesc(GsActivity::getId));
-        return R.ok(page);
+        int offset = (pageNum - 1) * pageSize;
+        List<GsActivity> records = activityMapper.selectActivityPage(
+                offset, pageSize, type, category, status);
+        long total = activityMapper.countActivityPage(type, category, status);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("records", records);
+        result.put("total", total);
+        result.put("size", pageSize);
+        result.put("current", pageNum);
+        return R.ok(result);
     }
 
     @GetMapping("/activity/{id}")
     public R<Map<String, Object>> activityDetail(@PathVariable Long id) {
-        GsActivity a = activityMapper.selectById(id);
-        if (a == null) return R.fail("活动不存在");
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("activity", a);
-        result.put("products", activityProductMapper.selectProductsByActivityId(id));
-        if (a.getLiveRoomId() != null) {
-            OpsLiveRoom lr = liveRoomMapper.selectById(a.getLiveRoomId());
-            result.put("liveRoom", lr);
-        }
-        return R.ok(result);
+        Map<String, Object> detail = activityService.activityDetail(id);
+        if (detail == null) return R.fail("活动不存在");
+        return R.ok(detail);
     }
 
     @PostMapping("/activity")
     public R<?> createActivity(@RequestBody Map<String, Object> body) {
-        GsActivity a = buildActivity(body);
-        a.setCorpId(getCorpId());
-        a.setStatus(1);
-        activityMapper.insert(a);
-        saveActivityProducts(a.getId(), body.get("productIds"));
-        return R.ok(Map.of("id", a.getId()));
+        return R.fail("请通过管理员接口 /api/ops/admin/activities 创建活动");
     }
 
     @PutMapping("/activity/{id}")
     public R<?> updateActivity(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        GsActivity a = buildActivity(body);
-        a.setId(id);
-        activityMapper.updateById(a);
-        saveActivityProducts(id, body.get("productIds"));
-        return R.ok();
+        return R.fail("请通过管理员接口 /api/ops/admin/activities/" + id + " 更新活动");
     }
 
     @PutMapping("/activity/{id}/status")
     public R<?> activityStatus(@PathVariable Long id, @RequestBody Map<String,Object> body) {
-        GsActivity a = new GsActivity(); a.setId(id);
-        a.setStatus(Integer.valueOf(body.get("status").toString()));
-        activityMapper.updateById(a);
-        return R.ok();
+        return R.fail("请通过管理员接口 /api/ops/admin/activities/" + id + "/status 更新状态");
     }
 
     @DeleteMapping("/activity/{id}")
     public R<?> deleteActivity(@PathVariable Long id) {
-        activityMapper.deleteById(id);
-        activityProductMapper.deleteByActivityId(id);
-        return R.ok();
-    }
-
-    // ── Activity helpers ───────────────────────────────────────────
-
-    private GsActivity buildActivity(Map<String, Object> body) {
-        GsActivity a = new GsActivity();
-        a.setTitle((String) body.get("title"));
-        a.setCategory((String) body.get("category"));
-        a.setType((String) body.getOrDefault("type", "activity"));
-        a.setLocation((String) body.get("location"));
-        a.setDetail((String) body.get("detail"));
-        a.setCoverImage((String) body.get("coverImage"));
-        a.setCoverUrl((String) body.get("coverUrl"));
-        a.setVideoUrl((String) body.get("videoUrl"));
-        a.setDetailVideoUrl((String) body.get("detailVideoUrl"));
-        a.setImages((String) body.get("images"));
-        a.setDetailImages((String) body.get("detailImages"));
-        a.setPointsReward(body.get("pointsReward") != null
-                ? Integer.valueOf(body.get("pointsReward").toString()) : 0);
-        a.setMaxParticipants(body.get("maxParticipants") != null
-                ? Integer.valueOf(body.get("maxParticipants").toString()) : null);
-        if (body.get("liveRoomId") != null)
-            a.setLiveRoomId(Long.valueOf(body.get("liveRoomId").toString()));
-        if (body.get("startTime") != null)
-            a.setStartTime(parseDateTime(body.get("startTime").toString()));
-        if (body.get("endTime") != null)
-            a.setEndTime(parseDateTime(body.get("endTime").toString()));
-        return a;
-    }
-
-    @SuppressWarnings("unchecked")
-    private void saveActivityProducts(Long activityId, Object productIdsObj) {
-        activityProductMapper.deleteByActivityId(activityId);
-        if (productIdsObj == null) return;
-        List<Integer> ids;
-        if (productIdsObj instanceof List) {
-            ids = (List<Integer>) productIdsObj;
-        } else return;
-        for (Integer pid : ids) {
-            OpsActivityProduct ap = new OpsActivityProduct();
-            ap.setActivityId(activityId);
-            ap.setProductId(Long.valueOf(pid));
-            activityProductMapper.insert(ap);
-        }
-    }
-
-    private LocalDateTime parseDateTime(String s) {
-        try { return LocalDateTime.parse(s.replace(" ", "T")); }
-        catch (Exception e) { return LocalDateTime.now(); }
+        return R.fail("请通过管理员接口 /api/ops/admin/activities/" + id + " 删除活动");
     }
 
     // ═══ 地址 ═══

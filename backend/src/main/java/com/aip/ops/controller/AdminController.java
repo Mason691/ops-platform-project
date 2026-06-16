@@ -2,6 +2,7 @@ package com.aip.ops.controller;
 
 import com.aip.ops.entity.*;
 import com.aip.ops.mapper.*;
+import com.aip.ops.service.GsActivityService;
 import com.aip.ops.service.IGsProductService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
@@ -34,6 +35,7 @@ public class AdminController {
     private final MerchantMiniappConfigMapper miniappConfigMapper;
     private final OpsLiveRoomMapper liveRoomMapper;
     private final PublicAccountConfigMapper publicAccountConfigMapper;
+    private final GsActivityService activityService;
     private final org.springframework.web.client.RestTemplate restTemplate;
     private final String merchantRoleName;
 
@@ -44,6 +46,7 @@ public class AdminController {
                            MerchantMiniappConfigMapper miniappConfigMapper,
                            OpsLiveRoomMapper liveRoomMapper,
                            PublicAccountConfigMapper publicAccountConfigMapper,
+                           GsActivityService activityService,
                            org.springframework.web.client.RestTemplate restTemplate,
                            @Value("${platform.merchant-role-name:销售商}") String merchantRoleName) {
         this.omMapper = omMapper;
@@ -53,6 +56,7 @@ public class AdminController {
         this.miniappConfigMapper = miniappConfigMapper;
         this.liveRoomMapper = liveRoomMapper;
         this.publicAccountConfigMapper = publicAccountConfigMapper;
+        this.activityService = activityService;
         this.restTemplate = restTemplate;
         this.merchantRoleName = merchantRoleName;
     }
@@ -439,6 +443,139 @@ public class AdminController {
             String shortErr = errStr.length() > 100 ? errStr.substring(0, 100) + "..." : errStr;
             return R.fail("网络请求失败: " + shortErr);
         }
+    }
+
+    // ═══ 活动管理 ═══
+
+    /**
+     * 分页查询活动列表（含关联商品数量）。
+     */
+    @GetMapping("/activities")
+    public R<?> activityPage(@RequestParam(defaultValue = "1") int pageNum,
+                             @RequestParam(defaultValue = "10") int pageSize,
+                             @RequestParam(required = false) String type,
+                             @RequestParam(required = false) String category,
+                             @RequestParam(required = false) Integer status) {
+        Long operatorId = currentOperatorId();
+        return R.ok(activityService.adminActivityPage(
+                operatorId, pageNum, pageSize, type, category, status));
+    }
+
+    /**
+     * 活动详情（含关联商品 + 直播间信息）。
+     */
+    @GetMapping("/activities/{id}")
+    public R<?> activityDetail(@PathVariable Long id) {
+        Map<String, Object> detail = activityService.activityDetail(id);
+        if (detail == null) return R.fail("活动不存在");
+        return R.ok(detail);
+    }
+
+    /**
+     * 创建活动。
+     * 接收 type、liveRoomId、productIds 等字段。
+     */
+    @PostMapping("/activities")
+    public R<?> createActivity(@RequestBody Map<String, Object> body) {
+        GsActivity a = buildActivityFromBody(body);
+        a.setCorpId(currentOperatorId());
+        a.setStatus(1);
+        @SuppressWarnings("unchecked")
+        List<Long> productIds = body.get("productIds") != null
+                ? ((List<Integer>) body.get("productIds")).stream()
+                        .map(Long::valueOf).collect(Collectors.toList())
+                : Collections.emptyList();
+        Long id = activityService.createActivity(a, productIds);
+        return R.ok(Map.of("id", id));
+    }
+
+    /**
+     * 更新活动（含商品关联）。
+     */
+    @PutMapping("/activities/{id}")
+    public R<?> updateActivity(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        GsActivity a = buildActivityFromBody(body);
+        @SuppressWarnings("unchecked")
+        List<Long> productIds = body.get("productIds") != null
+                ? ((List<Integer>) body.get("productIds")).stream()
+                        .map(Long::valueOf).collect(Collectors.toList())
+                : Collections.emptyList();
+        activityService.updateActivity(id, a, productIds);
+        return R.ok();
+    }
+
+    /**
+     * 更新活动状态（上架/下架/结束）。
+     */
+    @PutMapping("/activities/{id}/status")
+    public R<?> updateActivityStatus(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        Integer status = Integer.valueOf(body.get("status").toString());
+        activityService.updateStatus(id, status);
+        return R.ok();
+    }
+
+    /**
+     * 删除活动（同时清除关联商品）。
+     */
+    @DeleteMapping("/activities/{id}")
+    public R<?> deleteActivity(@PathVariable Long id) {
+        activityService.deleteActivity(id);
+        return R.ok();
+    }
+
+    /**
+     * 获取可用直播间列表（仅 status=0 预告状态的直播间，限当前运营商绑定的销售商）。
+     * 用于活动编辑时选择"关联直播主题"。
+     */
+    @GetMapping("/live-rooms/available")
+    public R<?> availableLiveRooms() {
+        Long operatorId = currentOperatorId();
+        Set<Long> boundMerchantIds = omMapper.selectList(new LambdaQueryWrapper<OperatorMerchant>()
+                .eq(OperatorMerchant::getOperatorId, operatorId)
+                .eq(OperatorMerchant::getStatus, 1))
+                .stream().map(OperatorMerchant::getMerchantId).collect(Collectors.toSet());
+        if (boundMerchantIds.isEmpty()) return R.ok(Collections.emptyList());
+
+        List<OpsLiveRoom> list = liveRoomMapper.selectList(
+                new LambdaQueryWrapper<OpsLiveRoom>()
+                        .in(OpsLiveRoom::getMerchantId, boundMerchantIds)
+                        .eq(OpsLiveRoom::getStatus, 0)
+                        .orderByAsc(OpsLiveRoom::getSortOrder)
+                        .orderByDesc(OpsLiveRoom::getStartTime));
+        return R.ok(list);
+    }
+
+    // ── Activity helper ──
+
+    private GsActivity buildActivityFromBody(Map<String, Object> body) {
+        GsActivity a = new GsActivity();
+        a.setTitle((String) body.get("title"));
+        a.setCategory((String) body.get("category"));
+        a.setType((String) body.getOrDefault("type", "activity"));
+        a.setLocation((String) body.get("location"));
+        a.setDetail((String) body.get("detail"));
+        a.setCoverImage((String) body.get("coverImage"));
+        a.setCoverUrl((String) body.get("coverUrl"));
+        a.setVideoUrl((String) body.get("videoUrl"));
+        a.setDetailVideoUrl((String) body.get("detailVideoUrl"));
+        a.setImages((String) body.get("images"));
+        a.setDetailImages((String) body.get("detailImages"));
+        a.setPointsReward(body.get("pointsReward") != null
+                ? Integer.valueOf(body.get("pointsReward").toString()) : 0);
+        a.setMaxParticipants(body.get("maxParticipants") != null
+                ? Integer.valueOf(body.get("maxParticipants").toString()) : null);
+        if (body.get("liveRoomId") != null)
+            a.setLiveRoomId(Long.valueOf(body.get("liveRoomId").toString()));
+        if (body.get("startTime") != null)
+            a.setStartTime(parseActivityDateTime(body.get("startTime").toString()));
+        if (body.get("endTime") != null)
+            a.setEndTime(parseActivityDateTime(body.get("endTime").toString()));
+        return a;
+    }
+
+    private java.time.LocalDateTime parseActivityDateTime(String s) {
+        try { return java.time.LocalDateTime.parse(s.replace(" ", "T")); }
+        catch (Exception e) { return java.time.LocalDateTime.now(); }
     }
 
     /** Map common WeChat API error codes to human-readable hints */

@@ -24,4 +24,8 @@ public class GsActivity {
     @TableField("points_reward") private Integer pointsReward;
     @TableField("max_participants") private Integer maxParticipants;
     @TableField("status") private Integer status;
+
+    /** 关联商品数量（非数据库字段，由列表查询 JOIN 计算） */
+    @TableField(exist = false)
+    private Integer productCount;
 }

@@ -30,6 +30,14 @@ export const api = {
   // 活动
   activityPage: (params) => request({url:'/api/ops/activity/page',data:params}),
   activityDetail: (id) => request({url:'/api/ops/activity/'+id}),
+  // 运营商管理后台 — 活动管理
+  adminActivityPage: (params) => request({url:'/api/ops/admin/activities',data:params}),
+  adminActivityDetail: (id) => request({url:'/api/ops/admin/activities/'+id}),
+  adminCreateActivity: (data) => request({url:'/api/ops/admin/activities',method:'POST',data}),
+  adminUpdateActivity: (id,data) => request({url:'/api/ops/admin/activities/'+id,method:'PUT',data}),
+  adminUpdateActivityStatus: (id,status) => request({url:'/api/ops/admin/activities/'+id+'/status',method:'PUT',data:{status}}),
+  adminDeleteActivity: (id) => request({url:'/api/ops/admin/activities/'+id,method:'DELETE'}),
+  adminAvailableLiveRooms: () => request({url:'/api/ops/admin/live-rooms/available'}),
   // 地址
   addressList: () => request({url:'/api/ops/address/list'}),
   saveAddress: (data) => request({url:'/api/ops/address',method:'POST',data}),
