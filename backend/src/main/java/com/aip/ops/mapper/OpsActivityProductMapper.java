@@ -17,7 +17,8 @@ public interface OpsActivityProductMapper extends BaseMapper<OpsActivityProduct>
         FROM ops_activity_product ap
         JOIN ops_product op ON op.id = ap.product_id
         JOIN mall_db.mall_product mp ON mp.id = op.mall_product_id
-        LEFT JOIN biz_merchant_miniapp_config mmc ON mmc.merchant_id = op.operator_id AND mmc.app_id IS NOT NULL
+        LEFT JOIN biz_operator_merchant bom ON bom.operator_id = op.operator_id AND bom.status = 1
+        LEFT JOIN biz_merchant_miniapp_config mmc ON mmc.merchant_id = bom.merchant_id AND mmc.app_id IS NOT NULL
         WHERE ap.activity_id = #{activityId}
         ORDER BY ap.sort ASC, ap.create_time ASC
     """)

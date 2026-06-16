@@ -555,7 +555,7 @@ public class AdminController {
         a.setLocation((String) body.get("location"));
         a.setDetail((String) body.get("detail"));
         a.setCoverImage((String) body.get("coverImage"));
-        a.setCoverUrl((String) body.get("coverUrl"));
+        a.setCoverUrl((String) body.getOrDefault("coverUrl", body.get("coverImage")));
         a.setVideoUrl((String) body.get("videoUrl"));
         a.setDetailVideoUrl((String) body.get("detailVideoUrl"));
         a.setImages((String) body.get("images"));

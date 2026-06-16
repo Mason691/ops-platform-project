@@ -17,7 +17,7 @@
         <!-- Cover -->
         <view class="card-cover">
           <image
-            :src="a.coverUrl || a.coverImage || '/static/gas-default.png'"
+            :src="assetUrl(a.coverUrl || a.coverImage) || '/static/gas-default.png'"
             mode="aspectFill"
             class="cover-img"
           />
@@ -66,6 +66,14 @@
 
 <script setup>
 import { ref, onMounted, reactive } from 'vue'
+import { BASE_URL } from '@/config'
+
+/** Resolve asset URL — prepend BASE_URL for mini-program, keep relative for H5 */
+function assetUrl(path) {
+  if (!path) return ''
+  if (/^https?:\/\//.test(path) || /^data:/.test(path)) return path
+  return BASE_URL + path
+}
 
 const list = ref([])
 const loading = ref(false)
@@ -169,7 +177,7 @@ onMounted(() => load(true))
 function api(url, method, data) {
   return new Promise((resolve, reject) => {
     uni.request({
-      url: url,
+      url: BASE_URL + url,
       method: method || 'GET',
       data: data || {},
       header: { 'Content-Type': 'application/json' },

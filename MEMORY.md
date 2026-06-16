@@ -55,3 +55,4 @@
 ---
 
 最后更新：2026-06-10
+- [Build & Deploy Workflow](build-deploy-workflow.md) — always build locally, deploy to remote, never compile on server
