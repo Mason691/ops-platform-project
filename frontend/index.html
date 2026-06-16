@@ -13,8 +13,8 @@
     <meta name="x5-video-player-fullscreen" content="true" />
     <meta name="x5-video-orientation" content="portrait" />
     <title>金地燃气聚合展示引流平台</title>
-    <!-- ═══ 微信 JSSDK — 加载官方 jweixin SDK ═══ -->
-    <script src="https://res.wx.qq.com/open/js/jweixin-1.6.0.js"></script>
+    <!-- ═══ 微信 JSSDK — 加载本地 jweixin SDK（避免 CDN 超时） ═══ -->
+    <script src="./jweixin-1.6.0.js"></script>
     <script>
       // ═══ 微信 JSSDK 初始化 — 等待 wx 可用后注入签名 ═══
       // 核心修复：不再立即调用 initWx()，而是监听 WeixinJSBridgeReady 事件，

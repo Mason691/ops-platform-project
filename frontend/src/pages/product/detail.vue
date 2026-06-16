@@ -57,7 +57,8 @@ function jumpToMiniapp(){
   if(!cfg||!cfg.appId){showGuide.value=true;return}
   try{
     // #ifdef H5
-    if(typeof wx !== 'undefined' && wx.miniProgram){wx.miniProgram.navigateTo({appId:cfg.appId,path:cfg.path,envVersion:cfg.envVersion||'release',success:()=>{},fail:()=>{uni.showToast({title:'跳转小程序失败，请重试',icon:'none'})}});return}
+    var realWx = window.wx || (typeof wx !== 'undefined' && wx.miniProgram ? wx : null)
+    if(realWx && realWx.miniProgram && typeof realWx.miniProgram.navigateTo === 'function'){realWx.miniProgram.navigateTo({appId:cfg.appId,path:cfg.path,envVersion:cfg.envVersion||'release',success:()=>{},fail:()=>{uni.showToast({title:'跳转小程序失败，请重试',icon:'none'})}});return}
     // #endif
     showGuide.value=true
   }catch(e){showGuide.value=true}

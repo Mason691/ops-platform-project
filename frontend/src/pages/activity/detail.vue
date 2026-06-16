@@ -297,20 +297,28 @@ function doShare() {
 }
 
 function goProduct(p) {
-  if (p.miniapp_app_id) {
-    // Jump to merchant mini-program product page
-    if (typeof wx !== 'undefined' && wx.miniProgram) {
-      wx.miniProgram.navigateTo({
-        url: (p.miniapp_path || '/pages/index/index').replace('{productId}', p.product_id),
-        appId: p.miniapp_app_id,
-        success: () => {},
-        fail: () => uni.showToast({ title: '跳转失败', icon: 'none' })
-      })
-    } else {
-      uni.showToast({ title: '请在小程序中查看', icon: 'none' })
-    }
+  if (!p.miniapp_app_id) {
+    uni.showToast({ title: '暂不支持小程序跳转', icon: 'none' })
+    return
+  }
+  const url = (p.miniapp_path || '/pages/index/index').replace('{productId}', p.product_id)
+  // Use window.wx explicitly — uni-app shadows bare `wx` in H5 mode
+  const realWx = window.wx || (typeof wx !== 'undefined' ? wx : null)
+  if (realWx && realWx.miniProgram && typeof realWx.miniProgram.navigateTo === 'function') {
+    realWx.miniProgram.navigateTo({
+      url: url,
+      appId: p.miniapp_app_id,
+      success: () => {},
+      fail: (err) => { console.error('[goProduct] 跳转失败:', err); uni.showToast({ title: '跳转失败', icon: 'none' }) }
+    })
+  } else if (typeof WeixinJSBridge !== 'undefined' && WeixinJSBridge.invoke) {
+    WeixinJSBridge.invoke('navigateToMiniProgram', { appId: p.miniapp_app_id, path: url }, function(res) {
+      if (res.err_msg && res.err_msg.indexOf('ok') === -1) {
+        uni.showToast({ title: '跳转失败', icon: 'none' })
+      }
+    })
   } else {
-    uni.showToast({ title: '暂不支持跳转', icon: 'none' })
+    uni.showToast({ title: '请在小程序中打开', icon: 'none' })
   }
 }
 
