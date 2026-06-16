@@ -54,6 +54,7 @@ public class FileUploadController {
 
             // Auto-transcode H.265/HEVC videos to H.264 for universal browser support
             long fileSize = file.getSize();
+            String videoCoverUrl = null;
             if (isVideo) {
                 try {
                     long newSize = transcodeToH264IfNeeded(dest);
@@ -64,12 +65,20 @@ public class FileUploadController {
                 } catch (Exception te) {
                     log.warn("视频转码失败（保留原始文件）: {} → {}, error={}", orig, url, te.getMessage());
                 }
+                // Auto-capture first frame as video cover
+                try {
+                    videoCoverUrl = captureVideoFrame(dest, name);
+                    log.info("视频封面已截取: {} → {}", url, videoCoverUrl);
+                } catch (Exception fe) {
+                    log.warn("视频封面截取失败: {} → {}, error={}", orig, url, fe.getMessage());
+                }
             }
 
             Map<String,Object> r = new LinkedHashMap<>();
             r.put("url", url);
             r.put("type", isVideo ? "video" : "image");
             r.put("size", fileSize);
+            if (videoCoverUrl != null) r.put("videoCoverUrl", videoCoverUrl);
             log.info("文件上传成功: {} → {} ({} bytes)", orig, url, fileSize);
             return R.ok(r);
         } catch (Exception e) {
@@ -134,6 +143,45 @@ public class FileUploadController {
         } catch (Exception e) {
             log.warn("视频转码异常: {}", e.getMessage());
             return 0;
+        }
+    }
+
+    /**
+     * 截取视频第一帧作为封面图（JPEG）。
+     * @param videoFile 已保存的视频文件
+     * @param baseName  视频文件基础名（不含扩展名）
+     * @return 封面图相对 URL，失败返回 null
+     */
+    private String captureVideoFrame(File videoFile, String baseName) {
+        try {
+            String imgName = baseName.substring(0, baseName.lastIndexOf('.')) + "_cover.jpg";
+            File imgFile = new File(videoFile.getParentFile(), imgName);
+
+            // ffmpeg -y -i input.mp4 -ss 00:00:01 -vframes 1 -q:v 3 output.jpg
+            ProcessBuilder pb = new ProcessBuilder(
+                    "ffmpeg", "-y", "-i", videoFile.getAbsolutePath(),
+                    "-ss", "00:00:01",
+                    "-vframes", "1",
+                    "-q:v", "3",
+                    imgFile.getAbsolutePath());
+            pb.redirectErrorStream(true);
+            Process proc = pb.start();
+            proc.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+            int exitCode = proc.waitFor();
+
+            if (exitCode != 0 || !imgFile.exists() || imgFile.length() == 0) {
+                imgFile.delete();
+                return null;
+            }
+
+            // Build relative URL matching the video's URL pattern
+            String parentPath = videoFile.getParentFile().getAbsolutePath();
+            String baseDir = System.getProperty("user.dir") + "/uploads/";
+            String relativePath = parentPath.replace(baseDir, "");
+            return "/uploads/" + relativePath + "/" + imgFile.getName();
+        } catch (Exception e) {
+            log.warn("视频封面截取异常: {}", e.getMessage());
+            return null;
         }
     }
 }

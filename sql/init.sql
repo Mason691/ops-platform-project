@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS `ops_activity` (
     `cover_url`         VARCHAR(500)    DEFAULT NULL                    COMMENT '直播封面图URL',
     `images`            TEXT            DEFAULT NULL,
     `video_url`         VARCHAR(500)    DEFAULT NULL,
+    `video_cover_url`   VARCHAR(500)    DEFAULT NULL                    COMMENT '视频封面（首帧截取）',
     `detail_video_url`  VARCHAR(500)    DEFAULT NULL                    COMMENT '详情视频URL',
     `detail_images`     TEXT            DEFAULT NULL                    COMMENT '详情图片集（JSON数组）',
     `detail`            TEXT            DEFAULT NULL,

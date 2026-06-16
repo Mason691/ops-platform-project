@@ -12,6 +12,7 @@ public class GsActivity {
     @TableField("cover_url") private String coverUrl;
     @TableField("images") private String images;
     @TableField("video_url") private String videoUrl;
+    @TableField("video_cover_url") private String videoCoverUrl;
     @TableField("detail_video_url") private String detailVideoUrl;
     @TableField("detail_images") private String detailImages;
     @TableField("type") private String type;

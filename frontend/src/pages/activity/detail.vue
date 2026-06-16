@@ -15,7 +15,7 @@
           x5-video-orientation="portrait"
           show-center-play-btn
           enable-progress-gesture
-          :poster="assetUrl(act.coverUrl || act.coverImage)"
+          :poster="assetUrl(act.videoCoverUrl || act.coverUrl || act.coverImage)"
           @error="onVideoError"
           @loadeddata="onVideoLoaded"
         />
