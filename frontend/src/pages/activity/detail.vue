@@ -2,7 +2,7 @@
   <view class="page" v-if="act">
     <!-- ═══ Cover — video or image ═══ -->
     <view class="cover-area">
-      <view v-if="videoSrc" class="cover-video-wrap">
+      <view v-if="videoSrc && !videoFailed" class="cover-video-wrap">
         <video
           :key="videoSrc"
           :src="videoSrc"
@@ -15,13 +15,25 @@
           x5-video-orientation="portrait"
           show-center-play-btn
           enable-progress-gesture
-          :poster="act.coverUrl || act.coverImage"
+          :poster="assetUrl(act.coverUrl || act.coverImage)"
           @error="onVideoError"
         />
       </view>
+      <view v-else-if="videoFailed" class="cover-fallback" @click="retryVideo">
+        <image
+          :src="assetUrl(act.coverUrl || act.coverImage) || '/static/gas-default.png'"
+          class="cover-img"
+          mode="aspectFill"
+        />
+        <view class="fallback-overlay">
+          <text class="fallback-icon">▶</text>
+          <text class="fallback-text">{{ videoErrorInfo || '视频暂时无法播放' }}</text>
+          <text class="fallback-hint">点击重试</text>
+        </view>
+      </view>
       <image
         v-else
-        :src="act.coverUrl || act.coverImage || '/static/gas-default.png'"
+        :src="assetUrl(act.coverUrl || act.coverImage) || '/static/gas-default.png'"
         class="cover-img"
         mode="aspectFill"
       />
@@ -61,7 +73,7 @@
         <image
           v-for="(url, i) in detailImages"
           :key="i"
-          :src="url"
+          :src="assetUrl(url)"
           class="gallery-img"
           mode="aspectFill"
           @click="previewImages(i)"
@@ -74,7 +86,7 @@
       <text class="sec-title">关联商品</text>
       <scroll-view scroll-x class="prod-scroll" :show-scrollbar="false">
         <view v-for="p in products" :key="p.product_id" class="prod-card">
-          <image :src="p.cover_image||'/static/gas-default.png'" class="prod-img" mode="aspectFill" @click="goProduct(p)"/>
+          <image :src="assetUrl(p.cover_image)||'/static/gas-default.png'" class="prod-img" mode="aspectFill" @click="goProduct(p)"/>
           <text class="prod-name">{{ p.name }}</text>
           <view class="prod-price">
             <text v-if="p.points_price>0" class="p-points">{{ p.points_price }}积分</text>
@@ -122,11 +134,21 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import { BASE_URL } from '@/config'
 
 const act = ref(null), liveRoom = ref(null), products = ref([])
 const loadErr = ref('')
 const booked = ref(false)
 const videoFailed = ref(false)
+const videoErrorInfo = ref('')
+
+/** Resolve asset URL — prepend BASE_URL for mini-program, keep relative for H5 */
+function assetUrl(path) {
+  if (!path) return ''
+  // Already absolute (starts with http or data:)
+  if (/^https?:\/\//.test(path) || /^data:/.test(path)) return path
+  return BASE_URL + path
+}
 
 onMounted(async () => {
   const pages = getCurrentPages()
@@ -157,13 +179,13 @@ async function checkBooked(activityId) {
 const videoSrc = computed(() => {
   if (videoFailed.value) return ''
   const raw = act.value?.detailVideoUrl || act.value?.videoUrl
-  if (!raw) return ''
+  if (!raw || raw === 'null' || raw === 'None') return ''
   // Trim whitespace and wrapping quotes sometimes present in DB data
-  let url = raw.trim()
+  let url = String(raw).trim()
   if ((url.startsWith("'") && url.endsWith("'")) || (url.startsWith('"') && url.endsWith('"')))
     url = url.slice(1, -1)
-  // H5 environment: relative paths are fine; uni-app handles them
-  return url
+  // Prepend BASE_URL for mini-program compatibility
+  return assetUrl(url)
 })
 const detailImages = computed(() => {
   if (!act.value) return []
@@ -219,10 +241,24 @@ async function doBook() {
   }
 }
 
+function retryVideo() {
+  videoFailed.value = false
+  videoErrorInfo.value = ''
+}
+
 function onVideoError(e) {
-  console.error('[activity-detail] 视频加载失败:', e.detail?.errMsg || e)
+  const err = e.detail || e
+  const codes = {1:'MEDIA_ERR_ABORTED', 2:'MEDIA_ERR_NETWORK', 3:'MEDIA_ERR_DECODE', 4:'MEDIA_ERR_SRC_NOT_SUPPORTED'}
+  const code = err?.error?.code || err?.code || err?.errCode
+  const msg = codes[code] || '未知错误'
+  console.error('[activity-detail] 视频加载失败:', {
+    videoUrl: videoSrc.value,
+    errorCode: code,
+    errorMsg: msg,
+    platform: uni.getSystemInfoSync?.()?.platform || 'unknown'
+  })
   videoFailed.value = true
-  uni.showToast({ title: '视频暂无法播放', icon: 'none', duration: 2000 })
+  videoErrorInfo.value = msg
 }
 
 function doShare() {
@@ -262,9 +298,10 @@ function goProduct(p) {
 }
 
 function previewImages(index) {
+  const urls = detailImages.value.map(u => assetUrl(u))
   uni.previewImage({
-    urls: detailImages.value,
-    current: detailImages.value[index] || detailImages.value[0]
+    urls,
+    current: urls[index] || urls[0]
   })
 }
 
@@ -304,6 +341,11 @@ function req(url, method, data) {
 .cover-img { width: 100%; height: 100%; }
 .cover-video-wrap { width: 100%; height: 100%; }
 .cover-video { width: 100%; height: 100%; }
+.cover-fallback { position: relative; width: 100%; height: 100%; }
+.fallback-overlay { position: absolute; inset: 0; background: rgba(0,0,0,.55); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12rpx; }
+.fallback-icon { font-size: 56rpx; color: rgba(255,255,255,.9); }
+.fallback-text { font-size: 26rpx; color: rgba(255,255,255,.85); }
+.fallback-hint { font-size: 22rpx; color: rgba(255,255,255,.55); }
 .hero-badge {
   position: absolute; top: 20rpx; left: 20rpx;
   padding: 8rpx 24rpx; border-radius: 12rpx; font-size: 24rpx; color: #fff;
