@@ -17,6 +17,7 @@
           enable-progress-gesture
           :poster="assetUrl(act.coverUrl || act.coverImage)"
           @error="onVideoError"
+          @loadeddata="onVideoLoaded"
         />
       </view>
       <view v-else-if="videoFailed" class="cover-fallback" @click="retryVideo">
@@ -184,8 +185,13 @@ const videoSrc = computed(() => {
   let url = String(raw).trim()
   if ((url.startsWith("'") && url.endsWith("'")) || (url.startsWith('"') && url.endsWith('"')))
     url = url.slice(1, -1)
-  // Prepend BASE_URL for mini-program compatibility
-  return assetUrl(url)
+  // Resolve to absolute HTTPS URL — iOS WebKit <video> requires absolute URLs
+  url = assetUrl(url)
+  if (url && !/^https?:\/\//.test(url)) {
+    const origin = typeof location !== 'undefined' ? location.origin : 'https://a.15891589.xyz'
+    url = origin + url
+  }
+  return url
 })
 const detailImages = computed(() => {
   if (!act.value) return []
@@ -246,15 +252,26 @@ function retryVideo() {
   videoErrorInfo.value = ''
 }
 
+function onVideoLoaded() {
+  console.log('[activity-detail] 视频加载成功:', videoSrc.value)
+}
+
 function onVideoError(e) {
-  const err = e.detail || e
+  // Collect ALL possible error info — uni-app H5 uses standard DOM events
+  const target = e.target || (e.detail && e.detail.target)
+  const mediaErr = target?.error
+  const code = mediaErr?.code || e.detail?.error?.code || e.detail?.code || e.detail?.errCode
   const codes = {1:'MEDIA_ERR_ABORTED', 2:'MEDIA_ERR_NETWORK', 3:'MEDIA_ERR_DECODE', 4:'MEDIA_ERR_SRC_NOT_SUPPORTED'}
-  const code = err?.error?.code || err?.code || err?.errCode
-  const msg = codes[code] || '未知错误'
+  const msg = codes[code] || mediaErr?.message || e.detail?.errMsg || e.detail?.error?.message || '未知错误'
+
+  // Log everything for debugging
   console.error('[activity-detail] 视频加载失败:', {
     videoUrl: videoSrc.value,
     errorCode: code,
     errorMsg: msg,
+    mediaError: mediaErr ? {code: mediaErr.code, message: mediaErr.message} : null,
+    eventKeys: Object.keys(e),
+    detailKeys: e.detail ? Object.keys(e.detail) : null,
     platform: uni.getSystemInfoSync?.()?.platform || 'unknown'
   })
   videoFailed.value = true
