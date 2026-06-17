@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 /**
  * 运营商管理后台 — 绑定销售商、商品管理、分类管理。
  *
- * 销售商来源：底座平台 sys_corp 表中，在 sys_corp_role 中拥有 role_name='销售商' 的组织。
+ * 销售商来源：底座平台 sys_corp 表中，在 sys_corp_user_role 中拥有 role_name='销售商' 的组织。
  * 商品数据：通过 ops_product（映射表）JOIN mall_product 获取完整商品信息。
  */
 @Slf4j
@@ -92,7 +92,10 @@ public class AdminController {
             m.put("bound", bound.contains(mid));
         });
 
-        return R.ok(merchants);
+        // 查询总数（独立 SQL，避免 LIMIT 分页后 total 丢失）
+        long total = merchantMapper.countMerchants(merchantRoleName, keyword);
+
+        return R.ok(Map.of("data", merchants, "total", total));
     }
 
     /** 批量绑定销售商 */

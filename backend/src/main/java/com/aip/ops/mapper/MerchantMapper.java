@@ -11,8 +11,8 @@ import java.util.Map;
  * 跨库查询底座平台组织表，获取"销售商"角色组织列表。
  * mall_db 和 ai_platform 在同一 MySQL 实例，使用 ai_platform.sys_corp 跨库访问。
  *
- * 角色筛选不是 sys_corp.org_role_id = 3（那是组织注册角色，非企业角色），
- * 而是通过 sys_corp_role 表，role_name = ${merchantRoleName} 确认该组织拥有销售商企业角色。
+ * 角色筛选通过 sys_corp_user_role 表，role_name = ${merchantRoleName} 确认该组织拥有销售商企业角色。
+ * 该角色由 SysCorpServiceImpl.createCorp() 根据组织类型（org_role_id）自动创建。
  */
 @Mapper
 public interface MerchantMapper {
@@ -21,7 +21,7 @@ public interface MerchantMapper {
             + "SELECT c.id, c.name, c.contact_name AS contactName, "
             + "       c.contact_phone AS phone, c.address "
             + "FROM ai_platform.sys_corp c "
-            + "INNER JOIN ai_platform.sys_corp_role cr "
+            + "INNER JOIN ai_platform.sys_corp_user_role cr "
             + "  ON c.id = cr.corp_id AND cr.delete_flag = 0 AND cr.role_name = #{roleName} "
             + "WHERE c.delete_flag = 0 AND c.status = 1 "
             + "<if test='keyword != null and keyword != \"\"'>"
@@ -36,6 +36,20 @@ public interface MerchantMapper {
                                               @Param("size") int size,
                                               @Param("roleName") String roleName,
                                               @Param("keyword") String keyword);
+
+    @Select("<script>"
+            + "SELECT COUNT(DISTINCT c.id) "
+            + "FROM ai_platform.sys_corp c "
+            + "INNER JOIN ai_platform.sys_corp_user_role cr "
+            + "  ON c.id = cr.corp_id AND cr.delete_flag = 0 AND cr.role_name = #{roleName} "
+            + "WHERE c.delete_flag = 0 AND c.status = 1 "
+            + "<if test='keyword != null and keyword != \"\"'>"
+            + "  AND (c.name LIKE CONCAT('%', #{keyword}, '%') "
+            + "       OR c.contact_phone LIKE CONCAT('%', #{keyword}, '%')) "
+            + "</if>"
+            + "</script>")
+    long countMerchants(@Param("roleName") String roleName,
+                        @Param("keyword") String keyword);
 
     /**
      * 批量查询组织名称（用于商品列表中展示所属销售商名称）。
@@ -53,7 +67,7 @@ public interface MerchantMapper {
      * 校验指定组织是否拥有指定角色。
      * 返回 ID 表示该组织确实有该角色，否则返回 null/空。
      */
-    @Select("SELECT cr.corp_id FROM ai_platform.sys_corp_role cr "
+    @Select("SELECT cr.corp_id FROM ai_platform.sys_corp_user_role cr "
             + "WHERE cr.corp_id = #{corpId} AND cr.role_name = #{roleName} AND cr.delete_flag = 0 LIMIT 1")
     Long checkMerchantRole(@Param("corpId") Long corpId, @Param("roleName") String roleName);
 }

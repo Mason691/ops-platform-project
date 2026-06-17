@@ -43,3 +43,75 @@ export async function fetchPublicAccountConfig(corpId) {
     return null
   }
 }
+
+// ── 微信 JSSDK 录音 ──────────────────────────────────────────────
+
+/**
+ * 检查 wx JSSDK 录音 API 是否可用。
+ * 注意：这些 API 在 jweixin-1.6.0 中仍存在，但新版微信客户端可能不支持。
+ */
+export function isWxRecordAvailable() {
+  // #ifdef H5
+  return typeof wx !== 'undefined'
+      && typeof wx.startRecord === 'function'
+      && typeof wx.stopRecord === 'function'
+      && typeof wx.uploadVoice === 'function'
+  // #endif
+  return false
+}
+
+/**
+ * 使用微信 JSSDK 开始录音。
+ * 需要在 wx.ready 回调中调用。
+ */
+export function wxStartRecord() {
+  return new Promise((resolve, reject) => {
+    if (!isWxRecordAvailable()) return reject(new Error('微信录音 API 不可用'))
+    wx.startRecord({
+      success() { console.log('[JSSDK] 录音已开始') },
+      fail(err) {
+        console.error('[JSSDK] 开始录音失败:', err)
+        reject(err)
+      }
+    })
+    // startRecord 没有直接的成功回调告知录音开始，
+    // 它只有在 stopRecord 时才返回结果。这里等待一小段时间后 resolve
+    setTimeout(() => resolve(), 200)
+  })
+}
+
+/**
+ * 停止微信 JSSDK 录音并上传到微信服务器，返回 serverId。
+ * @returns {Promise<{serverId: string, localId: string}>}
+ */
+export function wxStopRecordAndUpload() {
+  return new Promise((resolve, reject) => {
+    if (!isWxRecordAvailable()) return reject(new Error('微信录音 API 不可用'))
+    wx.stopRecord({
+      success(res) {
+        const localId = res.localId
+        console.log('[JSSDK] 录音停止, localId:', localId)
+        if (!localId) return reject(new Error('未获取到录音 localId'))
+
+        // 上传到微信服务器获取 serverId
+        wx.uploadVoice({
+          localId,
+          isShowProgressTips: 0,
+          success(uploadRes) {
+            const serverId = uploadRes.serverId
+            console.log('[JSSDK] 语音上传成功, serverId:', serverId)
+            resolve({ serverId, localId })
+          },
+          fail(err) {
+            console.error('[JSSDK] 语音上传失败:', err)
+            reject(err)
+          }
+        })
+      },
+      fail(err) {
+        console.error('[JSSDK] 停止录音失败:', err)
+        reject(err)
+      }
+    })
+  })
+}

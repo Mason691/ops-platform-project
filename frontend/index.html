@@ -61,7 +61,8 @@
           var jsApiList = [
             'updateAppMessageShareData','updateTimelineShareData',
             'onMenuShareTimeline','onMenuShareAppMessage',
-            'chooseImage','previewImage'
+            'chooseImage','previewImage',
+            'startRecord','stopRecord','uploadVoice','downloadVoice','translateVoice'
           ];
           // 仅当需要跳转小程序时申请 miniProgram
           if (typeof wx.miniProgram !== 'undefined' || navigator.userAgent.indexOf('miniProgram') > -1) {

@@ -93,6 +93,7 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index.js'
+import { isWechat, isWxRecordAvailable, wxStartRecord, wxStopRecordAndUpload } from '@/utils/jssdk.js'
 
 const aiNickname    = ref('小金')
 const aiAvatar      = ref('/static/ai-avatar.png')
@@ -205,6 +206,9 @@ async function autoPlayReply(text, msgIdx) {
 function sendQuick(q) { inputText.value = q; sendMsg() }
 
 // ── Voice input ──
+
+let recordingMode = 'media' // 'media' | 'wx' — 录音模式
+
 function onMicDown(e) {
   e.preventDefault()
   cancelled = false
@@ -223,12 +227,40 @@ function onMicCancel() {
   cancelled = true
   recording.value = false
   if (holdTimer) { clearTimeout(holdTimer); holdTimer = null }
-  if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop()
+  if (recordingMode === 'media' && mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop()
+  }
+  if (recordingMode === 'wx') {
+    // 微信 JSSDK 没有 cancel API，只能等待 stopRecord
+    try { wxStopRecordAndUpload().catch(() => {}) } catch (_) {}
+  }
   if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null }
 }
 
 function startRecording() {
   console.log('[Voice] 开始录音...')
+
+  // ── 微信环境优先使用 JSSDK 录音 ──
+  if (isWechat() && isWxRecordAvailable()) {
+    recordingMode = 'wx'
+    console.log('[Voice] 使用微信 JSSDK 录音')
+    wxStartRecord()
+      .then(() => { console.log('[Voice] JSSDK 录音已启动') })
+      .catch(err => {
+        console.warn('[Voice] JSSDK 录音启动失败，回退到 getUserMedia:', err)
+        recordingMode = 'media'
+        startMediaRecording()
+      })
+    return
+  }
+
+  // ── 非微信环境使用 getUserMedia ──
+  recordingMode = 'media'
+  startMediaRecording()
+}
+
+function startMediaRecording() {
+  console.log('[Voice] 使用 getUserMedia 录音')
   try {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
@@ -245,24 +277,52 @@ function startRecording() {
         mediaRecorder.onerror = () => { recording.value = false; uni.showToast({ title: '录音出错', icon: 'none' }) }
         mediaRecorder.start(250)
       }).catch(err => {
+        console.error('[Voice] getUserMedia 失败:', err)
         recording.value = false
-        uni.showToast({ title: '麦克风权限未开启，请在设置中允许', icon: 'none' })
+        const errMsg = String(err)
+        if (errMsg.includes('NotAllowed') || errMsg.includes('Permission')) {
+          uni.showToast({ title: '麦克风权限未开启，请在设置中允许', icon: 'none' })
+        } else if (errMsg.includes('NotFound')) {
+          uni.showToast({ title: '未检测到麦克风设备', icon: 'none' })
+        } else {
+          uni.showToast({ title: '录音启动失败，请重试', icon: 'none' })
+        }
       })
     } else {
       recording.value = false
-      uni.showToast({ title: '当前浏览器不支持录音', icon: 'none' })
+      uni.showToast({ title: '当前浏览器不支持录音，请使用微信小程序', icon: 'none', duration: 4000 })
     }
-  } catch (e) { recording.value = false }
+  } catch (e) {
+    recording.value = false
+    console.error('[Voice] startMediaRecording 异常:', e)
+  }
 }
 
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') { mediaRecorder.stop() }
-  else { cancelled = true; recording.value = false }
+  if (recordingMode === 'media') {
+    if (mediaRecorder && mediaRecorder.state === 'recording') { mediaRecorder.stop() }
+    else { cancelled = true; recording.value = false }
+  } else if (recordingMode === 'wx') {
+    cancelled = false // JSSDK 需要正常停止
+    wxStopRecordAndUpload()
+      .then(res => {
+        recording.value = false
+        console.log('[Voice] JSSDK serverId:', res.serverId)
+        processWechatVoice(res.serverId)
+      })
+      .catch(err => {
+        console.error('[Voice] JSSDK 录音停止失败:', err)
+        recording.value = false
+        uni.showToast({ title: '录音失败，请重试', icon: 'none' })
+      })
+  } else {
+    cancelled = true; recording.value = false
+  }
 }
 
 async function processAudio(blob) {
   recording.value = false
-  uni.showToast({ title: '识别中...', icon: 'loading', duration: 3000 })
+  uni.showToast({ title: '识别中...', icon: 'loading', duration: 5000 })
   try {
     const r = await api.aiVoiceRecognize(blob)
     uni.hideToast()
@@ -273,7 +333,28 @@ async function processAudio(blob) {
     } else { uni.showToast({ title: '未识别到语音内容', icon: 'none' }) }
   } catch (e) {
     uni.hideToast()
-    uni.showToast({ title: '语音识别失败，请重试', icon: 'none' })
+    console.error('[Voice] ASR 失败:', e)
+    const errMsg = e?.msg || '请重试'
+    uni.showToast({ title: '语音识别失败：' + errMsg, icon: 'none', duration: 3000 })
+  }
+}
+
+/** 微信 JSSDK 录音 → serverId → 后端下载 → ASR */
+async function processWechatVoice(serverId) {
+  uni.showToast({ title: '识别中...', icon: 'loading', duration: 5000 })
+  try {
+    const r = await api.aiVoiceRecognizeWechat(serverId)
+    uni.hideToast()
+    const text = r?.text || ''
+    if (text) {
+      inputText.value = text
+      sendMsg()
+    } else { uni.showToast({ title: '未识别到语音内容', icon: 'none' }) }
+  } catch (e) {
+    uni.hideToast()
+    console.error('[Voice] ASR(WeChat) 失败:', e)
+    const errMsg = e?.msg || '请重试'
+    uni.showToast({ title: '语音识别失败：' + errMsg, icon: 'none', duration: 3000 })
   }
 }
 

@@ -1,7 +1,10 @@
 package com.aip.ops.controller;
 
+import com.aip.ops.entity.PublicAccountConfig;
+import com.aip.ops.service.impl.PublicAccountConfigServiceImpl;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,6 +15,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * AI 助手代理 — 对接底座平台 AI 引擎（对话、ASR、TTS）。
@@ -28,6 +32,7 @@ import java.util.*;
 public class AiChatProxyController {
 
     private final RestTemplate restTemplate;
+    private final PublicAccountConfigServiceImpl publicAccountConfigService;
 
     @Value("${platform.base-url}")
     private String platformBaseUrl;
@@ -138,6 +143,146 @@ public class AiChatProxyController {
             return R.fail("语音识别服务返回空结果");
         } catch (Exception e) {
             log.warn("ASR 识别失败 corpId={}: {}", resolveCorpId(request), e.getMessage());
+            if (e.getMessage() != null && e.getMessage().contains("401")) {
+                return R.fail("ASR API Key 无效，请联系管理员配置语音识别服务");
+            }
+            return R.fail("语音识别服务暂不可用，请稍后重试");
+        }
+    }
+
+    // ═══ 语音识别（微信 JSSDK 录音）— serverId 模式 ═══
+
+    /** 微信 access_token 缓存（与 PublicAccountController 共享内存缓存） */
+    private final Map<String, String>  wxTokenCache  = new ConcurrentHashMap<>();
+    private final Map<String, Long>    wxTokenExpire = new ConcurrentHashMap<>();
+
+    /**
+     * 微信 JSSDK 语音识别中转：前端通过 wx.startRecord/stopRecord/uploadVoice 获取 serverId，
+     * 后端下载微信服务器上的语音文件 → 转发到底座 ASR 服务。
+     */
+    @PostMapping("/voice/recognize-wechat")
+    public R<?> voiceRecognizeWechat(@RequestBody Map<String, Object> body,
+                                     HttpServletRequest request) {
+        String serverId = body.get("serverId") != null ? body.get("serverId").toString() : null;
+        if (serverId == null || serverId.isBlank()) return R.fail("serverId 不能为空");
+
+        Long corpId = resolveCorpId(request);
+        log.info("ASR(WeChat) 开始: corpId={}, serverId={}", corpId, serverId);
+
+        // 1. 获取微信 access_token
+        String accessToken = getWxAccessToken(corpId);
+        if (accessToken == null) return R.fail("获取微信 access_token 失败，请检查公众号配置");
+
+        // 2. 从微信服务器下载语音
+        byte[] audioBytes = downloadWechatMedia(accessToken, serverId);
+        if (audioBytes == null || audioBytes.length == 0)
+            return R.fail("从微信服务器下载语音失败");
+
+        // 3. 转发到底座 ASR 服务
+        return forwardToAsr(audioBytes, "voice.amr", corpId);
+    }
+
+    private String getWxAccessToken(Long corpId) {
+        // 获取当前组织的公众号配置
+        PublicAccountConfig cfg = publicAccountConfigService.getOne(
+                new LambdaQueryWrapper<PublicAccountConfig>()
+                        .eq(PublicAccountConfig::getCorpId, corpId)
+                        .eq(PublicAccountConfig::getIsDefault, 1)
+                        .eq(PublicAccountConfig::getStatus, 1)
+                        .last("LIMIT 1"));
+        if (cfg == null) {
+            cfg = publicAccountConfigService.getOne(
+                    new LambdaQueryWrapper<PublicAccountConfig>()
+                            .eq(PublicAccountConfig::getCorpId, corpId)
+                            .eq(PublicAccountConfig::getStatus, 1)
+                            .last("LIMIT 1"));
+        }
+        if (cfg == null) {
+            log.warn("ASR(WeChat): 未找到 corpId={} 的公众号配置", corpId);
+            return null;
+        }
+
+        String key = cfg.getAppId();
+        Long expire = wxTokenExpire.getOrDefault(key, 0L);
+        if (System.currentTimeMillis() < expire && wxTokenCache.containsKey(key))
+            return wxTokenCache.get(key);
+
+        String url = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential"
+                + "&appid=" + cfg.getAppId() + "&secret=" + cfg.getAppSecret();
+        try {
+            var resp = restTemplate.getForObject(url, Map.class);
+            if (resp != null && resp.containsKey("access_token")) {
+                String token = (String) resp.get("access_token");
+                int expiresIn = ((Number) resp.get("expires_in")).intValue();
+                wxTokenCache.put(key, token);
+                wxTokenExpire.put(key, System.currentTimeMillis() + (expiresIn - 300) * 1000L);
+                return token;
+            }
+            log.warn("ASR(WeChat): getAccessToken failed: {}", resp);
+        } catch (Exception e) { log.error("ASR(WeChat): getAccessToken error", e); }
+        return null;
+    }
+
+    private byte[] downloadWechatMedia(String accessToken, String serverId) {
+        String url = "https://api.weixin.qq.com/cgi-bin/media/get?access_token="
+                + accessToken + "&media_id=" + serverId;
+        try {
+            ResponseEntity<byte[]> resp = restTemplate.getForEntity(url, byte[].class);
+            if (resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null
+                    && resp.getBody().length > 0) {
+                // 检查是否返回了 JSON 错误（而非二进制音频）
+                String ct = resp.getHeaders().getContentType() != null
+                        ? String.valueOf(resp.getHeaders().getContentType()) : "";
+                if (ct.contains("application/json") || ct.contains("text/plain")) {
+                    try {
+                        String body = new String(resp.getBody());
+                        if (body.contains("errcode")) {
+                            log.error("ASR(WeChat): 下载媒体失败: {}", body);
+                            return null;
+                        }
+                    } catch (Exception ignored) {}
+                }
+                log.info("ASR(WeChat): 下载语音成功, size={}", resp.getBody().length);
+                return resp.getBody();
+            }
+            log.error("ASR(WeChat): 下载媒体异常, HTTP {}", resp.getStatusCode());
+        } catch (Exception e) {
+            log.error("ASR(WeChat): 下载媒体失败: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /** 将音频字节转发到底座 ASR 管线 */
+    private R<?> forwardToAsr(byte[] audioBytes, String filename, Long corpId) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Internal-Token", internalToken);
+            headers.set("X-Corp-Id", String.valueOf(corpId));
+            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+            org.springframework.core.io.ByteArrayResource resource =
+                    new org.springframework.core.io.ByteArrayResource(audioBytes) {
+                        @Override public String getFilename() { return filename; }
+                    };
+            org.springframework.util.MultiValueMap<String, Object> parts =
+                    new org.springframework.util.LinkedMultiValueMap<>();
+            parts.add("audio", resource);
+
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    platformBaseUrl + "/api/internal/asr/recognize",
+                    HttpMethod.POST, new HttpEntity<>(parts, headers), Map.class);
+
+            if (resp.getBody() != null) {
+                Object data = resp.getBody().get("data");
+                if (data instanceof Map) {
+                    Object text = ((Map<?, ?>) data).get("text");
+                    if (text != null) return R.ok(Map.of("text", text.toString()));
+                }
+                return R.ok(data);
+            }
+            return R.fail("语音识别服务返回空结果");
+        } catch (Exception e) {
+            log.warn("ASR 识别失败 corpId={}: {}", corpId, e.getMessage());
             if (e.getMessage() != null && e.getMessage().contains("401")) {
                 return R.fail("ASR API Key 无效，请联系管理员配置语音识别服务");
             }
