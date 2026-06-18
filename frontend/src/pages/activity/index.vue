@@ -61,6 +61,7 @@
       <text class="empty-text">暂无活动，敬请期待更多精彩内容</text>
     </view>
     <view v-else-if="noMore && list.length" class="state-tip">— 已经到底啦 —</view>
+
   </view>
 </template>
 
@@ -325,4 +326,5 @@ function api(url, method, data) {
 .empty { padding: 120rpx 48rpx; }
 .empty-icon { font-size: 64rpx; display: block; margin-bottom: 20rpx; }
 .empty-text { color: #999; }
+
 </style>
