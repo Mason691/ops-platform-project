@@ -30,8 +30,6 @@ public class UserServiceImpl implements IUserService {
 
     private final String jwtSecret;
     private final long jwtExpiration;
-    private final boolean phoneMockEnabled;
-    private final String phoneMockPhone;
 
     private static final java.util.regex.Pattern PHONE_PATTERN =
             java.util.regex.Pattern.compile("^1[3-9]\\d{9}$");
@@ -41,16 +39,12 @@ public class UserServiceImpl implements IUserService {
             PasswordEncoder passwordEncoder,
             MemberSyncClient memberSyncClient,
             @Value("${platform.jwt-secret}") String jwtSecret,
-            @Value("${platform.jwt-expiration:43200}") long jwtExpiration,
-            @Value("${wechat.phone-mock.enabled:false}") boolean phoneMockEnabled,
-            @Value("${wechat.phone-mock.phone:13800138000}") String phoneMockPhone) {
+            @Value("${platform.jwt-expiration:43200}") long jwtExpiration) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.memberSyncClient = memberSyncClient;
         this.jwtSecret = jwtSecret;
         this.jwtExpiration = jwtExpiration;
-        this.phoneMockEnabled = phoneMockEnabled;
-        this.phoneMockPhone = phoneMockPhone;
     }
 
     // ═══ 注册 ═══
@@ -75,7 +69,7 @@ public class UserServiceImpl implements IUserService {
         if (nickname == null || nickname.isEmpty())
             nickname = phone.substring(0, 3) + "****" + phone.substring(7);
 
-        log.info("注册: phone={}, mock={}, corpId={}", phone, phoneMockEnabled, corpId);
+        log.info("注册: phone={}, corpId={}", phone, corpId);
 
         // ── 检查是否已注册 ──
         OpsMember exist = userMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
@@ -169,7 +163,7 @@ public class UserServiceImpl implements IUserService {
         Long corpId = req.getCorpId() != null ? req.getCorpId() : 4L;
         String nickname = req.getNickname();
 
-        // ── 获取手机号（与注册相同的 mock/正式解析逻辑）──
+        // ── 获取手机号 ──
         String phone = resolvePhoneForWechat(req);
         if (phone == null || !PHONE_PATTERN.matcher(phone).matches())
             throw new IllegalArgumentException("未获取到手机号，请授权后重试");
@@ -177,7 +171,7 @@ public class UserServiceImpl implements IUserService {
         if (nickname == null || nickname.isEmpty())
             nickname = phone.substring(0, 3) + "****" + phone.substring(7);
 
-        log.info("微信登录: phone={}, mock={}, corpId={}", phone, phoneMockEnabled, corpId);
+        log.info("微信登录: phone={}, corpId={}", phone, corpId);
 
         // ── 查找或创建用户 ──
         OpsMember user = userMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
@@ -223,16 +217,8 @@ public class UserServiceImpl implements IUserService {
         return result;
     }
 
-    /** 从 WechatLoginRequest 解析手机号（复用 RegisterRequest 解析路径） */
+    /** 从 WechatLoginRequest 解析手机号 */
     private String resolvePhoneForWechat(WechatLoginRequest req) {
-        if (phoneMockEnabled) {
-            if (req.getMockPhone() != null && PHONE_PATTERN.matcher(req.getMockPhone()).matches()) {
-                log.info("使用前端 mock 手机号: {}", req.getMockPhone());
-                return req.getMockPhone();
-            }
-            log.info("使用配置 mock 手机号: {}", phoneMockPhone);
-            return phoneMockPhone;
-        }
         if (req.getEncryptedData() != null && req.getIv() != null && req.getCode() != null) {
             return decryptWechatPhone(req.getCode(), req.getEncryptedData(), req.getIv());
         }
@@ -241,16 +227,8 @@ public class UserServiceImpl implements IUserService {
 
     // ═══ 私有方法 ═══
 
-    /** 获取手机号（mock 模式优先） */
+    /** 获取手机号 */
     private String resolvePhone(RegisterRequest req) {
-        if (phoneMockEnabled) {
-            if (req.getMockPhone() != null && PHONE_PATTERN.matcher(req.getMockPhone()).matches()) {
-                log.info("使用前端 mock 手机号: {}", req.getMockPhone());
-                return req.getMockPhone();
-            }
-            log.info("使用配置 mock 手机号: {}", phoneMockPhone);
-            return phoneMockPhone;
-        }
         if (req.getEncryptedData() != null && req.getIv() != null && req.getCode() != null) {
             return decryptWechatPhone(req.getCode(), req.getEncryptedData(), req.getIv());
         }
@@ -259,7 +237,7 @@ public class UserServiceImpl implements IUserService {
 
     /** 从微信解密手机号（正式环境实现） */
     private String decryptWechatPhone(String code, String encryptedData, String iv) {
-        log.warn("微信手机号解密尚未实现（需认证服务号），当前仅 mock 模式可用");
+        log.warn("微信手机号解密尚未实现，需认证服务号");
         return null;
     }
 

@@ -46,12 +46,6 @@ ops:
   remind:
     hours-before: 24,1
 
-# 微信手机号获取 — 开发阶段 mock 开关
-wechat:
-  phone-mock:
-    enabled: true
-    phone: 13800138000
-
 management:
   endpoints:
     web:

@@ -43,8 +43,7 @@ public class AuthController {
 
     /**
      * 微信一键登录。
-     * 正式环境：前端调用 wx.login + getPhoneNumber 获取 code/encryptedData/iv；
-     * 开发环境：前端传 mockPhone 或后端配置默认 mock 手机号。
+     * 前端调用 wx.login + getPhoneNumber 获取 code/encryptedData/iv。
      */
     @PostMapping("/wechat-login")
     public R<?> wechatLogin(@RequestBody WechatLoginRequest req) {

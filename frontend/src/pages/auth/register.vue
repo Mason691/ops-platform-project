@@ -83,7 +83,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { api } from '@/api/index'
 
 const phone         = ref('')
@@ -134,42 +134,21 @@ const canSubmit = computed(() => {
     && phoneObtained.value
 })
 
-// ── 开发模式 mock 手机号 ──
-
-onMounted(() => {
-  // #ifdef H5
-  const mock = new URLSearchParams(location.search).get('mockPhone')
-  if (mock && /^1[3-9]\d{9}$/.test(mock)) {
-    phone.value = mock
-    phoneObtained.value = true
-  }
-  // #endif
-})
-
 // ── 微信授权（带 mock 降级） ──
-
-function injectMock() {
-  phone.value = '13800138000'
-  phoneObtained.value = true
-  uni.showToast({ title: '已获取手机号', icon: 'success' })
-}
 
 function requestWechatAuth() {
   // #ifdef H5
-  // 非微信 → 直接 mock
-  if (!/micromessenger/i.test(navigator.userAgent)) return injectMock()
-
-  // 微信环境：调 getPhoneNumber，失败降级 mock
-  if (typeof WeixinJSBridge !== 'undefined') {
+  // 微信环境：调 getPhoneNumber
+  if (/micromessenger/i.test(navigator.userAgent) && typeof WeixinJSBridge !== 'undefined') {
     WeixinJSBridge.invoke('getPhoneNumber', {}, (res) => {
       if (res.err_msg && res.err_msg.indexOf(':ok') > -1) {
         uni.showToast({ title: '授权成功', icon: 'success' })
       } else {
-        injectMock()
+        uni.showToast({ title: '授权失败，请重试', icon: 'none' })
       }
     })
   } else {
-    injectMock()
+    uni.showToast({ title: '请在微信中打开', icon: 'none' })
   }
   // #endif
 }
@@ -183,11 +162,8 @@ async function doRegister() {
     const payload = {
       password: password.value,
       confirmPassword: confirmPwd.value,
+      phone: phone.value,
     }
-    // #ifdef H5
-    const mock = new URLSearchParams(location.search).get('mockPhone')
-    payload.mockPhone = mock || phone.value
-    // #endif
 
     const r = await api.register(payload)
     uni.showToast({ title: '注册成功', icon: 'success' })
