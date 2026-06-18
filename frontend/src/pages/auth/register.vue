@@ -208,7 +208,7 @@ function toLogin() {
 <style scoped>
 .page {
   min-height: 100vh;
-  background: linear-gradient(160deg, #1a73e8 0%, #0d47a1 50%, #f0f4f8 50%);
+  background: linear-gradient(160deg, #FF6B35 0%, #E85D2C 50%, #f0f4f8 50%);
   padding: 80rpx 40rpx 40rpx;
 }
 
@@ -252,9 +252,9 @@ function toLogin() {
   font-size: 30rpx; color: #333; outline: none; box-sizing: border-box;
   transition: border-color .2s;
 }
-.full-input:focus { border-color: #1a73e8; background: #fff }
+.full-input:focus { border-color: #FF6B35; background: #fff }
 .field-hint { display: block; font-size: 22rpx; color: #e53935; margin-top: 8rpx; padding-left: 4rpx }
-.pwd-toggle { text-align: right; margin-top: 12rpx; font-size: 24rpx; color: #1a73e8 }
+.pwd-toggle { text-align: right; margin-top: 12rpx; font-size: 24rpx; color: #FF6B35 }
 
 /* ── Strength ── */
 .strength { display: flex; align-items: center; gap: 16rpx; margin-top: -8rpx; margin-bottom: 8rpx }
@@ -263,13 +263,13 @@ function toLogin() {
 .weak  { background: #e53935 }
 .mid   { background: #fb8c00 }
 .good  { background: #43a047 }
-.strong{ background: #1a73e8 }
+.strong{ background: #FF6B35 }
 .strength-text { font-size: 22rpx; color: #999; flex-shrink: 0 }
 
 /* Submit */
 .submit-btn {
   height: 96rpx; line-height: 96rpx; text-align: center; border-radius: 48rpx;
-  background: linear-gradient(135deg, #1a73e8, #0d47a1);
+  background: linear-gradient(135deg, #FF6B35, #FF8C5A);
   color: #fff; font-size: 32rpx; font-weight: 600; margin-top: 40rpx;
   transition: opacity .2s;
 }
@@ -277,5 +277,5 @@ function toLogin() {
 .submit-btn.disabled { background: #ccc; pointer-events: none }
 
 .footer-link { text-align: center; margin-top: 20rpx; font-size: 26rpx; color: #999 }
-.link { color: #1a73e8; font-weight: 500 }
+.link { color: #FF6B35; font-weight: 500 }
 </style>

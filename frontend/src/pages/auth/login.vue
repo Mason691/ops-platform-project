@@ -94,7 +94,7 @@ function toRegister() {
 <style scoped>
 .page {
   min-height: 100vh;
-  background: linear-gradient(160deg, #1a73e8 0%, #0d47a1 50%, #f0f4f8 50%);
+  background: linear-gradient(160deg, #FF6B35 0%, #E85D2C 50%, #f0f4f8 50%);
   padding: 80rpx 40rpx 40rpx;
 }
 
@@ -111,7 +111,7 @@ function toRegister() {
 .field { margin-bottom: 32rpx }
 .field-label { display: block; font-size: 28rpx; color: #333; font-weight: 600; margin-bottom: 16rpx }
 .field-box { display: flex; align-items: center; background: #f5f7fa; border-radius: 16rpx; padding: 0 24rpx; border: 2rpx solid transparent; transition: border-color .2s }
-.field-box:focus-within { border-color: #1a73e8; background: #fff }
+.field-box:focus-within { border-color: #FF6B35; background: #fff }
 .field-prefix { font-size: 28rpx; color: #999; padding-right: 16rpx; flex-shrink: 0 }
 .field-input { flex: 1; height: 96rpx; font-size: 30rpx; color: #333; border: none; background: transparent; outline: none; width: 0; min-width: 0 }
 .field-input.full { width: 100% }
@@ -124,7 +124,7 @@ function toRegister() {
   line-height: 96rpx;
   text-align: center;
   border-radius: 48rpx;
-  background: linear-gradient(135deg, #1a73e8, #0d47a1);
+  background: linear-gradient(135deg, #FF6B35, #FF8C5A);
   color: #fff;
   font-size: 32rpx;
   font-weight: 600;
@@ -135,5 +135,5 @@ function toRegister() {
 .submit-btn.disabled { background: #ccc; pointer-events: none }
 
 .footer-link { text-align: center; margin-top: 36rpx; font-size: 26rpx; color: #999 }
-.link { color: #1a73e8; font-weight: 500 }
+.link { color: #FF6B35; font-weight: 500 }
 </style>

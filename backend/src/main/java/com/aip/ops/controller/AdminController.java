@@ -343,6 +343,10 @@ public class AdminController {
     @PostMapping("/live-rooms")
     public R<?> createLiveRoom(@RequestBody OpsLiveRoom room) {
         Long operatorId = currentOperatorId();
+        // 自动填充 merchant_id 为当前运营商第一个已绑定销售商
+        if (room.getMerchantId() == null) {
+            room.setMerchantId(resolveDefaultMerchant(operatorId));
+        }
         assertMerchantBound(operatorId, room.getMerchantId());
         room.setId(null);
         liveRoomMapper.insert(room);
@@ -354,10 +358,23 @@ public class AdminController {
         Long operatorId = currentOperatorId();
         OpsLiveRoom existing = liveRoomMapper.selectById(id);
         if (existing == null) return R.fail("直播间不存在");
-        assertMerchantBound(operatorId, existing.getMerchantId());
+        // 如果前端未传 merchant_id，沿用已有值
+        if (room.getMerchantId() == null) {
+            room.setMerchantId(existing.getMerchantId());
+        }
+        assertMerchantBound(operatorId, room.getMerchantId());
         room.setId(id);
         liveRoomMapper.updateById(room);
         return R.ok();
+    }
+
+    /** 获取当前运营商第一个已绑定销售商 ID */
+    private Long resolveDefaultMerchant(Long operatorId) {
+        return omMapper.selectList(new LambdaQueryWrapper<OperatorMerchant>()
+                .eq(OperatorMerchant::getOperatorId, operatorId)
+                .eq(OperatorMerchant::getStatus, 1)
+                .last("LIMIT 1"))
+                .stream().map(OperatorMerchant::getMerchantId).findFirst().orElse(null);
     }
 
     @DeleteMapping("/live-rooms/{id}")
