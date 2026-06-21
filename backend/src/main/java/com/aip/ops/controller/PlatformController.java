@@ -50,6 +50,8 @@ public class PlatformController {
     private String platformBaseUrl;
     @org.springframework.beans.factory.annotation.Value("${platform.internal-token}")
     private String internalToken;
+    @org.springframework.beans.factory.annotation.Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
+    private String uploadBaseDir;
 
     // ═══ 用户登录 ═══
     // 登录接口已迁移至 AuthController：POST /api/ops/auth/login
@@ -99,8 +101,8 @@ public class PlatformController {
             byte[] bytes = java.util.Base64.getDecoder().decode(base64);
             String fileName = "avatar_" + userId + "_" + System.currentTimeMillis() + "." + ext;
 
-            // 保存到文件系统
-            java.io.File uploadDir = new java.io.File("./uploads/avatar/");
+            // 保存到文件系统（绝对路径，确保 Nginx 可读）
+            java.io.File uploadDir = new java.io.File(uploadBaseDir + "/avatar/");
             if (!uploadDir.exists()) uploadDir.mkdirs();
             java.io.File file = new java.io.File(uploadDir, fileName);
             java.nio.file.Files.write(file.toPath(), bytes);

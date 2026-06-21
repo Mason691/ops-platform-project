@@ -2,6 +2,7 @@ package com.aip.ops.controller;
 
 import com.aip.sdk.result.R;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -17,6 +18,9 @@ import java.util.*;
 @RestController
 @RequestMapping("/api/ops/files")
 public class FileUploadController {
+
+    @Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
+    private String uploadBaseDir;
 
     private static final Set<String> IMAGE_EXTS = Set.of("jpg","jpeg","png","gif","webp","bmp");
     private static final Set<String> VIDEO_EXTS = Set.of("mp4","mov","avi","webm");
@@ -43,8 +47,7 @@ public class FileUploadController {
             // without conflicting with mall backend's /uploads/ route.
             String subdir = isVideo ? "ops/video/" : "ops/img/";
             String datePart = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-            String baseDir = System.getProperty("user.dir");
-            File dir = new File(baseDir, "uploads/" + subdir + datePart + "/");
+            File dir = new File(uploadBaseDir, subdir + datePart + "/");
             if (!dir.exists()) dir.mkdirs();
 
             String name = UUID.randomUUID().toString().substring(0,8) + "." + ext;
@@ -176,8 +179,7 @@ public class FileUploadController {
 
             // Build relative URL matching the video's URL pattern
             String parentPath = videoFile.getParentFile().getAbsolutePath();
-            String baseDir = System.getProperty("user.dir") + "/uploads/";
-            String relativePath = parentPath.replace(baseDir, "");
+            String relativePath = parentPath.replace(uploadBaseDir + "/", "");
             return "/uploads/" + relativePath + "/" + imgFile.getName();
         } catch (Exception e) {
             log.warn("视频封面截取异常: {}", e.getMessage());
