@@ -217,8 +217,11 @@ public class UserServiceImpl implements IUserService {
         return result;
     }
 
-    /** 从 WechatLoginRequest 解析手机号 */
+    /** 从 WechatLoginRequest 解析手机号（开发模式优先使用 mockPhone） */
     private String resolvePhoneForWechat(WechatLoginRequest req) {
+        if (req.getMockPhone() != null && !req.getMockPhone().isBlank()) {
+            return req.getMockPhone().trim();
+        }
         if (req.getEncryptedData() != null && req.getIv() != null && req.getCode() != null) {
             return decryptWechatPhone(req.getCode(), req.getEncryptedData(), req.getIv());
         }
@@ -227,8 +230,11 @@ public class UserServiceImpl implements IUserService {
 
     // ═══ 私有方法 ═══
 
-    /** 获取手机号 */
+    /** 获取手机号（开发模式优先使用 mockPhone） */
     private String resolvePhone(RegisterRequest req) {
+        if (req.getMockPhone() != null && !req.getMockPhone().isBlank()) {
+            return req.getMockPhone().trim();
+        }
         if (req.getEncryptedData() != null && req.getIv() != null && req.getCode() != null) {
             return decryptWechatPhone(req.getCode(), req.getEncryptedData(), req.getIv());
         }

@@ -379,8 +379,33 @@ function goBack() {
   uni.navigateBack()
 }
 
+// ==================== Mock Login ====================
+async function ensureLogin() {
+  const token = uni.getStorageSync('ops_token')
+  if (token) return true
+  try {
+    const res = await new Promise((resolve, reject) => {
+      uni.request({
+        url: 'https://a.15891589.xyz/api/ops/auth/login',
+        method: 'POST',
+        data: { phone: '13900000001', password: 'admin123' },
+        header: { 'Content-Type': 'application/json' },
+        success(r) { if (r.data?.ok) resolve(r.data.data); else reject(r.data) },
+        fail: reject,
+      })
+    })
+    uni.setStorageSync('ops_token', res.token)
+    uni.setStorageSync('ops_member', JSON.stringify(res))
+    return true
+  } catch (e) {
+    console.warn('[activity-form] mock login failed:', e)
+    return false
+  }
+}
+
 // ==================== Init (Edit mode) ====================
 onMounted(async () => {
+  await ensureLogin()
   const pages = getCurrentPages()
   const opts = pages[pages.length - 1]?.options || {}
   const id = opts.id
