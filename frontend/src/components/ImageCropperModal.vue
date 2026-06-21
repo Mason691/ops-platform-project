@@ -119,6 +119,10 @@ function initCropper() {
         rotatable: false,            // 不可旋转
         scalable: true,              // 图片可缩放
         toggleDragModeOnDblclick: false, // 双击不切换模式
+        ready() {
+          // 图片加载完成后放大一倍，方便看清细节
+          cropper.zoomTo(2)
+        },
       })
       initialized = true
     } catch (e) {
@@ -249,7 +253,7 @@ onBeforeUnmount(() => {
 .cropper-modal {
   background: #fff;
   border-radius: 8px;
-  width: 720px;
+  width: 920px;
   max-width: 95vw;
   max-height: 95vh;
   display: flex;
@@ -308,10 +312,10 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
-/* 裁剪容器 — 正方形 600×600 */
+/* 裁剪容器 — 正方形 800×800 */
 .cropper-wrapper {
-  width: 600px;
-  height: 600px;
+  width: 800px;
+  height: 800px;
   max-width: 100%;
   border: 1px solid #e0e0e0;
   border-radius: 4px;
@@ -416,7 +420,7 @@ onBeforeUnmount(() => {
 }
 
 /* ========== 响应式适配 ========== */
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   .cropper-modal {
     width: 95vw;
     max-height: 90vh;
@@ -425,8 +429,8 @@ onBeforeUnmount(() => {
   .cropper-wrapper {
     width: 80vw;
     height: 80vw;
-    max-width: 500px;
-    max-height: 500px;
+    max-width: 600px;
+    max-height: 600px;
   }
 
   .cropper-header {
@@ -439,10 +443,6 @@ onBeforeUnmount(() => {
 
   .cropper-footer {
     padding: 12px 20px;
-  }
-
-  .cropper-title {
-    font-size: 15px;
   }
 }
 
