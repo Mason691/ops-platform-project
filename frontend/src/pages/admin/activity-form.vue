@@ -327,7 +327,11 @@ async function handleCropperConfirm() {
       uni.showLoading({ title: '上传封面...' })
       try {
         const url = await uploadFile(blob, 'cover.jpg')
-        form.coverImage = url; form.coverUrl = url; coverUrl.value = url
+        // H5: uniapp <image> renders as CSS background-image,
+        // CSS url() resolves root-relative paths to page base (/subsystem/ops/).
+        // Must prepend full HTTPS domain for correct display.
+        const fullUrl = url.startsWith('/') ? 'https://a.15891589.xyz' + url : url
+        form.coverImage = url; form.coverUrl = url; coverUrl.value = fullUrl
         uni.hideLoading(); uni.showToast({ title: '上传成功', icon: 'success' })
       } catch { uni.hideLoading(); uni.showToast({ title: '上传失败', icon: 'none' }) }
     }, 'image/jpeg', 0.92)
