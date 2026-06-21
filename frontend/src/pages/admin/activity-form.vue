@@ -8,6 +8,16 @@
     <!-- ═══ Cover Image ═══ -->
     <view class="af-section">
       <text class="af-label">封面图 <text class="af-required">*</text></text>
+      <!-- H5 隐藏的原生 file input，避免 uni.chooseImage 兼容问题 -->
+      <!-- #ifdef H5 -->
+      <input
+        ref="fileInputRef"
+        type="file"
+        accept="image/*"
+        style="display:none"
+        @change="onFilePicked"
+      />
+      <!-- #endif -->
       <view class="af-cover" @click="chooseCover">
         <image
           v-if="coverUrl"
@@ -21,6 +31,12 @@
           <text class="af-empty-text">点击选择封面</text>
         </view>
         <view class="af-cover-badge" v-if="coverUrl">点击更换</view>
+      </view>
+      <!-- 测试用：直接用已有图片 URL 打开裁剪器 -->
+      <view class="af-test-row" v-if="!coverUrl">
+        <text class="af-test-label">快速测试：</text>
+        <button class="af-test-btn" @click="testCropperWithUrl('https://a.15891589.xyz/uploads/ops/img/20260621/546aaaff.jpg')">测试图片1</button>
+        <button class="af-test-btn" @click="testCropperWithUrl('https://a.15891589.xyz/uploads/ops/img/20260621/607065ab.jpg')">测试图片2</button>
       </view>
     </view>
 
@@ -117,23 +133,67 @@
       </button>
     </view>
 
-    <!-- ═══ Image Cropper Modal ═══ -->
-    <ImageCropperModal
-      :visible="cropperVisible"
-      :imageUrl="cropperImageUrl"
-      @close="cropperVisible = false"
-      @confirm="onCropperConfirm"
-      @error="onCropperError"
-    />
+    <!-- ═══ Inline Image Cropper ═══ -->
+    <!-- #ifdef H5 -->
+    <view class="co-overlay" v-if="cropperVisible" @click.stop.prevent="() => {}" @touchmove.prevent.stop>
+      <view class="co-dialog">
+        <view class="co-header">
+          <view class="co-header-left">
+            <view class="co-header-icon">✂️</view>
+            <text class="co-title">裁剪封面图</text>
+            <view class="co-badge">800 × 800</view>
+          </view>
+          <view class="co-close-btn" @click="cropperVisible = false">✕</view>
+        </view>
+        <view class="co-body">
+          <view class="co-main">
+            <view class="co-crop-container">
+              <img ref="cropperImageRef" :src="cropperImageUrl" alt="封面原图" crossorigin="anonymous" @load="initCropper" @error="cropperVisible = false" />
+            </view>
+          </view>
+          <view class="co-preview">
+            <view class="co-preview-header"><text class="co-preview-title">实时预览</text></view>
+            <view class="co-preview-cards">
+              <view class="co-preview-item">
+                <view class="co-preview-box co-preview-box--round"><view class="co-preview-inner" id="previewRound"></view></view>
+                <text class="co-preview-label">圆形</text>
+              </view>
+              <view class="co-preview-item">
+                <view class="co-preview-box co-preview-box--square"><view class="co-preview-inner" id="previewSquare"></view></view>
+                <text class="co-preview-label">方形</text>
+              </view>
+            </view>
+          </view>
+        </view>
+        <view class="co-footer">
+          <view class="co-toolbar">
+            <button class="co-tool-btn co-tool-btn--icon" @click="zoomOut" :disabled="zoomLevel <= 0.5">−</button>
+            <view class="co-zoom-display"><text class="co-zoom-value">{{ Math.round(zoomLevel * 100) }}</text><text class="co-zoom-unit">%</text></view>
+            <button class="co-tool-btn co-tool-btn--icon" @click="zoomIn" :disabled="zoomLevel >= 3">+</button>
+            <view class="co-tool-divider"></view>
+            <button class="co-tool-btn co-tool-btn--text" @click="rotateLeft">↺ 左转</button>
+            <button class="co-tool-btn co-tool-btn--text" @click="rotateRight">↻ 右转</button>
+            <view class="co-tool-divider"></view>
+            <button class="co-tool-btn co-tool-btn--text" @click="resetCrop">重置</button>
+          </view>
+          <view class="co-actions">
+            <button class="co-btn co-btn--cancel" @click="cropperVisible = false">取消</button>
+            <button class="co-btn co-btn--confirm" @click="handleCropperConfirm">确认裁剪</button>
+          </view>
+        </view>
+      </view>
+    </view>
+    <!-- #endif -->
 
     <view style="height: 120rpx"></view>
   </view>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick, watch, onBeforeUnmount } from 'vue'
 import { api } from '@/api/index'
-import ImageCropperModal from '@/components/ImageCropperModal.vue'
+import Cropper from 'cropperjs'
+import 'cropperjs/dist/cropper.css'
 
 // ==================== State ====================
 const isEdit = ref(false)
@@ -173,61 +233,141 @@ const coverUrl = ref('')
 // ==================== Cropper ====================
 const cropperVisible = ref(false)
 const cropperImageUrl = ref('')
+const cropperImageRef = ref(null)
+const fileInputRef = ref(null)
+let cropperInstance = null
+let cropperInitialized = false
+const zoomLevel = ref(1)
+
+// ═══ Cropper Core ═══
+function updatePreview() {
+  if (!cropperInstance || !cropperInitialized) return
+  try {
+    const rc = cropperInstance.getCroppedCanvas({ width: 150, height: 150 })
+    const sc = cropperInstance.getCroppedCanvas({ width: 150, height: 150 })
+    const rEl = document.getElementById('previewRound')
+    const sEl = document.getElementById('previewSquare')
+    if (rEl) { rEl.innerHTML = ''; if (rc) rEl.appendChild(rc) }
+    if (sEl) { sEl.innerHTML = ''; if (sc) sEl.appendChild(sc) }
+  } catch {}
+}
+
+function destroyCropper() {
+  if (cropperInstance) {
+    try { cropperInstance.destroy() } catch {}
+    cropperInstance = null
+    cropperInitialized = false
+    zoomLevel.value = 1
+  }
+}
+
+function initCropper() {
+  destroyCropper()
+  const img = cropperImageRef.value
+  if (!img) return
+  nextTick(() => {
+    try {
+      cropperInstance = new Cropper(img, {
+        aspectRatio: 1, viewMode: 1, autoCropArea: 1,
+        cropBoxMovable: false, cropBoxResizable: false, dragMode: 'move',
+        minCanvasWidth: 800, minCanvasHeight: 800,
+        guides: true, background: true, modal: true, center: true, highlight: false,
+        movable: true, zoomable: true, zoomOnWheel: true, zoomOnTouch: true,
+        scalable: true, rotatable: true, toggleDragModeOnDblclick: false,
+        responsive: true, restore: false,
+        ready() {
+          const cd = cropperInstance.getContainerData()
+          const id = cropperInstance.getImageData()
+          if (id.naturalWidth > 0 && id.naturalHeight > 0) {
+            const fz = Math.max(cd.width / id.naturalWidth, cd.height / id.naturalHeight)
+            cropperInstance.zoomTo(fz)
+            zoomLevel.value = Math.round(fz * 100) / 100
+          } else { cropperInstance.zoomTo(2); zoomLevel.value = 2 }
+          updatePreview()
+        },
+        crop() { updatePreview() },
+        zoom(e) { zoomLevel.value = e.detail.ratio },
+      })
+      cropperInitialized = true
+    } catch (e) { console.error('Cropper init:', e) }
+  })
+}
+
+function zoomIn() { if (cropperInstance) cropperInstance.zoom(0.1) }
+function zoomOut() { if (cropperInstance) cropperInstance.zoom(-0.1) }
+function rotateLeft() { if (cropperInstance) cropperInstance.rotate(-90) }
+function rotateRight() { if (cropperInstance) cropperInstance.rotate(90) }
+function resetCrop() {
+  if (!cropperInstance) return
+  cropperInstance.reset()
+  const cd = cropperInstance.getContainerData()
+  const id = cropperInstance.getImageData()
+  if (id.naturalWidth > 0 && id.naturalHeight > 0) {
+    const fz = Math.max(cd.width / id.naturalWidth, cd.height / id.naturalHeight)
+    cropperInstance.zoomTo(fz)
+    zoomLevel.value = Math.round(fz * 100) / 100
+  } else { cropperInstance.zoomTo(2) }
+}
+
+async function handleCropperConfirm() {
+  if (!cropperInstance || !cropperInitialized) { uni.showToast({ title: '裁剪未就绪', icon: 'none' }); return }
+  try {
+    const canvas = cropperInstance.getCroppedCanvas({ width: 800, height: 800, imageSmoothingEnabled: true, imageSmoothingQuality: 'high' })
+    if (!canvas) { uni.showToast({ title: '生成图片失败', icon: 'none' }); return }
+    canvas.toBlob(async (blob) => {
+      if (!blob) { uni.showToast({ title: '导出失败', icon: 'none' }); return }
+      cropperVisible.value = false
+      uni.showLoading({ title: '上传封面...' })
+      try {
+        const url = await uploadFile(blob, 'cover.jpg')
+        form.coverImage = url; form.coverUrl = url; coverUrl.value = url
+        uni.hideLoading(); uni.showToast({ title: '上传成功', icon: 'success' })
+      } catch { uni.hideLoading(); uni.showToast({ title: '上传失败', icon: 'none' }) }
+    }, 'image/jpeg', 0.92)
+  } catch (e) { console.error('Crop failed:', e); uni.showToast({ title: '裁剪失败', icon: 'none' }) }
+}
+
+// Watchers + lifecycle for cropper
+watch(cropperImageUrl, (n, o) => { if (n !== o && cropperInstance && cropperInitialized) cropperInstance.replace(n) })
+onBeforeUnmount(() => destroyCropper())
+
+// Test: open cropper with known URL
+function testCropperWithUrl(url) {
+  cropperImageUrl.value = url; cropperVisible.value = true
+}
+
+// File picker — H5 native input
+function onFilePicked(e) {
+  // #ifdef H5
+  const file = e.target?.files?.[0] || e.detail?.target?.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (ev) => { cropperImageUrl.value = ev.target.result; cropperVisible.value = true }
+  reader.readAsDataURL(file)
+  if (fileInputRef.value) fileInputRef.value.value = ''
+  // #endif
+}
 
 async function chooseCover() {
+  // #ifdef H5
+  if (fileInputRef.value) { fileInputRef.value.click(); return }
+  // #endif
   try {
     const res = await new Promise((resolve, reject) => {
-      uni.chooseImage({
-        count: 1,
-        sizeType: ['original', 'compressed'],
-        sourceType: ['album', 'camera'],
-        success: resolve,
-        fail: reject,
-      })
+      uni.chooseImage({ count: 1, sizeType: ['original', 'compressed'], sourceType: ['album', 'camera'], success: resolve, fail: reject })
     })
     const path = res.tempFilePaths[0]
-    // H5: convert blob path to data URL for cropper
     let dataUrl = path
     // #ifdef H5
     try {
       const blob = await fetch(path).then(r => r.blob())
-      dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(reader.result)
-        reader.onerror = reject
-        reader.readAsDataURL(blob)
-      })
-    } catch { /* fall through — path may already be a data URL */ }
+      dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob) })
+    } catch {}
     // #endif
-    cropperImageUrl.value = dataUrl
-    cropperVisible.value = true
+    cropperImageUrl.value = dataUrl; cropperVisible.value = true
   } catch (e) {
-    if (!String(e.errMsg || '').includes('cancel')) {
-      uni.showToast({ title: '选择图片失败', icon: 'none' })
-    }
+    if (!String(e.errMsg || '').includes('cancel')) { uni.showToast({ title: '选择图片失败', icon: 'none' }) }
   }
-}
-
-async function onCropperConfirm(blob) {
-  cropperVisible.value = false
-  uni.showLoading({ title: '上传封面...' })
-  try {
-    const uploadedUrl = await uploadFile(blob, 'cover.jpg')
-    form.coverImage = uploadedUrl
-    form.coverUrl = uploadedUrl
-    coverUrl.value = uploadedUrl
-    uni.hideLoading()
-    uni.showToast({ title: '封面上传成功', icon: 'success' })
-  } catch (e) {
-    uni.hideLoading()
-    uni.showToast({ title: '封面上传失败', icon: 'none' })
-    console.error('[activity-form] cover upload failed:', e)
-  }
-}
-
-function onCropperError(e) {
-  console.error('[activity-form] cropper error:', e)
-  uni.showToast({ title: '图片处理失败', icon: 'none' })
 }
 
 // ==================== Upload Helper ====================
@@ -515,6 +655,63 @@ onMounted(async () => {
   color: #fff; font-size: 22rpx;
 }
 
+/* Test buttons */
+.af-test-row {
+  display: flex; align-items: center; gap: 12rpx; margin-top: 16rpx;
+}
+.af-test-label { font-size: 22rpx; color: #999; }
+.af-test-btn {
+  padding: 8rpx 20rpx; border-radius: 20rpx;
+  background: #EEF2FF; color: #6366F1; border: 1px solid #d4d8f0;
+  font-size: 22rpx; font-weight: 550; cursor: pointer;
+}
+.af-test-btn:hover { background: #dde3ff; }
+.af-test-btn:active { transform: scale(0.97); }
+
+
+/* ═══ Cropper Overlay & Dialog ═══ */
+.co-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.5); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; }
+.co-dialog { background: #fff; border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,0.16); width: 1060px; max-width: 96vw; max-height: 95vh; display: flex; flex-direction: column; overflow: hidden; }
+.co-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid #f0f0f0; background: #fafbfc; }
+.co-header-left { display: flex; align-items: center; gap: 10px; }
+.co-header-icon { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, #fff3ee, #ffe8dc); color: #FF6B35; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.co-title { font-size: 17px; font-weight: 650; color: #1a1a2e; }
+.co-badge { font-size: 11px; font-weight: 600; color: #FF6B35; background: #fff5f0; padding: 3px 10px; border-radius: 20px; }
+.co-close-btn { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #94a3b8; font-size: 20px; font-weight: 600; }
+.co-body { flex: 1; display: flex; gap: 24px; padding: 24px; background: #f8f9fb; overflow: hidden; }
+.co-main { flex: none; display: flex; align-items: center; justify-content: center; }
+.co-crop-container { width: 800px; height: 800px; background: #fff; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); overflow: hidden; }
+.co-crop-container img { display: block; }
+.co-preview { flex: none; width: 180px; display: flex; flex-direction: column; align-items: center; gap: 20px; padding-top: 4px; }
+.co-preview-title { font-size: 12px; font-weight: 650; color: #64748b; text-transform: uppercase; }
+.co-preview-cards { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+.co-preview-item { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.co-preview-box { width: 130px; height: 130px; background: #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.06); overflow: hidden; }
+.co-preview-box--round { border-radius: 50%; }
+.co-preview-box--square { border-radius: 12px; }
+.co-preview-inner { width: 100%; height: 100%; }
+.co-preview-inner canvas { width: 100%; height: 100%; }
+.co-preview-label { font-size: 11px; font-weight: 550; color: #94a3b8; }
+.co-footer { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; border-top: 1px solid #f0f0f0; background: #fff; }
+.co-toolbar { display: flex; align-items: center; gap: 10px; }
+.co-tool-divider { width: 1px; height: 22px; background: #e5e7eb; }
+.co-zoom-display { display: flex; align-items: baseline; min-width: 52px; padding: 2px 6px; background: #f8fafc; border-radius: 6px; }
+.co-zoom-value { font-size: 14px; font-weight: 700; color: #1e293b; }
+.co-zoom-unit { font-size: 10px; font-weight: 600; color: #94a3b8; margin-left: 1px; }
+.co-tool-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; border: 1px solid #e2e8f0; background: #fff; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 550; color: #475569; padding: 6px 10px; outline: none; }
+.co-tool-btn:disabled { opacity: 0.3; pointer-events: none; }
+.co-tool-btn--icon { width: 34px; height: 34px; padding: 0; }
+.co-actions { display: flex; gap: 10px; }
+.co-btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; border: none; cursor: pointer; outline: none; }
+.co-btn--cancel { background: #f1f5f9; color: #475569; }
+.co-btn--confirm { background: linear-gradient(135deg, #FF6B35, #e85d2c); color: #fff; }
+/* Cropper overrides */
+:deep(.cropper-crop-box) { outline: 2px dashed rgba(255,255,255,0.85) !important; }
+:deep(.cropper-point) { display: none !important; }
+:deep(.cropper-face) { opacity: 0 !important; }
+@media (max-width: 1100px) { .co-dialog { width: 97vw; } .co-body { flex-direction: column; align-items: center; } .co-crop-container { width: 80vw; height: 80vw; max-width: 500px; max-height: 500px; } .co-preview { flex-direction: row; gap: 12px; } .co-preview-cards { flex-direction: row; } }
+@media (max-width: 640px) { .co-crop-container { width: 88vw; height: 88vw; max-width: 340px; max-height: 340px; } .co-preview-box { width: 80px; height: 80px; } .co-btn { padding: 8px 16px; font-size: 13px; } }
+@media (max-width: 400px) { .co-crop-container { width: 92vw; height: 92vw; max-width: 280px; max-height: 280px; } }
 /* Upload */
 .af-upload-row { display: flex; align-items: center; gap: 16rpx; }
 .af-upload-status { font-size: 24rpx; color: #4CAF50; }
