@@ -91,8 +91,10 @@
           <image :src="assetUrl(p.cover_image || p.coverImage)" class="prod-img" mode="aspectFill" @click="goProduct(p)" @error="onImgError"/>
           <text class="prod-name">{{ p.name }}</text>
           <view class="prod-price">
-            <text v-if="p.points_price>0" class="p-points">{{ p.points_price }}积分</text>
-            <text v-if="p.cash_price>0" class="p-cash">¥{{ p.cash_price }}</text>
+            <text v-if="(p.points_price || p.points || 0) > 0" class="p-points">{{ p.points_price || p.points }}积分</text>
+            <text v-else class="p-points p-placeholder">0积分</text>
+            <text v-if="(p.cash_price || 0) > 0" class="p-cash">¥{{ p.cash_price }}</text>
+            <text v-else class="p-cash p-placeholder">¥0</text>
           </view>
           <view class="prod-buy-btn" @click.stop="goProduct(p)">立即抢购</view>
         </view>
@@ -434,6 +436,7 @@ function req(url, method, data) {
 .prod-price { display: flex; gap: 8rpx; padding: 0 12rpx 12rpx; align-items: baseline; }
 .p-points { font-size: 24rpx; color: #FF6B35; font-weight: 600; }
 .p-cash { font-size: 22rpx; color: #999; }
+.p-placeholder { visibility: hidden; }
 .prod-buy-btn {
   margin: 8rpx 12rpx 12rpx;
   padding: 8rpx 0;
