@@ -175,7 +175,19 @@ DB (相对路径) → Backend ImageUrlUtil → API JSON (相对路径)
 - **商品图片**：上游 mall_product 表存完整 HTTPS URL，Backend 提取文件名后映射到 `/uploads/ops/mall/`
   该路径通过 symlink `uploads/ops/mall → /home/jason/uploads/` 由 Nginx 读磁盘
 
-### 文件上传（FileUploadController）
+### 首页配置管理（Home Config）
+
+- **数据库**：`ops_home_config` 表，按 `operator_id` + `config_type`（banner/video/recommend）隔离
+- **Admin API**：`HomeConfigController`（`/api/ops/admin/home-configs/**`）— CRUD + 批量排序
+  - `GET /api/ops/admin/activities/available-videos` — 可选活动视频（type='activity' + video_url 非空）
+  - `GET /api/ops/admin/products/recommendable` — 可推荐商品（绑定销售商的上架商品）
+- **Public API**：`HomeController`（`GET /api/ops/home-data`）— 无需认证，返回 `{banners, videos, recommends}`
+  - 支持 `?corpId=` 参数指定运营商
+- **Admin 页面**：`pages/admin/home-config.vue`（3 Tab：广告轮播/精彩视频/热门推荐）
+  - Banner 上传使用 CropperJS（15:8 宽高比）+ FileUploadController
+- **H5 首页**：`pages/index/index.vue` 消费 home-data，动态渲染轮播/视频/推荐
+
+### 首页数据流
 - 路径：`POST /api/ops/files/upload`（JWT）
 - 图片：jpg/png/gif/webp/bmp，≤2MB
 - 视频：mp4/mov/avi/webm，≤50MB
@@ -238,6 +250,7 @@ CSS `url()` 把根相对路径（如 `/uploads/ops/img/xxx.jpg`）解析到页�
 | **商品图片来源** | `ops_product` 只是映射表，实际商品数据在 `mall_product` 表 |
 | **活动封面** | `ops_activity` 同时有 `cover_image` 和 `cover_url` 两个字段，部分老数据 `cover_url` 可能为 NULL，后端 `PlatformController` 已做回退处理 |
 | **Nginx 缓存** | `/subsystem/ops/assets/` 30 天 immutable 缓存，部署后如果文件没变（相同 hash）则不更新；`index.html` 有 `no-cache` 头 |
+| **首页配置 corpId** | `/api/ops/home-data` 是公开接口（无 JWT），必须传 `?corpId=` 参数；否则回退 corpId=3，看不到 corp_id=4 的数据 |
 
 ---
 

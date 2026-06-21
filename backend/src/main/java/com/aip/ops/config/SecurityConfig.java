@@ -34,6 +34,7 @@ public class SecurityConfig {
                     "/api/public-account/**",
                     "/api/ops/auth/**", "/api/ops/product/**",
                     "/api/ops/activity/**",
+                    "/api/ops/home-data",
                     "/api/ops/coupon/list",
                     "/api/ops/ai/config",
                     "/api/ops/live-rooms/**"

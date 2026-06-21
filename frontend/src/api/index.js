@@ -38,6 +38,19 @@ export const api = {
   adminUpdateActivityStatus: (id,status) => request({url:'/api/ops/admin/activities/'+id+'/status',method:'PUT',data:{status}}),
   adminDeleteActivity: (id) => request({url:'/api/ops/admin/activities/'+id,method:'DELETE'}),
   adminAvailableLiveRooms: () => request({url:'/api/ops/admin/live-rooms/available'}),
+  // 运营商管理后台 — 首页配置管理
+  adminHomeConfigs: (params) => request({url:'/api/ops/admin/home-configs',data:params}),
+  adminCreateHomeConfig: (data) => request({url:'/api/ops/admin/home-configs',method:'POST',data}),
+  adminUpdateHomeConfig: (id,data) => request({url:'/api/ops/admin/home-configs/'+id,method:'PUT',data}),
+  adminDeleteHomeConfig: (id) => request({url:'/api/ops/admin/home-configs/'+id,method:'DELETE'}),
+  adminBatchSortHomeConfig: (items) => request({url:'/api/ops/admin/home-configs/sort',method:'PUT',data:{items}}),
+  adminAvailableVideos: () => request({url:'/api/ops/admin/activities/available-videos'}),
+  adminRecommendableProducts: () => request({url:'/api/ops/admin/products/recommendable'}),
+  // 首页公开数据
+  homeData: () => {
+    const corpId = uni.getStorageSync('corp_id') || 4
+    return request({url:'/api/ops/home-data', data:{corpId}})
+  },
   // 地址
   addressList: () => request({url:'/api/ops/address/list'}),
   saveAddress: (data) => request({url:'/api/ops/address',method:'POST',data}),

@@ -13,6 +13,7 @@
       <view class="menu-item" @click="goPage('/pages/booking/list')"><text>📅 我的预约</text><text class="arrow">›</text></view>
       <view class="menu-item" @click="goPage('/pages/address/list')"><text>📍 收货地址</text><text class="arrow">›</text></view>
       <view class="menu-item" @click="goPage('/pages/admin/activity-form')" v-if="isLogin"><text>✏️ 活动管理</text><text class="arrow">›</text></view>
+      <view class="menu-item" @click="goPage('/pages/admin/home-config')" v-if="isLogin"><text>🏠 首页配置</text><text class="arrow">›</text></view>
     </view>
     <view class="logout" v-if="isLogin" @click="doLogout"><text>退出登录</text></view>
   </view>
