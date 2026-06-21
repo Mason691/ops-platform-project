@@ -167,9 +167,9 @@
         </view>
         <view class="co-footer">
           <view class="co-toolbar">
-            <button class="co-tool-btn co-tool-btn--icon" @click="zoomOut" :disabled="zoomLevel <= 0.5">−</button>
+            <button class="co-tool-btn co-tool-btn--icon" @click="zoomOut" :disabled="zoomLevel <= minZoom">−</button>
             <view class="co-zoom-display"><text class="co-zoom-value">{{ Math.round(zoomLevel * 100) }}</text><text class="co-zoom-unit">%</text></view>
-            <button class="co-tool-btn co-tool-btn--icon" @click="zoomIn" :disabled="zoomLevel >= 3">+</button>
+            <button class="co-tool-btn co-tool-btn--icon" @click="zoomIn" :disabled="zoomLevel >= maxZoom">+</button>
             <view class="co-tool-divider"></view>
             <button class="co-tool-btn co-tool-btn--text" @click="rotateLeft">↺ 左转</button>
             <button class="co-tool-btn co-tool-btn--text" @click="rotateRight">↻ 右转</button>
@@ -238,6 +238,8 @@ const fileInputRef = ref(null)
 let cropperInstance = null
 let cropperInitialized = false
 const zoomLevel = ref(1)
+const minZoom = ref(1)
+const maxZoom = ref(3)
 
 // ═══ Cropper Core ═══
 function updatePreview() {
@@ -282,11 +284,16 @@ function initCropper() {
             const fz = Math.max(cd.width / id.naturalWidth, cd.height / id.naturalHeight)
             cropperInstance.zoomTo(fz)
             zoomLevel.value = Math.round(fz * 100) / 100
-          } else { cropperInstance.zoomTo(2); zoomLevel.value = 2 }
+            // Zoom limits: min = fill-container ratio, max = 3× min (Cropper internal cap ~3.14)
+            minZoom.value = Math.round(fz * 100) / 100
+            maxZoom.value = Math.round(fz * 3 * 100) / 100
+          } else { cropperInstance.zoomTo(2); zoomLevel.value = 2; minZoom.value = 2; maxZoom.value = 6 }
           updatePreview()
         },
         crop() { updatePreview() },
-        zoom(e) { zoomLevel.value = e.detail.ratio },
+        zoom(e) {
+          zoomLevel.value = Math.round(e.detail.ratio * 100) / 100
+        },
       })
       cropperInitialized = true
     } catch (e) { console.error('Cropper init:', e) }
