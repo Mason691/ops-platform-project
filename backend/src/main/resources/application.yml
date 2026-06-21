@@ -27,6 +27,11 @@ mybatis-plus:
     map-underscore-to-camel-case: true
   mapper-locations: classpath:mapper/*.xml
 
+app:
+  resource:
+    # 静态资源对外域名（用于拼接完整图片 URL）
+    base-url: https://a.15891589.xyz
+
 platform:
   base-url: http://104.238.165.57:8080
   subsystem-code: ops-platform

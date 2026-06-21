@@ -6,6 +6,7 @@ import com.aip.ops.entity.OperatorMerchant;
 import com.aip.ops.entity.ProductCategory;
 import com.aip.ops.mapper.*;
 import com.aip.ops.service.IGsProductService;
+import com.aip.ops.util.ImageUrlUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -33,6 +34,7 @@ public class GsProductServiceImpl implements IGsProductService {
     private final OperatorMerchantMapper omMapper;
     private final MerchantMapper merchantMapper;
     private final MerchantMiniappConfigMapper miniappConfigMapper;
+    private final ImageUrlUtil imageUrlUtil;
 
     // ═══ 管理员商品管理 ═══
 
@@ -85,7 +87,7 @@ public class GsProductServiceImpl implements IGsProductService {
             m.put("id", rec.get("mappingId"));
             m.put("productId", rec.get("productId"));
             m.put("name", rec.get("name"));
-            m.put("coverImage", rec.get("coverImage"));
+            m.put("coverImage", imageUrlUtil.normalizeProductImage((String) rec.get("coverImage")));
             m.put("images", rec.get("images"));
             m.put("videoUrl", rec.get("videoUrl"));
             m.put("description", rec.get("description"));
@@ -266,7 +268,7 @@ public class GsProductServiceImpl implements IGsProductService {
             m.put("id", rec.get("mappingId"));
             m.put("productId", rec.get("productId"));
             m.put("name", rec.get("name"));
-            m.put("coverImage", rec.get("coverImage"));
+            m.put("coverImage", imageUrlUtil.normalizeProductImage((String) rec.get("coverImage")));
             // 分类
             Object cidObj = rec.get("categoryId");
             if (cidObj != null) {

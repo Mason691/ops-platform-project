@@ -4,6 +4,7 @@ import com.aip.ops.entity.*;
 import com.aip.ops.mapper.*;
 import com.aip.ops.service.GsActivityService;
 import com.aip.ops.service.IGsProductService;
+import com.aip.ops.util.ImageUrlUtil;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -38,6 +39,7 @@ public class AdminController {
     private final GsActivityService activityService;
     private final org.springframework.web.client.RestTemplate restTemplate;
     private final String merchantRoleName;
+    private final ImageUrlUtil imageUrlUtil;
 
     public AdminController(OperatorMerchantMapper omMapper,
                            IGsProductService productService,
@@ -48,7 +50,8 @@ public class AdminController {
                            PublicAccountConfigMapper publicAccountConfigMapper,
                            GsActivityService activityService,
                            org.springframework.web.client.RestTemplate restTemplate,
-                           @Value("${platform.merchant-role-name:销售商}") String merchantRoleName) {
+                           @Value("${platform.merchant-role-name:销售商}") String merchantRoleName,
+                           ImageUrlUtil imageUrlUtil) {
         this.omMapper = omMapper;
         this.productService = productService;
         this.categoryMapper = categoryMapper;
@@ -59,6 +62,7 @@ public class AdminController {
         this.activityService = activityService;
         this.restTemplate = restTemplate;
         this.merchantRoleName = merchantRoleName;
+        this.imageUrlUtil = imageUrlUtil;
     }
 
     /** 当前用户ID（用于个人身份） */
@@ -477,8 +481,26 @@ public class AdminController {
                              @RequestParam(required = false) String category,
                              @RequestParam(required = false) Integer status) {
         Long operatorId = currentOperatorId();
-        return R.ok(activityService.adminActivityPage(
-                operatorId, pageNum, pageSize, type, category, status));
+        Map<String, Object> page = activityService.adminActivityPage(
+                operatorId, pageNum, pageSize, type, category, status);
+
+        // 规范化活动图片 URL
+        @SuppressWarnings("unchecked")
+        List<GsActivity> records = (List<GsActivity>) page.get("records");
+        if (records != null) {
+            for (GsActivity a : records) {
+                if (a.getCoverUrl() == null || a.getCoverUrl().isBlank()) {
+                    a.setCoverUrl(a.getCoverImage());
+                }
+                a.setCoverUrl(imageUrlUtil.normalizeImage(a.getCoverUrl()));
+                a.setCoverImage(imageUrlUtil.normalizeImage(a.getCoverImage()));
+                a.setVideoCoverUrl(imageUrlUtil.normalizeImage(a.getVideoCoverUrl()));
+                a.setVideoUrl(imageUrlUtil.normalizeImage(a.getVideoUrl()));
+                a.setDetailVideoUrl(imageUrlUtil.normalizeImage(a.getDetailVideoUrl()));
+            }
+        }
+
+        return R.ok(page);
     }
 
     /**
@@ -488,6 +510,33 @@ public class AdminController {
     public R<?> activityDetail(@PathVariable Long id) {
         Map<String, Object> detail = activityService.activityDetail(id);
         if (detail == null) return R.fail("活动不存在");
+
+        // 规范化活动图片 URL
+        GsActivity act = (GsActivity) detail.get("activity");
+        if (act != null) {
+            if (act.getCoverUrl() == null || act.getCoverUrl().isBlank()) {
+                act.setCoverUrl(act.getCoverImage());
+            }
+            act.setCoverUrl(imageUrlUtil.normalizeImage(act.getCoverUrl()));
+            act.setCoverImage(imageUrlUtil.normalizeImage(act.getCoverImage()));
+            act.setVideoCoverUrl(imageUrlUtil.normalizeImage(act.getVideoCoverUrl()));
+            act.setVideoUrl(imageUrlUtil.normalizeImage(act.getVideoUrl()));
+            act.setDetailVideoUrl(imageUrlUtil.normalizeImage(act.getDetailVideoUrl()));
+        }
+
+        // 规范化关联商品图片
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> products = (List<Map<String, Object>>) detail.get("products");
+        if (products != null) {
+            for (Map<String, Object> p : products) {
+                Object coverImage = p.get("cover_image");
+                if (coverImage == null) coverImage = p.get("coverImage");
+                if (coverImage instanceof String) {
+                    p.put("cover_image", imageUrlUtil.normalizeProductImage((String) coverImage));
+                }
+            }
+        }
+
         return R.ok(detail);
     }
 
