@@ -228,6 +228,10 @@ function initCropper() {
         cropBoxResizable: false,
         dragMode: 'move',
 
+	        // 小图自动放大：canvas 最小 800×800 确保撑满容器
+	        minCanvasWidth: 800,
+	        minCanvasHeight: 800,
+
         // Visual
         guides: true,
         background: true,
@@ -248,12 +252,20 @@ function initCropper() {
 
         // Lifecycle
         ready() {
-          cropper.zoomTo(2)
-          zoomLevel.value = cropper.getImageData().width
-            ? Math.round((cropper.getCanvasData().naturalWidth / cropper.getImageData().naturalWidth) * 100) / 100
-            : cropper.getData().width > 0
-              ? cropper.getData().width / 800
-              : 2
+          // 动态计算填充缩放比 — 无论原图多大都撑满 800×800 容器
+          const cd = cropper.getContainerData()
+          const id = cropper.getImageData()
+          if (id.naturalWidth > 0 && id.naturalHeight > 0) {
+            const fillZoom = Math.max(
+              cd.width / id.naturalWidth,
+              cd.height / id.naturalHeight
+            )
+            cropper.zoomTo(fillZoom)
+            zoomLevel.value = Math.round(fillZoom * 100) / 100
+          } else {
+            cropper.zoomTo(2)
+            zoomLevel.value = 2
+          }
           updatePreview()
         },
 
@@ -297,7 +309,16 @@ function rotateRight() {
 function resetCrop() {
   if (!cropper) return
   cropper.reset()
-  cropper.zoomTo(2)
+  // 重置后重新计算填充缩放比，确保小图仍撑满容器
+  const cd = cropper.getContainerData()
+  const id = cropper.getImageData()
+  if (id.naturalWidth > 0 && id.naturalHeight > 0) {
+    const fillZoom = Math.max(cd.width / id.naturalWidth, cd.height / id.naturalHeight)
+    cropper.zoomTo(fillZoom)
+    zoomLevel.value = Math.round(fillZoom * 100) / 100
+  } else {
+    cropper.zoomTo(2)
+  }
 }
 
 // ==================== Confirm / Cancel ====================
@@ -509,8 +530,8 @@ onBeforeUnmount(() => destroyCropper())
 
 .co-crop-container :deep(img) {
   display: block;
-  max-width: 100%;
-  max-height: 100%;
+  /* 不设 max-width/max-height，交给 Cropper ready() 中的 fillZoom 计算缩放比。
+     小图会被放大至撑满 800×800 容器，大图由 Cropper responsive 自动适配。 */
 }
 
 /* ── Right: preview panel ── */
