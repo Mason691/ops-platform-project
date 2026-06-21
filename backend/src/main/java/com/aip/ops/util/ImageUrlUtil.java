@@ -3,6 +3,8 @@ package com.aip.ops.util;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.Set;
+
 /**
  * 图片 URL 工具 — 统一处理商品和活动封面图的资源路径。
  *
@@ -20,6 +22,11 @@ public class ImageUrlUtil {
 
     @Value("${app.resource.base-url:https://a.15891589.xyz}")
     private String resourceBaseUrl;
+
+    /** 已知占位图/测试图片域名，匹配到的 URL 返回 null 避免前端加载失败 */
+    private static final Set<String> PLACEHOLDER_DOMAINS = Set.of(
+            "via.placeholder.com", "placeholder.com", "placehold.co", "placekitten.com"
+    );
 
     /**
      * 将商品封面图 URL 转换为可通过 Nginx /uploads/ops/mall/ 直接访问的相对路径。
@@ -47,7 +54,9 @@ public class ImageUrlUtil {
 
     /**
      * 规范化活动/通用图片 URL。
-     * - 完整 HTTPS URL → 提取相对路径（去掉域名）
+     * - 占位图域名（via.placeholder.com 等）→ null
+     * - 本站完整 HTTPS URL → 提取相对路径（去掉域名）
+     * - 外部完整 HTTPS URL → 原样保留（如微信视频号封面）
      * - 相对路径 → 原样返回
      * - null/空白 → null
      */
@@ -55,19 +64,26 @@ public class ImageUrlUtil {
         if (path == null || path.isBlank()) return null;
         String str = path.trim();
 
-        // 完整 URL → 提取路径部分
+        // 完整 URL → 检查是否占位图域名
         if (str.startsWith("http://") || str.startsWith("https://")) {
-            // 去掉协议和域名
-            int schemeEnd = str.indexOf("://");
-            int pathStart = str.indexOf('/', schemeEnd + 3);
-            if (pathStart > 0) {
-                str = str.substring(pathStart);
-            } else {
-                return null; // 纯域名，无路径
+            // 过滤已知占位图域名
+            for (String domain : PLACEHOLDER_DOMAINS) {
+                if (str.contains(domain)) return null;
             }
-            // 去掉查询参数
-            int qIdx = str.indexOf('?');
-            if (qIdx > 0) str = str.substring(0, qIdx);
+            // 本站 URL → 提取路径部分，转相对路径
+            if (str.contains("a.15891589.xyz") || str.contains("localhost")) {
+                int schemeEnd = str.indexOf("://");
+                int pathStart = str.indexOf('/', schemeEnd + 3);
+                if (pathStart > 0) {
+                    str = str.substring(pathStart);
+                } else {
+                    return null;
+                }
+                int qIdx = str.indexOf('?');
+                if (qIdx > 0) str = str.substring(0, qIdx);
+                return str;
+            }
+            // 外部 URL → 原样保留（前端 assetUrl 会直接通过）
             return str;
         }
 

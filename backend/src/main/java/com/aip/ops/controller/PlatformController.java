@@ -558,6 +558,12 @@ public class PlatformController {
                         .orderByDesc(OpsLiveRoom::getStatus)
                         .orderByAsc(OpsLiveRoom::getSortOrder)
                         .last("LIMIT " + limit));
+        // 规范化封面 URL，过滤已知占位图域名
+        for (OpsLiveRoom room : list) {
+            if (room.getCoverUrl() != null && !room.getCoverUrl().isBlank()) {
+                room.setCoverUrl(imageUrlUtil.normalizeImage(room.getCoverUrl()));
+            }
+        }
         return R.ok(list);
     }
 
