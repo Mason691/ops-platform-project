@@ -1,50 +1,84 @@
 <template>
-  <!-- 裁剪弹窗 — 仅 H5（PC 管理后台使用） -->
   <!-- #ifdef H5 -->
-  <view class="cropper-overlay" v-if="visible" @touchmove.prevent.stop>
-    <view class="cropper-modal">
-      <!-- 标题栏 -->
+  <view class="cropper-overlay" v-if="visible" @click.self="handleCancel" @touchmove.prevent.stop>
+    <view class="cropper-dialog">
+      <!-- ═══ 头部 ═══ -->
       <view class="cropper-header">
-        <text class="cropper-title">裁剪封面图（800×800）</text>
+        <view class="header-left">
+          <text class="cropper-title">✂️ 裁剪封面图</text>
+          <text class="cropper-badge">800 × 800</text>
+        </view>
         <view class="cropper-close" @click="handleCancel">
           <text>✕</text>
         </view>
       </view>
 
-      <!-- 裁剪区域 -->
+      <!-- ═══ 主体：左裁剪 + 右预览 ═══ -->
       <view class="cropper-body">
-        <view class="cropper-wrapper">
-          <img
-            ref="cropperImageRef"
-            :src="imageUrl"
-            class="cropper-image"
-            crossorigin="anonymous"
-            @load="initCropper"
-            @error="handleImageError"
-          />
+        <!-- 左侧：裁剪操作区 -->
+        <view class="cropper-main">
+          <view class="cropper-wrapper" ref="wrapperRef">
+            <img
+              ref="cropperImageRef"
+              :src="imageUrl"
+              alt="封面原图"
+              crossorigin="anonymous"
+              @load="initCropper"
+              @error="handleImageError"
+            />
+          </view>
         </view>
 
-        <!-- 提示文字 -->
-        <view class="cropper-tips">
-          <text class="cropper-tips-icon">💡</text>
-          <text class="cropper-tips-text">拖拽图片调整位置，裁剪后将生成 800×800 图片</text>
+        <!-- 右侧：实时预览 -->
+        <view class="cropper-preview">
+          <text class="preview-title">实时预览</text>
+          <view class="preview-card">
+            <view class="preview-box preview-box--round">
+              <view class="preview-canvas" id="previewRound"></view>
+            </view>
+            <text class="preview-label">圆形</text>
+          </view>
+          <view class="preview-card">
+            <view class="preview-box preview-box--square">
+              <view class="preview-canvas" id="previewSquare"></view>
+            </view>
+            <text class="preview-label">方形</text>
+          </view>
         </view>
       </view>
 
-      <!-- 底部按钮 -->
+      <!-- ═══ 底部：工具栏 + 操作按钮 ═══ -->
       <view class="cropper-footer">
-        <button class="cropper-btn cropper-btn--cancel" @click="handleCancel">
-          取消
-        </button>
-        <button class="cropper-btn cropper-btn--confirm" @click="handleConfirm">
-          确认裁剪
-        </button>
+        <view class="toolbar">
+          <view class="toolbar-group">
+            <button
+              class="tool-btn tool-btn--icon"
+              :disabled="zoomLevel <= 0.5"
+              @click="zoomOut"
+            >−</button>
+            <text class="zoom-text">{{ Math.round(zoomLevel * 100) }}%</text>
+            <button
+              class="tool-btn tool-btn--icon"
+              :disabled="zoomLevel >= 3"
+              @click="zoomIn"
+            >+</button>
+          </view>
+          <view class="toolbar-divider"></view>
+          <view class="toolbar-group">
+            <button class="tool-btn tool-btn--text" @click="rotateLeft">↺ 左转</button>
+            <button class="tool-btn tool-btn--text" @click="rotateRight">↻ 右转</button>
+            <button class="tool-btn tool-btn--text" @click="resetCrop">↩ 重置</button>
+          </view>
+        </view>
+        <view class="action-group">
+          <button class="action-btn action-btn--cancel" @click="handleCancel">取消</button>
+          <button class="action-btn action-btn--confirm" @click="handleConfirm">确认裁剪</button>
+        </view>
       </view>
     </view>
   </view>
   <!-- #endif -->
 
-  <!-- 非 H5 平台占位 -->
   <!-- #ifndef H5 -->
   <view v-if="visible">
     <text>裁剪功能仅支持 PC 浏览器</text>
@@ -57,91 +91,142 @@ import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
 
-// ========== Props ==========
+// ==================== Props & Emits ====================
 const props = defineProps({
-  /** 弹窗可见性 */
-  visible: {
-    type: Boolean,
-    default: false,
-  },
-  /** 待裁剪图片 URL */
-  imageUrl: {
-    type: String,
-    default: '',
-  },
+  visible: { type: Boolean, default: false },
+  imageUrl: { type: String, default: '' },
 })
 
-// ========== Emits ==========
 const emit = defineEmits(['close', 'confirm', 'error'])
 
-// ========== Refs ==========
+// ==================== Refs ====================
 const cropperImageRef = ref(null)
+// preview refs — use id selectors (uni-view custom elements)
+//   see updatePreview() below
 
-// ========== State ==========
+// ==================== State ====================
 let cropper = null
 let initialized = false
+const zoomLevel = ref(1)
 
-// ========== Methods ==========
+// ==================== Preview ====================
+function updatePreview() {
+  if (!cropper || !initialized) return
 
-/**
- * 初始化 Cropper 实例
- * 在图片 load 事件后调用，确保 DOM 就绪
- */
+  try {
+    const roundCanvas = cropper.getCroppedCanvas({ width: 150, height: 150 })
+    const squareCanvas = cropper.getCroppedCanvas({ width: 150, height: 150 })
+
+    const roundEl = document.getElementById("previewRound")
+    const squareEl = document.getElementById("previewSquare")
+
+    if (roundEl) {
+      roundEl.innerHTML = ''
+      if (roundCanvas) roundEl.appendChild(roundCanvas)
+    }
+    if (squareEl) {
+      squareEl.innerHTML = ''
+      if (squareCanvas) squareEl.appendChild(squareCanvas)
+    }
+  } catch { /* silently skip preview errors */ }
+}
+
+// ==================== Cropper Init ====================
 function initCropper() {
   destroyCropper()
 
   const img = cropperImageRef.value
-  if (!img) {
-    console.warn('[ImageCropper] cropperImageRef is null')
-    return
-  }
+  if (!img) return
 
   nextTick(() => {
     try {
       cropper = new Cropper(img, {
-        aspectRatio: 1,              // 正方形 1:1
-        viewMode: 1,                 // 裁剪框限制在图片范围内
-        autoCropArea: 1,             // 裁剪框自动占满容器
-        cropBoxMovable: false,       // 裁剪框不可移动
-        cropBoxResizable: false,     // 裁剪框不可调整大小
-        dragMode: 'move',            // 拖动图片模式
-        guides: true,                // 显示九宫格辅助线
-        background: true,            // 显示网格背景
-        modal: true,                 // 裁剪框外半透明遮罩
-        responsive: true,            // 响应容器大小变化
-        restore: false,              // 不恢复上次裁剪
-        center: true,                // 图片居中
-        highlight: false,            // 不显示裁剪框内高亮
-        movable: true,               // 图片可移动
-        zoomable: true,              // 图片可缩放
-        zoomOnWheel: true,           // 鼠标滚轮缩放
-        zoomOnTouch: true,           // 触摸缩放
-        rotatable: false,            // 不可旋转
-        scalable: true,              // 图片可缩放
-        toggleDragModeOnDblclick: false, // 双击不切换模式
+        // ── Core constraints ──
+        aspectRatio: 1,
+        viewMode: 1,
+        autoCropArea: 1,
+        cropBoxMovable: false,
+        cropBoxResizable: false,
+        dragMode: 'move',
+
+        // ── Visual ──
+        guides: true,
+        background: true,
+        modal: true,
+        center: true,
+        highlight: false,
+
+        // ── Interaction ──
+        movable: true,
+        zoomable: true,
+        zoomOnWheel: true,
+        zoomOnTouch: true,
+        scalable: true,
+        rotatable: true,
+        toggleDragModeOnDblclick: false,
+        responsive: true,
+        restore: false,
+
+        // ── Lifecycle ──
         ready() {
-          // 图片加载完成后放大一倍，方便看清细节
           cropper.zoomTo(2)
+          zoomLevel.value = cropper.getImageData().width
+            ? Math.round((cropper.getCanvasData().naturalWidth / cropper.getImageData().naturalWidth) * 100) / 100
+            : cropper.getData().width > 0
+              ? cropper.getData().width / 800
+              : 2
+          updatePreview()
+        },
+
+        crop() {
+          updatePreview()
+        },
+
+        zoom(event) {
+          zoomLevel.value = event.detail.ratio
         },
       })
       initialized = true
     } catch (e) {
-      console.error('[ImageCropper] Failed to init cropper:', e)
+      console.error('[ImageCropper] Init failed:', e)
       emit('error', e)
     }
   })
 }
 
-/**
- * 确认裁剪
- * 生成 800×800 的 canvas → Blob → 通过 confirm 事件传出
- */
+// ==================== Toolbar Actions ====================
+function zoomIn() {
+  if (!cropper) return
+  cropper.zoom(0.1)
+}
+
+function zoomOut() {
+  if (!cropper) return
+  cropper.zoom(-0.1)
+}
+
+function rotateLeft() {
+  if (!cropper) return
+  cropper.rotate(-90)
+}
+
+function rotateRight() {
+  if (!cropper) return
+  cropper.rotate(90)
+}
+
+function resetCrop() {
+  if (!cropper) return
+  cropper.reset()
+  cropper.zoomTo(2)
+}
+
+// ==================== Confirm / Cancel ====================
 function handleConfirm() {
   if (!cropper || !initialized) {
     uni.showToast({ title: '裁剪未就绪，请稍候', icon: 'none' })
     return
   }
-
   try {
     const canvas = cropper.getCroppedCanvas({
       width: 800,
@@ -149,178 +234,173 @@ function handleConfirm() {
       imageSmoothingEnabled: true,
       imageSmoothingQuality: 'high',
     })
-
     if (!canvas) {
       uni.showToast({ title: '生成图片失败', icon: 'none' })
       return
     }
-
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          uni.showToast({ title: '图片导出失败', icon: 'none' })
-          return
-        }
-        emit('confirm', blob)
-      },
-      'image/jpeg',
-      0.92
-    )
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        uni.showToast({ title: '图片导出失败', icon: 'none' })
+        return
+      }
+      emit('confirm', blob)
+    }, 'image/jpeg', 0.92)
   } catch (e) {
     console.error('[ImageCropper] Crop failed:', e)
     uni.showToast({ title: '裁剪失败', icon: 'none' })
   }
 }
 
-/**
- * 取消裁剪
- */
 function handleCancel() {
   emit('close')
 }
 
-/**
- * 图片加载失败处理
- */
 function handleImageError() {
-  console.error('[ImageCropper] Image load error:', props.imageUrl)
   uni.showToast({ title: '图片加载失败', icon: 'none' })
   emit('error', new Error('Image load failed'))
 }
 
-/**
- * 销毁 Cropper 实例
- */
+// ==================== Destroy ====================
 function destroyCropper() {
   if (cropper) {
-    try {
-      cropper.destroy()
-    } catch (e) {
-      console.warn('[ImageCropper] Destroy error:', e)
-    }
+    try { cropper.destroy() } catch {}
     cropper = null
     initialized = false
+    zoomLevel.value = 1
   }
 }
 
-// ========== Watchers ==========
-
-// 弹窗关闭时销毁 cropper
-watch(
-  () => props.visible,
-  (newVal) => {
-    if (!newVal) {
-      destroyCropper()
-    }
-  }
-)
-
-// 更换图片时重新初始化
-watch(
-  () => props.imageUrl,
-  (newVal, oldVal) => {
-    if (newVal !== oldVal && cropper && initialized) {
-      cropper.replace(newVal)
-    }
-  }
-)
-
-// ========== Lifecycle ==========
-onBeforeUnmount(() => {
-  destroyCropper()
+// ==================== Watchers ====================
+watch(() => props.visible, (v) => { if (!v) destroyCropper() })
+watch(() => props.imageUrl, (n, o) => {
+  if (n !== o && cropper && initialized) cropper.replace(n)
 })
+
+// ==================== Lifecycle ====================
+onBeforeUnmount(() => destroyCropper())
 </script>
 
 <style scoped>
-/* ========== 遮罩层 ========== */
+/* ═══════════════════════════════════════════
+   OVERLAY
+   ═══════════════════════════════════════════ */
 .cropper-overlay {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: cropper-fade-in 0.2s ease;
+  animation: fadeIn 0.2s ease;
+  backdrop-filter: blur(4px);
 }
 
-@keyframes cropper-fade-in {
+@keyframes fadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
 
-/* ========== 弹窗容器 ========== */
-.cropper-modal {
+/* ═══════════════════════════════════════════
+   DIALOG SHELL
+   ═══════════════════════════════════════════ */
+.cropper-dialog {
   background: #fff;
-  border-radius: 8px;
-  width: 920px;
-  max-width: 95vw;
-  max-height: 95vh;
+  border-radius: 12px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
+  width: 1060px;
+  max-width: 97vw;
+  max-height: 96vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-  animation: cropper-slide-up 0.25s ease;
+  overflow: hidden;
+  animation: slideUp 0.25s ease;
 }
 
-@keyframes cropper-slide-up {
-  from { transform: translateY(30px); opacity: 0; }
+@keyframes slideUp {
+  from { transform: translateY(36px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
 }
 
-/* ========== 标题栏 ========== */
+/* ═══════════════════════════════════════════
+   HEADER
+   ═══════════════════════════════════════════ */
 .cropper-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 24px;
-  border-bottom: 1px solid #eee;
+  padding: 18px 24px;
+  border-bottom: 1px solid #f0f0f0;
   flex-shrink: 0;
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .cropper-title {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 600;
-  color: #333;
+  color: #1f2937;
+}
+
+.cropper-badge {
+  font-size: 12px;
+  font-weight: 500;
+  color: #FF6B35;
+  background: #FFF3EE;
+  padding: 3px 10px;
+  border-radius: 10px;
+  border: 1px solid #ffe0d0;
 }
 
 .cropper-close {
   width: 32px;
   height: 32px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
   cursor: pointer;
-  color: #999;
-  font-size: 18px;
-  transition: all 0.15s ease;
+  color: #9ca3af;
+  font-size: 17px;
+  transition: all 0.15s;
 }
-
 .cropper-close:hover {
-  background: #f5f5f5;
-  color: #333;
+  background: #f3f4f6;
+  color: #1f2937;
 }
 
-/* ========== 裁剪主体 ========== */
+/* ═══════════════════════════════════════════
+   BODY — left crop + right preview
+   ═══════════════════════════════════════════ */
 .cropper-body {
   flex: 1;
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  gap: 24px;
   padding: 24px;
-  overflow-y: auto;
+  background: #fafbfc;
+  overflow: hidden;
   min-height: 0;
 }
 
-/* 裁剪容器 — 正方形 800×800 */
+/* ── Left: crop area ── */
+.cropper-main {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .cropper-wrapper {
   width: 800px;
   height: 800px;
-  max-width: 100%;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
+  background: #fff;
+  border: 2px dashed #d1d5db;
+  border-radius: 8px;
   overflow: hidden;
-  background: #fafafa;
   flex-shrink: 0;
 }
 
@@ -330,100 +410,201 @@ onBeforeUnmount(() => {
   max-height: 100%;
 }
 
-/* 提示文字 */
-.cropper-tips {
-  margin-top: 16px;
+/* ── Right: preview panel ── */
+.cropper-preview {
+  flex: none;
+  width: 180px;
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding-top: 8px;
+}
+
+.preview-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.preview-card {
+  display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 6px;
+}
+
+.preview-box {
+  width: 140px;
+  height: 140px;
+  border: 2px solid #e5e7eb;
+  background: #fff;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.preview-box:hover { border-color: #FF6B35; }
+
+.preview-box--round    { border-radius: 50%; }
+.preview-box--square   { border-radius: 8px;  }
+
+.preview-canvas {
+  width: 100%;
+  height: 100%;
+}
+.preview-canvas :deep(canvas) {
+  width: 100%;
+  height: 100%;
+}
+
+.preview-label {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* ═══════════════════════════════════════════
+   FOOTER — toolbar + action buttons
+   ═══════════════════════════════════════════ */
+.cropper-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  border-top: 1px solid #f0f0f0;
+  background: #fff;
   flex-shrink: 0;
 }
 
-.cropper-tips-icon {
+/* ── Toolbar ── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: #e5e7eb;
+}
+
+.tool-btn {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
   font-size: 14px;
+  font-family: inherit;
+  transition: all 0.15s;
+  outline: none;
+  padding: 6px 0;
+  color: #374151;
+}
+.tool-btn:hover  { background: #f9fafb; border-color: #d1d5db; }
+.tool-btn:active { background: #f3f4f6; }
+
+.tool-btn--icon {
+  width: 34px;
+  font-size: 18px;
+  font-weight: 600;
   line-height: 1;
 }
 
-.cropper-tips-text {
+.tool-btn--text {
+  padding: 6px 12px;
+}
+
+.tool-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.zoom-text {
+  display: inline-block;
+  min-width: 42px;
+  text-align: center;
   font-size: 13px;
-  color: #999;
-  line-height: 1.5;
+  font-weight: 600;
+  color: #6b7280;
 }
 
-/* ========== 底部按钮栏 ========== */
-.cropper-footer {
+/* ── Action buttons ── */
+.action-group {
   display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 16px 24px;
-  border-top: 1px solid #eee;
-  flex-shrink: 0;
+  gap: 10px;
 }
 
-/* 按钮通用样式 */
-.cropper-btn {
-  padding: 9px 24px;
+.action-btn {
+  padding: 9px 28px;
   font-size: 14px;
-  border-radius: 4px;
+  font-weight: 500;
+  border-radius: 6px;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.15s ease;
-  line-height: 1.5;
+  transition: all 0.15s;
   outline: none;
   font-family: inherit;
+  line-height: 1.5;
 }
 
-/* 取消按钮 */
-.cropper-btn--cancel {
+.action-btn--cancel {
   background: #fff;
-  color: #666;
-  border-color: #d9d9d9;
+  color: #6b7280;
+  border-color: #d1d5db;
 }
-
-.cropper-btn--cancel:hover {
+.action-btn--cancel:hover {
   color: #FF6B35;
   border-color: #FF6B35;
+  background: #fff8f5;
 }
 
-/* 确认按钮 */
-.cropper-btn--confirm {
+.action-btn--confirm {
   background: #FF6B35;
   color: #fff;
   border-color: #FF6B35;
 }
-
-.cropper-btn--confirm:hover {
+.action-btn--confirm:hover {
   background: #e55a2b;
   border-color: #e55a2b;
 }
 
-/* ========== 裁剪框内样式覆盖 ========== */
-/* 裁剪框边框 — 白色虚线，更清晰 */
+/* ═══════════════════════════════════════════
+   CROPPER INTERNAL STYLE OVERRIDES
+   ═══════════════════════════════════════════ */
 :deep(.cropper-crop-box) {
   outline: 2px dashed rgba(255, 255, 255, 0.9) !important;
 }
 
-/* 裁剪框角标 — 隐藏（不可调整大小） */
 :deep(.cropper-point) {
   display: none !important;
 }
 
-/* 裁剪框中线 — 更明显 */
 :deep(.cropper-dashed) {
-  border-color: rgba(255, 255, 255, 0.4) !important;
+  border-color: rgba(255, 255, 255, 0.45) !important;
 }
 
-/* 中心十字 */
 :deep(.cropper-center) {
   display: block !important;
   opacity: 0.5;
 }
 
-/* ========== 响应式适配 ========== */
-@media (max-width: 1024px) {
-  .cropper-modal {
-    width: 95vw;
-    max-height: 90vh;
+/* ═══════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════ */
+@media (max-width: 1100px) {
+  .cropper-dialog { width: 97vw; }
+
+  .cropper-body {
+    flex-direction: column;
+    align-items: center;
+    overflow-y: auto;
   }
 
   .cropper-wrapper {
@@ -433,25 +614,36 @@ onBeforeUnmount(() => {
     max-height: 600px;
   }
 
-  .cropper-header {
-    padding: 16px 20px;
-  }
-
-  .cropper-body {
-    padding: 20px;
+  .cropper-preview {
+    flex-direction: row;
+    width: auto;
+    gap: 24px;
+    padding-top: 0;
   }
 
   .cropper-footer {
-    padding: 12px 20px;
+    flex-wrap: wrap;
+    gap: 10px;
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 640px) {
+  .cropper-header { padding: 14px 16px; }
+  .cropper-body   { padding: 16px; }
+  .cropper-footer { padding: 12px 16px; }
+
   .cropper-wrapper {
-    width: 85vw;
-    height: 85vw;
-    max-width: 340px;
-    max-height: 340px;
+    width: 88vw;
+    height: 88vw;
+    max-width: 360px;
+    max-height: 360px;
   }
+
+  .cropper-preview { gap: 16px; }
+  .preview-box { width: 100px; height: 100px; }
+
+  .toolbar { gap: 6px; }
+  .toolbar-group { gap: 2px; }
+  .action-btn { padding: 8px 18px; }
 }
 </style>
