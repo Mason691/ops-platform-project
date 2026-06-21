@@ -1,23 +1,36 @@
 <template>
+  <!-- ═══════════ H5: 完整裁剪功能 ═══════════ -->
   <!-- #ifdef H5 -->
-  <view class="cropper-overlay" v-if="visible" @click.self="handleCancel" @touchmove.prevent.stop>
-    <view class="cropper-dialog">
+  <view class="co-overlay" v-if="visible" @click.stop.prevent="() => {}" @touchmove.prevent.stop>
+    <view class="co-dialog">
       <!-- ═══ 头部 ═══ -->
-      <view class="cropper-header">
-        <view class="header-left">
-          <text class="cropper-title">✂️ 裁剪封面图</text>
-          <text class="cropper-badge">800 × 800</text>
+      <view class="co-header">
+        <view class="co-header-left">
+          <view class="co-header-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="6" width="20" height="12" rx="2"/>
+              <path d="M8 2v4"/>
+              <path d="M16 2v4"/>
+              <rect x="2" y="18" width="9" height="4" rx="1"/>
+              <path d="M22 22v-4"/>
+            </svg>
+          </view>
+          <text class="co-title">裁剪封面图</text>
+          <view class="co-badge">800 × 800</view>
         </view>
-        <view class="cropper-close" @click="handleCancel">
-          <text>✕</text>
+        <view class="co-close-btn" @click="handleCancel">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
         </view>
       </view>
 
-      <!-- ═══ 主体：左裁剪 + 右预览 ═══ -->
-      <view class="cropper-body">
+      <!-- ═══ 主体：左裁剪区 + 右预览 ═══ -->
+      <view class="co-body">
         <!-- 左侧：裁剪操作区 -->
-        <view class="cropper-main">
-          <view class="cropper-wrapper" ref="wrapperRef">
+        <view class="co-main">
+          <view class="co-crop-container" ref="wrapperRef">
             <img
               ref="cropperImageRef"
               :src="imageUrl"
@@ -30,58 +43,124 @@
         </view>
 
         <!-- 右侧：实时预览 -->
-        <view class="cropper-preview">
-          <text class="preview-title">实时预览</text>
-          <view class="preview-card">
-            <view class="preview-box preview-box--round">
-              <view class="preview-canvas" id="previewRound"></view>
-            </view>
-            <text class="preview-label">圆形</text>
+        <view class="co-preview">
+          <view class="co-preview-header">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <text class="co-preview-title">实时预览</text>
           </view>
-          <view class="preview-card">
-            <view class="preview-box preview-box--square">
-              <view class="preview-canvas" id="previewSquare"></view>
+
+          <view class="co-preview-cards">
+            <!-- 圆形预览 -->
+            <view class="co-preview-item">
+              <view class="co-preview-box co-preview-box--round">
+                <view class="co-preview-inner" id="previewRound"></view>
+              </view>
+              <text class="co-preview-label">圆形</text>
             </view>
-            <text class="preview-label">方形</text>
+
+            <!-- 方形预览 -->
+            <view class="co-preview-item">
+              <view class="co-preview-box co-preview-box--square">
+                <view class="co-preview-inner" id="previewSquare"></view>
+              </view>
+              <text class="co-preview-label">方形</text>
+            </view>
           </view>
         </view>
       </view>
 
-      <!-- ═══ 底部：工具栏 + 操作按钮 ═══ -->
-      <view class="cropper-footer">
-        <view class="toolbar">
-          <view class="toolbar-group">
+      <!-- ═══ 底部工具栏 + 操作按钮 ═══ -->
+      <view class="co-footer">
+        <view class="co-toolbar">
+          <!-- 缩放控制 -->
+          <view class="co-tool-group">
             <button
-              class="tool-btn tool-btn--icon"
+              class="co-tool-btn co-tool-btn--icon"
               :disabled="zoomLevel <= 0.5"
               @click="zoomOut"
-            >−</button>
-            <text class="zoom-text">{{ Math.round(zoomLevel * 100) }}%</text>
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
+            <view class="co-zoom-display">
+              <text class="co-zoom-value">{{ Math.round(zoomLevel * 100) }}</text>
+              <text class="co-zoom-unit">%</text>
+            </view>
             <button
-              class="tool-btn tool-btn--icon"
+              class="co-tool-btn co-tool-btn--icon"
               :disabled="zoomLevel >= 3"
               @click="zoomIn"
-            >+</button>
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
           </view>
-          <view class="toolbar-divider"></view>
-          <view class="toolbar-group">
-            <button class="tool-btn tool-btn--text" @click="rotateLeft">↺ 左转</button>
-            <button class="tool-btn tool-btn--text" @click="rotateRight">↻ 右转</button>
-            <button class="tool-btn tool-btn--text" @click="resetCrop">↩ 重置</button>
+
+          <!-- 分隔线 -->
+          <view class="co-tool-divider"></view>
+
+          <!-- 旋转控制 -->
+          <view class="co-tool-group">
+            <button class="co-tool-btn co-tool-btn--text" @click="rotateLeft">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="1 4 1 10 7 10"/>
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+              </svg>
+              <text>左转</text>
+            </button>
+            <button class="co-tool-btn co-tool-btn--text" @click="rotateRight">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"/>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+              </svg>
+              <text>右转</text>
+            </button>
           </view>
+
+          <!-- 分隔线 -->
+          <view class="co-tool-divider"></view>
+
+          <!-- 重置 -->
+          <button class="co-tool-btn co-tool-btn--text" @click="resetCrop">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 4v6h6"/>
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+              <path d="M17.5 9.5 12 15l-2.5-2.5"/>
+              <line x1="12" y1="15" x2="12" y2="20"/>
+            </svg>
+            <text>重置</text>
+          </button>
         </view>
-        <view class="action-group">
-          <button class="action-btn action-btn--cancel" @click="handleCancel">取消</button>
-          <button class="action-btn action-btn--confirm" @click="handleConfirm">确认裁剪</button>
+
+        <!-- 操作按钮 -->
+        <view class="co-actions">
+          <button class="co-btn co-btn--cancel" @click="handleCancel">取消</button>
+          <button class="co-btn co-btn--confirm" @click="handleConfirm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <text>确认裁剪</text>
+          </button>
         </view>
       </view>
     </view>
   </view>
   <!-- #endif -->
 
+  <!-- ═══════════ 非 H5：不支持提示 ═══════════ -->
   <!-- #ifndef H5 -->
-  <view v-if="visible">
-    <text>裁剪功能仅支持 PC 浏览器</text>
+  <view v-if="visible" class="co-fallback">
+    <view class="co-fallback-card">
+      <text class="co-fallback-icon">✂️</text>
+      <text class="co-fallback-title">裁剪功能</text>
+      <text class="co-fallback-desc">请在 PC 浏览器中打开以使用图片裁剪功能</text>
+      <button class="co-fallback-btn" @click="handleCancel">知道了</button>
+    </view>
   </view>
   <!-- #endif -->
 </template>
@@ -99,17 +178,15 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'confirm', 'error'])
 
-// ==================== Refs ====================
+// ==================== Template Refs ====================
 const cropperImageRef = ref(null)
-// preview refs — use id selectors (uni-view custom elements)
-//   see updatePreview() below
 
 // ==================== State ====================
 let cropper = null
 let initialized = false
 const zoomLevel = ref(1)
 
-// ==================== Preview ====================
+// ==================== Preview Update ====================
 function updatePreview() {
   if (!cropper || !initialized) return
 
@@ -117,8 +194,8 @@ function updatePreview() {
     const roundCanvas = cropper.getCroppedCanvas({ width: 150, height: 150 })
     const squareCanvas = cropper.getCroppedCanvas({ width: 150, height: 150 })
 
-    const roundEl = document.getElementById("previewRound")
-    const squareEl = document.getElementById("previewSquare")
+    const roundEl = document.getElementById('previewRound')
+    const squareEl = document.getElementById('previewSquare')
 
     if (roundEl) {
       roundEl.innerHTML = ''
@@ -128,7 +205,9 @@ function updatePreview() {
       squareEl.innerHTML = ''
       if (squareCanvas) squareEl.appendChild(squareCanvas)
     }
-  } catch { /* silently skip preview errors */ }
+  } catch {
+    /* silently skip preview errors */
+  }
 }
 
 // ==================== Cropper Init ====================
@@ -141,7 +220,7 @@ function initCropper() {
   nextTick(() => {
     try {
       cropper = new Cropper(img, {
-        // ── Core constraints ──
+        // Core constraints
         aspectRatio: 1,
         viewMode: 1,
         autoCropArea: 1,
@@ -149,14 +228,14 @@ function initCropper() {
         cropBoxResizable: false,
         dragMode: 'move',
 
-        // ── Visual ──
+        // Visual
         guides: true,
         background: true,
         modal: true,
         center: true,
         highlight: false,
 
-        // ── Interaction ──
+        // Interaction
         movable: true,
         zoomable: true,
         zoomOnWheel: true,
@@ -167,7 +246,7 @@ function initCropper() {
         responsive: true,
         restore: false,
 
-        // ── Lifecycle ──
+        // Lifecycle
         ready() {
           cropper.zoomTo(2)
           zoomLevel.value = cropper.getImageData().width
@@ -281,305 +360,397 @@ onBeforeUnmount(() => destroyCropper())
 </script>
 
 <style scoped>
-/* ═══════════════════════════════════════════
-   OVERLAY
-   ═══════════════════════════════════════════ */
-.cropper-overlay {
+/* ═══════════════════════════════════════════════
+   1. OVERLAY
+   ═══════════════════════════════════════════════ */
+.co-overlay {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: fadeIn 0.2s ease;
-  backdrop-filter: blur(4px);
+  animation: coFadeIn 0.2s ease;
 }
 
-@keyframes fadeIn {
+@keyframes coFadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
 
-/* ═══════════════════════════════════════════
-   DIALOG SHELL
-   ═══════════════════════════════════════════ */
-.cropper-dialog {
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
+/* ═══════════════════════════════════════════════
+   2. DIALOG SHELL
+   ═══════════════════════════════════════════════ */
+.co-dialog {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 24px 64px rgba(0, 0, 0, 0.16),
+    0 8px 24px rgba(0, 0, 0, 0.08);
   width: 1060px;
-  max-width: 97vw;
-  max-height: 96vh;
+  max-width: 96vw;
+  max-height: 95vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: slideUp 0.25s ease;
+  animation: coSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes slideUp {
-  from { transform: translateY(36px); opacity: 0; }
+@keyframes coSlideUp {
+  from { transform: translateY(24px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
 }
 
-/* ═══════════════════════════════════════════
-   HEADER
-   ═══════════════════════════════════════════ */
-.cropper-header {
+/* ═══════════════════════════════════════════════
+   3. HEADER
+   ═══════════════════════════════════════════════ */
+.co-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 24px;
+  padding: 20px 28px;
   border-bottom: 1px solid #f0f0f0;
   flex-shrink: 0;
+  background: #fafbfc;
 }
 
-.header-left {
+.co-header-left {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.cropper-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.cropper-badge {
-  font-size: 12px;
-  font-weight: 500;
-  color: #FF6B35;
-  background: #FFF3EE;
-  padding: 3px 10px;
+.co-header-icon {
+  width: 36px;
+  height: 36px;
   border-radius: 10px;
-  border: 1px solid #ffe0d0;
+  background: linear-gradient(135deg, #fff3ee 0%, #ffe8dc 100%);
+  color: #FF6B35;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.cropper-close {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
+.co-title {
+  font-size: 17px;
+  font-weight: 650;
+  color: #1a1a2e;
+  letter-spacing: -0.01em;
+}
+
+.co-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #FF6B35;
+  background: linear-gradient(135deg, #fff5f0 0%, #ffede4 100%);
+  padding: 3px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.02em;
+  border: 1px solid #ffe8da;
+}
+
+.co-close-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: #9ca3af;
-  font-size: 17px;
-  transition: all 0.15s;
+  color: #94a3b8;
+  transition: all 0.15s ease;
+  background: transparent;
 }
-.cropper-close:hover {
-  background: #f3f4f6;
-  color: #1f2937;
+.co-close-btn:hover {
+  background: #f1f5f9;
+  color: #475569;
+}
+.co-close-btn:active {
+  background: #e2e8f0;
+  transform: scale(0.95);
 }
 
-/* ═══════════════════════════════════════════
-   BODY — left crop + right preview
-   ═══════════════════════════════════════════ */
-.cropper-body {
+/* ═══════════════════════════════════════════════
+   4. BODY — left crop + right preview
+   ═══════════════════════════════════════════════ */
+.co-body {
   flex: 1;
   display: flex;
-  gap: 24px;
-  padding: 24px;
-  background: #fafbfc;
+  gap: 28px;
+  padding: 28px;
+  background: linear-gradient(180deg, #f8f9fb 0%, #f5f6fa 100%);
   overflow: hidden;
   min-height: 0;
 }
 
 /* ── Left: crop area ── */
-.cropper-main {
+.co-main {
   flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.cropper-wrapper {
+.co-crop-container {
   width: 800px;
   height: 800px;
   background: #fff;
-  border: 2px dashed #d1d5db;
-  border-radius: 8px;
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 4px 16px rgba(0, 0, 0, 0.06);
   overflow: hidden;
   flex-shrink: 0;
 }
 
-.cropper-wrapper :deep(img) {
+.co-crop-container :deep(img) {
   display: block;
   max-width: 100%;
   max-height: 100%;
 }
 
 /* ── Right: preview panel ── */
-.cropper-preview {
+.co-preview {
   flex: none;
   width: 180px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
-  padding-top: 8px;
+  gap: 20px;
+  padding-top: 4px;
 }
 
-.preview-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #6b7280;
+.co-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #64748b;
+}
+
+.co-preview-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: #64748b;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.06em;
 }
 
-.preview-card {
+.co-preview-cards {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 20px;
 }
 
-.preview-box {
-  width: 140px;
-  height: 140px;
-  border: 2px solid #e5e7eb;
+.co-preview-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.co-preview-box {
+  width: 130px;
+  height: 130px;
   background: #fff;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 4px 12px rgba(0, 0, 0, 0.06);
   overflow: hidden;
-  transition: border-color 0.2s;
+  transition: all 0.25s ease;
 }
-.preview-box:hover { border-color: #FF6B35; }
+.co-preview-box:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.10);
+}
 
-.preview-box--round    { border-radius: 50%; }
-.preview-box--square   { border-radius: 8px;  }
+.co-preview-box--round {
+  border-radius: 50%;
+}
 
-.preview-canvas {
+.co-preview-box--square {
+  border-radius: 12px;
+}
+
+.co-preview-inner {
   width: 100%;
   height: 100%;
 }
-.preview-canvas :deep(canvas) {
+.co-preview-inner :deep(canvas) {
   width: 100%;
   height: 100%;
 }
 
-.preview-label {
-  font-size: 12px;
-  color: #9ca3af;
+.co-preview-label {
+  font-size: 11px;
+  font-weight: 550;
+  color: #94a3b8;
+  letter-spacing: 0.03em;
 }
 
-/* ═══════════════════════════════════════════
-   FOOTER — toolbar + action buttons
-   ═══════════════════════════════════════════ */
-.cropper-footer {
+/* ═══════════════════════════════════════════════
+   5. FOOTER — toolbar + action buttons
+   ═══════════════════════════════════════════════ */
+.co-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 24px;
+  padding: 16px 28px;
   border-top: 1px solid #f0f0f0;
   background: #fff;
   flex-shrink: 0;
 }
 
 /* ── Toolbar ── */
-.toolbar {
+.co-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
-.toolbar-group {
+.co-tool-group {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
 }
 
-.toolbar-divider {
+.co-tool-divider {
   width: 1px;
-  height: 24px;
+  height: 22px;
   background: #e5e7eb;
+  border-radius: 1px;
 }
 
-.tool-btn {
-  border: 1px solid #e5e7eb;
-  background: #fff;
+.co-zoom-display {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  min-width: 52px;
+  padding: 2px 6px;
+  background: #f8fafc;
   border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  font-family: inherit;
-  transition: all 0.15s;
-  outline: none;
-  padding: 6px 0;
-  color: #374151;
 }
-.tool-btn:hover  { background: #f9fafb; border-color: #d1d5db; }
-.tool-btn:active { background: #f3f4f6; }
 
-.tool-btn--icon {
-  width: 34px;
-  font-size: 18px;
+.co-zoom-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.co-zoom-unit {
+  font-size: 10px;
   font-weight: 600;
+  color: #94a3b8;
+  margin-left: 1px;
+}
+
+/* ── Tool Buttons (base) ── */
+.co-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: 550;
+  color: #475569;
+  transition: all 0.15s ease;
+  outline: none;
+  padding: 7px 0;
   line-height: 1;
 }
-
-.tool-btn--text {
-  padding: 6px 12px;
+.co-tool-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #1e293b;
 }
-
-.tool-btn:disabled {
-  opacity: 0.35;
+.co-tool-btn:active {
+  background: #f1f5f9;
+  border-color: #bcc5d1;
+  transform: scale(0.97);
+}
+.co-tool-btn:disabled {
+  opacity: 0.3;
   cursor: not-allowed;
+  pointer-events: none;
 }
 
-.zoom-text {
-  display: inline-block;
-  min-width: 42px;
-  text-align: center;
-  font-size: 13px;
-  font-weight: 600;
-  color: #6b7280;
+.co-tool-btn--icon {
+  width: 34px;
+  height: 34px;
+  padding: 0;
 }
 
-/* ── Action buttons ── */
-.action-group {
+.co-tool-btn--text {
+  padding: 7px 10px;
+}
+
+/* ── Action Buttons ── */
+.co-actions {
   display: flex;
   gap: 10px;
 }
 
-.action-btn {
-  padding: 9px 28px;
+.co-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 24px;
   font-size: 14px;
-  font-weight: 500;
-  border-radius: 6px;
-  border: 1px solid transparent;
+  font-weight: 600;
+  border-radius: 10px;
+  border: none;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
   outline: none;
   font-family: inherit;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
-.action-btn--cancel {
-  background: #fff;
-  color: #6b7280;
-  border-color: #d1d5db;
+.co-btn--cancel {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
 }
-.action-btn--cancel:hover {
-  color: #FF6B35;
-  border-color: #FF6B35;
-  background: #fff8f5;
+.co-btn--cancel:hover {
+  background: #e2e8f0;
+  color: #1e293b;
+  border-color: #cbd5e1;
 }
-
-.action-btn--confirm {
-  background: #FF6B35;
-  color: #fff;
-  border-color: #FF6B35;
-}
-.action-btn--confirm:hover {
-  background: #e55a2b;
-  border-color: #e55a2b;
+.co-btn--cancel:active {
+  background: #cbd5e1;
+  transform: scale(0.98);
 }
 
-/* ═══════════════════════════════════════════
-   CROPPER INTERNAL STYLE OVERRIDES
-   ═══════════════════════════════════════════ */
+.co-btn--confirm {
+  background: linear-gradient(135deg, #FF6B35 0%, #e85d2c 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(255, 107, 53, 0.3);
+}
+.co-btn--confirm:hover {
+  box-shadow: 0 4px 16px rgba(255, 107, 53, 0.4);
+  transform: translateY(-1px);
+}
+.co-btn--confirm:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 1px 4px rgba(255, 107, 53, 0.25);
+}
+
+/* ═══════════════════════════════════════════════
+   6. CROPPER.JS INTERNAL OVERRIDES
+   ═══════════════════════════════════════════════ */
 :deep(.cropper-crop-box) {
-  outline: 2px dashed rgba(255, 255, 255, 0.9) !important;
+  outline: 2px dashed rgba(255, 255, 255, 0.85) !important;
 }
 
 :deep(.cropper-point) {
@@ -587,63 +758,167 @@ onBeforeUnmount(() => destroyCropper())
 }
 
 :deep(.cropper-dashed) {
-  border-color: rgba(255, 255, 255, 0.45) !important;
+  border-color: rgba(255, 255, 255, 0.4) !important;
 }
 
 :deep(.cropper-center) {
   display: block !important;
-  opacity: 0.5;
+  opacity: 0.45;
 }
 
-/* ═══════════════════════════════════════════
-   RESPONSIVE
-   ═══════════════════════════════════════════ */
-@media (max-width: 1100px) {
-  .cropper-dialog { width: 97vw; }
+:deep(.cropper-face) {
+  opacity: 0 !important;
+}
 
-  .cropper-body {
+/* ═══════════════════════════════════════════════
+   7. FALLBACK (non-H5)
+   ═══════════════════════════════════════════════ */
+.co-fallback {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.co-fallback-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 40px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+  width: 320px;
+  max-width: 85vw;
+}
+
+.co-fallback-icon {
+  font-size: 40px;
+}
+
+.co-fallback-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.co-fallback-desc {
+  font-size: 14px;
+  color: #64748b;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.co-fallback-btn {
+  margin-top: 8px;
+  padding: 10px 32px;
+  background: #FF6B35;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ═══════════════════════════════════════════════
+   8. RESPONSIVE
+   ═══════════════════════════════════════════════ */
+@media (max-width: 1100px) {
+  .co-dialog {
+    width: 97vw;
+  }
+
+  .co-body {
     flex-direction: column;
     align-items: center;
     overflow-y: auto;
+    gap: 20px;
+    padding: 20px;
   }
 
-  .cropper-wrapper {
+  .co-crop-container {
     width: 80vw;
     height: 80vw;
-    max-width: 600px;
-    max-height: 600px;
+    max-width: 500px;
+    max-height: 500px;
   }
 
-  .cropper-preview {
+  .co-preview {
     flex-direction: row;
     width: auto;
     gap: 24px;
     padding-top: 0;
   }
 
-  .cropper-footer {
+  .co-preview-cards {
+    flex-direction: row;
+    gap: 24px;
+  }
+
+  .co-preview-header { display: none; }
+
+  .co-footer {
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 12px;
   }
 }
 
 @media (max-width: 640px) {
-  .cropper-header { padding: 14px 16px; }
-  .cropper-body   { padding: 16px; }
-  .cropper-footer { padding: 12px 16px; }
+  .co-header { padding: 14px 16px; }
+  .co-title  { font-size: 15px; }
 
-  .cropper-wrapper {
+  .co-body   { padding: 16px; }
+
+  .co-crop-container {
     width: 88vw;
     height: 88vw;
-    max-width: 360px;
-    max-height: 360px;
+    max-width: 340px;
+    max-height: 340px;
   }
 
-  .cropper-preview { gap: 16px; }
-  .preview-box { width: 100px; height: 100px; }
+  .co-preview-cards { gap: 16px; }
 
-  .toolbar { gap: 6px; }
-  .toolbar-group { gap: 2px; }
-  .action-btn { padding: 8px 18px; }
+  .co-preview-box {
+    width: 90px;
+    height: 90px;
+  }
+
+  .co-toolbar { gap: 8px; }
+  .co-tool-group { gap: 1px; }
+  .co-tool-btn--text { padding: 6px 8px; font-size: 12px; }
+  .co-tool-btn--icon { width: 30px; height: 30px; }
+
+  .co-footer { padding: 12px 16px; }
+  .co-btn { padding: 8px 16px; font-size: 13px; }
+}
+
+@media (max-width: 400px) {
+  .co-header { padding: 10px 12px; }
+  .co-header-icon { width: 30px; height: 30px; border-radius: 8px; }
+  .co-title { font-size: 14px; }
+  .co-badge { font-size: 10px; padding: 2px 7px; }
+
+  .co-crop-container {
+    width: 92vw;
+    height: 92vw;
+    max-width: 280px;
+    max-height: 280px;
+  }
+
+  .co-preview-cards { gap: 10px; }
+  .co-preview-box {
+    width: 70px;
+    height: 70px;
+  }
+  .co-preview-label { font-size: 10px; }
+
+  .co-toolbar { gap: 4px; }
+  .co-tool-btn--text { padding: 5px 6px; font-size: 11px; }
+  .co-btn { padding: 7px 14px; font-size: 12px; }
 }
 </style>
