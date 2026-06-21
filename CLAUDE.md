@@ -38,8 +38,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # 后端（本地构建，JAR 上传到远程运行）
+# 本地 JDK 在 /home/jason/jdk17/，但服务器默认 JDK 8，运行 JAR 必须指定完整路径
 JAVA_HOME=/home/jason/jdk17/jdk-17.0.9+9 mvn clean package -DskipTests -o
+# 本地测试（JDK 17 已在 PATH）：
 java -jar backend/target/ops-platform-1.0.0-SNAPSHOT.jar
+# 远程运行（服务器 JDK 8 是默认，必须用绝对路径）：
+# /home/jason/jdk17/bin/java -jar backend/target/ops-platform-1.0.0-SNAPSHOT.jar
 
 # 前端 H5 dev server（端口 3035，Vite proxy /api → localhost:8084）
 cd frontend && npm run dev:h5
@@ -66,17 +70,19 @@ ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jason@104.238.16
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   -r dist/build/h5/* jason@104.238.165.57:/home/jason/ops-platform-project/frontend/dist/build/h5/
 
-# 后端部署
+# 后端部署（注意：服务器默认 JDK 8，必须用 JDK 17 绝对路径）
 cd backend && JAVA_HOME=/home/jason/jdk17/jdk-17.0.9+9 mvn clean package -DskipTests -o
 scp target/ops-platform-1.0.0-SNAPSHOT.jar jason@104.238.165.57:~/ops-platform-project/backend/target/
-ssh jason@104.238.165.57 "cd ~/ops-platform-project && kill \$(lsof -ti:8084) 2>/dev/null; sleep 1; \
-  nohup java -jar backend/target/ops-platform-1.0.0-SNAPSHOT.jar > backend/app.log 2>&1 &"
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jason@104.238.165.57 "kill \$(lsof -ti:8084) 2>/dev/null; sleep 1; \
+  nohup /home/jason/jdk17/bin/java -jar /home/jason/ops-platform-project/backend/target/ops-platform-1.0.0-SNAPSHOT.jar > /tmp/ops.log 2>&1 &"
 ```
 
 **Nginx 路由**（`/etc/nginx/conf.d/a.15891589.xyz.conf`）：
 - `/subsystem/ops/` → 前端静态文件（`dist/build/h5/`）
 - `/api/ops/**` → 后端 8084
-- `/uploads/ops/**` → 文件上传目录
+- `/uploads/ops/**` → alias 到 `/home/jason/ops-platform-project/uploads/ops/`（Nginx 直接读磁盘）
+- `/uploads/ops/mall/` → symlink 到 `/home/jason/uploads/`（mall 商品图片）
+- **⚠️ 修改 Nginx 配置需要 sudo**，开发用户 jason 无 sudo 权限
 
 **验证部署**：
 ```bash
@@ -114,8 +120,9 @@ ops-platform-project/
 │   │   └── service/         # 5 service interfaces + 4 impls（含 ActivityReminderService）
 │   └── pom.xml
 ├── frontend/
-│   ├── src/pages/           # 14 page modules（index/activity/product/mine/order/address/points/coupon/booking/live/ai/auth）
-│   ├── src/components/      # 共享组件（ImageCropperModal 等）
+│   ├── src/pages/           # page modules（含 admin/activity-form 活动编辑器）
+│   ├── src/pages/admin/     # 管理后台页面（活动编辑器，内联 CropperJS）
+│   ├── src/components/      # 共享组件（ImageCropperModal.vue 为旧版，已被 admin/activity-form 内联替代）
 │   ├── static/              # 静态资源（jweixin-1.6.0.js 等）
 │   ├── vite.config.js       # base: /subsystem/ops/ (prod), proxy /api → 8084 (dev)
 │   ├── .env                 # VITE_OPS_ENTRY + VITE_CORP_ID
@@ -149,13 +156,42 @@ ops-platform-project/
 
 ## 关键后端特性
 
+### 图片服务架构
+
+图片从数据库到前端渲染的完整链路：
+
+```
+DB (相对路径) → Backend ImageUrlUtil → API JSON (相对路径)
+  → 前端 assetUrl() 拼接 BASE_URL → 完整 HTTPS URL
+  → 浏览器请求 → Nginx /uploads/ops/ → 磁盘文件
+```
+
+- **Backend `ImageUrlUtil`**（`util/ImageUrlUtil.java`）：规范化所有图片路径
+  - `normalizeImage(path)` — 完整 HTTPS URL → 提取相对路径；占位图域名（`via.placeholder.com` 等）→ `null`
+  - `normalizeProductImage(path)` — mall 商品图片提取文件名 → `/uploads/ops/mall/{filename}`
+  - `resolveActivityCover(coverUrl, coverImage)` — 回退逻辑：coverUrl 为空时用 coverImage
+- **前端 `utils/image.js`**：`assetUrl()` 空值返回占位 SVG；HTTPS/data: 原样；相对路径拼 `BASE_URL + path`
+- **Nginx**：`location /uploads/ops/` → alias `/home/jason/ops-platform-project/uploads/ops/`
+- **商品图片**：上游 mall_product 表存完整 HTTPS URL，Backend 提取文件名后映射到 `/uploads/ops/mall/`
+  该路径通过 symlink `uploads/ops/mall → /home/jason/uploads/` 由 Nginx 读磁盘
+
 ### 文件上传（FileUploadController）
 - 路径：`POST /api/ops/files/upload`（JWT）
 - 图片：jpg/png/gif/webp/bmp，≤2MB
 - 视频：mp4/mov/avi/webm，≤50MB
 - 自动 H.265→H.264 转码（ffmpeg）+ 首帧截图作为封面
-- 存储：`uploads/ops/img/{yyyyMMdd}/` 和 `uploads/ops/video/{yyyyMMdd}/`
-- 返回：`{url, type, size, videoCoverUrl}`
+- **上传目录通过 `app.upload.base-dir` 配置为绝对路径**（`/home/jason/ops-platform-project/uploads`），
+  **不是** `System.getProperty("user.dir")`，否则 JAR 从不同目录启动时文件会落到错误位置
+
+### 管理后台活动编辑器
+- 前端页面：`pages/admin/activity-form.vue`，路由注册在 `pages.json`
+- 入口：我的 → ✏️ 活动管理（需登录），或直接 URL `#/pages/admin/activity-form`
+- 封面裁剪器已**内联**到页面中（非独立组件），包含 CropperJS 800×800 容器、fillZoom 自适应缩放、
+  圆形/方形实时预览、缩放/旋转/重置工具栏
+- 开发模式自动登录：`ensureLogin()` 用测试账号 `13900000001/admin123` mock 登录
+- 测试按钮：未上传封面时可点击"测试图片1/2"跳过文件选择器直接打开裁剪器
+- 后端 mock 登录支持：`mockPhone` 字段（`RegisterRequest` / `WechatLoginRequest`），
+  `UserServiceImpl.resolvePhone()` 优先读取 mockPhone，跳过微信解密
 
 ### 活动系统
 - 预约提醒（`ActivityReminderService`）：活动开始前 24h/1h 通过公众号发送提醒
@@ -176,9 +212,32 @@ ops-platform-project/
 | `VITE_CORP_ID` | 默认组织 ID | `4` (prod) |
 
 **API 协议**：
-- H5 使用相对路径（`/api`），Nginx 反代统一 HTTPS，避免混合内容
-- 小程序使用完整 URL（`https://a.15891589.xyz/api`），微信强制 HTTPS
+- H5 同样使用完整 HTTPS URL（`https://a.15891589.xyz/api`）、小程序亦同
 - 本地 dev：Vite proxy 将 `/api` 转发到 `localhost:8084`
+
+**⚠️ H5 图片 URL 必须用完整 HTTPS 路径**（`config.js` 中 `BASE_URL = 'https://a.15891589.xyz'`）：
+uni-app 的 `<image>` 组件在 H5 中渲染为 `<div style="background-image: url(...)">`。
+CSS `url()` 把根相对路径（如 `/uploads/ops/img/xxx.jpg`）解析到页面 base
+`/subsystem/ops/`，导致实际请求 `/subsystem/ops/uploads/...` → 404。
+因此在 H5 模式下必须返回完整 `https://a.15891589.xyz/uploads/...` 绝对 URL。
+前端 `utils/image.js` 的 `assetUrl()` 通过 `BASE_URL + path` 拼接完整 URL，
+其中 `BASE_URL` 从 `VITE_OPS_ENTRY` 环境变量读取。
+
+---
+
+## 已知陷阱
+
+| 陷阱 | 说明 |
+|------|------|
+| **服务器 JDK** | 默认 JDK 8，运行 ops-platform JAR 必须用 `/home/jason/jdk17/bin/java` |
+| **Maven offline** | 必须 `-o`（离线模式），本地仓库 `/home/jason/m2_local` |
+| **uni-app H5 image** | `<image>` 渲染为 CSS `background-image`，CSS `url()` 把根相对路径解析到页面 base `/subsystem/ops/` → 图片 URL 必须用完整 HTTPS 路径 |
+| **Nginx sudo** | jason 用户无 sudo 权限，修改 Nginx 配置需要联系管理员 |
+| **MySQL** | 在 Docker 容器中，通过 `docker exec $(docker ps -q \| head -1) mysql ...` 访问 |
+| **文件上传目录** | 后端 `app.upload.base-dir` 配置为绝对路径；如果使用了 `user.dir`，文件会落到 `backend/uploads/`，Nginx 无法访问 |
+| **商品图片来源** | `ops_product` 只是映射表，实际商品数据在 `mall_product` 表 |
+| **活动封面** | `ops_activity` 同时有 `cover_image` 和 `cover_url` 两个字段，部分老数据 `cover_url` 可能为 NULL，后端 `PlatformController` 已做回退处理 |
+| **Nginx 缓存** | `/subsystem/ops/assets/` 30 天 immutable 缓存，部署后如果文件没变（相同 hash）则不更新；`index.html` 有 `no-cache` 头 |
 
 ---
 
