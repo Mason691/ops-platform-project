@@ -19,7 +19,7 @@
     <!-- 商品网格 -->
     <view class="product-grid" v-if="products.length > 0">
       <view v-for="p in products" :key="p.id" class="p-card" @click="onProductClick(p)">
-        <image :src="p.coverImage||'/static/gas-default.png'" class="p-img" mode="aspectFill"/>
+        <image :src="assetUrl(p.coverImage)" class="p-img" mode="aspectFill" @error="onImgError"/>
         <view v-if="p.miniappConfig" class="p-tag">小程序</view>
         <view class="p-body">
           <text class="p-name">{{p.name}}</text>
@@ -55,6 +55,7 @@
 </template>
 <script setup>
 import {ref,onMounted} from 'vue';import {api} from '@/api/index'
+import { assetUrl, onImgError } from '@/utils/image.js'
 const categories=ref([]),activeCatId=ref(null),products=ref([]),loading=ref(false),showGuide=ref(false),liveRoom=ref(null)
 onMounted(async()=>{
   try{const lr=await api.activeLiveRooms();liveRoom.value=(lr||[])[0]||null}catch{}

@@ -1,6 +1,6 @@
 <template>
   <view class="page" v-if="p">
-    <swiper class="swiper" indicator-dots><swiper-item v-for="(img,i) in images" :key="i"><image :src="img" class="swiper-img" mode="aspectFill"/></swiper-item></swiper>
+    <swiper class="swiper" indicator-dots><swiper-item v-for="(img,i) in images" :key="i"><image :src="assetUrl(img)" class="swiper-img" mode="aspectFill" @error="onImgError"/></swiper-item></swiper>
     <view class="info">
       <text class="merchant">{{p.merchantName||''}}</text>
       <text class="name">{{p.name}}</text>
@@ -47,6 +47,7 @@
 </template>
 <script setup>
 import {ref,computed,onMounted} from 'vue';import {api} from '@/api/index'
+import { assetUrl, onImgError } from '@/utils/image.js'
 const id=ref(0),p=ref(null),showConfirm=ref(false),showGuide=ref(false)
 const images=computed(()=>{if(!p.value)return[];try{return JSON.parse(p.value.images)}catch{return[p.value.coverImage]}})
 function fmtCash(v){if(v==null)return'0.00';const n=Number(v);return n.toFixed(n===Math.floor(n)?0:2)}

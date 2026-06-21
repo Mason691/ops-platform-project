@@ -22,9 +22,10 @@
       </view>
       <view v-else-if="videoFailed" class="cover-fallback" @click="retryVideo">
         <image
-          :src="assetUrl(act.coverUrl || act.coverImage) || '/static/gas-default.png'"
+          :src="assetUrl(act.coverUrl || act.coverImage)"
           class="cover-img"
           mode="aspectFill"
+          @error="onImgError"
         />
         <view class="fallback-overlay">
           <text class="fallback-icon">▶</text>
@@ -87,7 +88,7 @@
       <text class="sec-title">关联商品</text>
       <scroll-view scroll-x class="prod-scroll" :show-scrollbar="false">
         <view v-for="p in products" :key="p.product_id" class="prod-card">
-          <image :src="assetUrl(p.cover_image)||'/static/gas-default.png'" class="prod-img" mode="aspectFill" @click="goProduct(p)"/>
+          <image :src="assetUrl(p.cover_image || p.coverImage)" class="prod-img" mode="aspectFill" @click="goProduct(p)" @error="onImgError"/>
           <text class="prod-name">{{ p.name }}</text>
           <view class="prod-price">
             <text v-if="p.points_price>0" class="p-points">{{ p.points_price }}积分</text>
@@ -136,20 +137,13 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { BASE_URL } from '@/config'
+import { assetUrl, onImgError } from '@/utils/image.js'
 
 const act = ref(null), liveRoom = ref(null), products = ref([])
 const loadErr = ref('')
 const booked = ref(false)
 const videoFailed = ref(false)
 const videoErrorInfo = ref('')
-
-/** Resolve asset URL — prepend BASE_URL for mini-program, keep relative for H5 */
-function assetUrl(path) {
-  if (!path) return ''
-  // Already absolute (starts with http or data:)
-  if (/^https?:\/\//.test(path) || /^data:/.test(path)) return path
-  return BASE_URL + path
-}
 
 onMounted(async () => {
   const pages = getCurrentPages()

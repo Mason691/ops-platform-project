@@ -7,7 +7,7 @@
     <view class="live-grid" v-if="rooms.length > 0">
       <view class="live-card" v-for="room in rooms" :key="room.id" @click="openLive(room)">
         <view class="card-cover">
-          <image :src="room.coverUrl || '/static/live-default.png'" class="cover-img" mode="aspectFill" />
+          <image :src="assetUrl(room.coverUrl)" class="cover-img" mode="aspectFill" @error="onImgError" />
           <view class="live-badge" v-if="room.status === 1">
             <view class="badge-dot"></view>
             <text>直播中</text>
@@ -38,6 +38,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { assetUrl, onImgError } from '@/utils/image.js'
 
 const rooms = ref([])
 const showGuide = ref(false)

@@ -17,9 +17,10 @@
         <!-- Cover -->
         <view class="card-cover">
           <image
-            :src="assetUrl(a.coverUrl || a.coverImage) || '/static/gas-default.png'"
+            :src="assetUrl(a.coverUrl || a.coverImage)"
             mode="aspectFill"
             class="cover-img"
+            @error="onImgError"
           />
           <view class="status-badge" :class="statusClass(a)">
             {{ statusLabel(a) }}
@@ -68,13 +69,7 @@
 <script setup>
 import { ref, onMounted, reactive } from 'vue'
 import { BASE_URL } from '@/config'
-
-/** Resolve asset URL — prepend BASE_URL for mini-program, keep relative for H5 */
-function assetUrl(path) {
-  if (!path) return ''
-  if (/^https?:\/\//.test(path) || /^data:/.test(path)) return path
-  return BASE_URL + path
-}
+import { assetUrl, onImgError } from '@/utils/image.js'
 
 const list = ref([])
 const loading = ref(false)

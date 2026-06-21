@@ -18,7 +18,7 @@
           <text class="live-title">{{ liveRoom.liveTitle }}</text>
           <text class="live-sub">点击进入视频号直播间 ›</text>
         </view>
-        <image v-if="liveRoom.coverUrl" :src="liveRoom.coverUrl" class="live-cover" mode="aspectFill"/>
+        <image v-if="liveRoom.coverUrl" :src="assetUrl(liveRoom.coverUrl)" class="live-cover" mode="aspectFill" @error="onImgError"/>
       </view>
       <view class="more-activity" @click="goActivityList"><text>更多活动 ›</text></view>
       <!-- 视频信息流 -->
@@ -31,7 +31,7 @@
       <view class="section-title"><text>🏆 热门推荐</text></view>
       <view class="product-grid">
         <view v-for="p in products" :key="p.id" class="p-card" @click="goProduct(p.id)">
-          <image :src="p.coverImage||'/static/gas-default.png'" class="p-img" mode="aspectFill"/>
+          <image :src="assetUrl(p.coverImage)" class="p-img" mode="aspectFill" @error="onImgError"/>
           <text class="p-name">{{p.name}}</text>
           <view class="p-bottom"><text class="p-points">{{p.pointsPrice}}积分</text><text class="p-cash" v-if="p.cashPrice>0">+¥{{p.cashPrice}}</text></view>
         </view>
@@ -53,6 +53,7 @@
 </template>
 <script setup>
 import {ref,onMounted} from 'vue';import {api} from '@/api/index'
+import { assetUrl, onImgError } from '@/utils/image.js'
 const isLogin=ref(false),points=ref(0),products=ref([]),banners=ref(['/static/gas-banner1.png','/static/gas-banner2.png']),coupons=ref([]),showCoupons=ref(false),liveRoom=ref(null)
 onMounted(async()=>{
   const u=uni.getStorageSync('gas_user');if(u){isLogin.value=true;try{const m=await api.getMe();points.value=m.pointsBalance||0}catch{isLogin.value=false}}
