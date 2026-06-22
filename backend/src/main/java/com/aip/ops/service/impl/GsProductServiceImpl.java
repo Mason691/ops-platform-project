@@ -1,11 +1,13 @@
 package com.aip.ops.service.impl;
 
+import com.aip.ops.client.ProductBatchClient;
 import com.aip.ops.entity.GsProduct;
 import com.aip.ops.entity.MerchantMiniappConfig;
 import com.aip.ops.entity.OperatorMerchant;
 import com.aip.ops.entity.ProductCategory;
 import com.aip.ops.mapper.*;
 import com.aip.ops.service.IGsProductService;
+import com.aip.ops.service.PlatformMerchantService;
 import com.aip.ops.util.ImageUrlUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
@@ -19,11 +21,10 @@ import java.util.stream.Collectors;
 /**
  * 商品展示管理 Service 实现。
  *
- * 核心逻辑：
- * 1. 管理员看到的商品 = ops_product JOIN mall_product，按 operator_id 过滤，
- *    且仅显示已绑定销售商（biz_operator_merchant）的商品
- * 2. 用户端看到的商品 = ops_product JOIN mall_product，按 shelf_status=1 过滤
- * 3. 上下架/分类操作前校验商品是否属于当前运营商绑定的销售商
+ * 核心变更（ADR-005 合规）：
+ * - 不再通过 GsProductMapper JOIN mall_product 跨库查询
+ * - 改为：查 ops_product → 收集 mall_product_id → ProductBatchClient 批量获取商品详情
+ * - 销售商归属校验改为通过 ProductBatchClient 获取 corpId 后在 Service 层完成
  */
 @Service
 @RequiredArgsConstructor
@@ -32,8 +33,9 @@ public class GsProductServiceImpl implements IGsProductService {
     private final GsProductMapper productMapper;
     private final ProductCategoryMapper categoryMapper;
     private final OperatorMerchantMapper omMapper;
-    private final MerchantMapper merchantMapper;
+    private final PlatformMerchantService platformMerchantService;
     private final MerchantMiniappConfigMapper miniappConfigMapper;
+    private final ProductBatchClient productBatchClient;
     private final ImageUrlUtil imageUrlUtil;
 
     // ═══ 管理员商品管理 ═══
@@ -44,69 +46,84 @@ public class GsProductServiceImpl implements IGsProductService {
         // 1. 获取当前运营商绑定的所有销售商 ID
         Set<Long> boundMerchantIds = getBoundMerchantIds(operatorId);
 
-        // 2. 未绑定任何销售商 → 直接返回空列表
+        // 2. 未绑定任何销售商 → 直接返回空
         if (boundMerchantIds.isEmpty()) {
-            Map<String, Object> empty = new LinkedHashMap<>();
-            empty.put("records", Collections.emptyList());
-            empty.put("total", 0L);
-            empty.put("size", pageSize);
-            empty.put("current", pageNum);
-            return empty;
+            return emptyPage(pageSize, pageNum);
         }
 
-        // 3. 若前端指定了 merchantId 筛选，校验其是否在绑定列表中
-        List<Long> corpIds;
-        if (merchantId != null) {
-            if (!boundMerchantIds.contains(merchantId)) {
-                // 请求的销售商不在绑定列表中 → 返回空
-                Map<String, Object> empty = new LinkedHashMap<>();
-                empty.put("records", Collections.emptyList());
-                empty.put("total", 0L);
-                empty.put("size", pageSize);
-                empty.put("current", pageNum);
-                return empty;
-            }
-            corpIds = Collections.singletonList(merchantId);
-        } else {
-            corpIds = new ArrayList<>(boundMerchantIds);
+        // 3. 若指定 merchantId 筛选，校验其是否在绑定列表中
+        if (merchantId != null && !boundMerchantIds.contains(merchantId)) {
+            return emptyPage(pageSize, pageNum);
         }
+        Set<Long> targetMerchantIds = (merchantId != null)
+                ? Collections.singleton(merchantId) : boundMerchantIds;
+
+        // 4. 查询 ops_product 列表（仅含本地字段，无 mall_product JOIN）
         int offset = (pageNum - 1) * pageSize;
+        List<Map<String, Object>> mappings = productMapper.selectProductList(
+                operatorId, offset, pageSize, shelfStatus, categoryId);
+        long total = productMapper.countProductList(operatorId, shelfStatus, categoryId);
 
-        // 4. 按绑定销售商过滤商品
-        List<Map<String, Object>> records = productMapper.selectProductList(
-                operatorId, corpIds, offset, pageSize, shelfStatus, categoryId, keyword);
-        long total = productMapper.countProductList(operatorId, corpIds, shelfStatus, categoryId, keyword);
+        if (mappings.isEmpty()) {
+            return emptyPage(pageSize, pageNum);
+        }
 
-        // 5. 批量加载销售商名称（id → name）和小程序跳转配置
-        Map<Long, String> merchantNameMap = loadMerchantNames(boundMerchantIds);
-        Map<Long, Map<String, Object>> miniappConfigMap = loadMiniappConfigs(boundMerchantIds);
+        // 5. 收集 mall_product_id，批量获取商品详情
+        List<Long> mallProductIds = mappings.stream()
+                .map(m -> Long.valueOf(m.get("mallProductId").toString()))
+                .distinct().collect(Collectors.toList());
+        Map<Long, Map<String, Object>> productMap = productBatchClient.batchQuery(mallProductIds);
 
-        // 6. 富化每条记录
-        List<Map<String, Object>> enriched = records.stream().map(rec -> {
+        // 6. 按销售商和关键词过滤（替代原 SQL 中的 JOIN 过滤）
+        List<Map<String, Object>> filtered = mappings.stream()
+                .filter(m -> {
+                    Long mpId = Long.valueOf(m.get("mallProductId").toString());
+                    Map<String, Object> prod = productMap.get(mpId);
+                    if (prod == null) return false;
+                    // 销售商过滤
+                    Object corpIdObj = prod.get("corpId");
+                    if (corpIdObj == null) return false;
+                    Long corpId = Long.valueOf(corpIdObj.toString());
+                    if (!targetMerchantIds.contains(corpId)) return false;
+                    // 关键词过滤
+                    if (keyword != null && !keyword.isEmpty()) {
+                        String name = (String) prod.get("name");
+                        if (name == null || !name.contains(keyword)) return false;
+                    }
+                    return true;
+                }).collect(Collectors.toList());
+
+        // 7. 加载销售商名称和小程序配置（使用过滤后的商家 ID）
+        Map<Long, String> merchantNameMap = platformMerchantService.getCorpNames(targetMerchantIds);
+        Map<Long, Map<String, Object>> miniappConfigMap = loadMiniappConfigs(targetMerchantIds);
+
+        // 8. 富化每条记录
+        List<Map<String, Object>> enriched = filtered.stream().map(rec -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", rec.get("mappingId"));
-            m.put("productId", rec.get("productId"));
-            m.put("name", rec.get("name"));
-            m.put("coverImage", imageUrlUtil.normalizeProductImage((String) rec.get("coverImage")));
-            m.put("images", rec.get("images"));
-            m.put("videoUrl", rec.get("videoUrl"));
-            m.put("description", rec.get("description"));
-            m.put("pointsPrice", rec.get("pointsPrice"));
+            Long mpId = Long.valueOf(rec.get("mallProductId").toString());
+            Map<String, Object> prod = productMap.get(mpId);
+            m.put("productId", mpId);
+            m.put("name", prod != null ? prod.get("name") : "");
+            m.put("coverImage", prod != null ? imageUrlUtil.normalizeProductImage((String) prod.get("coverImage")) : null);
+            m.put("images", prod != null ? prod.get("images") : null);
+            m.put("videoUrl", prod != null ? prod.get("videoUrl") : null);
+            m.put("description", prod != null ? prod.get("description") : null);
+            m.put("pointsPrice", prod != null ? prod.get("pointsPrice") : BigDecimal.ZERO);
             // 销售价 + 积分兑换配置
-            Object salePriceObj = rec.get("salePrice");
-            BigDecimal salePrice = salePriceObj != null ? new BigDecimal(salePriceObj.toString()) : BigDecimal.ZERO;
+            BigDecimal salePrice = prod != null && prod.get("salePrice") != null
+                    ? new BigDecimal(prod.get("salePrice").toString()) : BigDecimal.ZERO;
             m.put("salePrice", salePrice);
-            Object ptsObj = rec.get("points");
-            Object excObj = rec.get("exchangeAmount");
-            int pts = ptsObj != null ? Integer.parseInt(ptsObj.toString()) : 0;
-            BigDecimal exc = excObj != null ? new BigDecimal(excObj.toString()) : BigDecimal.ZERO;
+            int pts = rec.get("points") != null ? Integer.parseInt(rec.get("points").toString()) : 0;
+            BigDecimal exc = rec.get("exchangeAmount") != null
+                    ? new BigDecimal(rec.get("exchangeAmount").toString()) : BigDecimal.ZERO;
             m.put("points", pts);
             m.put("exchangeAmount", exc);
             BigDecimal cash = pts > 0 ? salePrice.subtract(exc) : salePrice;
             m.put("cashPrice", cash.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : cash);
-            m.put("maxPointsDeduct", rec.get("maxPointsDeduct"));
-            m.put("clickCount", rec.get("clickCount") != null ? rec.get("clickCount") : 0);
-            m.put("status", rec.get("status"));
+            m.put("maxPointsDeduct", prod != null ? prod.get("maxPointsDeduct") : BigDecimal.ZERO);
+            m.put("clickCount", prod != null ? prod.get("clickCount") : 0L);
+            m.put("status", prod != null ? prod.get("status") : null);
             m.put("shelfStatus", rec.get("shelfStatus"));
             m.put("categoryId", rec.get("categoryId"));
             // 分类名称
@@ -117,26 +134,18 @@ public class GsProductServiceImpl implements IGsProductService {
             } else {
                 m.put("categoryName", "-");
             }
-            // 所属销售商（从 mall_product.corp_id 解析）
-            Object merchantIdObj = rec.get("merchantId");
-            String merchantName = "-";
-            if (merchantIdObj != null) {
-                Long mid = Long.valueOf(merchantIdObj.toString());
-                merchantName = merchantNameMap.getOrDefault(mid, "未知销售商");
-            }
-            m.put("merchantId", merchantIdObj);
-            m.put("merchantName", merchantName);
-            // 小程序跳转配置（路径模板中 {productId} 替换为 mall_product.id）
-            if (merchantIdObj != null) {
-                Long mid = Long.valueOf(merchantIdObj.toString());
-                if (miniappConfigMap.containsKey(mid)) {
-                    Map<String, Object> cfg = new LinkedHashMap<>(miniappConfigMap.get(mid));
-                    Object pid = rec.get("productId");
-                    if (pid != null && cfg.containsKey("path")) {
-                        cfg.put("path", cfg.get("path").toString().replace("{productId}", pid.toString()));
-                    }
-                    m.put("miniappConfig", cfg);
+            // 所属销售商
+            Long mid = prod != null && prod.get("corpId") != null
+                    ? Long.valueOf(prod.get("corpId").toString()) : null;
+            m.put("merchantId", mid);
+            m.put("merchantName", mid != null ? merchantNameMap.getOrDefault(mid, "未知销售商") : "-");
+            // 小程序跳转配置
+            if (mid != null && miniappConfigMap.containsKey(mid)) {
+                Map<String, Object> cfg = new LinkedHashMap<>(miniappConfigMap.get(mid));
+                if (cfg.containsKey("path")) {
+                    cfg.put("path", cfg.get("path").toString().replace("{productId}", mpId.toString()));
                 }
+                m.put("miniappConfig", cfg);
             }
             m.put("createTime", rec.get("createTime"));
             return m;
@@ -152,17 +161,39 @@ public class GsProductServiceImpl implements IGsProductService {
 
     @Override
     public Map<String, Object> productDetailByMappingId(Long mappingId) {
-        Map<String, Object> detail = productMapper.selectProductByMappingId(mappingId);
-        if (detail != null) {
-            Object midObj = detail.get("merchantId");
+        // 1. 查 ops_product（仅本地字段）
+        Map<String, Object> mapping = productMapper.selectProductByMappingId(mappingId);
+        if (mapping == null) return null;
+
+        // 2. 批量获取商品详情（单条）
+        Long mpId = Long.valueOf(mapping.get("mallProductId").toString());
+        Map<Long, Map<String, Object>> productMap = productBatchClient.batchQuery(Collections.singletonList(mpId));
+        Map<String, Object> prod = productMap.get(mpId);
+
+        // 3. 组装结果
+        Map<String, Object> detail = new LinkedHashMap<>(mapping);
+        detail.put("productId", mpId);
+        if (prod != null) {
+            detail.put("name", prod.get("name"));
+            detail.put("coverImage", prod.get("coverImage"));
+            detail.put("images", prod.get("images"));
+            detail.put("videoUrl", prod.get("videoUrl"));
+            detail.put("description", prod.get("description"));
+            detail.put("salePrice", prod.get("salePrice"));
+            detail.put("pointsPrice", prod.get("pointsPrice"));
+            detail.put("maxPointsDeduct", prod.get("maxPointsDeduct"));
+            detail.put("clickCount", prod.get("clickCount"));
+            detail.put("status", prod.get("status"));
+            detail.put("merchantId", prod.get("corpId"));
+            // 小程序跳转配置
+            Object midObj = prod.get("corpId");
             if (midObj != null) {
                 Long mid = Long.valueOf(midObj.toString());
                 Map<Long, Map<String, Object>> configs = loadMiniappConfigs(Collections.singleton(mid));
                 if (configs.containsKey(mid)) {
                     Map<String, Object> cfg = new LinkedHashMap<>(configs.get(mid));
-                    Object pid = detail.get("productId");
-                    if (pid != null && cfg.containsKey("path")) {
-                        cfg.put("path", cfg.get("path").toString().replace("{productId}", pid.toString()));
+                    if (cfg.containsKey("path")) {
+                        cfg.put("path", cfg.get("path").toString().replace("{productId}", mpId.toString()));
                     }
                     detail.put("miniappConfig", cfg);
                 }
@@ -173,7 +204,6 @@ public class GsProductServiceImpl implements IGsProductService {
 
     @Override
     public void updateShelfStatus(Long mappingId, Integer shelfStatus) {
-        // 单个操作暂不做权限校验（由批量操作统一入口），保留灵活性
         GsProduct p = new GsProduct();
         p.setId(mappingId);
         p.setShelfStatus(shelfStatus);
@@ -245,30 +275,66 @@ public class GsProductServiceImpl implements IGsProductService {
         int offset = (pageNum - 1) * pageSize;
         long effectiveCorpId = (corpId != null) ? corpId : 3L;
 
-        // 解析目标销售商 ID 列表：
-        // 若传入的 corpId 是运营商（在 biz_operator_merchant 中有绑定记录），
-        // 则展示所有已绑定销售商的商品；否则按原始 corpId 过滤（兼容直接指定销售商）
+        // 解析目标销售商 ID 列表
         List<Long> targetCorpIds = resolveTargetMerchantIds(effectiveCorpId);
 
-        List<Map<String, Object>> records = productMapper.selectPublishedProducts(
-                targetCorpIds, offset, pageSize, categoryId, keyword);
-        long total = productMapper.countPublishedProducts(targetCorpIds, categoryId, keyword);
+        // 查询 ops_product 上架商品（仅本地字段）
+        List<Map<String, Object>> mappings = productMapper.selectPublishedProducts(offset, pageSize);
+        long total = productMapper.countPublishedProducts();
 
-        // 收集唯一的销售商ID，加载名称和小程序跳转配置
-        Set<Long> merchantIds = records.stream()
-                .map(r -> r.get("merchantId"))
+        if (mappings.isEmpty()) {
+            return emptyPage(pageSize, pageNum);
+        }
+
+        // 批量获取商品详情
+        List<Long> mallProductIds = mappings.stream()
+                .map(m -> Long.valueOf(m.get("mallProductId").toString()))
+                .distinct().collect(Collectors.toList());
+        Map<Long, Map<String, Object>> productMap = productBatchClient.batchQuery(mallProductIds);
+
+        // 按销售商和关键词过滤
+        List<Map<String, Object>> filtered = mappings.stream()
+                .filter(m -> {
+                    Long mpId = Long.valueOf(m.get("mallProductId").toString());
+                    Map<String, Object> prod = productMap.get(mpId);
+                    if (prod == null) return false;
+                    // 销售商过滤
+                    Object midObj = prod.get("corpId");
+                    if (midObj == null) return false;
+                    Long mid = Long.valueOf(midObj.toString());
+                    if (!targetCorpIds.contains(mid)) return false;
+                    // 关键词过滤
+                    if (keyword != null && !keyword.isEmpty()) {
+                        String name = (String) prod.get("name");
+                        return name != null && name.contains(keyword);
+                    }
+                    // 状态过滤
+                    Object statusObj = prod.get("status");
+                    return statusObj != null && Integer.valueOf(statusObj.toString()) == 1;
+                }).collect(Collectors.toList());
+
+        // 收集唯一销售商ID
+        Set<Long> merchantIds = filtered.stream()
+                .map(m -> {
+                    Long mpId = Long.valueOf(m.get("mallProductId").toString());
+                    Map<String, Object> prod = productMap.get(mpId);
+                    return prod != null && prod.get("corpId") != null
+                            ? Long.valueOf(prod.get("corpId").toString()) : null;
+                })
                 .filter(Objects::nonNull)
-                .map(mid -> Long.valueOf(mid.toString()))
                 .collect(Collectors.toSet());
-        Map<Long, String> merchantNameMap = loadMerchantNames(merchantIds);
+        Map<Long, String> merchantNameMap = platformMerchantService.getCorpNames(merchantIds);
         Map<Long, Map<String, Object>> miniappConfigMap = loadMiniappConfigs(merchantIds);
 
-        List<Map<String, Object>> mapped = records.stream().map(rec -> {
+        // 组装结果
+        List<Map<String, Object>> mapped = filtered.stream().map(rec -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", rec.get("mappingId"));
-            m.put("productId", rec.get("productId"));
-            m.put("name", rec.get("name"));
-            m.put("coverImage", imageUrlUtil.normalizeProductImage((String) rec.get("coverImage")));
+            Long mpId = Long.valueOf(rec.get("mallProductId").toString());
+            Map<String, Object> prod = productMap.get(mpId);
+            m.put("productId", mpId);
+            m.put("name", prod != null ? prod.get("name") : "");
+            m.put("coverImage", prod != null ? imageUrlUtil.normalizeProductImage((String) prod.get("coverImage")) : null);
             // 分类
             Object cidObj = rec.get("categoryId");
             if (cidObj != null) {
@@ -280,37 +346,31 @@ public class GsProductServiceImpl implements IGsProductService {
                 m.put("categoryId", null);
                 m.put("categoryName", "-");
             }
-            m.put("pointsPrice", rec.get("pointsPrice"));
-            // 销售价 + 积分兑换配置
-            Object spObj = rec.get("salePrice");
-            BigDecimal sp = spObj != null ? new BigDecimal(spObj.toString()) : BigDecimal.ZERO;
+            m.put("pointsPrice", prod != null ? prod.get("pointsPrice") : BigDecimal.ZERO);
+            BigDecimal sp = prod != null && prod.get("salePrice") != null
+                    ? new BigDecimal(prod.get("salePrice").toString()) : BigDecimal.ZERO;
             m.put("salePrice", sp);
-            Object pObj = rec.get("points");
-            Object eObj = rec.get("exchangeAmount");
-            int pv = pObj != null ? Integer.parseInt(pObj.toString()) : 0;
-            BigDecimal ev = eObj != null ? new BigDecimal(eObj.toString()) : BigDecimal.ZERO;
+            int pv = rec.get("points") != null ? Integer.parseInt(rec.get("points").toString()) : 0;
+            BigDecimal ev = rec.get("exchangeAmount") != null
+                    ? new BigDecimal(rec.get("exchangeAmount").toString()) : BigDecimal.ZERO;
             m.put("points", pv);
             m.put("exchangeAmount", ev);
             BigDecimal cp = pv > 0 ? sp.subtract(ev) : sp;
             m.put("cashPrice", cp.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : cp);
-            m.put("maxPointsDeduct", rec.get("maxPointsDeduct"));
-            m.put("description", rec.get("description"));
-            m.put("clickCount", rec.get("clickCount") != null ? rec.get("clickCount") : 0);
+            m.put("maxPointsDeduct", prod != null ? prod.get("maxPointsDeduct") : BigDecimal.ZERO);
+            m.put("description", prod != null ? prod.get("description") : null);
+            m.put("clickCount", prod != null ? prod.get("clickCount") : 0L);
             // 所属销售商
-            Object midObj = rec.get("merchantId");
-            if (midObj != null) {
-                Long mid = Long.valueOf(midObj.toString());
+            Long mid = prod != null && prod.get("corpId") != null
+                    ? Long.valueOf(prod.get("corpId").toString()) : null;
+            if (mid != null) {
                 m.put("merchantId", mid);
                 m.put("merchantName", merchantNameMap.getOrDefault(mid, "未知销售商"));
-            }
-            // 小程序跳转配置
-            if (midObj != null) {
-                Long mid = Long.valueOf(midObj.toString());
+                // 小程序跳转配置
                 if (miniappConfigMap.containsKey(mid)) {
                     Map<String, Object> cfg = new LinkedHashMap<>(miniappConfigMap.get(mid));
-                    Object pid = rec.get("productId");
-                    if (pid != null && cfg.containsKey("path")) {
-                        cfg.put("path", cfg.get("path").toString().replace("{productId}", pid.toString()));
+                    if (cfg.containsKey("path")) {
+                        cfg.put("path", cfg.get("path").toString().replace("{productId}", mpId.toString()));
                     }
                     m.put("miniappConfig", cfg);
                 }
@@ -328,13 +388,7 @@ public class GsProductServiceImpl implements IGsProductService {
 
     // ═══ 私有辅助方法 ═══
 
-    /**
-     * 解析用户端商品查询的目标销售商 ID 列表。
-     * corpId=0（平台管理员）：返回所有已绑定销售商 ID；
-     * 否则按运营商-销售商绑定关系解析。
-     */
     private List<Long> resolveTargetMerchantIds(Long corpId) {
-        // 平台管理员：展示所有已绑定销售商的商品
         if (corpId == 0L || corpId == null) {
             List<Long> all = omMapper.selectList(new LambdaQueryWrapper<OperatorMerchant>()
                     .eq(OperatorMerchant::getStatus, 1))
@@ -349,9 +403,6 @@ public class GsProductServiceImpl implements IGsProductService {
         return Collections.singletonList(corpId);
     }
 
-    /**
-     * 获取运营商绑定的所有激活销售商 ID 集合。
-     */
     private Set<Long> getBoundMerchantIds(Long operatorId) {
         return omMapper.selectList(new LambdaQueryWrapper<OperatorMerchant>()
                 .eq(OperatorMerchant::getOperatorId, operatorId)
@@ -359,9 +410,6 @@ public class GsProductServiceImpl implements IGsProductService {
                 .stream().map(OperatorMerchant::getMerchantId).collect(Collectors.toSet());
     }
 
-    /**
-     * 批量查询小程序跳转配置，返回 merchantId → {appId, path, envVersion} 映射。
-     */
     private Map<Long, Map<String, Object>> loadMiniappConfigs(Set<Long> merchantIds) {
         if (merchantIds.isEmpty()) return Collections.emptyMap();
         List<MerchantMiniappConfig> configs = miniappConfigMapper.selectList(
@@ -379,27 +427,9 @@ public class GsProductServiceImpl implements IGsProductService {
     }
 
     /**
-     * 批量查询销售商组织名称，返回 id → name 映射。
-     */
-    private Map<Long, String> loadMerchantNames(Set<Long> merchantIds) {
-        if (merchantIds.isEmpty()) return Collections.emptyMap();
-        List<Map<String, Object>> rows = merchantMapper.selectCorpNamesByIds(merchantIds);
-        Map<Long, String> map = new LinkedHashMap<>();
-        for (Map<String, Object> row : rows) {
-            Long id = Long.valueOf(row.get("id").toString());
-            String name = (String) row.get("name");
-            map.put(id, name != null ? name : "未知销售商");
-        }
-        return map;
-    }
-
-    /**
      * 校验待操作的商品是否属于当前运营商绑定的销售商。
-     * 通过 ops_product JOIN mall_product，检查 mall_product.corp_id 是否在绑定列表中。
-     *
-     * @param mappingIds 要操作的商品映射 ID 列表
-     * @param operatorId 当前运营商组织 ID
-     * @throws IllegalArgumentException 如果有商品不属于绑定的销售商
+     * 通过 ProductBatchClient 获取商品 corpId 后在 Service 层校验，
+     * 替代原跨库 JOIN mall_product 的方式。
      */
     private void assertProductsBelongToOperator(List<Long> mappingIds, Long operatorId) {
         Set<Long> boundMerchantIds = getBoundMerchantIds(operatorId);
@@ -408,15 +438,45 @@ public class GsProductServiceImpl implements IGsProductService {
             throw new IllegalArgumentException("当前运营商未绑定任何销售商，无法操作商品");
         }
 
-        List<Long> authorized = productMapper.selectIdsInMerchants(
-                mappingIds, new ArrayList<>(boundMerchantIds));
-
-        if (authorized.size() != mappingIds.size()) {
-            Set<Long> authorizedSet = new HashSet<>(authorized);
-            List<Long> unauthorized = mappingIds.stream()
-                    .filter(id -> !authorizedSet.contains(id))
+        // 查询映射是否存在
+        List<Long> existIds = productMapper.selectIdsExist(mappingIds);
+        if (existIds.size() != mappingIds.size()) {
+            Set<Long> existSet = new HashSet<>(existIds);
+            List<Long> missing = mappingIds.stream()
+                    .filter(id -> !existSet.contains(id))
                     .collect(Collectors.toList());
+            throw new IllegalArgumentException("以下商品映射不存在: " + missing);
+        }
+
+        // 获取 mall_product_id → 批量查询产品详情 → 校验 corpId
+        List<GsProduct> mappings = productMapper.selectBatchIds(mappingIds);
+        List<Long> mallProductIds = mappings.stream()
+                .map(GsProduct::getMallProductId).distinct().collect(Collectors.toList());
+        Map<Long, Map<String, Object>> productMap = productBatchClient.batchQuery(mallProductIds);
+
+        List<Long> unauthorized = new ArrayList<>();
+        for (GsProduct m : mappings) {
+            Map<String, Object> prod = productMap.get(m.getMallProductId());
+            if (prod == null || prod.get("corpId") == null) {
+                unauthorized.add(m.getId());
+                continue;
+            }
+            Long corpId = Long.valueOf(prod.get("corpId").toString());
+            if (!boundMerchantIds.contains(corpId)) {
+                unauthorized.add(m.getId());
+            }
+        }
+        if (!unauthorized.isEmpty()) {
             throw new IllegalArgumentException("无权操作以下商品（不属于绑定的销售商）: " + unauthorized);
         }
+    }
+
+    private Map<String, Object> emptyPage(int pageSize, int pageNum) {
+        Map<String, Object> empty = new LinkedHashMap<>();
+        empty.put("records", Collections.emptyList());
+        empty.put("total", 0L);
+        empty.put("size", pageSize);
+        empty.put("current", pageNum);
+        return empty;
     }
 }

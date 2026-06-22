@@ -8,14 +8,14 @@ import java.util.Map;
 
 /**
  * ops_product 关系映射表 Mapper。
- * 提供 JOIN mall_product 的查询方法，获取完整商品信息。
+ * 仅查询 ops_product 本地表，不再 JOIN mall_product（跨库查询已通过 ProductBatchClient 替代）。
  */
 @Mapper
 public interface GsProductMapper extends BaseMapper<GsProduct> {
 
     /**
-     * 分页查询运营商关联的商品列表（JOIN mall_product）。
-     * 仅返回当前运营商通过 ops_product 引入、且所属销售商在绑定列表中的商品。
+     * 分页查询运营商关联的商品映射列表（仅查 ops_product，不含 mall_product JOIN）。
+     * 商品详情通过 ProductBatchClient 批量获取后在 Service 层组装。
      */
     @Select("<script>"
             + "SELECT gp.id AS mappingId, "
@@ -24,85 +24,55 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "       gp.category_id AS categoryId, "
             + "       gp.points, "
             + "       gp.exchange_amount AS exchangeAmount, "
-            + "       gp.create_time AS createTime, "
-            + "       mp.id AS productId, "
-            + "       mp.corp_id AS merchantId, "
-            + "       mp.name, "
-            + "       mp.cover_image AS coverImage, "
-            + "       mp.images, "
-            + "       mp.video_url AS videoUrl, "
-            + "       mp.description, "
-            + "       COALESCE(mp.points_price, 0) AS pointsPrice, "
-            + "       COALESCE(mp.sale_price, 0) AS salePrice, "
-            + "       COALESCE(mp.max_points_deduct, 0) AS maxPointsDeduct, "
-            + "       COALESCE(mp.click_count, 0) AS clickCount, "
-            + "       mp.status "
+            + "       gp.mall_product_id AS mallProductId, "
+            + "       gp.create_time AS createTime "
             + "FROM ops_product gp "
-            + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.operator_id = #{operatorId} "
-            + "  AND mp.corp_id IN "
-            + "  <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach>"
             + "<if test='shelfStatus != null'>"
             + "  AND gp.shelf_status = #{shelfStatus} "
             + "</if>"
             + "<if test='categoryId != null'>"
             + "  AND gp.category_id = #{categoryId} "
-            + "</if>"
-            + "<if test='keyword != null and keyword != \"\"'>"
-            + "  AND mp.name LIKE CONCAT('%', #{keyword}, '%') "
             + "</if>"
             + "ORDER BY gp.id DESC "
             + "LIMIT #{offset}, #{size}"
             + "</script>")
     List<Map<String, Object>> selectProductList(@Param("operatorId") Long operatorId,
-                                                 @Param("corpIds") List<Long> corpIds,
                                                  @Param("offset") int offset,
                                                  @Param("size") int size,
                                                  @Param("shelfStatus") Integer shelfStatus,
-                                                 @Param("categoryId") Long categoryId,
-                                                 @Param("keyword") String keyword);
+                                                 @Param("categoryId") Long categoryId);
 
-    /** 统计总数（与 selectProductList 相同的过滤条件） */
+    /** 统计总数（与 selectProductList 相同的过滤条件，不含 mall_product JOIN） */
     @Select("<script>"
             + "SELECT COUNT(*) "
             + "FROM ops_product gp "
-            + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.operator_id = #{operatorId} "
-            + "  AND mp.corp_id IN "
-            + "  <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach>"
             + "<if test='shelfStatus != null'>"
             + "  AND gp.shelf_status = #{shelfStatus} "
             + "</if>"
             + "<if test='categoryId != null'>"
             + "  AND gp.category_id = #{categoryId} "
             + "</if>"
-            + "<if test='keyword != null and keyword != \"\"'>"
-            + "  AND mp.name LIKE CONCAT('%', #{keyword}, '%') "
-            + "</if>"
             + "</script>")
     long countProductList(@Param("operatorId") Long operatorId,
-                          @Param("corpIds") List<Long> corpIds,
                           @Param("shelfStatus") Integer shelfStatus,
-                          @Param("categoryId") Long categoryId,
-                          @Param("keyword") String keyword);
+                          @Param("categoryId") Long categoryId);
 
     /**
-     * 权限校验：检查指定 mappingId 列表中的商品是否都属于给定的销售商集合。
-     * 返回属于绑定销售商的 mappingId 列表，调用方通过比较列表大小判断是否有越权操作。
+     * 权限校验：检查指定 mappingId 列表中的商品映射是否存在。
+     * 仅查 ops_product，不再 JOIN mall_product 校验销售商归属。
+     * 销售商归属校验改为通过 ProductBatchClient 获取商品 corpId 后在 Service 层完成。
      */
     @Select("<script>"
             + "SELECT gp.id FROM ops_product gp "
-            + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.id IN "
             + "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach>"
-            + " AND mp.corp_id IN "
-            + "<foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach>"
             + "</script>")
-    List<Long> selectIdsInMerchants(@Param("ids") List<Long> ids,
-                                     @Param("corpIds") List<Long> corpIds);
+    List<Long> selectIdsExist(@Param("ids") List<Long> ids);
 
     /**
-     * 通过映射ID查询单个商品详情（JOIN mall_product）
+     * 通过映射ID查询单个商品映射详情（仅 ops_product，不含 mall_product JOIN）
      */
     @Select("SELECT gp.id AS mappingId, "
             + "       gp.operator_id AS operatorId, "
@@ -110,80 +80,30 @@ public interface GsProductMapper extends BaseMapper<GsProduct> {
             + "       gp.category_id AS categoryId, "
             + "       gp.points, "
             + "       gp.exchange_amount AS exchangeAmount, "
-            + "       gp.create_time AS createTime, "
-            + "       mp.id AS productId, "
-            + "       mp.corp_id AS merchantId, "
-            + "       mp.name, "
-            + "       mp.cover_image AS coverImage, "
-            + "       mp.images, "
-            + "       mp.video_url AS videoUrl, "
-            + "       mp.description, "
-            + "       COALESCE(mp.points_price, 0) AS pointsPrice, "
-            + "       COALESCE(mp.sale_price, 0) AS salePrice, "
-            + "       COALESCE(mp.max_points_deduct, 0) AS maxPointsDeduct, "
-            + "       COALESCE(mp.click_count, 0) AS clickCount, "
-            + "       mp.status "
+            + "       gp.mall_product_id AS mallProductId, "
+            + "       gp.create_time AS createTime "
             + "FROM ops_product gp "
-            + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.id = #{mappingId}")
     Map<String, Object> selectProductByMappingId(@Param("mappingId") Long mappingId);
 
     /**
-     * 分页查询所有上架商品（用户端浏览），跨运营商。
-     * 仅返回 shelf_status=1 且 mp.status=1 的商品。
+     * 分页查询所有上架商品映射（用户端浏览），仅查 ops_product。
      */
     @Select("<script>"
             + "SELECT gp.id AS mappingId, "
             + "       gp.category_id AS categoryId, "
-            + "       mp.id AS productId, "
-            + "       mp.corp_id AS merchantId, "
-            + "       mp.name, "
-            + "       mp.cover_image AS coverImage, "
-            + "       COALESCE(mp.points_price, 0) AS pointsPrice, "
-            + "       COALESCE(mp.sale_price, 0) AS salePrice, "
-            + "       COALESCE(mp.max_points_deduct, 0) AS maxPointsDeduct, "
+            + "       gp.mall_product_id AS mallProductId, "
             + "       gp.points, "
-            + "       gp.exchange_amount AS exchangeAmount, "
-            + "       mp.description, "
-            + "       COALESCE(mp.click_count, 0) AS clickCount "
+            + "       gp.exchange_amount AS exchangeAmount "
             + "FROM ops_product gp "
-            + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
             + "WHERE gp.shelf_status = 1 "
-            + "  AND mp.status = 1 "
-            + "  AND mp.corp_id IN "
-            + "  <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach>"
-            + "<if test='categoryId != null'>"
-            + "  AND gp.category_id = #{categoryId} "
-            + "</if>"
-            + "<if test='keyword != null and keyword != \"\"'>"
-            + "  AND mp.name LIKE CONCAT('%', #{keyword}, '%') "
-            + "</if>"
             + "ORDER BY gp.id DESC "
             + "LIMIT #{offset}, #{size}"
             + "</script>")
-    List<Map<String, Object>> selectPublishedProducts(@Param("corpIds") List<Long> corpIds,
-                                                       @Param("offset") int offset,
-                                                       @Param("size") int size,
-                                                       @Param("categoryId") Long categoryId,
-                                                       @Param("keyword") String keyword);
+    List<Map<String, Object>> selectPublishedProducts(@Param("offset") int offset,
+                                                       @Param("size") int size);
 
-    /** 上架商品总数 */
-    @Select("<script>"
-            + "SELECT COUNT(*) "
-            + "FROM ops_product gp "
-            + "INNER JOIN mall_product mp ON gp.mall_product_id = mp.id "
-            + "WHERE gp.shelf_status = 1 "
-            + "  AND mp.status = 1 "
-            + "  AND mp.corp_id IN "
-            + "  <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach>"
-            + "<if test='categoryId != null'>"
-            + "  AND gp.category_id = #{categoryId} "
-            + "</if>"
-            + "<if test='keyword != null and keyword != \"\"'>"
-            + "  AND mp.name LIKE CONCAT('%', #{keyword}, '%') "
-            + "</if>"
-            + "</script>")
-    long countPublishedProducts(@Param("corpIds") List<Long> corpIds,
-                                @Param("categoryId") Long categoryId,
-                                @Param("keyword") String keyword);
+    /** 上架商品总数（仅查 ops_product） */
+    @Select("SELECT COUNT(*) FROM ops_product gp WHERE gp.shelf_status = 1")
+    long countPublishedProducts();
 }

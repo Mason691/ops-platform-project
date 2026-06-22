@@ -4,6 +4,7 @@ import com.aip.ops.entity.*;
 import com.aip.ops.mapper.*;
 import com.aip.ops.service.GsActivityService;
 import com.aip.ops.service.IGsProductService;
+import com.aip.ops.service.PlatformMerchantService;
 import com.aip.ops.util.ImageUrlUtil;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
@@ -32,7 +33,7 @@ public class AdminController {
     private final OperatorMerchantMapper omMapper;
     private final IGsProductService productService;
     private final ProductCategoryMapper categoryMapper;
-    private final MerchantMapper merchantMapper;
+    private final PlatformMerchantService platformMerchantService;
     private final MerchantMiniappConfigMapper miniappConfigMapper;
     private final OpsLiveRoomMapper liveRoomMapper;
     private final PublicAccountConfigMapper publicAccountConfigMapper;
@@ -44,7 +45,7 @@ public class AdminController {
     public AdminController(OperatorMerchantMapper omMapper,
                            IGsProductService productService,
                            ProductCategoryMapper categoryMapper,
-                           MerchantMapper merchantMapper,
+                           PlatformMerchantService platformMerchantService,
                            MerchantMiniappConfigMapper miniappConfigMapper,
                            OpsLiveRoomMapper liveRoomMapper,
                            PublicAccountConfigMapper publicAccountConfigMapper,
@@ -55,7 +56,7 @@ public class AdminController {
         this.omMapper = omMapper;
         this.productService = productService;
         this.categoryMapper = categoryMapper;
-        this.merchantMapper = merchantMapper;
+        this.platformMerchantService = platformMerchantService;
         this.miniappConfigMapper = miniappConfigMapper;
         this.liveRoomMapper = liveRoomMapper;
         this.publicAccountConfigMapper = publicAccountConfigMapper;
@@ -88,16 +89,16 @@ public class AdminController {
                 .eq(OperatorMerchant::getStatus, 1))
                 .stream().map(OperatorMerchant::getMerchantId).collect(Collectors.toSet());
 
-        List<Map<String,Object>> merchants = merchantMapper.selectMerchants(
-                (pageNum - 1) * pageSize, pageSize, merchantRoleName, keyword);
+        List<Map<String,Object>> merchants = platformMerchantService.getMerchantsByRole(
+                pageNum, pageSize, merchantRoleName, keyword);
 
         merchants.forEach(m -> {
             Long mid = Long.valueOf(m.get("id").toString());
             m.put("bound", bound.contains(mid));
         });
 
-        // 查询总数（独立 SQL，避免 LIMIT 分页后 total 丢失）
-        long total = merchantMapper.countMerchants(merchantRoleName, keyword);
+        // 查询总数（通过平台 API，与列表查询共用同一接口的 total 字段）
+        long total = platformMerchantService.countMerchantsByRole(merchantRoleName, keyword);
 
         return R.ok(Map.of("data", merchants, "total", total));
     }
@@ -114,8 +115,8 @@ public class AdminController {
         int count = 0;
         for (Integer id : ids) {
             Long merchantId = Long.valueOf(id);
-            // 校验该组织确实拥有销售商角色
-            if (merchantMapper.checkMerchantRole(merchantId, merchantRoleName) == null) {
+            // 校验该组织确实拥有销售商角色（通过平台 API，替代跨库查询 ai_platform.sys_corp_user_role）
+            if (!platformMerchantService.hasRole(merchantId, merchantRoleName)) {
                 throw new IllegalArgumentException("组织ID " + merchantId + " 不是销售商，无法绑定");
             }
             Long exist = omMapper.selectCount(new LambdaQueryWrapper<OperatorMerchant>()
@@ -135,8 +136,8 @@ public class AdminController {
     @DeleteMapping("/bind-merchants/{merchantId}")
     public R<?> unbind(@PathVariable Long merchantId) {
         Long operatorId = currentOperatorId();
-        // 双重校验：该组织确实是销售商
-        if (merchantMapper.checkMerchantRole(merchantId, merchantRoleName) == null) {
+        // 双重校验：该组织确实是销售商（通过平台 API，替代跨库查询）
+        if (!platformMerchantService.hasRole(merchantId, merchantRoleName)) {
             throw new IllegalArgumentException("组织ID " + merchantId + " 不是销售商");
         }
         OperatorMerchant om = omMapper.selectOne(new LambdaQueryWrapper<OperatorMerchant>()

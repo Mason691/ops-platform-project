@@ -1,8 +1,10 @@
 package com.aip.ops.service.impl;
 
+import com.aip.ops.client.ProductBatchClient;
 import com.aip.ops.entity.*;
 import com.aip.ops.mapper.*;
 import com.aip.ops.service.HomeConfigService;
+import com.aip.ops.service.PlatformMerchantService;
 import com.aip.ops.util.ImageUrlUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -34,8 +36,9 @@ public class HomeConfigServiceImpl implements HomeConfigService {
     private final GsActivityMapper activityMapper;
     private final GsProductMapper productMapper;
     private final OperatorMerchantMapper omMapper;
-    private final MerchantMapper merchantMapper;
+    private final PlatformMerchantService platformMerchantService;
     private final MerchantMiniappConfigMapper miniappConfigMapper;
+    private final ProductBatchClient productBatchClient;
     private final ImageUrlUtil imageUrlUtil;
 
     // ═══ CRUD ═══
@@ -149,25 +152,42 @@ public class HomeConfigServiceImpl implements HomeConfigService {
             return Collections.emptyList();
         }
 
-        // 2. 查询上架商品（shelfStatus=1, mp.status=1 由 Mapper 方法过滤）
-        List<Long> corpIds = new ArrayList<>(boundMerchantIds);
-        // 查询最多 500 条，足够选择器使用
+        // 2. 查询上架商品映射（仅查 ops_product，不再 JOIN mall_product）
         List<Map<String, Object>> records = productMapper.selectProductList(
-                operatorId, corpIds, 0, 500, 1, null, null);
+                operatorId, 0, 500, 1, null);
 
-        // 3. 批量加载销售商名称
+        if (records.isEmpty()) return Collections.emptyList();
+
+        // 3. 批量获取商品详情
+        List<Long> mallProductIds = records.stream()
+                .map(r -> Long.valueOf(r.get("mallProductId").toString()))
+                .distinct().collect(Collectors.toList());
+        Map<Long, Map<String, Object>> productMap = productBatchClient.batchQuery(mallProductIds);
+
+        // 4. 过滤：仅保留属于已绑定销售商且状态正常的商品
         Map<Long, String> merchantNameMap = loadMerchantNames(boundMerchantIds);
 
-        // 4. 简化映射
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> rec : records) {
+            Long mpId = Long.valueOf(rec.get("mallProductId").toString());
+            Map<String, Object> prod = productMap.get(mpId);
+            if (prod == null) continue;
+            // 销售商过滤
+            Object midObj = prod.get("corpId");
+            if (midObj == null) continue;
+            Long mid = Long.valueOf(midObj.toString());
+            if (!boundMerchantIds.contains(mid)) continue;
+            // 状态过滤
+            Object statusObj = prod.get("status");
+            if (statusObj == null || Integer.valueOf(statusObj.toString()) != 1) continue;
+
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("mappingId", rec.get("mappingId"));
-            m.put("productId", rec.get("productId"));
-            m.put("name", rec.get("name"));
-            m.put("coverImage", imageUrlUtil.normalizeProductImage((String) rec.get("coverImage")));
-            m.put("pointsPrice", rec.get("pointsPrice"));
-            Object spObj = rec.get("salePrice");
+            m.put("productId", mpId);
+            m.put("name", prod.get("name"));
+            m.put("coverImage", imageUrlUtil.normalizeProductImage((String) prod.get("coverImage")));
+            m.put("pointsPrice", prod.get("pointsPrice"));
+            Object spObj = prod.get("salePrice");
             m.put("salePrice", spObj != null ? spObj : 0);
             // 积分兑换配置
             Object ptsObj = rec.get("points");
@@ -176,14 +196,8 @@ public class HomeConfigServiceImpl implements HomeConfigService {
             BigDecimal exc = excObj != null ? new BigDecimal(excObj.toString()) : BigDecimal.ZERO;
             m.put("points", pts);
             m.put("exchangeAmount", exc);
-
-            // 销售商信息
-            Object midObj = rec.get("merchantId");
-            if (midObj != null) {
-                Long mid = Long.valueOf(midObj.toString());
-                m.put("merchantId", mid);
-                m.put("merchantName", merchantNameMap.getOrDefault(mid, "未知销售商"));
-            }
+            m.put("merchantId", mid);
+            m.put("merchantName", merchantNameMap.getOrDefault(mid, "未知销售商"));
             result.add(m);
         }
         return result;
@@ -268,23 +282,41 @@ public class HomeConfigServiceImpl implements HomeConfigService {
         Map<Long, Map<String, Object>> productMap = new HashMap<>();
         Map<Long, Map<String, Object>> miniappConfigByMapping = new HashMap<>();
         if (!mappingIds.isEmpty()) {
+            // 批量查询 ops_product 映射（仅本地字段）
             for (Long mappingId : mappingIds) {
-                Map<String, Object> prod = productMapper.selectProductByMappingId(mappingId);
-                if (prod != null) {
-                    productMap.put(mappingId, prod);
-                    // Load miniapp config for this product's merchant
-                    Object midObj = prod.get("merchantId");
-                    if (midObj != null) {
-                        Long mid = Long.valueOf(midObj.toString());
-                        Map<String, Object> cfg = loadMiniappConfigForMerchant(mid);
-                        if (cfg != null) {
-                            Object pid = prod.get("productId");
-                            if (pid != null && cfg.containsKey("path")) {
-                                cfg = new LinkedHashMap<>(cfg);
-                                cfg.put("path", cfg.get("path").toString().replace("{productId}", pid.toString()));
-                            }
-                            miniappConfigByMapping.put(mappingId, cfg);
+                Map<String, Object> mapping = productMapper.selectProductByMappingId(mappingId);
+                if (mapping != null) {
+                    productMap.put(mappingId, mapping);
+                }
+            }
+            // 收集 mall_product_id，批量获取商品详情
+            List<Long> mallProductIds = productMap.values().stream()
+                    .map(m -> Long.valueOf(m.get("mallProductId").toString()))
+                    .distinct().collect(Collectors.toList());
+            Map<Long, Map<String, Object>> productDetails = productBatchClient.batchQuery(mallProductIds);
+            // 合并商品详情到 productMap
+            for (Map.Entry<Long, Map<String, Object>> entry : productMap.entrySet()) {
+                Long mpId = Long.valueOf(entry.getValue().get("mallProductId").toString());
+                Map<String, Object> detail = productDetails.get(mpId);
+                if (detail != null) {
+                    entry.getValue().putAll(detail);
+                }
+            }
+            // 加载小程序跳转配置
+            for (Map.Entry<Long, Map<String, Object>> entry : productMap.entrySet()) {
+                Map<String, Object> prod = entry.getValue();
+                Object midObj = prod.get("corpId");
+                if (midObj != null) {
+                    Long mid = Long.valueOf(midObj.toString());
+                    Map<String, Object> cfg = loadMiniappConfigForMerchant(mid);
+                    if (cfg != null) {
+                        Object pid = prod.get("productId");
+                        if (pid == null) pid = prod.get("mallProductId");
+                        if (pid != null && cfg.containsKey("path")) {
+                            cfg = new LinkedHashMap<>(cfg);
+                            cfg.put("path", cfg.get("path").toString().replace("{productId}", pid.toString()));
                         }
+                        miniappConfigByMapping.put(entry.getKey(), cfg);
                     }
                 }
             }
@@ -344,15 +376,8 @@ public class HomeConfigServiceImpl implements HomeConfigService {
     }
 
     private Map<Long, String> loadMerchantNames(Set<Long> merchantIds) {
-        if (merchantIds.isEmpty()) return Collections.emptyMap();
-        List<Map<String, Object>> rows = merchantMapper.selectCorpNamesByIds(merchantIds);
-        Map<Long, String> map = new LinkedHashMap<>();
-        for (Map<String, Object> row : rows) {
-            Long id = Long.valueOf(row.get("id").toString());
-            String name = (String) row.get("name");
-            map.put(id, name != null ? name : "未知销售商");
-        }
-        return map;
+        // 通过平台内部 API 批量查询组织名称，替代原跨库查询 ai_platform.sys_corp
+        return platformMerchantService.getCorpNames(merchantIds);
     }
 
     private Map<String, Object> loadMiniappConfigForMerchant(Long merchantId) {

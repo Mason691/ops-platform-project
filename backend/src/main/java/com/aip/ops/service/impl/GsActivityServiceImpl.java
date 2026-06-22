@@ -1,5 +1,6 @@
 package com.aip.ops.service.impl;
 
+import com.aip.ops.client.ProductBatchClient;
 import com.aip.ops.entity.GsActivity;
 import com.aip.ops.entity.OpsActivityProduct;
 import com.aip.ops.entity.OpsLiveRoom;
@@ -13,12 +14,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 活动管理 Service 实现。
  *
- * 统一了原本散落在 PlatformController 中的活动 CRUD 和商品关联逻辑，
- * 供管理员接口（AdminController）和公开接口（PlatformController）共用。
+ * 核心变更（ADR-005 合规）：
+ * - 活动关联商品不再通过 OpsActivityProductMapper JOIN mall_db.mall_product 跨库查询
+ * - 改为通过 ProductBatchClient 批量获取商品名称/封面/价格
  */
 @Slf4j
 @Service
@@ -28,6 +31,7 @@ public class GsActivityServiceImpl implements GsActivityService {
     private final GsActivityMapper activityMapper;
     private final OpsActivityProductMapper activityProductMapper;
     private final OpsLiveRoomMapper liveRoomMapper;
+    private final ProductBatchClient productBatchClient;
 
     @Override
     public Map<String, Object> adminActivityPage(Long operatorId, int pageNum, int pageSize,
@@ -49,9 +53,16 @@ public class GsActivityServiceImpl implements GsActivityService {
     public Map<String, Object> activityDetail(Long id) {
         GsActivity a = activityMapper.selectById(id);
         if (a == null) return null;
+
+        // 查询活动关联商品（仅本地字段 + 小程序配置，不含 mall_product JOIN）
+        List<Map<String, Object>> rawProducts = activityProductMapper.selectProductsByActivityId(id);
+
+        // 批量获取商品详情（名称、封面、价格）
+        List<Map<String, Object>> enrichedProducts = enrichActivityProducts(rawProducts);
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("activity", a);
-        result.put("products", activityProductMapper.selectProductsByActivityId(id));
+        result.put("products", enrichedProducts);
         if (a.getLiveRoomId() != null) {
             OpsLiveRoom lr = liveRoomMapper.selectById(a.getLiveRoomId());
             result.put("liveRoom", lr);
@@ -98,6 +109,47 @@ public class GsActivityServiceImpl implements GsActivityService {
     }
 
     // ═══ 私有方法 ═══
+
+    /**
+     * 批量获取商品详情（名称、封面、价格），替代跨库 JOIN mall_db.mall_product。
+     */
+    private List<Map<String, Object>> enrichActivityProducts(List<Map<String, Object>> rawProducts) {
+        if (rawProducts == null || rawProducts.isEmpty()) return Collections.emptyList();
+
+        // 收集 mall_product_id
+        List<Long> mallProductIds = rawProducts.stream()
+                .map(p -> {
+                    Object mpId = p.get("mall_product_id");
+                    return mpId != null ? Long.valueOf(mpId.toString()) : null;
+                })
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+
+        Map<Long, Map<String, Object>> productDetails = productBatchClient.batchQuery(mallProductIds);
+
+        // 组装结果
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> raw : rawProducts) {
+            Map<String, Object> enriched = new LinkedHashMap<>(raw);
+            Object mpIdObj = raw.get("mall_product_id");
+            if (mpIdObj != null) {
+                Long mpId = Long.valueOf(mpIdObj.toString());
+                Map<String, Object> detail = productDetails.get(mpId);
+                if (detail != null) {
+                    enriched.put("name", detail.get("name"));
+                    enriched.put("cover_image", detail.get("coverImage"));
+                    enriched.put("points_price", detail.get("pointsPrice"));
+                    // cash_price = salePrice - points（简化计算）
+                    Object salePrice = detail.get("salePrice");
+                    Object pointsPrice = detail.get("pointsPrice");
+                    enriched.put("cash_price", salePrice != null ? salePrice : 0);
+                }
+            }
+            result.add(enriched);
+        }
+        return result;
+    }
 
     /**
      * 保存活动-商品关联（先删后增，使用列表索引作为排序值）。

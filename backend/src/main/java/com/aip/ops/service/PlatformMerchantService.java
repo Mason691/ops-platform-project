@@ -11,10 +11,6 @@ import java.util.stream.Collectors;
 /**
  * 替代 MerchantMapper 跨库查询的服务。
  * 通过底座平台内部 API 获取组织信息，不再直查 ai_platform.sys_corp。
- *
- * 注意：selectMerchants / countMerchants / checkMerchantRole 三个按角色筛选的方法
- * 依赖平台提供角色查询接口，当前使用平台 API 暂不完全支持，
- * 标记为技术债务，待平台暴露 GET /api/internal/corp/list-by-role 后迁移。
  */
 @Slf4j
 @Service
@@ -48,18 +44,20 @@ public class PlatformMerchantService {
     }
 
     /**
-     * 按角色查询组织列表（分页）。
-     * TODO: 待平台实现 GET /api/internal/corp/list-by-role 后替换现有 MerchantMapper.selectMerchants。
+     * 按角色查询组织列表（分页），替代 MerchantMapper.selectMerchants + countMerchants。
+     * 调用平台 GET /api/internal/corp/list-by-role。
      */
+    @SuppressWarnings("unchecked")
     public List<Map<String, Object>> getMerchantsByRole(
             int pageNum, int pageSize, String roleName, String keyword) {
         try {
-            String path = String.format(
-                    "/api/internal/corp/list-by-role?pageNum=%d&pageSize=%d&roleName=%s%s",
-                    pageNum, pageSize, roleName,
-                    keyword != null && !keyword.isEmpty() ? "&keyword=" + keyword : "");
-            Map<String, Object> resp = platformInternalClient.get(path, null);
-            @SuppressWarnings("unchecked")
+            StringBuilder path = new StringBuilder(
+                    String.format("/api/internal/corp/list-by-role?roleName=%s&pageNum=%d&pageSize=%d",
+                            roleName, pageNum, pageSize));
+            if (keyword != null && !keyword.isEmpty()) {
+                path.append("&keyword=").append(java.net.URLEncoder.encode(keyword, "UTF-8"));
+            }
+            Map<String, Object> resp = platformInternalClient.get(path.toString(), null);
             Map<String, Object> data = (Map<String, Object>) resp.get("data");
             if (data != null && data.get("records") != null) {
                 return (List<Map<String, Object>>) data.get("records");
@@ -68,5 +66,43 @@ public class PlatformMerchantService {
             log.error("按角色查询组织列表失败: {}", e.getMessage());
         }
         return List.of();
+    }
+
+    /**
+     * 按角色查询组织总数，替代 MerchantMapper.countMerchants。
+     */
+    public long countMerchantsByRole(String roleName, String keyword) {
+        try {
+            StringBuilder path = new StringBuilder(
+                    String.format("/api/internal/corp/list-by-role?roleName=%s&pageNum=1&pageSize=1",
+                            roleName));
+            if (keyword != null && !keyword.isEmpty()) {
+                path.append("&keyword=").append(java.net.URLEncoder.encode(keyword, "UTF-8"));
+            }
+            Map<String, Object> resp = platformInternalClient.get(path.toString(), null);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) resp.get("data");
+            if (data != null && data.get("total") instanceof Number) {
+                return ((Number) data.get("total")).longValue();
+            }
+        } catch (Exception e) {
+            log.error("按角色统计组织数量失败: {}", e.getMessage());
+        }
+        return 0L;
+    }
+
+    /**
+     * 校验指定组织是否拥有指定角色，替代 MerchantMapper.checkMerchantRole。
+     */
+    public boolean hasRole(Long corpId, String roleName) {
+        try {
+            String path = String.format("/api/internal/corp/%d/check-role?roleName=%s",
+                    corpId, java.net.URLEncoder.encode(roleName, "UTF-8"));
+            Map<String, Object> resp = platformInternalClient.get(path, null);
+            return resp.get("data") != null;
+        } catch (Exception e) {
+            log.error("校验组织角色失败: corpId={}, roleName={}", corpId, roleName, e);
+            return false;
+        }
     }
 }
