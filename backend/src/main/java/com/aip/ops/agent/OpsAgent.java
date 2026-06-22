@@ -11,7 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 金地燃气运营平台 DomainAgent。
+ * 运营平台 DomainAgent。
  * 向底座注册后，AI 助手可将运营相关综合问题路由到此 Agent 处理。
  *
  * 设计原则：简单数据查询优先使用 MCP 工具（如 OpsOrderQueryTool），
@@ -32,7 +32,7 @@ public class OpsAgent implements SdkDomainAgent {
 
     @Override
     public String description() {
-        return "金地燃气运营平台 Agent，负责燃气业务运营分析、积分兑换咨询、活动查询推荐等综合业务。";
+        return "运营平台 Agent，负责运营分析、积分兑换咨询、活动查询推荐等综合业务。";
     }
 
     @Override
@@ -46,7 +46,7 @@ public class OpsAgent implements SdkDomainAgent {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("reply", String.format(
-                "金地燃气运营平台当前共有 %d 件积分商品、累计 %d 笔兑换订单。" +
+                "运营平台当前共有 %d 件积分商品、累计 %d 笔兑换订单。" +
                 "如需查询具体订单、推荐商品或了解活动详情，请告诉我您的需求。",
                 productCount, orderCount));
         result.put("orderCount", orderCount);

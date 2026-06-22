@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目定位
 
-金地燃气聚合展示引流平台，作为独立业务子系统运行，后端端口 8084。
+运营平台，作为独立业务子系统运行，后端端口 8084。
 **核心定位**：聚合展示 · 引流 · 积分消耗。**不提供交易功能**，所有商品购买跳转第三方小程序。
 
 依赖 `ai-platform-sdk` 接入底座的安全、多租户、MCP、Agent 等能力。
@@ -95,7 +95,7 @@ curl -s https://a.15891589.xyz/api/ops/product/page?pageNum=1&pageSize=5  # 后�
 ## 包名与命名约定
 
 - Java：`com.aip.ops.*`
-- 表前缀：`gs_`（燃气平台业务表）
+- 表前缀：`ops_`（运营平台业务表）
 - 前端路由 base：`/subsystem/ops/`（生产）/ `/`（本地 dev）
 
 ---

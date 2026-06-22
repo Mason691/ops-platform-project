@@ -1,5 +1,5 @@
 -- ===========================================================
--- 金地燃气聚合展示引流平台 — 数据库初始化
+-- 运营平台 — 数据库初始化
 -- 目标库: mall_db (共用)
 -- 表数量: 17
 -- ===========================================================
@@ -282,4 +282,4 @@ INSERT IGNORE INTO ops_coupon (corp_id, name, type, value, min_points, total_qty
 (3, '满500减30积分券', 'POINTS', 30, 500, 500, 500, 30);
 
 INSERT IGNORE INTO sys_public_account_config (corp_id, app_id, app_secret, name, js_domain, is_default, status)
-VALUES (3, 'wx095b91409f8ecbfe', '53668cb543dd33b165061e706894f937', '金地燃气', 'a.15891589.xyz', 1, 1);
+VALUES (3, 'wx095b91409f8ecbfe', '53668cb543dd33b165061e706894f937', '运营平台', 'a.15891589.xyz', 1, 1);

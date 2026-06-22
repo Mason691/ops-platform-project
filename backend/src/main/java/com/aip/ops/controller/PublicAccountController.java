@@ -190,7 +190,7 @@ public class PublicAccountController {
         r.put("appId", cfg != null ? cfg.getAppId() : "wx095b91409f8ecbfe");
         r.put("jsDomain", cfg != null && cfg.getJsDomain() != null
                 ? cfg.getJsDomain() : "a.15891589.xyz");
-        r.put("name", cfg != null && cfg.getName() != null ? cfg.getName() : "金地燃气");
+        r.put("name", cfg != null && cfg.getName() != null ? cfg.getName() : "运营平台");
         r.put("debug", cfg == null);
         return R.ok(r);
     }

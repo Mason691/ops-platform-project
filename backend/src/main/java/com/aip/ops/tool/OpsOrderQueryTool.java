@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 import java.util.*;
 
 /**
- * 金地燃气订单查询 MCP 工具。
+ * 订单查询 MCP 工具。
  * 注册到底座平台后，AI 助手可通过 MCP 协议查询用户订单。
  */
 @McpTool
@@ -28,7 +28,7 @@ public class OpsOrderQueryTool implements McpToolDefinition {
 
     @Override
     public String getDescription() {
-        return "查询当前用户在金地燃气运营平台的订单。支持按订单号和状态过滤，返回最近订单列表。";
+        return "查询当前用户在运营平台的订单。支持按订单号和状态过滤，返回最近订单列表。";
     }
 
     @Override

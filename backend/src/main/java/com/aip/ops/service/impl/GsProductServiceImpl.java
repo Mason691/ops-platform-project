@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
  * 商品展示管理 Service 实现。
  *
  * 核心变更（ADR-005 合规）：
- * - 不再通过 GsProductMapper JOIN mall_product 跨库查询
+ * - 不再跨库 JOIN mall_product 查询
  * - 改为：查 ops_product → 收集 mall_product_id → ProductBatchClient 批量获取商品详情
  * - 销售商归属校验改为通过 ProductBatchClient 获取 corpId 后在 Service 层完成
  */

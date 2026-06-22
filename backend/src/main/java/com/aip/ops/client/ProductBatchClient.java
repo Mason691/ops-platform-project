@@ -15,7 +15,7 @@ import java.util.stream.Collectors;
  * 调用 mall-project 的 POST /api/internal/product/batch-query（X-Internal-Token 认证），
  * 替代跨库 JOIN mall_db.mall_product。
  *
- * GsProductMapper 中的 7 个 JOIN 查询逐步迁移为此模式：
+ * 原跨库 JOIN 查询逐步迁移为此模式：
  * 1. 先查 ops_product 表
  * 2. 收集 mall_product_id 集合
  * 3. 调用 batchQuery 获取商品详情
