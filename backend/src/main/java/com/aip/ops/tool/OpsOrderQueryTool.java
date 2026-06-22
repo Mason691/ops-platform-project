@@ -1,7 +1,7 @@
 package com.aip.ops.tool;
 
-import com.aip.ops.entity.GsOrder;
-import com.aip.ops.mapper.GsOrderMapper;
+import com.aip.ops.entity.OpsOrder;
+import com.aip.ops.mapper.OpsOrderMapper;
 import com.aip.sdk.annotation.McpTool;
 import com.aip.sdk.mcp.McpToolDefinition;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -19,7 +19,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class OpsOrderQueryTool implements McpToolDefinition {
 
-    private final GsOrderMapper orderMapper;
+    private final OpsOrderMapper orderMapper;
 
     @Override
     public String getName() {
@@ -50,13 +50,13 @@ public class OpsOrderQueryTool implements McpToolDefinition {
         int limit = args.get("limit") instanceof Number
                 ? Math.min(((Number) args.get("limit")).intValue(), 20) : 10;
 
-        List<GsOrder> orders = orderMapper.selectList(
-                new LambdaQueryWrapper<GsOrder>()
-                        .eq(GsOrder::getUserId, userId)
-                        .eq(GsOrder::getCorpId, corpId)
-                        .eq(orderNo != null && !orderNo.isEmpty(), GsOrder::getOrderNo, orderNo)
-                        .eq(status != null && !status.isEmpty(), GsOrder::getStatus, status)
-                        .orderByDesc(GsOrder::getId)
+        List<OpsOrder> orders = orderMapper.selectList(
+                new LambdaQueryWrapper<OpsOrder>()
+                        .eq(OpsOrder::getUserId, userId)
+                        .eq(OpsOrder::getCorpId, corpId)
+                        .eq(orderNo != null && !orderNo.isEmpty(), OpsOrder::getOrderNo, orderNo)
+                        .eq(status != null && !status.isEmpty(), OpsOrder::getStatus, status)
+                        .orderByDesc(OpsOrder::getId)
                         .last("LIMIT " + limit));
 
         List<Map<String, Object>> list = orders.stream().map(o -> {

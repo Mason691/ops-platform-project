@@ -8,7 +8,7 @@ import lombok.EqualsAndHashCode;
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("ops_click_log")
-public class GsClickLog extends BaseEntity {
+public class OpsClickLog extends BaseEntity {
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;
     @TableField("user_id") private Long userId;

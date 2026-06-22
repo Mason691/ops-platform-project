@@ -2,8 +2,8 @@ package com.aip.ops.controller;
 
 import com.aip.ops.entity.*;
 import com.aip.ops.mapper.*;
-import com.aip.ops.service.GsActivityService;
-import com.aip.ops.service.IGsProductService;
+import com.aip.ops.service.OpsActivityService;
+import com.aip.ops.service.IOpsProductService;
 import com.aip.ops.util.ImageUrlUtil;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
@@ -29,15 +29,15 @@ import java.util.*;
 public class PlatformController {
 
     private final OpsMemberMapper userMapper;
-    private final IGsProductService productService;
-    private final GsOrderMapper orderMapper;
-    private final GsActivityMapper activityMapper;
-    private final GsActivityService activityService;
-    private final GsAddressMapper addressMapper;
-    private final GsPointsLogMapper pointsLogMapper;
-    private final GsCouponMapper couponMapper;
-    private final GsUserCouponMapper userCouponMapper;
-    private final GsClickLogMapper clickLogMapper;
+    private final IOpsProductService productService;
+    private final OpsOrderMapper orderMapper;
+    private final OpsActivityMapper activityMapper;
+    private final OpsActivityService activityService;
+    private final OpsAddressMapper addressMapper;
+    private final OpsPointsLogMapper pointsLogMapper;
+    private final OpsCouponMapper couponMapper;
+    private final OpsUserCouponMapper userCouponMapper;
+    private final OpsClickLogMapper clickLogMapper;
     private final ProductCategoryMapper categoryMapper;
     private final OpsActivityProductMapper activityProductMapper;
     private final OpsLiveRoomMapper liveRoomMapper;
@@ -184,7 +184,7 @@ public class PlatformController {
         if (product == null) return R.fail("商品不存在");
         // 点击统计
         Long corpId = getCorpId();
-        GsClickLog cl = new GsClickLog(); cl.setCorpId(corpId);
+        OpsClickLog cl = new OpsClickLog(); cl.setCorpId(corpId);
         cl.setUserId(getUserIdOrNull()); cl.setTargetType("PRODUCT"); cl.setTargetId(id);
         clickLogMapper.insert(cl);
         return R.ok(product);
@@ -240,13 +240,13 @@ public class PlatformController {
         u.setPointsBalance(u.getPointsBalance() - pointsSpent);
         userMapper.updateById(u);
 
-        GsPointsLog log = new GsPointsLog(); log.setCorpId(corpId); log.setUserId(userId);
+        OpsPointsLog log = new OpsPointsLog(); log.setCorpId(corpId); log.setUserId(userId);
         log.setChangeType("CONSUME"); log.setAmount(pointsSpent);
         log.setBalanceAfter(u.getPointsBalance()); log.setRemark("兑换商品：" + productName);
         pointsLogMapper.insert(log);
 
         String orderNo = "OPS" + System.currentTimeMillis() + userId;
-        GsOrder order = new GsOrder(); order.setCorpId(corpId); order.setUserId(userId);
+        OpsOrder order = new OpsOrder(); order.setCorpId(corpId); order.setUserId(userId);
         order.setOrderNo(orderNo); order.setProductId(mappingId);
         order.setProductName(productName);
         order.setProductImage((String) product.get("coverImage"));
@@ -268,17 +268,17 @@ public class PlatformController {
     public R<?> myOrders(@RequestParam(defaultValue="1") int pageNum,
                          @RequestParam(defaultValue="10") int pageSize) {
         Long userId = SecurityUtils.getCurrentUserId();
-        Page<GsOrder> page = orderMapper.selectPage(new Page<>(pageNum, pageSize),
-                new LambdaQueryWrapper<GsOrder>().eq(GsOrder::getUserId, userId)
-                        .orderByDesc(GsOrder::getId));
+        Page<OpsOrder> page = orderMapper.selectPage(new Page<>(pageNum, pageSize),
+                new LambdaQueryWrapper<OpsOrder>().eq(OpsOrder::getUserId, userId)
+                        .orderByDesc(OpsOrder::getId));
         return R.ok(page);
     }
 
     /** 第三方回调：确认支付或退还积分 */
     @PostMapping("/order/{orderNo}/callback")
     public R<?> orderCallback(@PathVariable String orderNo, @RequestBody Map<String,Object> body) {
-        GsOrder o = orderMapper.selectOne(new LambdaQueryWrapper<GsOrder>()
-                .eq(GsOrder::getOrderNo, orderNo));
+        OpsOrder o = orderMapper.selectOne(new LambdaQueryWrapper<OpsOrder>()
+                .eq(OpsOrder::getOrderNo, orderNo));
         if (o == null) return R.fail("订单不存在");
         String action = (String) body.getOrDefault("action", "PAID");
         if ("PAID".equals(action)) {
@@ -287,7 +287,7 @@ public class PlatformController {
             o.setStatus("CANCELLED");
             OpsMember u = userMapper.selectById(o.getUserId());
             u.setPointsBalance(u.getPointsBalance() + o.getPointsSpent()); userMapper.updateById(u);
-            GsPointsLog log = new GsPointsLog(); log.setCorpId(o.getCorpId());
+            OpsPointsLog log = new OpsPointsLog(); log.setCorpId(o.getCorpId());
             log.setUserId(o.getUserId()); log.setChangeType("REFUND");
             log.setAmount(o.getPointsSpent()); log.setBalanceAfter(u.getPointsBalance());
             log.setOrderNo(orderNo); log.setRemark("订单取消退还积分");
@@ -305,12 +305,12 @@ public class PlatformController {
             @RequestParam(required=false) String type,
             @RequestParam(required=false) Integer status) {
         int offset = (pageNum - 1) * pageSize;
-        List<GsActivity> records = activityMapper.selectActivityPage(
+        List<OpsActivity> records = activityMapper.selectActivityPage(
                 offset, pageSize, type, category, status);
         long total = activityMapper.countActivityPage(type, category, status);
 
         // 规范化图片 URL：补全 coverUrl → 相对路径统一处理
-        for (GsActivity a : records) {
+        for (OpsActivity a : records) {
             // 若 coverUrl 为空，回退到 coverImage
             if (a.getCoverUrl() == null || a.getCoverUrl().isBlank()) {
                 a.setCoverUrl(a.getCoverImage());
@@ -337,7 +337,7 @@ public class PlatformController {
         if (detail == null) return R.fail("活动不存在");
 
         // 规范化活动图片 URL
-        GsActivity act = (GsActivity) detail.get("activity");
+        OpsActivity act = (OpsActivity) detail.get("activity");
         if (act != null) {
             if (act.getCoverUrl() == null || act.getCoverUrl().isBlank()) {
                 act.setCoverUrl(act.getCoverImage());
@@ -394,19 +394,19 @@ public class PlatformController {
     @GetMapping("/address/list")
     public R<?> addressList() {
         Long userId = SecurityUtils.getCurrentUserId();
-        return R.ok(addressMapper.selectList(new LambdaQueryWrapper<GsAddress>()
-                .eq(GsAddress::getUserId, userId).orderByDesc(GsAddress::getIsDefault)));
+        return R.ok(addressMapper.selectList(new LambdaQueryWrapper<OpsAddress>()
+                .eq(OpsAddress::getUserId, userId).orderByDesc(OpsAddress::getIsDefault)));
     }
 
     @GetMapping("/address/default")
     public R<?> defaultAddress() {
         Long userId = SecurityUtils.getCurrentUserId();
-        return R.ok(addressMapper.selectOne(new LambdaQueryWrapper<GsAddress>()
-                .eq(GsAddress::getUserId, userId).eq(GsAddress::getIsDefault, 1).last("LIMIT 1")));
+        return R.ok(addressMapper.selectOne(new LambdaQueryWrapper<OpsAddress>()
+                .eq(OpsAddress::getUserId, userId).eq(OpsAddress::getIsDefault, 1).last("LIMIT 1")));
     }
 
     @PostMapping("/address")
-    public R<?> saveAddress(@RequestBody GsAddress addr) {
+    public R<?> saveAddress(@RequestBody OpsAddress addr) {
         addr.setUserId(SecurityUtils.getCurrentUserId());
         addr.setCorpId(SecurityUtils.getCurrentCorpId());
         if (Integer.valueOf(1).equals(addr.getIsDefault())) clearDefault(addr.getUserId());
@@ -415,7 +415,7 @@ public class PlatformController {
     }
 
     @PutMapping("/address/{id}")
-    public R<?> updateAddress(@PathVariable Long id, @RequestBody GsAddress addr) {
+    public R<?> updateAddress(@PathVariable Long id, @RequestBody OpsAddress addr) {
         Long userId = SecurityUtils.getCurrentUserId();
         addr.setId(id); addr.setUserId(userId);
         if (Integer.valueOf(1).equals(addr.getIsDefault())) clearDefault(userId);
@@ -427,8 +427,8 @@ public class PlatformController {
     public R<?> deleteAddress(@PathVariable Long id) { addressMapper.deleteById(id); return R.ok(); }
 
     private void clearDefault(Long userId) {
-        addressMapper.update(null, new LambdaUpdateWrapper<GsAddress>()
-                .eq(GsAddress::getUserId, userId).set(GsAddress::getIsDefault, 0));
+        addressMapper.update(null, new LambdaUpdateWrapper<OpsAddress>()
+                .eq(OpsAddress::getUserId, userId).set(OpsAddress::getIsDefault, 0));
     }
 
     // ═══ 积分 ═══
@@ -436,32 +436,32 @@ public class PlatformController {
     public R<?> pointsLog(@RequestParam(defaultValue="1") int pageNum,
                           @RequestParam(defaultValue="20") int pageSize,
                           @RequestParam(required=false) String changeType) {
-        Page<GsPointsLog> page = pointsLogMapper.selectPage(new Page<>(pageNum, pageSize),
-                new LambdaQueryWrapper<GsPointsLog>().eq(GsPointsLog::getUserId,
+        Page<OpsPointsLog> page = pointsLogMapper.selectPage(new Page<>(pageNum, pageSize),
+                new LambdaQueryWrapper<OpsPointsLog>().eq(OpsPointsLog::getUserId,
                         SecurityUtils.getCurrentUserId())
-                        .eq(changeType != null && !changeType.isEmpty(), GsPointsLog::getChangeType, changeType)
-                        .orderByDesc(GsPointsLog::getId));
+                        .eq(changeType != null && !changeType.isEmpty(), OpsPointsLog::getChangeType, changeType)
+                        .orderByDesc(OpsPointsLog::getId));
         return R.ok(page);
     }
 
     // ═══ 优惠券 ═══
     @GetMapping("/coupon/list")
     public R<?> couponList() {
-        return R.ok(couponMapper.selectList(new LambdaQueryWrapper<GsCoupon>()
-                .eq(GsCoupon::getStatus, 1).gt(GsCoupon::getRemainQty, 0)));
+        return R.ok(couponMapper.selectList(new LambdaQueryWrapper<OpsCoupon>()
+                .eq(OpsCoupon::getStatus, 1).gt(OpsCoupon::getRemainQty, 0)));
     }
 
     @PostMapping("/coupon/draw")
     public R<?> drawCoupon(@RequestBody Map<String,Object> body) {
         Long userId = SecurityUtils.getCurrentUserId();
         Long couponId = Long.valueOf(body.get("couponId").toString());
-        GsCoupon c = couponMapper.selectById(couponId);
+        OpsCoupon c = couponMapper.selectById(couponId);
         if (c == null || c.getRemainQty() <= 0) return R.fail("优惠券已抢完");
-        Long count = userCouponMapper.selectCount(new LambdaQueryWrapper<GsUserCoupon>()
-                .eq(GsUserCoupon::getUserId, userId).eq(GsUserCoupon::getCouponId, couponId));
+        Long count = userCouponMapper.selectCount(new LambdaQueryWrapper<OpsUserCoupon>()
+                .eq(OpsUserCoupon::getUserId, userId).eq(OpsUserCoupon::getCouponId, couponId));
         if (count > 0) return R.fail("已领取过该优惠券");
         c.setRemainQty(c.getRemainQty() - 1); couponMapper.updateById(c);
-        GsUserCoupon uc = new GsUserCoupon(); uc.setCorpId(c.getCorpId());
+        OpsUserCoupon uc = new OpsUserCoupon(); uc.setCorpId(c.getCorpId());
         uc.setUserId(userId); uc.setCouponId(couponId);
         uc.setExpireTime(LocalDateTime.now().plusDays(c.getExpireDays() != null ? c.getExpireDays() : 30));
         uc.setStatus("UNUSED"); userCouponMapper.insert(uc);
@@ -470,9 +470,9 @@ public class PlatformController {
 
     @GetMapping("/coupon/my")
     public R<?> myCoupons() {
-        return R.ok(userCouponMapper.selectList(new LambdaQueryWrapper<GsUserCoupon>()
-                .eq(GsUserCoupon::getUserId, SecurityUtils.getCurrentUserId())
-                .orderByDesc(GsUserCoupon::getId)));
+        return R.ok(userCouponMapper.selectList(new LambdaQueryWrapper<OpsUserCoupon>()
+                .eq(OpsUserCoupon::getUserId, SecurityUtils.getCurrentUserId())
+                .orderByDesc(OpsUserCoupon::getId)));
     }
 
     // ═══ 活动预约 ═══
@@ -482,7 +482,7 @@ public class PlatformController {
         Long userId = SecurityUtils.getCurrentUserId();
         Long corpId = SecurityUtils.getCurrentCorpId();
 
-        GsActivity activity = activityMapper.selectById(activityId);
+        OpsActivity activity = activityMapper.selectById(activityId);
         if (activity == null || activity.getStatus() == null || activity.getStatus() != 1)
             return R.fail("活动不存在或已结束");
 
@@ -525,7 +525,7 @@ public class PlatformController {
         // Enrich with activity titles
         List<Map<String,Object>> result = new ArrayList<>();
         for (OpsActivityBooking b : bookings) {
-            GsActivity act = activityMapper.selectById(b.getActivityId());
+            OpsActivity act = activityMapper.selectById(b.getActivityId());
             Map<String,Object> m = new LinkedHashMap<>();
             m.put("id", b.getId());
             m.put("activityId", b.getActivityId());
@@ -543,8 +543,8 @@ public class PlatformController {
     public R<?> history(@RequestParam(defaultValue="1") int pageNum,
                         @RequestParam(defaultValue="20") int pageSize) {
         return R.ok(clickLogMapper.selectPage(new Page<>(pageNum, pageSize),
-                new LambdaQueryWrapper<GsClickLog>().eq(GsClickLog::getUserId,
-                        SecurityUtils.getCurrentUserId()).orderByDesc(GsClickLog::getId)));
+                new LambdaQueryWrapper<OpsClickLog>().eq(OpsClickLog::getUserId,
+                        SecurityUtils.getCurrentUserId()).orderByDesc(OpsClickLog::getId)));
     }
 
     // ═══ 视频直播 ═══

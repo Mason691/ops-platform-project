@@ -1,12 +1,12 @@
 package com.aip.ops.service.impl;
 
 import com.aip.ops.client.ProductBatchClient;
-import com.aip.ops.entity.GsProduct;
+import com.aip.ops.entity.OpsProduct;
 import com.aip.ops.entity.MerchantMiniappConfig;
 import com.aip.ops.entity.OperatorMerchant;
 import com.aip.ops.entity.ProductCategory;
 import com.aip.ops.mapper.*;
-import com.aip.ops.service.IGsProductService;
+import com.aip.ops.service.IOpsProductService;
 import com.aip.ops.service.PlatformMerchantService;
 import com.aip.ops.util.ImageUrlUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -28,9 +28,9 @@ import java.util.stream.Collectors;
  */
 @Service
 @RequiredArgsConstructor
-public class GsProductServiceImpl implements IGsProductService {
+public class OpsProductServiceImpl implements IOpsProductService {
 
-    private final GsProductMapper productMapper;
+    private final OpsProductMapper productMapper;
     private final ProductCategoryMapper categoryMapper;
     private final OperatorMerchantMapper omMapper;
     private final PlatformMerchantService platformMerchantService;
@@ -204,7 +204,7 @@ public class GsProductServiceImpl implements IGsProductService {
 
     @Override
     public void updateShelfStatus(Long mappingId, Integer shelfStatus) {
-        GsProduct p = new GsProduct();
+        OpsProduct p = new OpsProduct();
         p.setId(mappingId);
         p.setShelfStatus(shelfStatus);
         productMapper.updateById(p);
@@ -214,7 +214,7 @@ public class GsProductServiceImpl implements IGsProductService {
     @Transactional
     public int batchUpdateShelfStatus(List<Long> ids, Integer shelfStatus, Long operatorId) {
         assertProductsBelongToOperator(ids, operatorId);
-        GsProduct p = new GsProduct();
+        OpsProduct p = new OpsProduct();
         p.setShelfStatus(shelfStatus);
         int count = 0;
         for (Long id : ids) {
@@ -229,7 +229,7 @@ public class GsProductServiceImpl implements IGsProductService {
     @Transactional
     public int batchUpdateCategory(List<Long> ids, Long categoryId, Long operatorId) {
         assertProductsBelongToOperator(ids, operatorId);
-        GsProduct p = new GsProduct();
+        OpsProduct p = new OpsProduct();
         p.setCategoryId(categoryId);
         int count = 0;
         for (Long id : ids) {
@@ -244,7 +244,7 @@ public class GsProductServiceImpl implements IGsProductService {
     @Transactional
     public void updatePointsConfig(Long mappingId, Integer points, BigDecimal exchangeAmount, Long operatorId) {
         assertProductsBelongToOperator(Collections.singletonList(mappingId), operatorId);
-        GsProduct p = new GsProduct();
+        OpsProduct p = new OpsProduct();
         p.setId(mappingId);
         p.setPoints(points != null ? points : 0);
         p.setExchangeAmount(exchangeAmount != null ? exchangeAmount : BigDecimal.ZERO);
@@ -255,7 +255,7 @@ public class GsProductServiceImpl implements IGsProductService {
     @Transactional
     public int batchUpdatePointsConfig(List<Long> ids, Integer points, BigDecimal exchangeAmount, Long operatorId) {
         assertProductsBelongToOperator(ids, operatorId);
-        GsProduct p = new GsProduct();
+        OpsProduct p = new OpsProduct();
         p.setPoints(points != null ? points : 0);
         p.setExchangeAmount(exchangeAmount != null ? exchangeAmount : BigDecimal.ZERO);
         int count = 0;
@@ -449,13 +449,13 @@ public class GsProductServiceImpl implements IGsProductService {
         }
 
         // 获取 mall_product_id → 批量查询产品详情 → 校验 corpId
-        List<GsProduct> mappings = productMapper.selectBatchIds(mappingIds);
+        List<OpsProduct> mappings = productMapper.selectBatchIds(mappingIds);
         List<Long> mallProductIds = mappings.stream()
-                .map(GsProduct::getMallProductId).distinct().collect(Collectors.toList());
+                .map(OpsProduct::getMallProductId).distinct().collect(Collectors.toList());
         Map<Long, Map<String, Object>> productMap = productBatchClient.batchQuery(mallProductIds);
 
         List<Long> unauthorized = new ArrayList<>();
-        for (GsProduct m : mappings) {
+        for (OpsProduct m : mappings) {
             Map<String, Object> prod = productMap.get(m.getMallProductId());
             if (prod == null || prod.get("corpId") == null) {
                 unauthorized.add(m.getId());

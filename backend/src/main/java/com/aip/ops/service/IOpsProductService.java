@@ -7,7 +7,7 @@ import java.util.Map;
 /**
  * 商品展示管理 Service — 处理 ops_product 映射与 mall_product 联表逻辑。
  */
-public interface IGsProductService {
+public interface IOpsProductService {
 
     /**
      * 管理员分页查询本运营商关联的商品列表。

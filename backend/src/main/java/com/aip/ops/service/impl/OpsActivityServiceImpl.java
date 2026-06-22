@@ -1,13 +1,13 @@
 package com.aip.ops.service.impl;
 
 import com.aip.ops.client.ProductBatchClient;
-import com.aip.ops.entity.GsActivity;
+import com.aip.ops.entity.OpsActivity;
 import com.aip.ops.entity.OpsActivityProduct;
 import com.aip.ops.entity.OpsLiveRoom;
-import com.aip.ops.mapper.GsActivityMapper;
+import com.aip.ops.mapper.OpsActivityMapper;
 import com.aip.ops.mapper.OpsActivityProductMapper;
 import com.aip.ops.mapper.OpsLiveRoomMapper;
-import com.aip.ops.service.GsActivityService;
+import com.aip.ops.service.OpsActivityService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,9 +26,9 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class GsActivityServiceImpl implements GsActivityService {
+public class OpsActivityServiceImpl implements OpsActivityService {
 
-    private final GsActivityMapper activityMapper;
+    private final OpsActivityMapper activityMapper;
     private final OpsActivityProductMapper activityProductMapper;
     private final OpsLiveRoomMapper liveRoomMapper;
     private final ProductBatchClient productBatchClient;
@@ -37,7 +37,7 @@ public class GsActivityServiceImpl implements GsActivityService {
     public Map<String, Object> adminActivityPage(Long operatorId, int pageNum, int pageSize,
                                                   String type, String category, Integer status) {
         int offset = (pageNum - 1) * pageSize;
-        List<GsActivity> records = activityMapper.selectActivityPage(
+        List<OpsActivity> records = activityMapper.selectActivityPage(
                 offset, pageSize, type, category, status);
         long total = activityMapper.countActivityPage(type, category, status);
 
@@ -51,7 +51,7 @@ public class GsActivityServiceImpl implements GsActivityService {
 
     @Override
     public Map<String, Object> activityDetail(Long id) {
-        GsActivity a = activityMapper.selectById(id);
+        OpsActivity a = activityMapper.selectById(id);
         if (a == null) return null;
 
         // 查询活动关联商品（仅本地字段 + 小程序配置，不含 mall_product JOIN）
@@ -72,7 +72,7 @@ public class GsActivityServiceImpl implements GsActivityService {
 
     @Override
     @Transactional
-    public Long createActivity(GsActivity activity, List<Long> productIds) {
+    public Long createActivity(OpsActivity activity, List<Long> productIds) {
         activityMapper.insert(activity);
         saveActivityProducts(activity.getId(), productIds);
         log.info("活动创建成功: id={}, title={}, type={}, productCount={}",
@@ -83,7 +83,7 @@ public class GsActivityServiceImpl implements GsActivityService {
 
     @Override
     @Transactional
-    public void updateActivity(Long id, GsActivity activity, List<Long> productIds) {
+    public void updateActivity(Long id, OpsActivity activity, List<Long> productIds) {
         activity.setId(id);
         activityMapper.updateById(activity);
         saveActivityProducts(id, productIds);
@@ -94,7 +94,7 @@ public class GsActivityServiceImpl implements GsActivityService {
 
     @Override
     public void updateStatus(Long id, Integer status) {
-        GsActivity a = new GsActivity();
+        OpsActivity a = new OpsActivity();
         a.setId(id);
         a.setStatus(status);
         activityMapper.updateById(a);

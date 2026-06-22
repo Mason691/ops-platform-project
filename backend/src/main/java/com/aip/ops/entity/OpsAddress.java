@@ -8,7 +8,7 @@ import lombok.EqualsAndHashCode;
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("ops_address")
-public class GsAddress extends BaseEntity {
+public class OpsAddress extends BaseEntity {
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;
     @TableField("user_id") private Long userId;

@@ -11,7 +11,7 @@ import lombok.EqualsAndHashCode;
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("ops_product")
-public class GsProduct extends BaseEntity {
+public class OpsProduct extends BaseEntity {
     /** createTime / modifyTime 由 BaseEntity 继承 */
     @TableId(type = IdType.AUTO)
     private Long id;

@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("ops_activity")
-public class GsActivity extends BaseEntity {
+public class OpsActivity extends BaseEntity {
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;
     @TableField("title") private String title;

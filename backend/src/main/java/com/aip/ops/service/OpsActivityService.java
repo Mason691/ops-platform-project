@@ -1,13 +1,13 @@
 package com.aip.ops.service;
 
-import com.aip.ops.entity.GsActivity;
+import com.aip.ops.entity.OpsActivity;
 import java.util.List;
 import java.util.Map;
 
 /**
  * 活动管理 Service — 统一活动 CRUD 和商品关联逻辑。
  */
-public interface GsActivityService {
+public interface OpsActivityService {
 
     /**
      * 管理员分页查询活动列表（含关联商品数量）。
@@ -27,12 +27,12 @@ public interface GsActivityService {
      * @param productIds 关联商品映射 ID 列表
      * @return 新活动 ID
      */
-    Long createActivity(GsActivity activity, List<Long> productIds);
+    Long createActivity(OpsActivity activity, List<Long> productIds);
 
     /**
      * 更新活动并重新保存商品关联（先删后增）。
      */
-    void updateActivity(Long id, GsActivity activity, List<Long> productIds);
+    void updateActivity(Long id, OpsActivity activity, List<Long> productIds);
 
     /** 仅更新活动状态 */
     void updateStatus(Long id, Integer status);

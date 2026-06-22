@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("ops_user_coupon")
-public class GsUserCoupon extends BaseEntity {
+public class OpsUserCoupon extends BaseEntity {
     /** createTime / modifyTime 由 BaseEntity 继承 */
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;

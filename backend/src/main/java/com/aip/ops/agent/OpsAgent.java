@@ -1,7 +1,7 @@
 package com.aip.ops.agent;
 
-import com.aip.ops.mapper.GsOrderMapper;
-import com.aip.ops.mapper.GsProductMapper;
+import com.aip.ops.mapper.OpsOrderMapper;
+import com.aip.ops.mapper.OpsProductMapper;
 import com.aip.sdk.agent.SdkDomainAgent;
 import com.aip.sdk.annotation.AgentComponent;
 import lombok.RequiredArgsConstructor;
@@ -22,8 +22,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class OpsAgent implements SdkDomainAgent {
 
-    private final GsOrderMapper orderMapper;
-    private final GsProductMapper productMapper;
+    private final OpsOrderMapper orderMapper;
+    private final OpsProductMapper productMapper;
 
     @Override
     public String name() {

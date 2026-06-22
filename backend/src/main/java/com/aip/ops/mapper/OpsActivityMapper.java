@@ -1,13 +1,13 @@
 package com.aip.ops.mapper;
 
-import com.aip.ops.entity.GsActivity;
+import com.aip.ops.entity.OpsActivity;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.*;
 
 import java.util.List;
 
 @Mapper
-public interface GsActivityMapper extends BaseMapper<GsActivity> {
+public interface OpsActivityMapper extends BaseMapper<OpsActivity> {
 
     /**
      * 分页查询活动列表（含关联商品数量）。
@@ -36,7 +36,7 @@ public interface GsActivityMapper extends BaseMapper<GsActivity> {
         LIMIT #{offset}, #{size}
         </script>
     """)
-    List<GsActivity> selectActivityPage(@Param("offset") int offset,
+    List<OpsActivity> selectActivityPage(@Param("offset") int offset,
                                         @Param("size") int size,
                                         @Param("type") String type,
                                         @Param("category") String category,

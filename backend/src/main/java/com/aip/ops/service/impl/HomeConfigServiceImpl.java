@@ -33,8 +33,8 @@ import java.util.stream.Collectors;
 public class HomeConfigServiceImpl implements HomeConfigService {
 
     private final HomeConfigMapper homeConfigMapper;
-    private final GsActivityMapper activityMapper;
-    private final GsProductMapper productMapper;
+    private final OpsActivityMapper activityMapper;
+    private final OpsProductMapper productMapper;
     private final OperatorMerchantMapper omMapper;
     private final PlatformMerchantService platformMerchantService;
     private final MerchantMiniappConfigMapper miniappConfigMapper;
@@ -119,16 +119,16 @@ public class HomeConfigServiceImpl implements HomeConfigService {
 
     @Override
     public List<Map<String, Object>> getAvailableVideos(Long operatorId) {
-        List<GsActivity> activities = activityMapper.selectList(
-                new LambdaQueryWrapper<GsActivity>()
-                        .eq(GsActivity::getCorpId, operatorId)
-                        .eq(GsActivity::getType, "activity")
-                        .isNotNull(GsActivity::getVideoUrl)
-                        .ne(GsActivity::getVideoUrl, "")
-                        .orderByDesc(GsActivity::getId));
+        List<OpsActivity> activities = activityMapper.selectList(
+                new LambdaQueryWrapper<OpsActivity>()
+                        .eq(OpsActivity::getCorpId, operatorId)
+                        .eq(OpsActivity::getType, "activity")
+                        .isNotNull(OpsActivity::getVideoUrl)
+                        .ne(OpsActivity::getVideoUrl, "")
+                        .orderByDesc(OpsActivity::getId));
 
         List<Map<String, Object>> result = new ArrayList<>();
-        for (GsActivity a : activities) {
+        for (OpsActivity a : activities) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", a.getId());
             m.put("title", a.getTitle());
@@ -244,10 +244,10 @@ public class HomeConfigServiceImpl implements HomeConfigService {
                 .map(OpsHomeConfig::getTargetId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
-        Map<Long, GsActivity> activityMap = new HashMap<>();
+        Map<Long, OpsActivity> activityMap = new HashMap<>();
         if (!activityIds.isEmpty()) {
-            List<GsActivity> activities = activityMapper.selectBatchIds(activityIds);
-            for (GsActivity a : activities) {
+            List<OpsActivity> activities = activityMapper.selectBatchIds(activityIds);
+            for (OpsActivity a : activities) {
                 activityMap.put(a.getId(), a);
             }
         }
@@ -258,7 +258,7 @@ public class HomeConfigServiceImpl implements HomeConfigService {
             m.put("id", c.getId());
             m.put("sort", c.getSort());
             m.put("targetId", c.getTargetId());
-            GsActivity act = c.getTargetId() != null ? activityMap.get(c.getTargetId()) : null;
+            OpsActivity act = c.getTargetId() != null ? activityMap.get(c.getTargetId()) : null;
             if (act != null) {
                 m.put("title", act.getTitle());
                 m.put("videoUrl", imageUrlUtil.normalizeImage(act.getVideoUrl()));

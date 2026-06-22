@@ -8,7 +8,7 @@ import lombok.EqualsAndHashCode;
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("ops_coupon")
-public class GsCoupon extends BaseEntity {
+public class OpsCoupon extends BaseEntity {
     /** createTime / modifyTime 由 BaseEntity 继承 */
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;

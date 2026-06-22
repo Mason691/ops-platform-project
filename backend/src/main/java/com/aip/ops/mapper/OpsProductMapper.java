@@ -1,5 +1,5 @@
 package com.aip.ops.mapper;
-import com.aip.ops.entity.GsProduct;
+import com.aip.ops.entity.OpsProduct;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.*;
 
@@ -11,7 +11,7 @@ import java.util.Map;
  * 仅查询 ops_product 本地表，不再 JOIN mall_product（跨库查询已通过 ProductBatchClient 替代）。
  */
 @Mapper
-public interface GsProductMapper extends BaseMapper<GsProduct> {
+public interface OpsProductMapper extends BaseMapper<OpsProduct> {
 
     /**
      * 分页查询运营商关联的商品映射列表（仅查 ops_product，不含 mall_product JOIN）。

@@ -2,8 +2,8 @@ package com.aip.ops.controller;
 
 import com.aip.ops.entity.*;
 import com.aip.ops.mapper.*;
-import com.aip.ops.service.GsActivityService;
-import com.aip.ops.service.IGsProductService;
+import com.aip.ops.service.OpsActivityService;
+import com.aip.ops.service.IOpsProductService;
 import com.aip.ops.service.PlatformMerchantService;
 import com.aip.ops.util.ImageUrlUtil;
 import com.aip.sdk.result.R;
@@ -31,25 +31,25 @@ import java.util.stream.Collectors;
 public class AdminController {
 
     private final OperatorMerchantMapper omMapper;
-    private final IGsProductService productService;
+    private final IOpsProductService productService;
     private final ProductCategoryMapper categoryMapper;
     private final PlatformMerchantService platformMerchantService;
     private final MerchantMiniappConfigMapper miniappConfigMapper;
     private final OpsLiveRoomMapper liveRoomMapper;
     private final PublicAccountConfigMapper publicAccountConfigMapper;
-    private final GsActivityService activityService;
+    private final OpsActivityService activityService;
     private final org.springframework.web.client.RestTemplate restTemplate;
     private final String merchantRoleName;
     private final ImageUrlUtil imageUrlUtil;
 
     public AdminController(OperatorMerchantMapper omMapper,
-                           IGsProductService productService,
+                           IOpsProductService productService,
                            ProductCategoryMapper categoryMapper,
                            PlatformMerchantService platformMerchantService,
                            MerchantMiniappConfigMapper miniappConfigMapper,
                            OpsLiveRoomMapper liveRoomMapper,
                            PublicAccountConfigMapper publicAccountConfigMapper,
-                           GsActivityService activityService,
+                           OpsActivityService activityService,
                            org.springframework.web.client.RestTemplate restTemplate,
                            @Value("${platform.merchant-role-name:销售商}") String merchantRoleName,
                            ImageUrlUtil imageUrlUtil) {
@@ -487,9 +487,9 @@ public class AdminController {
 
         // 规范化活动图片 URL
         @SuppressWarnings("unchecked")
-        List<GsActivity> records = (List<GsActivity>) page.get("records");
+        List<OpsActivity> records = (List<OpsActivity>) page.get("records");
         if (records != null) {
-            for (GsActivity a : records) {
+            for (OpsActivity a : records) {
                 if (a.getCoverUrl() == null || a.getCoverUrl().isBlank()) {
                     a.setCoverUrl(a.getCoverImage());
                 }
@@ -513,7 +513,7 @@ public class AdminController {
         if (detail == null) return R.fail("活动不存在");
 
         // 规范化活动图片 URL
-        GsActivity act = (GsActivity) detail.get("activity");
+        OpsActivity act = (OpsActivity) detail.get("activity");
         if (act != null) {
             if (act.getCoverUrl() == null || act.getCoverUrl().isBlank()) {
                 act.setCoverUrl(act.getCoverImage());
@@ -547,7 +547,7 @@ public class AdminController {
      */
     @PostMapping("/activities")
     public R<?> createActivity(@RequestBody Map<String, Object> body) {
-        GsActivity a = buildActivityFromBody(body);
+        OpsActivity a = buildActivityFromBody(body);
         a.setCorpId(currentOperatorId());
         a.setStatus(1);
         @SuppressWarnings("unchecked")
@@ -564,7 +564,7 @@ public class AdminController {
      */
     @PutMapping("/activities/{id}")
     public R<?> updateActivity(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        GsActivity a = buildActivityFromBody(body);
+        OpsActivity a = buildActivityFromBody(body);
         @SuppressWarnings("unchecked")
         List<Long> productIds = body.get("productIds") != null
                 ? ((List<Integer>) body.get("productIds")).stream()
@@ -617,8 +617,8 @@ public class AdminController {
 
     // ── Activity helper ──
 
-    private GsActivity buildActivityFromBody(Map<String, Object> body) {
-        GsActivity a = new GsActivity();
+    private OpsActivity buildActivityFromBody(Map<String, Object> body) {
+        OpsActivity a = new OpsActivity();
         a.setTitle((String) body.get("title"));
         a.setCategory((String) body.get("category"));
         a.setType((String) body.getOrDefault("type", "activity"));

@@ -23,7 +23,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ActivityReminderService {
 
-    private final GsActivityMapper activityMapper;
+    private final OpsActivityMapper activityMapper;
     private final OpsActivityBookingMapper bookingMapper;
     private final OpsRemindLogMapper remindLogMapper;
 
@@ -38,13 +38,13 @@ public class ActivityReminderService {
             if (hours.length == 0) return;
 
             // 查找所有状态为"进行中"(status=1)且有开始时间的活动
-            List<GsActivity> activities = activityMapper.selectList(
-                    new LambdaQueryWrapper<GsActivity>()
-                            .eq(GsActivity::getStatus, 1)
-                            .isNotNull(GsActivity::getStartTime));
+            List<OpsActivity> activities = activityMapper.selectList(
+                    new LambdaQueryWrapper<OpsActivity>()
+                            .eq(OpsActivity::getStatus, 1)
+                            .isNotNull(OpsActivity::getStartTime));
 
             LocalDateTime now = LocalDateTime.now();
-            for (GsActivity activity : activities) {
+            for (OpsActivity activity : activities) {
                 if (activity.getStartTime() == null) continue;
                 long hoursUntilStart = java.time.Duration.between(now, activity.getStartTime()).toHours();
 
@@ -61,7 +61,7 @@ public class ActivityReminderService {
         }
     }
 
-    private void sendReminders(GsActivity activity, String remindType) {
+    private void sendReminders(OpsActivity activity, String remindType) {
         List<OpsActivityBooking> bookings = bookingMapper.selectList(
                 new LambdaQueryWrapper<OpsActivityBooking>()
                         .eq(OpsActivityBooking::getActivityId, activity.getId())
