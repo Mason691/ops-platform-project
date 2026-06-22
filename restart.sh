@@ -112,7 +112,7 @@ start_frontend() {
     log "启动前端 dev server (端口 3035)..."
     cd "$PROJECT_DIR/frontend"
     [ -d node_modules ] || npm install --silent
-    nohup npm run dev > "$FRONTEND_LOG" 2>&1 &
+    nohup npm run dev:h5 > "$FRONTEND_LOG" 2>&1 &
     echo $! > /tmp/ops-frontend.pid
     log "前端 PID: $(cat /tmp/ops-frontend.pid)，日志: $FRONTEND_LOG"
 
