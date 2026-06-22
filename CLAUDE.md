@@ -108,16 +108,25 @@ ops-platform-project/
 │   ├── src/main/java/com/aip/ops/
 │   │   ├── OpsApplication.java
 │   │   ├── config/          # SecurityConfig, AuthConfig, JacksonConfig, RestTemplateConfig
-│   │   ├── controller/      # 6 controllers
+│   │   ├── controller/      # 8 controllers
 │   │   │   ├── PlatformController.java      # 核心：商品/活动/订单/积分/优惠券/直播室
 │   │   │   ├── AdminController.java         # 管理后台：活动/商品 CRUD、预约查询、首页统计
 │   │   │   ├── AuthController.java          # 登录/注册
 │   │   │   ├── PublicAccountController.java  # 公众号配置查询
 │   │   │   ├── FileUploadController.java    # /api/ops/files/upload — 图片/视频上传
-│   │   │   └── AiChatProxyController.java  # AI 客服代理
-│   │   ├── entity/          # 17 entities
+│   │   │   ├── AiChatProxyController.java  # AI 客服代理
+│   │   │   ├── HomeController.java          # 公开首页数据（banner/视频/推荐）
+│   │   │   └── HomeConfigController.java    # 首页配置 CRUD + 批量排序
+│   │   ├── entity/          # 18 entities（全部继承 SDK BaseEntity）
 │   │   ├── mapper/          # 18 MyBatis-Plus mappers
-│   │   └── service/         # 5 service interfaces + 4 impls（含 ActivityReminderService）
+│   │   ├── service/         # 6 service interfaces + 5 impls
+│   │   ├── client/          # 子系统间 HTTP 客户端
+│   │   │   ├── MemberSyncClient.java        # 会员同步到底座平台
+│   │   │   └── ProductBatchClient.java      # mall-service 批量商品查询
+│   │   ├── agent/           # AI DomainAgent
+│   │   │   └── OpsAgent.java                # @AgentComponent，路由 AI 助手业务问答
+│   │   └── tool/            # MCP 工具
+│   │       └── OpsOrderQueryTool.java       # @McpTool，按条件查询订单
 │   └── pom.xml
 ├── frontend/
 │   ├── src/pages/           # page modules（含 admin/activity-form 活动编辑器）
@@ -149,6 +158,7 @@ ops-platform-project/
 | `/api/ops/address/**` | JWT | 收货地址 CRUD |
 | `/api/ops/points/**` | JWT | 积分流水 |
 | `/api/ops/coupon/**` | JWT | 优惠券 |
+| `/api/ops/home-data` | 无需 | 首页公开数据（banner/视频/推荐），支持 `?corpId=` |
 
 **SDK 透传路径**（无需 JWT，由底座内部 Token 保护）：`/actuator/**`, `/api/public-account/**`, `/api/ops/auth/**`, `/api/ops/product/**`, `/api/ops/activity/**`
 
@@ -214,6 +224,29 @@ DB (相对路径) → Backend ImageUrlUtil → API JSON (相对路径)
 - 预扣机制（ADR-002）：兑换时预扣积分，支付成功回调确认，失败/超时退还
 - 积分流水表 `GsPointsLog`
 
+### 底座架构合规（ADR-005，2026-06-22）
+
+> 详细合规清单见 `MEMORY.md` 第四节。以下记录已落地的关键模式。
+
+**实体继承 BaseEntity**：所有 entity 继承 `com.aip.sdk.entity.BaseEntity`（统一审计字段 `createTime`/`modifyTime`/`createUser`/`modifyUser`/`deleteFlag` 等）。
+- 必须加 `@EqualsAndHashCode(callSuper = true)`
+- 不要手动声明 `createTime`/`modifyTime`/`updateTime` 字段
+- `corpId` 字段已添加到所有业务表（迁移脚本：`sql/ops_baseentity_migration.sql`）
+
+**认证（平台 SSO）**：`UserServiceImpl` 不再自签 JWT。改为通过 `PlatformInternalClient` 调用 `POST /api/auth/sso/token`，
+传入 `identifierType=PHONE`、`identifier`、`nickname`、`avatar`、`subsystem="ops-platform"`、`corpId`。
+- `MemberSyncClient`：注册/登录时同步会员到底座平台（`POST /api/internal/member/register-or-get`），非致命操作
+- `jwtSecret` 配置和 `nimbus-jose-jwt` 依赖已移除
+
+**MCP + Agent 集成**：
+- `tool/OpsOrderQueryTool.java`：`@McpTool`，工具名 `ops_query_order`，按订单号/状态查询，多租户安全过滤
+- `agent/OpsAgent.java`：`@AgentComponent`，名称 `"OPS"`，处理业务综合问答（订单/商品统计）
+
+**子系统间通信**（替代跨库 JOIN）：
+- `client/ProductBatchClient.java`：调用 mall-service `POST /api/internal/product/batch-query`（配置 `mall-service.base-url`），替代 `GsProductMapper` 的 7 处跨库 JOIN
+- `service/PlatformMerchantService.java`：通过 `PlatformInternalClient` 查询组织信息，替代 `MerchantMapper` 跨库查 `ai_platform.sys_corp`
+- 认证方式：`X-Internal-Token` 请求头（平台共享密钥）
+
 ---
 
 ## 前端环境变量（.env）
@@ -251,7 +284,9 @@ CSS `url()` 把根相对路径（如 `/uploads/ops/img/xxx.jpg`）解析到页�
 | **活动封面** | `ops_activity` 同时有 `cover_image` 和 `cover_url` 两个字段，部分老数据 `cover_url` 可能为 NULL，后端 `PlatformController` 已做回退处理 |
 | **Nginx 缓存** | `/subsystem/ops/assets/` 30 天 immutable 缓存，部署后如果文件没变（相同 hash）则不更新；`index.html` 有 `no-cache` 头 |
 | **首页配置 corpId** | `/api/ops/home-data` 是公开接口（无 JWT），必须传 `?corpId=` 参数；否则回退 corpId=3，看不到 corp_id=4 的数据 |
+| **mall-service 连通性** | `ProductBatchClient` 依赖 mall-service（`mall-service.base-url`，默认 localhost:8083）；mall-service 不可用时批量商品查询失败 |
+| **BaseEntity 字段命名** | SDK `BaseEntity` 使用 `modifyTime`（不是 `updateTime`）；手动设置审计字段时注意命名一致 |
 
 ---
 
-最后更新：2026-06-21 | 负责人：架构师
+最后更新：2026-06-22 | 负责人：架构师

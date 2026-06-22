@@ -7,16 +7,13 @@ import com.aip.ops.dto.WechatLoginRequest;
 import com.aip.ops.entity.OpsMember;
 import com.aip.ops.mapper.OpsMemberMapper;
 import com.aip.ops.service.IUserService;
+import com.aip.sdk.client.PlatformInternalClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.nimbusds.jose.*;
-import com.nimbusds.jose.crypto.MACSigner;
-import com.nimbusds.jwt.JWTClaimsSet;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -27,8 +24,8 @@ public class UserServiceImpl implements IUserService {
     private final OpsMemberMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final MemberSyncClient memberSyncClient;
+    private final PlatformInternalClient platformInternalClient;
 
-    private final String jwtSecret;
     private final long jwtExpiration;
 
     private static final java.util.regex.Pattern PHONE_PATTERN =
@@ -38,12 +35,12 @@ public class UserServiceImpl implements IUserService {
             OpsMemberMapper userMapper,
             PasswordEncoder passwordEncoder,
             MemberSyncClient memberSyncClient,
-            @Value("${platform.jwt-secret}") String jwtSecret,
+            PlatformInternalClient platformInternalClient,
             @Value("${platform.jwt-expiration:43200}") long jwtExpiration) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.memberSyncClient = memberSyncClient;
-        this.jwtSecret = jwtSecret;
+        this.platformInternalClient = platformInternalClient;
         this.jwtExpiration = jwtExpiration;
     }
 
@@ -139,7 +136,7 @@ public class UserServiceImpl implements IUserService {
         user.setLastLoginTime(LocalDateTime.now());
         userMapper.updateById(user);
 
-        String token = generateJwt(user);
+        String token = getSsoToken(user);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("userId", user.getId());
@@ -199,7 +196,7 @@ public class UserServiceImpl implements IUserService {
         user.setLastLoginTime(LocalDateTime.now());
         if (!isNew) userMapper.updateById(user);
 
-        String token = generateJwt(user);
+        String token = getSsoToken(user);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("userId", user.getId());
@@ -264,27 +261,34 @@ public class UserServiceImpl implements IUserService {
         }
     }
 
-    private String generateJwt(OpsMember user) {
+    /**
+     * 调用底座平台 SSO 获取全局 JWT（替代子系统自签 JWT）。
+     * SSO 端点通过 identifierType + identifier 查找或创建会员后签发 JWT。
+     */
+    @SuppressWarnings("unchecked")
+    private String getSsoToken(OpsMember user) {
         try {
-            JWTClaimsSet claims = new JWTClaimsSet.Builder()
-                    .subject(String.valueOf(user.getId()))
-                    .claim("corp_id", user.getCorpId())
-                    .claim("username", user.getPhone())
-                    .claim("is_admin", false)
-                    .claim("permissions", Collections.emptyList())
-                    .issuer("ops-platform")
-                    .issueTime(new Date())
-                    .expirationTime(new Date(System.currentTimeMillis() + jwtExpiration * 1000))
-                    .build();
+            Map<String, Object> ssoReq = new LinkedHashMap<>();
+            ssoReq.put("identifierType", "PHONE");
+            ssoReq.put("identifier", user.getPhone());
+            ssoReq.put("nickname", user.getNickname());
+            ssoReq.put("avatar", user.getAvatar());
+            ssoReq.put("subsystem", "ops-platform");
+            ssoReq.put("corpId", user.getCorpId());
 
-            JWSSigner signer = new MACSigner(jwtSecret.getBytes(StandardCharsets.UTF_8));
-            JWSObject jws = new JWSObject(
-                    new JWSHeader.Builder(JWSAlgorithm.HS256).type(JOSEObjectType.JWT).build(),
-                    new Payload(claims.toJSONObject()));
-            jws.sign(signer);
-            return jws.serialize();
+            Map<String, Object> ssoResp = platformInternalClient.post(
+                    "/api/auth/sso/token", ssoReq, null);
+
+            Map<String, Object> data = (Map<String, Object>) ssoResp.get("data");
+            if (data != null && data.get("token") != null) {
+                return data.get("token").toString();
+            }
+            throw new RuntimeException("SSO 令牌响应缺少 token 字段");
+        } catch (RuntimeException e) {
+            throw e; // re-throw our own errors
         } catch (Exception e) {
-            throw new RuntimeException("JWT生成失败", e);
+            log.error("获取 SSO 令牌失败: phone={}, error={}", user.getPhone(), e.getMessage());
+            throw new RuntimeException("认证服务异常，请稍后重试", e);
         }
     }
 }

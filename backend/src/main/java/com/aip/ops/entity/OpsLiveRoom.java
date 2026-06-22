@@ -1,7 +1,9 @@
 package com.aip.ops.entity;
 
+import com.aip.sdk.entity.BaseEntity;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import java.time.LocalDateTime;
 
 /**
@@ -9,10 +11,15 @@ import java.time.LocalDateTime;
  * 运营商可配置自己的视频号直播间，公众号H5端展示并支持跳转。
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ops_live_room")
-public class OpsLiveRoom {
+public class OpsLiveRoom extends BaseEntity {
+    /** createTime / modifyTime 由 BaseEntity 继承 */
     @TableId(type = IdType.AUTO)
     private Long id;
+
+    @TableField("corp_id")
+    private Long corpId;
 
     /** 运营商组织ID */
     @TableField("merchant_id")
@@ -49,10 +56,4 @@ public class OpsLiveRoom {
     /** 备注 */
     @TableField("remark")
     private String remark;
-
-    @TableField("create_time")
-    private LocalDateTime createTime;
-
-    @TableField("update_time")
-    private LocalDateTime updateTime;
 }

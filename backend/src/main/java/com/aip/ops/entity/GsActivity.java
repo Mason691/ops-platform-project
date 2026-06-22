@@ -1,10 +1,14 @@
 package com.aip.ops.entity;
+import com.aip.sdk.entity.BaseEntity;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import java.time.LocalDateTime;
 
-@Data @TableName("ops_activity")
-public class GsActivity {
+@Data
+@EqualsAndHashCode(callSuper = true)
+@TableName("ops_activity")
+public class GsActivity extends BaseEntity {
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;
     @TableField("title") private String title;

@@ -1,12 +1,17 @@
 package com.aip.ops.entity;
 
+import com.aip.sdk.entity.BaseEntity;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-@Data @TableName("ops_order")
-public class GsOrder {
+@Data
+@EqualsAndHashCode(callSuper = true)
+@TableName("ops_order")
+public class GsOrder extends BaseEntity {
+    /** createTime / modifyTime 由 BaseEntity 继承 */
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;
     @TableField("user_id") private Long userId;
@@ -21,6 +26,4 @@ public class GsOrder {
     @TableField("status") private String status;
     @TableField("third_party_order_no") private String thirdPartyOrderNo;
     @TableField("expire_time") private LocalDateTime expireTime;
-    @TableField("create_time") private LocalDateTime createTime;
-    @TableField("modify_time") private LocalDateTime modifyTime;
 }

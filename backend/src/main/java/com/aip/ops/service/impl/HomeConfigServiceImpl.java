@@ -73,7 +73,7 @@ public class HomeConfigServiceImpl implements HomeConfigService {
         // 确保 ID 由数据库自增
         config.setId(null);
         config.setCreateTime(null);
-        config.setUpdateTime(null);
+        config.setModifyTime(null);
         if (config.getSort() == null) config.setSort(0);
         if (config.getStatus() == null) config.setStatus(1);
         homeConfigMapper.insert(config);
@@ -87,7 +87,7 @@ public class HomeConfigServiceImpl implements HomeConfigService {
         config.setId(id);
         config.setOperatorId(null);  // 不允许修改归属运营商
         config.setCreateTime(null);
-        config.setUpdateTime(null);
+        config.setModifyTime(null);
         homeConfigMapper.updateById(config);
         log.info("首页配置已更新: id={}", id);
     }

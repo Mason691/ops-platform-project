@@ -1,11 +1,15 @@
 package com.aip.ops.entity;
 
+import com.aip.sdk.entity.BaseEntity;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
-import java.time.LocalDateTime;
+import lombok.EqualsAndHashCode;
 
-@Data @TableName("ops_coupon")
-public class GsCoupon {
+@Data
+@EqualsAndHashCode(callSuper = true)
+@TableName("ops_coupon")
+public class GsCoupon extends BaseEntity {
+    /** createTime / modifyTime 由 BaseEntity 继承 */
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;
     @TableField("name") private String name;
@@ -16,5 +20,4 @@ public class GsCoupon {
     @TableField("remain_qty") private Integer remainQty;
     @TableField("expire_days") private Integer expireDays;
     @TableField("status") private Integer status;
-    @TableField("create_time") private LocalDateTime createTime;
 }

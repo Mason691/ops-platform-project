@@ -50,6 +50,10 @@ platform:
     - /api/ops/product/**
     - /api/ops/activity/**
 
+# mall-service 地址（用于跨子系统调用 InternalProductController）
+mall-service:
+  base-url: http://localhost:8083
+
 # 活动预约提醒配置
 ops:
   remind:
