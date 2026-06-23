@@ -2,8 +2,9 @@ import { defineConfig } from 'vite'
 import uni from '@dcloudio/vite-plugin-uni'
 
 export default defineConfig(({ mode }) => ({
-  // dev 模式用 /，生产构建用 /subsystem/ops/（与 qiankun 激活路由一致）
-  base: mode === 'production' ? '/subsystem/ops/' : '/',
+  // VITE_BASE env var allows overriding at build time (e.g. /aa/ops/ for Docker).
+  // Falls back to /subsystem/ops/ for production and / for local dev.
+  base: process.env.VITE_BASE || (mode === 'production' ? '/subsystem/ops/' : '/'),
   plugins: [uni()],
   server: {
     host: '0.0.0.0',
