@@ -108,7 +108,7 @@ ops-platform-project/
 │   ├── src/main/java/com/aip/ops/
 │   │   ├── OpsApplication.java
 │   │   ├── config/          # SecurityConfig, AuthConfig, JacksonConfig, RestTemplateConfig
-│   │   ├── controller/      # 8 controllers
+│   │   ├── controller/      # 9 controllers
 │   │   │   ├── PlatformController.java      # 核心：商品/活动/订单/积分/优惠券/直播室
 │   │   │   ├── AdminController.java         # 管理后台：活动/商品 CRUD、预约查询、首页统计
 │   │   │   ├── AuthController.java          # 登录/注册
@@ -116,7 +116,8 @@ ops-platform-project/
 │   │   │   ├── FileUploadController.java    # /api/ops/files/upload — 图片/视频上传
 │   │   │   ├── AiChatProxyController.java  # AI 客服代理
 │   │   │   ├── HomeController.java          # 公开首页数据（banner/视频/推荐）
-│   │   │   └── HomeConfigController.java    # 首页配置 CRUD + 批量排序
+│   │   │   ├── HomeConfigController.java    # 首页配置 CRUD + 批量排序
+│   │   │   └── PartnerController.java       # 城市合伙人管理（代理底座 internal API）
 │   │   ├── entity/          # 18 entities（全部继承 SDK BaseEntity）
 │   │   ├── mapper/          # 18 MyBatis-Plus mappers
 │   │   ├── service/         # 6 service interfaces + 5 impls
@@ -159,6 +160,7 @@ ops-platform-project/
 | `/api/ops/points/**` | JWT | 积分流水 |
 | `/api/ops/coupon/**` | JWT | 优惠券 |
 | `/api/ops/home-data` | 无需 | 首页公开数据（banner/视频/推荐），支持 `?corpId=` |
+| `/api/ops/admin/partners/**` | JWT | 城市合伙人 CRUD（运营商管理员管理下级合伙组织，代理底座 internal API） |
 
 **SDK 透传路径**（无需 JWT，由底座内部 Token 保护）：`/actuator/**`, `/api/public-account/**`, `/api/ops/auth/**`, `/api/ops/product/**`, `/api/ops/activity/**`
 
@@ -222,7 +224,7 @@ DB (相对路径) → Backend ImageUrlUtil → API JSON (相对路径)
 
 ### 积分体系
 - 预扣机制（ADR-002）：兑换时预扣积分，支付成功回调确认，失败/超时退还
-- 积分流水表 `GsPointsLog`
+- 积分流水表 `OpsPointsLog`
 
 ### 底座架构合规（ADR-005，2026-06-22）
 
@@ -248,6 +250,19 @@ DB (相对路径) → Backend ImageUrlUtil → API JSON (相对路径)
 - 认证方式：`X-Internal-Token` 请求头（平台共享密钥）
 
 ---
+
+## 关键后端配置（application.yml）
+
+| 配置键 | 说明 | 默认值 |
+|---|---|---|
+| `platform.base-url` | 底座平台地址 | `http://104.238.165.57:8080` |
+| `platform.subsystem-code` | 子系统标识 | `ops-platform` |
+| `platform.internal-token` | 子系统间调用认证 Token（X-Internal-Token 头） | `aip-internal-svc-token-2026` |
+| `platform.jwt-secret` | 底座 JWT 签名密钥（验证用，不自签） | 32+ 字节 |
+| `mall-service.base-url` | mall 子系统地址（ProductBatchClient 用） | `http://localhost:8083` |
+| `app.upload.base-dir` | 文件上传根目录（绝对路径） | `/home/jason/ops-platform-project/uploads` |
+| `app.resource.base-url` | 静态资源对外域名（拼接图片 URL） | `https://a.15891589.xyz` |
+| `ops.remind.hours-before` | 活动预约提醒提前小时数 | `24,1` |
 
 ## 前端环境变量（.env）
 
@@ -286,7 +301,9 @@ CSS `url()` 把根相对路径（如 `/uploads/ops/img/xxx.jpg`）解析到页�
 | **首页配置 corpId** | `/api/ops/home-data` 是公开接口（无 JWT），必须传 `?corpId=` 参数；否则回退 corpId=3，看不到 corp_id=4 的数据 |
 | **mall-service 连通性** | `ProductBatchClient` 依赖 mall-service（`mall-service.base-url`，默认 localhost:8083）；mall-service 不可用时批量商品查询失败 |
 | **BaseEntity 字段命名** | SDK `BaseEntity` 使用 `modifyTime`（不是 `updateTime`）；手动设置审计字段时注意命名一致 |
+| **无自动化测试** | 项目当前无单元测试或集成测试；所有验证依赖手动检查和生产监控 |
+| **MEMORY.md 过期** | MEMORY.md 第四节合规表为旧状态（改前快照），当前合规状态以本文件为准 |
 
 ---
 
-最后更新：2026-06-22 | 负责人：架构师
+最后更新：2026-06-23 | 负责人：架构师
