@@ -12,6 +12,7 @@
       <view class="menu-item" @click="goPage('/pages/coupon/list')"><text>🎫 我的优惠券</text><text class="arrow">›</text></view>
       <view class="menu-item" @click="goPage('/pages/booking/list')"><text>📅 我的预约</text><text class="arrow">›</text></view>
       <view class="menu-item" @click="goPage('/pages/address/list')"><text>📍 收货地址</text><text class="arrow">›</text></view>
+      <view class="menu-item" @click="goStation" v-if="isLogin"><text>{{ stationMenuText }}</text><text class="arrow">›</text></view>
       <view class="menu-item" @click="goPage('/pages/admin/activity-form')" v-if="isLogin"><text>✏️ 活动管理</text><text class="arrow">›</text></view>
       <view class="menu-item" @click="goPage('/pages/admin/home-config')" v-if="isLogin"><text>🏠 首页配置</text><text class="arrow">›</text></view>
     </view>
@@ -20,7 +21,7 @@
 </template>
 <script setup>
 import {ref,computed,onMounted} from 'vue';import {api} from '@/api/index';import {onShow} from '@dcloudio/uni-app'
-const isLogin=ref(false),user=ref({}),avatarKey=ref(0)
+const isLogin=ref(false),user=ref({}),avatarKey=ref(0),stationLabel=ref('成为站长'),stationIsMaster=ref(false)
 const avatarUrl=computed(()=>{
   const ua=user.value.avatar
   if(!ua) return '/static/gas-avatar.png'
@@ -29,9 +30,21 @@ const avatarUrl=computed(()=>{
 async function loadUser(){
   const token = uni.getStorageSync('ops_token')
   if (!token) { isLogin.value = false; return }
-  try { user.value = await api.getMe(); isLogin.value = true }
+  try { user.value = await api.getMe(); isLogin.value = true; checkStation() }
   catch { isLogin.value = false; uni.removeStorageSync('ops_token') }
 }
+async function checkStation(){
+  try{
+    const info = await api.stationInfo()
+    if (info) { stationIsMaster.value = true; stationLabel.value = '🏠 站长中心' }
+    else {
+      const s = await api.stationApplyStatus()
+      if (s) { stationLabel.value = s.status === '待审批' ? '⏳ 站长申请审核中' : '🏠 站长中心' }
+      else { stationLabel.value = '🎯 成为站长' }
+    }
+  } catch { stationLabel.value = '🎯 成为站长' }
+}
+const stationMenuText = computed(() => stationLabel.value)
 onMounted(loadUser);onShow(loadUser)
 
 async function changeAvatar(){
@@ -88,6 +101,11 @@ async function changeAvatar(){
 
 function goLogin(){uni.navigateTo({url:'/pages/auth/login'})}
 function goPage(url){if(!isLogin.value){goLogin();return};uni.navigateTo({url})}
+function goStation(){
+  if (!isLogin.value) { goLogin(); return }
+  if (stationIsMaster.value) { uni.navigateTo({ url: '/pages/station/center' }) }
+  else { uni.navigateTo({ url: '/pages/station/apply' }) }
+}
 function doLogout(){uni.clearStorageSync();isLogin.value=false;uni.showToast({title:'已退出',icon:'none'})}
 </script>
 <style scoped>

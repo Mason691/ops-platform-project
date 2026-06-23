@@ -68,6 +68,12 @@ export const api = {
   // AI 助手
   aiChat: (data) => request({url:'/api/ops/ai/chat',method:'POST',data}),
   aiConfig: () => request({url:'/api/ops/ai/config'}),
+
+  // 站长
+  stationApply: (data) => request({url:'/api/ops/station/apply',method:'POST',data}),
+  stationApplyStatus: () => request({url:'/api/ops/station/apply/status'}),
+  stationInfo: () => request({url:'/api/ops/station/info'}),
+
   aiVoiceRecognize: (blob) => {
     // Upload audio blob as multipart/form-data via XMLHttpRequest
     // (uni.uploadFile requires filePath, not blob; XHR works in H5)
