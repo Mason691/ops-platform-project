@@ -20,7 +20,7 @@ import java.util.Set;
 @Component
 public class ImageUrlUtil {
 
-    @Value("${app.resource.base-url:https://a.15891589.xyz}")
+    @Value("${app.resource.base-url:https://test.jdzn99.com}")
     private String resourceBaseUrl;
 
     /** 已知占位图/测试图片域名，匹配到的 URL 返回 null 避免前端加载失败 */
@@ -32,7 +32,7 @@ public class ImageUrlUtil {
      * 将商品封面图 URL 转换为可通过 Nginx /uploads/ops/mall/ 直接访问的相对路径。
      *
      * 输入示例：
-     *   https://a.15891589.xyz/uploads/068eac5be25d4a979a2a4eb45fb1dd4f.jpg
+     *   https://test.jdzn99.com/uploads/068eac5be25d4a979a2a4eb45fb1dd4f.jpg
      *   /uploads/ops/mall/068eac5be25d4a979a2a4eb45fb1dd4f.jpg
      *
      * 输出：/uploads/ops/mall/{filename}
@@ -71,7 +71,7 @@ public class ImageUrlUtil {
                 if (str.contains(domain)) return null;
             }
             // 本站 URL → 提取路径部分，转相对路径
-            if (str.contains("a.15891589.xyz") || str.contains("localhost")) {
+            if (str.contains("test.jdzn99.com") || str.contains("a.15891589.xyz") || str.contains("localhost")) {
                 int schemeEnd = str.indexOf("://");
                 int pathStart = str.indexOf('/', schemeEnd + 3);
                 if (pathStart > 0) {

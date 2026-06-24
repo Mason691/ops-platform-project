@@ -184,7 +184,7 @@ const videoSrc = computed(() => {
   // Resolve to absolute HTTPS URL — iOS WebKit <video> requires absolute URLs
   url = assetUrl(url)
   if (url && !/^https?:\/\//.test(url)) {
-    const origin = typeof location !== 'undefined' ? location.origin : 'https://a.15891589.xyz'
+    const origin = typeof location !== 'undefined' ? location.origin : 'https://test.jdzn99.com'
     url = origin + url
   }
   return url

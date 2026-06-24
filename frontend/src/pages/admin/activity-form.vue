@@ -330,7 +330,7 @@ async function handleCropperConfirm() {
         // H5: uniapp <image> renders as CSS background-image,
         // CSS url() resolves root-relative paths to page base (/subsystem/ops/).
         // Must prepend full HTTPS domain for correct display.
-        const fullUrl = url.startsWith('/') ? 'https://a.15891589.xyz' + url : url
+        const fullUrl = url.startsWith('/') ? 'https://test.jdzn99.com' + url : url
         form.coverImage = url; form.coverUrl = url; coverUrl.value = fullUrl
         uni.hideLoading(); uni.showToast({ title: '上传成功', icon: 'success' })
       } catch { uni.hideLoading(); uni.showToast({ title: '上传失败', icon: 'none' }) }
@@ -537,7 +537,7 @@ async function ensureLogin() {
   try {
     const res = await new Promise((resolve, reject) => {
       uni.request({
-        url: 'https://a.15891589.xyz/api/ops/auth/login',
+        url: 'https://test.jdzn99.com/api/ops/auth/login',
         method: 'POST',
         data: { phone: '13900000001', password: 'admin123' },
         header: { 'Content-Type': 'application/json' },
@@ -584,7 +584,7 @@ onMounted(async () => {
       let di = a.detailImages
       if (typeof di === 'string') { try { di = JSON.parse(di) } catch { di = [] } }
       form.detailImages = Array.isArray(di) ? di : []
-      coverUrl.value = form.coverUrl ? (form.coverUrl.startsWith('/') ? 'https://a.15891589.xyz' + form.coverUrl : form.coverUrl) : ''
+      coverUrl.value = form.coverUrl ? (form.coverUrl.startsWith('/') ? 'https://test.jdzn99.com' + form.coverUrl : form.coverUrl) : ''
     } catch (e) {
       console.error('[activity-form] load failed:', e)
       uni.showToast({ title: '加载活动失败', icon: 'none' })

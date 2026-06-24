@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => ({
     host: '0.0.0.0',
     port: 3035,
     // Vite 5.4+ 安全校验：允许外部域名访问 dev server
-    allowedHosts: ['a.15891589.xyz', 'localhost', '127.0.0.1'],
+    allowedHosts: ['test.jdzn99.com', 'a.15891589.xyz', 'localhost', '127.0.0.1'],
     cors: true,
     headers: { 'Access-Control-Allow-Origin': '*' },
     proxy: {

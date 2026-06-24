@@ -2,7 +2,7 @@
  * 图片 URL 工具 — 统一处理 H5 / 小程序两种模式下的资源路径。
  *
  * - H5 模式：BASE_URL = ''，走根相对路径 `/uploads/...`，由 Nginx 反代
- * - 小程序模式：BASE_URL = 'https://a.15891589.xyz'，拼接完整 HTTPS URL
+ * - 小程序模式：BASE_URL = 'https://test.jdzn99.com'，拼接完整 HTTPS URL
  */
 
 import { BASE_URL } from '@/config'

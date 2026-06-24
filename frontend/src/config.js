@@ -8,9 +8,9 @@
  * 将 CSS url() 中的根相对路径解析到页面 base（/subsystem/ops/），导致图片
  * 请求为 /subsystem/ops/uploads/... 而非 /uploads/...。
  *
- * 通过 .env 中的 VITE_OPS_ENTRY 控制：dev = http://localhost:3035, prod = https://a.15891589.xyz
+ * 通过 .env 中的 VITE_OPS_ENTRY 控制：dev = http://localhost:3035, prod = https://test.jdzn99.com
  */
-const OPS_ENTRY = import.meta.env.VITE_OPS_ENTRY || 'https://a.15891589.xyz'
+const OPS_ENTRY = import.meta.env.VITE_OPS_ENTRY || 'https://test.jdzn99.com'
 // #ifdef H5
 export const BASE_URL = OPS_ENTRY
 // #endif
