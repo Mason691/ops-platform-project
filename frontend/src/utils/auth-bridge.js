@@ -68,7 +68,7 @@ function handleNavigateMessage(payload) {
   const { path } = payload || {}
   if (!path) return
   // 提取子路径并在 uni-app 内导航
-  const basePath = '/subsystem/ops'
+  const basePath = '/aa/ops'
   const subPath = path.startsWith(basePath + '/')
     ? path.slice(basePath.length)
     : path === basePath ? '/pages/index/index' : null
