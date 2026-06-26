@@ -17,8 +17,8 @@
 
 ### 1.3 命名规范
 - Java: `com.aip.ops.*`
-- 表前缀: `gs_`
-- 前端路由: `/ops/`
+- 表前缀: `ops_`（运营平台业务表），`biz_`（跨子系统共享业务表），`sys_`（系统级配置表）
+- 前端路由: `/aa/ops/`（生产环境 hash 模式）
 
 ---
 
@@ -62,6 +62,9 @@
 ## 四、底座架构合规 (ADR-005, 2026-06-22)
 
 > 依据：`ai-native-platform/specs/subsystem-architecture-standard.md`
+> 
+> **⚠️ 以下合规状态表为 2026-06-22 改前快照，仅保留作历史记录。**
+> **当前实际状态（2026-06-25）：所有 O1~O9 已修复。详见 `CLAUDE.md`「底座架构合规」章节。**
 
 | 日期 | 决策 | 原因 |
 |------|------|------|
@@ -71,30 +74,30 @@
 | 2026-06-22 | 禁止跨库查询 `ai_platform.*` 和 `mall_db.*` 表 | 统一通过底座 API 代理 |
 | 2026-06-22 | 核心业务能力注册为 `@McpTool` 和 `@AgentComponent` | AI 助手集成 |
 
-### 合规状态
+### 合规状态（2026-06-22 快照 — 已全部修复）
 
-| 检查项 | 状态 | 说明 |
+| 检查项 | 状态 | 修复后状态 |
 |--------|------|------|
-| 实体继承 BaseEntity | ❌ 12% | 仅 OpsMember、PublicAccountConfig 合规，15 个待整改 |
-| 认证（平台 SSO） | ❌ | UserServiceImpl 自签 JWT，需改为调用 POST /api/auth/sso/token |
-| 数据访问（无跨库查询） | ❌ | MerchantMapper 跨库查 ai_platform，GsProductMapper 跨库 JOIN mall_product |
+| 实体继承 BaseEntity | ~~❌ 12%~~ | ✅ 100%（全部 18 个实体） |
+| 认证（平台 SSO） | ~~❌~~ | ✅ UserServiceImpl 通过 PlatformInternalClient 调用底座 SSO |
+| 数据访问（无跨库查询） | ~~❌~~ | ✅ ProductBatchClient + PlatformMerchantService 替代跨库 JOIN |
 | 统一响应 R<T> | ✅ | 使用 `com.aip.sdk.result.R` |
 | 统一异常 BusinessException | ✅ | 使用 SDK 的 `BusinessException`（通过 SdkGlobalExceptionHandler） |
 | SDK 依赖 | ✅ | `ai-platform-sdk:1.0.0-SNAPSHOT` |
-| Auth Filter | ✅ | 注入 `PlatformAuthenticationFilter`（但签发 JWT 时未走平台 SSO） |
-| MCP 集成 | ❌ | 无 @McpTool 或 @AgentComponent |
-| 多租户 corp_id | ❌ | 6 张表缺 corp_id 列 |
+| Auth Filter | ✅ | 注入 `PlatformAuthenticationFilter` |
+| MCP 集成 | ~~❌~~ | ✅ OpsOrderQueryTool (@McpTool) + OpsAgent (@AgentComponent) |
+| 多租户 corp_id | ~~❌~~ | ✅ 所有实体含 corpId 字段 |
 
-### 待整改清单
+### 待整改清单（2026-06-22 快照 — 已全部修复）
 
-| # | 偏离项 | 严重度 | 文件 |
-|---|--------|--------|------|
-| O1 | 15 个实体未继承 BaseEntity | 高 | entity/*.java |
-| O2 | UserServiceImpl 自签 JWT (generateJwt) | 严重 | service/impl/UserServiceImpl.java |
-| O3 | MerchantMapper 跨库查 ai_platform.sys_corp | 严重 | mapper/MerchantMapper.java |
-| O4 | GsProductMapper 跨库 JOIN mall_product (7处) | 严重 | mapper/GsProductMapper.java |
-| O5 | OpsActivityProductMapper 跨库 JOIN mall_product | 严重 | mapper/OpsActivityProductMapper.java |
-| O6 | 无 MCP 工具和 DomainAgent | 中 | 需新建 tool/ 和 agent/ 包 |
-| O7 | 6 张表缺 corp_id 列 | 高 | DB migration 待执行 |
-| O8 | JWT secret 硬编码 | 中 | application.yml |
-| O9 | 前端 auth-bridge.js 无 SSO 验证 | 中 | frontend/src/utils/auth-bridge.js |
+| # | 偏离项 | 当前状态 |
+|---|--------|------|
+| O1 | 15 个实体未继承 BaseEntity | ✅ 全部 18 个实体已继承 |
+| O2 | UserServiceImpl 自签 JWT | ✅ 已改为调用底座 SSO |
+| O3 | MerchantMapper 跨库查 ai_platform.sys_corp | ✅ MerchantMapper 已删除，PlatformMerchantService 替代 |
+| O4 | GsProductMapper 跨库 JOIN mall_product (7处) | ✅ 重构为 ProductBatchClient |
+| O5 | OpsActivityProductMapper 跨库 JOIN mall_product | ✅ SQL 仅 JOIN 本地表 |
+| O6 | 无 MCP 工具和 DomainAgent | ✅ OpsOrderQueryTool + OpsAgent 已创建 |
+| O7 | 6 张表缺 corp_id 列 | ✅ 已迁移 |
+| O8 | JWT secret 硬编码 | ✅ 不再自签 JWT（secret 仅用于验证） |
+| O9 | 前端 auth-bridge.js 无 SSO 验证 | ✅ isTrustedOrigin() 检查已实现 |

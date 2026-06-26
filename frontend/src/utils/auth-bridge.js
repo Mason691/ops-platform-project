@@ -7,7 +7,7 @@
  */
 
 // 底座平台父窗口 origin，生产环境应限制为底座域名
-const BASE_ORIGIN = 'https://test.jdzn99.com'
+const BASE_ORIGIN = 'https://boss.jdzn99.com'
 
 /**
  * 初始化底座认证桥接

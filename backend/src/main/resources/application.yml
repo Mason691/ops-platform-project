@@ -30,7 +30,7 @@ mybatis-plus:
 app:
   resource:
     # 静态资源对外域名（用于拼接完整图片 URL）
-    base-url: https://test.jdzn99.com
+    base-url: https://boss.jdzn99.com
   upload:
     # 文件上传根目录（绝对路径，确保 Nginx 可读）
     # Nginx location /uploads/ops/ → alias 指向此目录下的 ops/
