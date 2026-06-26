@@ -2,9 +2,9 @@ import { defineConfig } from 'vite'
 import uni from '@dcloudio/vite-plugin-uni'
 
 export default defineConfig(({ mode }) => ({
-  // VITE_BASE env var allows overriding at build time (e.g. /aa/ops/ for Docker).
-  // Falls back to /subsystem/ops/ for production and / for local dev.
-  base: process.env.VITE_BASE || (mode === 'production' ? '/subsystem/ops/' : '/'),
+  // VITE_BASE env var allows overriding at build time (e.g. /ops/ for Docker).
+  // Falls back to /ops/ for production and / for local dev.
+  base: process.env.VITE_BASE || (mode === 'production' ? '/ops/' : '/'),
   plugins: [uni()],
   server: {
     host: '0.0.0.0',
