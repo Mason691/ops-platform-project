@@ -169,7 +169,7 @@ ops-platform-project/
 │   │       └── OpsOrderQueryTool.java       # @McpTool，按条件查询订单
 │   └── pom.xml
 ├── frontend/
-│   ├── src/pages/           # 22 page files，10 个目录（见下方"前端页面路由"）
+│   ├── src/pages/           # 21 page files，14 个目录（见下方"前端页面路由"）
 │   ├── src/components/      # 共享组件（ImageCropperModal.vue 已被 activity-form 内联替代）
 │   ├── src/api/index.js     # 集中 API 注册（~45 个方法）
 │   ├── src/utils/           # request.js, image.js, config.js, jssdk.js, auth-bridge.js
