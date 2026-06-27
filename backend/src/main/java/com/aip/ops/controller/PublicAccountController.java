@@ -6,6 +6,7 @@ import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -176,7 +177,8 @@ public class PublicAccountController {
     // ═══ H5 公开查询 (无需 JWT) ═══
     @GetMapping("/api/public-account/config")
     public R<?> publicConfig(@RequestParam(required = false) String appId,
-                             @RequestParam(required = false) Long corpId) {
+                             @RequestParam(required = false) Long corpId,
+                             HttpServletRequest request) {
         PublicAccountConfig cfg;
         if (appId != null && !appId.isEmpty()) {
             cfg = configService.getByAppId(appId, corpId);
@@ -186,10 +188,14 @@ public class PublicAccountController {
                     .eq(PublicAccountConfig::getIsDefault, 1)
                     .eq(PublicAccountConfig::getStatus, 1).last("LIMIT 1"));
         }
+        // Derive domain from request Host header; fall back to DB field then default
+        String host = request.getHeader("Host");
+        String jsDomain = (host != null && !host.isBlank()) ? host
+                : (cfg != null && cfg.getJsDomain() != null) ? cfg.getJsDomain()
+                : "boss.jdzn99.com";
         Map<String,Object> r = new LinkedHashMap<>();
         r.put("appId", cfg != null ? cfg.getAppId() : "wx095b91409f8ecbfe");
-        r.put("jsDomain", cfg != null && cfg.getJsDomain() != null
-                ? cfg.getJsDomain() : "boss.jdzn99.com");
+        r.put("jsDomain", jsDomain);
         r.put("name", cfg != null && cfg.getName() != null ? cfg.getName() : "运营平台");
         r.put("debug", cfg == null);
         return R.ok(r);
