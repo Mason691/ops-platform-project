@@ -25,10 +25,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 前端 | uni-app（编译目标 H5 + mp-weixin） |
 | 底座 SDK | `com.aip:ai-platform-sdk:1.0.0-SNAPSHOT`（JDK 17，本地仓库 `/home/jason/m2_local`） |
 
-**环境参数**：
-- 远程服务器：`104.238.165.57`（jason / aB740602）
-- 后端端口：8084
-- 对外地址：`https://boss.jdzn99.com`
+**服务器**：
+
+| 环境 | IP | 用户/密码 | 域名 | 部署方式 |
+|------|-----|---------|------|---------|
+| 测试 | `104.238.165.57` | jason / aB740602 | `a.15891589.xyz` | Docker + host nginx |
+| 生产 | `113.250.60.41` | root / `j_ly[4=2Gh1?9]` | `boss.jdzn99.com` | Docker compose（`/data2/boss-platform/`） |
+
+- 后端端口：8084（测试）/ 8082（生产 Docker，`network_mode: host`）
 - 数据库：`mall_db @ 104.238.165.57`（root / aB740602，Docker 容器中）
 - Maven 本地仓库：`/home/jason/m2_local`
 
@@ -60,33 +64,59 @@ cd frontend && npm run build:mp-weixin  # 输出 dist/build/mp-weixin/
 
 ## 部署
 
-**原则**：始终本地构建，SCP 上传到远程。服务器内存不足，不要远程编译。
+### 本地 → 生产（Docker 模式）
+
+生产服务器 `113.250.60.41` 上通过 Docker compose 运行，部署目录 `/data2/boss-platform/`。
+
+**原则**：始终本地构建，上传到远程。不要在生产服务器上编译（节省资源）。
+
+```bash
+# 1. 后端构建 + 部署
+cd backend && JAVA_HOME=/home/jason/jdk17/jdk-17.0.9+9 mvn clean package -DskipTests -o
+
+# 上传 JAR 并重建容器（通过 Python paramiko 脚本，见 deploy-to-prod 模式）
+# JAR → /data2/boss-platform/ops-backend/app.jar
+# 然后: docker build -t boss-platform/ops:latest ./ops-backend/
+#       docker compose up -d ops-backend
+
+# 2. 前端构建 + 部署
+cd frontend && npm run build:h5   # 输出 dist/build/h5/（含 jweixin-1.6.0.js + static/ 图标）
+# 上传到 /data2/boss-platform/html/ops/
+```
+
+**生产 Docker 关键参数**（来自 `docker-compose.yml`）：
+- ops-backend: `SERVER_PORT=8082`, `network_mode: host`
+- Volume: `/data2/boss-platform/uploads:/app/uploads`
+- `PLATFORM_BASE_URL=http://localhost:8080`（通过 host 网络直接访问 platform-backend）
+- `MALL_SERVICE_BASE_URL=http://localhost:8083`
+
+### 测试环境部署
 
 ```bash
 # H5 前端部署
 cd frontend && npm run build:h5
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jason@104.238.165.57 \
-  "mkdir -p /home/jason/ops-platform-project/frontend/dist/build/h5"
+  "mkdir -p /home/jason/aa-platform/html/aa/ops"
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  -r dist/build/h5/* jason@104.238.165.57:/home/jason/ops-platform-project/frontend/dist/build/h5/
+  -r dist/build/h5/* jason@104.238.165.57:/home/jason/aa-platform/html/aa/ops/
 
-# 后端部署（注意：服务器默认 JDK 8，必须用 JDK 17 绝对路径）
+# 后端（测试环境 JAR 直接运行，非 Docker）
 cd backend && JAVA_HOME=/home/jason/jdk17/jdk-17.0.9+9 mvn clean package -DskipTests -o
 scp target/ops-platform-1.0.0-SNAPSHOT.jar jason@104.238.165.57:~/ops-platform-project/backend/target/
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jason@104.238.165.57 "kill \$(lsof -ti:8084) 2>/dev/null; sleep 1; \
-  nohup /home/jason/jdk17/bin/java -jar /home/jason/ops-platform-project/backend/target/ops-platform-1.0.0-SNAPSHOT.jar > /tmp/ops.log 2>&1 &"
+ssh jason@104.238.165.57 "kill \$(lsof -ti:8084) 2>/dev/null; sleep 1; \
+  nohup /home/jason/jdk17/bin/java -jar ~/ops-platform-project/backend/target/ops-platform-1.0.0-SNAPSHOT.jar > /tmp/ops.log 2>&1 &"
 ```
 
 **生产环境路由**：
-- H5 前端 base：`/aa/ops/`（`.env.production` 中 `VITE_BASE=/aa/ops/`，`manifest.json` hash mode base `/aa/ops/`）
-- Nginx 反代：`/api/ops/**` → 后端 8084
-- 静态文件：`/uploads/ops/**` → Nginx alias 到 `/home/jason/ops-platform-project/uploads/ops/`
-- 商品图片：`/uploads/ops/mall/` → symlink 到 `/home/jason/uploads/`
-- **⚠️ 修改 Nginx 配置需要 sudo**，开发用户 jason 无 sudo 权限
+- H5 前端 base：`/ops/`（`.env.production` 中 `VITE_BASE=/ops/`，`vite.config.js` 生产默认 `/ops/`）
+- 注意：`manifest.json` H5 base 仍为 `/aa/ops/`，实际由构建时的 `VITE_BASE` 环境变量覆盖
+- Nginx（生产 `boss.conf`）：`/ops/` → `boss-ops-nginx:80`，`/api/ops/**` → `ops-backend:8082`
+- 静态文件：`/uploads/ops/**` → Docker volume 挂载 `/data2/boss-platform/uploads` → ops-backend 的 `WebMvcConfig` 从磁盘读取
+- 商品图片：`/uploads/ops/mall/` — 生产环境为真实目录（测试环境为 symlink）
 
 **验证部署**：
 ```bash
-curl -sI https://boss.jdzn99.com/aa/ops/          # 前端
+curl -sI https://boss.jdzn99.com/ops/          # 前端
 curl -s https://boss.jdzn99.com/api/ops/product/page?pageNum=1&pageSize=5  # 后端
 ```
 
@@ -96,7 +126,7 @@ curl -s https://boss.jdzn99.com/api/ops/product/page?pageNum=1&pageSize=5  # 后
 
 - Java：`com.aip.ops.*`
 - 表前缀：`ops_`（运营平台业务表），`biz_`（跨子系统共享业务表），`sys_`（系统级配置表）
-- 前端路由 base：`/aa/ops/`（生产 hash 模式）
+- 前端路由 base：`/ops/`（生产 hash 模式）
 
 ---
 
@@ -107,7 +137,7 @@ ops-platform-project/
 ├── backend/
 │   ├── src/main/java/com/aip/ops/
 │   │   ├── OpsApplication.java
-│   │   ├── config/          # SecurityConfig, AuthConfig, JacksonConfig, RestTemplateConfig
+│   │   ├── config/          # SecurityConfig, AuthConfig, JacksonConfig, RestTemplateConfig, WebMvcConfig
 │   │   ├── controller/      # 11 controllers
 │   │   │   ├── PlatformController.java      # 核心：商品/活动/订单/积分/优惠券/直播室/用户
 │   │   │   ├── AdminController.java         # 管理后台：活动/商品 CRUD、预约查询、首页统计、商家绑定
@@ -150,10 +180,10 @@ ops-platform-project/
 │   ├── src/manifest.json    # H5 hash mode base /aa/ops/
 │   ├── static/              # 静态资源（jweixin-1.6.0.js 等）
 │   ├── index.html           # 入口 HTML（含内联微信 JSSDK 初始化脚本）
-│   ├── vite.config.js       # base 由 VITE_BASE 控制 (prod: /aa/ops/), proxy /api → 8084
+│   ├── vite.config.js       # base 由 VITE_BASE 控制 (prod: /ops/), proxy /api → 8084
 │   ├── .env                 # VITE_OPS_ENTRY + VITE_CORP_ID
 │   ├── .env.development     # VITE_OPS_ENTRY=http://localhost:3035
-│   ├── .env.production      # VITE_BASE=/aa/ops/ VITE_OPS_ENTRY=https://boss.jdzn99.com
+│   ├── .env.production      # VITE_BASE=/ops/ VITE_OPS_ENTRY=https://boss.jdzn99.com
 │   └── package.json
 ├── sql/init.sql             # 18 tables + seed data
 ├── sql/                     # 14 migration SQL files
@@ -185,7 +215,7 @@ ops-platform-project/
 - **无 Vue Router**：uni-app 文件路由（`pages.json` 配置），页面间通过 `uni.navigateTo()` + URL 参数传参
 - **iframe SSO**：H5 端通过 `auth-bridge.js` 监听父窗口 `postMessage`（`AIP_AUTH` / `AIP_NAVIGATE`），接收底座平台传递的 token/corpId/userId；信任同源和 `boss.jdzn99.com`
 - **微信 JSSDK**：`index.html` 内联初始化脚本（不在 Vue 生命周期中），`static/jweixin-1.6.0.js` 构建时复制到 dist
-- **H5 hash 路由**：manifest.json 配置 `hash` 模式 + base `/aa/ops/`
+- **H5 hash 路由**：manifest.json 配置 `hash` 模式 + base `/aa/ops/`，但实际 base 由构建时 `VITE_BASE` 覆盖为 `/ops/`
 
 ---
 
@@ -312,6 +342,29 @@ DB (相对路径) → Backend ImageUrlUtil → API JSON (相对路径)
 - 所有 mapper SQL 仅 JOIN 本地表（`ops_*`, `biz_*`），不再跨库
 - 认证方式：`X-Internal-Token` 请求头（平台共享密钥）
 
+### AI 语音代理链路（ASR / TTS）
+
+H5 前端的语音输入（ASR）和语音播报（TTS）通过 ops backend 代理至底座平台：
+
+```
+H5 浏览器 (getUserMedia / wx.startRecord)
+  → POST /api/ops/ai/voice/recognize  (multipart audio blob)
+  → AiChatProxyController → RestTemplate → platform-backend /api/internal/asr/recognize
+  → InternalAsrController → resolveVoiceCallConfig(corpId, sys_org_ai_config)
+  → 3rd-party ASR API (SiliconFlow FunAudioLLM/SenseVoiceSmall)
+
+TTS 同理：
+  → POST /api/ops/ai/voice/synthesize ({ text })
+  → AiChatProxyController → platform-backend /api/internal/tts/synthesize
+  → InternalTtsController → TtsSynthesizeService → 3rd-party TTS API
+  → 返回 data:audio/mpeg;base64,... → new Audio(url).play()
+```
+
+**注意事项**：
+- ASR/TTS 配置存储在底座 `sys_org_ai_config` 表（按 `corp_id`），API Key AES 加密存储
+- 内部调用使用 `X-Internal-Token` 认证（共享密钥 `aip-internal-svc-token-2026`）
+- 转发 multipart 请求时**不要手动设置 `Content-Type`**，让 Spring 自动生成带 boundary 的 header，否则三方 ASR 返回 422
+
 ---
 
 ## 关键后端配置（application.yml）
@@ -328,7 +381,7 @@ DB (相对路径) → Backend ImageUrlUtil → API JSON (相对路径)
 | `platform.jwt-expiration` | JWT 过期时间（秒） | `43200`（12h） |
 | `platform.merchant-role-name` | 销售商角色名 | `销售商` |
 | `mall-service.base-url` | mall 子系统地址（ProductBatchClient 用） | `http://localhost:8083` |
-| `app.upload.base-dir` | 文件上传根目录（绝对路径） | `/home/jason/ops-platform-project/uploads` |
+| `app.upload.base-dir` | 文件上传根目录 | `/app/uploads`（Docker 容器内）→ 挂载宿主机 `/data2/boss-platform/uploads` |
 | `app.resource.base-url` | 静态资源对外域名（拼接图片 URL） | `https://boss.jdzn99.com` |
 | `ops.remind.hours-before` | 活动预约提醒提前小时数 | `24,1` |
 
@@ -339,7 +392,7 @@ DB (相对路径) → Backend ImageUrlUtil → API JSON (相对路径)
 | `.env` (共享) | `VITE_OPS_ENTRY` | `https://boss.jdzn99.com` |
 | `.env` (共享) | `VITE_CORP_ID` | `4` |
 | `.env.development` | `VITE_OPS_ENTRY` | `http://localhost:3035` |
-| `.env.production` | `VITE_BASE` | `/aa/ops/` |
+| `.env.production` | `VITE_BASE` | `/ops/` |
 | `.env.production` | `VITE_OPS_ENTRY` | `https://boss.jdzn99.com` |
 
 **API 协议**：
@@ -349,7 +402,7 @@ DB (相对路径) → Backend ImageUrlUtil → API JSON (相对路径)
 **⚠️ H5 图片 URL 必须用完整 HTTPS 路径**（`config.js` 中 `BASE_URL = VITE_OPS_ENTRY`）：
 uni-app 的 `<image>` 组件在 H5 中渲染为 `<div style="background-image: url(...)">`。
 CSS `url()` 把根相对路径（如 `/uploads/ops/img/xxx.jpg`）解析到页面 base
-`/aa/ops/`，导致实际请求 `/aa/ops/uploads/...` → 404。
+`/ops/`，导致实际请求 `/ops/uploads/...` → 404。
 因此在 H5 模式下必须返回完整 `https://boss.jdzn99.com/uploads/...` 绝对 URL。
 前端 `utils/image.js` 的 `assetUrl()` 通过 `BASE_URL + path` 拼接完整 URL，
 其中 `BASE_URL` 从 `VITE_OPS_ENTRY` 环境变量读取。
@@ -360,25 +413,27 @@ CSS `url()` 把根相对路径（如 `/uploads/ops/img/xxx.jpg`）解析到页�
 
 | 陷阱 | 说明 |
 |------|------|
-| **服务器 JDK** | 默认 JDK 8，运行 ops-platform JAR 必须用 `/home/jason/jdk17/bin/java` |
+| **服务器 JDK** | 测试服务器默认 JDK 8，运行 JAR 必须用 `/home/jason/jdk17/bin/java`；生产 Docker 用 `eclipse-temurin:17-jre` 基础镜像 |
 | **Maven offline** | 必须 `-o`（离线模式），本地仓库 `/home/jason/m2_local` |
-| **生产 base 路径** | 生产 base 是 `/aa/ops/`（`.env.production` 的 `VITE_BASE`），不是 vite.config.js 中的默认 `/subsystem/ops/` |
-| **uni-app H5 image** | `<image>` 渲染为 CSS `background-image`，CSS `url()` 把根相对路径解析到页面 base `/aa/ops/` → 图片 URL 必须用完整 HTTPS 路径 |
-| **Nginx sudo** | jason 用户无 sudo 权限，修改 Nginx 配置需要联系管理员 |
-| **MySQL** | 在 Docker 容器中，通过 `docker exec $(docker ps -q \| head -1) mysql ...` 访问 |
-| **文件上传目录** | 后端 `app.upload.base-dir` 配置为绝对路径；如果使用了 `user.dir`，文件会落到 `backend/uploads/`，Nginx 无法访问 |
-| **商品图片来源** | `ops_product` 只是映射表，实际商品数据在 `mall_product` 表 |
-| **活动封面** | `ops_activity` 同时有 `cover_image` 和 `cover_url` 两个字段，部分老数据 `cover_url` 可能为 NULL，后端 `PlatformController` 已做回退处理 |
-| **Nginx 缓存** | `/aa/ops/assets/` 30 天 immutable 缓存，部署后如果文件没变（相同 hash）则不更新；`index.html` 有 `no-cache` 头 |
-| **首页配置 corpId** | `/api/ops/home-data` 是公开接口（无 JWT），必须传 `?corpId=` 参数；否则回退 corpId=3，看不到 corp_id=4 的数据 |
-| **mall-service 连通性** | `ProductBatchClient` 依赖 mall-service（`mall-service.base-url`，默认 localhost:8083）；mall-service 不可用时批量商品查询失败 |
+| **生产 base 路径** | 生产 base 是 `/ops/`（`.env.production` `VITE_BASE=/ops/`，`vite.config.js` 生产默认 `/ops/`） |
+| **生产部署** | 生产服务器 `113.250.60.41`（root），Docker compose 管理，JAR 放在 `/data2/boss-platform/ops-backend/app.jar` |
+| **WebMvcConfig** | 生产环境通过 Spring Boot 的 `WebMvcConfig.addResourceHandlers` 从磁盘提供 `/uploads/**`，替代 Nginx 直接读磁盘 |
+| **uni-app H5 image** | `<image>` 渲染为 CSS `background-image`，CSS `url()` 把根相对路径解析到页面 base `/ops/` → 图片 URL 必须用完整 HTTPS 路径 |
+| **manifest.json base** | manifest.json 中 `h5.router.base` 仍为 `/aa/ops/`，实际 base 由构建时 `VITE_BASE` 环境变量覆盖 |
+| **文件上传目录** | 生产 Docker：容器内 `/app/uploads`，挂载宿主机 `/data2/boss-platform/uploads`；测试：`/home/jason/ops-platform-project/uploads` |
+| **商品图片来源** | `ops_product` 只是映射表，实际商品数据在 `mall_product` 表，通过 `ProductBatchClient` HTTP 调用 mall-service 获取详情 |
+| **活动封面** | `ops_activity` 同时有 `cover_image` 和 `cover_url` 两个字段，部分老数据 `cover_url` 可能为 NULL，`ImageUrlUtil.resolveActivityCover()` 已做回退处理 |
+| **Nginx 缓存** | `/ops/assets/` 30 天 immutable 缓存；`index.html` 有 `no-cache` 头 |
+| **首页配置 corpId** | `/api/ops/home-data` 是公开接口（无 JWT），必须传 `?corpId=` 参数 |
+| **mall-service 连通性** | `ProductBatchClient` 依赖 mall-service（生产 `http://localhost:8083`，host 网络模式）；mall-service 不可用时批量商品查询失败 |
 | **BaseEntity 字段命名** | SDK `BaseEntity` 使用 `modifyTime`（不是 `updateTime`）；手动设置审计字段时注意命名一致 |
+| **jsDomain 来源** | `PublicAccountController.publicConfig()` 从请求 `Host` 头自动获取 jsDomain，不再依赖数据库配置 |
+| **ASR multipart** | 转发 ASR 请求时不要手动设置 `Content-Type: multipart/form-data`（不含 boundary 会导致 422），让 Spring 自动生成 |
+| **jweixin-1.6.0.js** | 必须用 `npm run build:h5` 而非 `npx uni build`，前者包含 `cp static/jweixin-1.6.0.js dist/build/h5/` 步骤 |
 | **nimbus-jose-jwt** | 依赖仍在 pom.xml 中但 JWT 自签已移除（改用平台 SSO），可考虑清理 |
 | **无自动化测试** | 项目当前无单元测试或集成测试；所有验证依赖手动检查和生产监控 |
-| **MEMORY.md 过期** | MEMORY.md 第四节合规表为改前快照（12% 实体合规、自签 JWT、跨库 JOIN 等），这些问题已全部修复。当前合规状态以本文件为准 |
-| **ImageCropperModal.vue** | 旧版组件（946 行），已被 `activity-form.vue` 内联 CropperJS 替代，可考虑删除 |
 | **无 Pinia/Vuex** | 前端不使用集中式状态管理，token/userId/permissions 通过 `uni.getStorageSync()` 存取 |
 
 ---
 
-最后更新：2026-06-25 | 负责人：架构师
+最后更新：2026-06-27 | 负责人：架构师
