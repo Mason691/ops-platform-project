@@ -115,7 +115,7 @@ public class AiChatProxyController {
             HttpHeaders headers = new HttpHeaders();
             headers.set("X-Internal-Token", internalToken);
             headers.set("X-Corp-Id", String.valueOf(corpId));
-            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+            // 不手动 setContentType，让 FormHttpMessageConverter 自动生成带 boundary 的 multipart header
 
             org.springframework.core.io.ByteArrayResource resource =
                     new org.springframework.core.io.ByteArrayResource(audio.getBytes()) {
@@ -258,7 +258,7 @@ public class AiChatProxyController {
             HttpHeaders headers = new HttpHeaders();
             headers.set("X-Internal-Token", internalToken);
             headers.set("X-Corp-Id", String.valueOf(corpId));
-            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+            // 不手动 setContentType，让 FormHttpMessageConverter 自动生成带 boundary 的 multipart header
 
             org.springframework.core.io.ByteArrayResource resource =
                     new org.springframework.core.io.ByteArrayResource(audioBytes) {
