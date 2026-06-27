@@ -5,30 +5,70 @@ import com.aip.ops.entity.OpsPersonalCommissionRule;
 import com.aip.ops.mapper.OpsCompanyCommissionRuleMapper;
 import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.service.CommissionRuleService;
+import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.exception.BusinessException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class CommissionRuleServiceImpl implements CommissionRuleService {
 
     private final OpsPersonalCommissionRuleMapper personalMapper;
     private final OpsCompanyCommissionRuleMapper companyMapper;
+    private final PlatformInternalClient platformInternalClient;
 
-    private static final List<String> VALID_CATEGORIES =
-            List.of("燃气灶", "抽油烟机", "壁挂炉", "热水器");
+    /** 品类缓存（从平台数据字典加载），volatile + 幂等重载保证线程安全 */
+    private volatile Set<String> categoryCache;
+
+    /** 默认品类（字典接口不可用时的兜底） */
+    private static final Set<String> DEFAULT_CATEGORIES =
+            Set.of("燃气灶", "抽油烟机", "壁挂炉", "热水器");
+
+    /**
+     * 从平台数据字典加载有效品类列表，结果缓存到内存。
+     */
+    private Set<String> getValidCategories() {
+        if (categoryCache != null) {
+            return categoryCache;
+        }
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = platformInternalClient.get(
+                    "/api/dict/data?typeCode=PRODUCT_CATEGORY", null);
+            Object data = resp.get("data");
+            if (data instanceof List) {
+                Set<String> set = new HashSet<>();
+                for (Object item : (List<?>) data) {
+                    if (item instanceof Map) {
+                        Object val = ((Map<?, ?>) item).get("itemValue");
+                        if (val != null) set.add(val.toString());
+                    }
+                }
+                if (!set.isEmpty()) {
+                    categoryCache = set;
+                    return set;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("从平台字典加载 PROPUCT_CATEGORY 失败，使用默认品类", e);
+        }
+        return DEFAULT_CATEGORIES;
+    }
 
     private void validateCategory(String category) {
-        if (category != null && !VALID_CATEGORIES.contains(category)) {
-            throw new BusinessException("品类必须为：" + String.join("/", VALID_CATEGORIES));
+        if (category != null && !getValidCategories().contains(category)) {
+            Set<String> cats = getValidCategories();
+            throw new BusinessException("品类必须为：" + String.join("/", cats));
         }
     }
 
