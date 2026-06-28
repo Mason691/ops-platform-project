@@ -29,16 +29,16 @@ public class BusinessDataController {
     }
 
     @GetMapping("/batches")
-    public R<?> batches() {
-        return R.ok(service.getBatches());
-    }
+    public R<?> batches() { return R.ok(service.getBatches()); }
 
     @PostMapping("/import")
     public R<?> importExcel(@RequestParam("file") MultipartFile file) {
         String batchNo = "金厨美家" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
-        Map<String, Object> result = service.importExcel(file, batchNo);
-        return R.ok(result);
+        return R.ok(service.importExcel(file, batchNo));
     }
+
+    @PostMapping("/calc-commission")
+    public R<?> calcCommission() { return R.ok(service.calcCommission()); }
 
     @DeleteMapping("/batch")
     public R<?> batchDelete(@RequestBody Map<String, List<Long>> params) {

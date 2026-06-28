@@ -1,13 +1,15 @@
 package com.aip.ops.entity;
 
+import com.aip.sdk.entity.BaseEntity;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("ops_business_data")
-public class OpsBusinessData {
+public class OpsBusinessData extends BaseEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
     @TableField("batch_no") private String batchNo;
@@ -25,7 +27,7 @@ public class OpsBusinessData {
     @TableField("group_lowest_price") private BigDecimal groupLowestPrice;
     @TableField("commission_rate") private BigDecimal commissionRate;
     @TableField("commission_amount") private BigDecimal commissionAmount;
+    @TableField("calc_status") private String calcStatus;
     @TableField("remark") private String remark;
     @TableField("operator_id") private Long operatorId;
-    @TableField("create_time") private LocalDateTime createTime;
 }
