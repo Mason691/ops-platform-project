@@ -8,8 +8,6 @@ import com.aip.ops.service.CommissionRuleService;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.exception.BusinessException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -50,7 +48,7 @@ public class CommissionRuleServiceImpl implements CommissionRuleService {
                 Set<String> set = new HashSet<>();
                 for (Object item : (List<?>) data) {
                     if (item instanceof Map) {
-                        Object val = ((Map<?, ?>) item).get("itemValue");
+                        Object val = ((Map<?, ?>) item).get("itemKey");
                         if (val != null) set.add(val.toString());
                     }
                 }
@@ -76,22 +74,16 @@ public class CommissionRuleServiceImpl implements CommissionRuleService {
 
     @Override
     public Map<String, Object> personalPage(int pageNum, int pageSize, String category, Integer status) {
-        Page<OpsPersonalCommissionRule> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<OpsPersonalCommissionRule> qw = new LambdaQueryWrapper<>();
-        if (category != null && !category.isEmpty()) {
-            qw.eq(OpsPersonalCommissionRule::getCategory, category);
-        }
-        if (status != null) {
-            qw.eq(OpsPersonalCommissionRule::getStatus, status);
-        }
+        if (category != null && !category.isEmpty()) qw.eq(OpsPersonalCommissionRule::getCategory, category);
+        if (status != null) qw.eq(OpsPersonalCommissionRule::getStatus, status);
         qw.orderByDesc(OpsPersonalCommissionRule::getPriority).orderByAsc(OpsPersonalCommissionRule::getId);
-        IPage<OpsPersonalCommissionRule> result = personalMapper.selectPage(page, qw);
-        return Map.of(
-                "records", result.getRecords(),
-                "total", result.getTotal(),
-                "size", result.getSize(),
-                "current", result.getCurrent()
-        );
+
+        long total = personalMapper.selectCount(qw);
+        int offset = (pageNum - 1) * pageSize;
+        qw.last("LIMIT " + offset + "," + pageSize);
+        return Map.of("records", personalMapper.selectList(qw), "total", total,
+                "size", pageSize, "current", pageNum);
     }
 
     @Override
@@ -136,22 +128,16 @@ public class CommissionRuleServiceImpl implements CommissionRuleService {
 
     @Override
     public Map<String, Object> companyPage(int pageNum, int pageSize, String category, Integer status) {
-        Page<OpsCompanyCommissionRule> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<OpsCompanyCommissionRule> qw = new LambdaQueryWrapper<>();
-        if (category != null && !category.isEmpty()) {
-            qw.eq(OpsCompanyCommissionRule::getCategory, category);
-        }
-        if (status != null) {
-            qw.eq(OpsCompanyCommissionRule::getStatus, status);
-        }
+        if (category != null && !category.isEmpty()) qw.eq(OpsCompanyCommissionRule::getCategory, category);
+        if (status != null) qw.eq(OpsCompanyCommissionRule::getStatus, status);
         qw.orderByDesc(OpsCompanyCommissionRule::getPriority).orderByAsc(OpsCompanyCommissionRule::getId);
-        IPage<OpsCompanyCommissionRule> result = companyMapper.selectPage(page, qw);
-        return Map.of(
-                "records", result.getRecords(),
-                "total", result.getTotal(),
-                "size", result.getSize(),
-                "current", result.getCurrent()
-        );
+
+        long total = companyMapper.selectCount(qw);
+        int offset = (pageNum - 1) * pageSize;
+        qw.last("LIMIT " + offset + "," + pageSize);
+        return Map.of("records", companyMapper.selectList(qw), "total", total,
+                "size", pageSize, "current", pageNum);
     }
 
     @Override

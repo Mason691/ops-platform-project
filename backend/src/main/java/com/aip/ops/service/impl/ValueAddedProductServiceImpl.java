@@ -6,8 +6,7 @@ import com.aip.ops.service.ValueAddedProductService;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.exception.BusinessException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -38,7 +37,7 @@ public class ValueAddedProductServiceImpl implements ValueAddedProductService {
                 Set<String> set = new HashSet<>();
                 for (Object item : (List<?>) data) {
                     if (item instanceof Map) {
-                        Object val = ((Map<?, ?>) item).get("itemValue");
+                        Object val = ((Map<?, ?>) item).get("itemKey");
                         if (val != null) set.add(val.toString());
                     }
                 }
@@ -56,15 +55,19 @@ public class ValueAddedProductServiceImpl implements ValueAddedProductService {
 
     @Override
     public Map<String, Object> page(int pageNum, int pageSize, String category, String brand, Integer status) {
-        Page<OpsValueAddedProduct> pg = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<OpsValueAddedProduct> qw = new LambdaQueryWrapper<>();
         if (category != null && !category.isEmpty()) qw.eq(OpsValueAddedProduct::getCategory, category);
         if (brand != null && !brand.isEmpty()) qw.eq(OpsValueAddedProduct::getBrand, brand);
         if (status != null) qw.eq(OpsValueAddedProduct::getStatus, status);
         qw.orderByAsc(OpsValueAddedProduct::getCategory).orderByAsc(OpsValueAddedProduct::getId);
-        IPage<OpsValueAddedProduct> result = mapper.selectPage(pg, qw);
-        return Map.of("records", result.getRecords(), "total", result.getTotal(),
-                "size", result.getSize(), "current", result.getCurrent());
+
+        // Manual count (avoid IPage.getTotal() returning 0 for non-BaseEntity)
+        long total = mapper.selectCount(qw);
+        int offset = (pageNum - 1) * pageSize;
+        qw.last("LIMIT " + offset + "," + pageSize);
+        List<OpsValueAddedProduct> records = mapper.selectList(qw);
+        return Map.of("records", records, "total", total,
+                "size", pageSize, "current", pageNum);
     }
 
     @Override
