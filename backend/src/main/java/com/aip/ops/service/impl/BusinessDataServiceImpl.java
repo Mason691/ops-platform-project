@@ -162,29 +162,43 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     @Override
     @Transactional
     public Map<String, Object> calcCommission() {
-        // Load all rules
         List<OpsPersonalCommissionRule> rules = ruleMapper.selectList(
                 new LambdaQueryWrapper<OpsPersonalCommissionRule>().eq(OpsPersonalCommissionRule::getStatus, 1));
         Map<String, OpsPersonalCommissionRule> ruleMap = new HashMap<>();
         for (OpsPersonalCommissionRule r : rules) ruleMap.putIfAbsent(r.getCategory(), r);
 
-        // Process uncalculated records
         List<OpsBusinessData> uncalcs = mapper.selectList(
                 new LambdaQueryWrapper<OpsBusinessData>().eq(OpsBusinessData::getCalcStatus, "未计算"));
 
         int done = 0, zero = 0;
-        for (OpsBusinessData d : uncalcs) {
-            OpsPersonalCommissionRule rule = ruleMap.get(d.getCategory());
-            BigDecimal[] cr = calcCommissionAmount(d.getSalePrice(),
-                    d.getRetailFloorPrice(), d.getGroupLowestPrice(), rule);
-            LambdaUpdateWrapper<OpsBusinessData> uw = new LambdaUpdateWrapper<>();
-            uw.set(OpsBusinessData::getCommissionRate, cr[0])
-              .set(OpsBusinessData::getCommissionAmount, cr[1])
-              .set(OpsBusinessData::getCalcStatus, "已计算")
-              .eq(OpsBusinessData::getId, d.getId());
-            mapper.update(null, uw);
-            if (cr[1].compareTo(BigDecimal.ZERO) > 0) done++; else zero++;
-        }
+        try (var conn = dataSource.getConnection(); var stmt = conn.createStatement()) {
+            // Batch UPDATE using CASE WHEN — single SQL per batch of 500
+            int batchSize = 500;
+            for (int i = 0; i < uncalcs.size(); i += batchSize) {
+                int end = Math.min(i + batchSize, uncalcs.size());
+                StringBuilder rateSql = new StringBuilder("UPDATE ops_business_data SET commission_rate = CASE ");
+                StringBuilder amtSql  = new StringBuilder("UPDATE ops_business_data SET commission_amount = CASE ");
+                StringBuilder ids = new StringBuilder();
+                for (int j = i; j < end; j++) {
+                    OpsBusinessData d = uncalcs.get(j);
+                    OpsPersonalCommissionRule rule = ruleMap.get(d.getCategory());
+                    BigDecimal[] cr = calcCommissionAmount(d.getSalePrice(),
+                            d.getRetailFloorPrice(), d.getGroupLowestPrice(), rule);
+                    String id = String.valueOf(d.getId());
+                    rateSql.append("WHEN id=").append(id).append(" THEN ").append(cr[0]).append(" ");
+                    amtSql.append("WHEN id=").append(id).append(" THEN ").append(cr[1]).append(" ");
+                    ids.append(id).append(",");
+                    if (cr[1].compareTo(BigDecimal.ZERO) > 0) done++; else zero++;
+                }
+                ids.setLength(ids.length() - 1);
+                rateSql.append("END, calc_status='已计算' WHERE id IN (").append(ids).append(")");
+                amtSql.append("END WHERE id IN (").append(ids).append(")");
+                stmt.addBatch(rateSql.toString());
+                stmt.addBatch(amtSql.toString());
+                stmt.executeBatch();
+            }
+        } catch (Exception e) { log.error("批量计算提成失败", e); throw new RuntimeException("批量计算提成失败", e); }
+
         log.info("提成计算完成: {}条有提成, {}条0提成, 共{}条", done, zero, uncalcs.size());
         return Map.of("total", uncalcs.size(), "commissioned", done, "zero", zero);
     }
@@ -225,7 +239,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             qw.orderByDesc(OpsBusinessData::getId);
             List<OpsBusinessData> all = mapper.selectList(qw);
 
-            Path tmp = Files.createTempFile("export_", ".xlsx");
+            Path tsvFile = Files.createTempFile("export_", ".tsv");
+            Path xlsFile = Path.of(tsvFile.toString().replace(".tsv", ".xlsx"));
+            // Write header + rows as tab-separated
             StringBuilder sb = new StringBuilder();
             sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t销售日期\t收款日期\t收据号\n");
             for (OpsBusinessData d : all) {
@@ -239,14 +255,23 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                   .append(fmt(d.getSaleDate())).append('\t').append(fmt(d.getReceiptDate())).append('\t')
                   .append(fmt(d.getReceiptNo())).append('\n');
             }
-            String script = "import openpyxl\nwb=openpyxl.Workbook()\nws=wb.active\ndata=\"\"\"" + sb + "\"\"\"\nfor line in data.strip().split('\\n'):\n  ws.append(line.split('\\t'))\nwb.save('" + tmp.toAbsolutePath() + "')\n";
-            new ProcessBuilder("python3", "-c", script).redirectErrorStream(true).start().waitFor();
+            Files.writeString(tsvFile, sb.toString());
+
+            // Convert TSV → XLSX using Python
+            new ProcessBuilder("python3", "-c",
+                "import openpyxl,sys\n"
+              + "wb=openpyxl.Workbook()\n"
+              + "ws=wb.active\n"
+              + "lines=open('" + tsvFile.toAbsolutePath() + "').read().strip().split('\\n')\n"
+              + "for line in lines:\n  ws.append(line.split('\\t'))\n"
+              + "wb.save('" + xlsFile.toAbsolutePath() + "')\n"
+            ).redirectErrorStream(true).start().waitFor();
 
             response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
             response.setHeader("Content-Disposition", "attachment; filename=业务数据导出.xlsx");
-            Files.copy(tmp, response.getOutputStream());
+            Files.copy(xlsFile, response.getOutputStream());
             response.getOutputStream().flush();
-            Files.deleteIfExists(tmp);
+            Files.deleteIfExists(tsvFile); Files.deleteIfExists(xlsFile);
         } catch (Exception e) { log.error("导出失败", e); }
     }
 
