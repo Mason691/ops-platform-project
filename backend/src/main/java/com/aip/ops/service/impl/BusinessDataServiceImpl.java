@@ -1,10 +1,8 @@
 package com.aip.ops.service.impl;
 
 import com.aip.ops.entity.OpsBusinessData;
-import com.aip.ops.entity.OpsPersonalCommissionRule;
 import com.aip.ops.entity.OpsValueAddedProduct;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
-import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.BusinessDataService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -15,9 +13,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 @Slf4j
@@ -27,7 +26,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     private final OpsBusinessDataMapper mapper;
     private final OpsValueAddedProductMapper productMapper;
-    private final OpsPersonalCommissionRuleMapper ruleMapper;
+
+    private static final Set<String> VALID_COMPANIES = Set.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
 
     private static final Map<String, String> CN_TO_KEY = Map.of(
             "燃气灶", "1", "抽油烟机", "2", "热水器", "3", "壁挂炉", "4",
@@ -68,23 +68,14 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         Path tmpFile = null;
 
         try {
-            // Save temp file
             tmpFile = Files.createTempFile("import_", ".xlsx");
             file.transferTo(tmpFile);
 
-            // Load products
+            // Load products: key = brand|category|model
             List<OpsValueAddedProduct> prods = productMapper.selectList(null);
             Map<String, OpsValueAddedProduct> productMap = new HashMap<>();
             for (OpsValueAddedProduct p : prods) {
                 productMap.put(p.getBrand() + "|" + p.getCategory() + "|" + p.getModel(), p);
-            }
-
-            // Load rules
-            List<OpsPersonalCommissionRule> rules = ruleMapper.selectList(
-                    new LambdaQueryWrapper<OpsPersonalCommissionRule>().eq(OpsPersonalCommissionRule::getStatus, 1));
-            Map<String, OpsPersonalCommissionRule> ruleMap = new HashMap<>();
-            for (OpsPersonalCommissionRule r : rules) {
-                ruleMap.putIfAbsent(r.getCategory(), r);
             }
 
             // Parse Excel via Python
@@ -93,55 +84,77 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 return Map.of("success", 0, "fail", 0, "errors", List.of("Python解析Excel失败"));
             }
 
-            // Split rows (tab-separated, newline-delimited)
             String[] rows = json.trim().split("\n");
             String[] headers = rows[0].split("\t");
 
-            int companyIdx = indexOf(headers, "客户");
+            int customerIdx = indexOf(headers, "客户");
             int catIdx = indexOf(headers, "品类");
             int brandIdx = indexOf(headers, "品牌");
             int modelIdx = indexOf(headers, "型号");
             int priceIdx = indexOf(headers, "销售价");
+            int companyIdx = indexOf(headers, "公司");
+            int deptIdx = indexOf(headers, "部门");
             int agentIdx = indexOf(headers, "经办人");
             int saleDateIdx = indexOf(headers, "销售日期");
             int recDateIdx = indexOf(headers, "收款日期");
             int recNoIdx = indexOf(headers, "收据号");
 
+            // batch_no per company: company + timestamp
+            String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+            Map<String, String> batchNoMap = new HashMap<>();
+
             for (int i = 1; i < rows.length; i++) {
                 String[] cols = rows[i].split("\t", -1);
                 if (cols.length < 4) continue;
                 try {
-                    OpsBusinessData d = new OpsBusinessData();
-                    d.setBatchNo(batchNo);
-                    d.setCompany(val(cols, companyIdx));
-                    d.setBrand(val(cols, brandIdx));
-                    d.setModel(val(cols, modelIdx));
-                    d.setSalePrice(toDecimal(val(cols, priceIdx)));
-                    d.setAgent(val(cols, agentIdx));
-                    d.setSaleDate(val(cols, saleDateIdx));
-                    d.setReceiptDate(val(cols, recDateIdx));
-                    d.setReceiptNo(val(cols, recNoIdx));
-                    d.setOperatorId(4L);
-
+                    String company = val(cols, companyIdx);
+                    String customer = val(cols, customerIdx);
+                    String brand = val(cols, brandIdx);
+                    String model = val(cols, modelIdx);
                     String catCn = val(cols, catIdx);
-                    d.setCategory(CN_TO_KEY.getOrDefault(catCn, catCn));
+                    BigDecimal salePrice = toDecimal(val(cols, priceIdx));
+                    String agent = val(cols, agentIdx);
+                    String dept = val(cols, deptIdx);
+                    String saleDate = val(cols, saleDateIdx);
+                    String recDate = val(cols, recDateIdx);
+                    String recNo = val(cols, recNoIdx);
+
+                    if (brand.isEmpty() || model.isEmpty()) continue;
+
+                    // Validate company
+                    if (company.isEmpty()) {
+                        fail++; errors.add("第" + (i + 1) + "行: 公司为空"); continue;
+                    }
+                    if (!VALID_COMPANIES.contains(company)) {
+                        fail++; errors.add("第" + (i + 1) + "行: 无效公司 \"" + company + "\"（允许: " + VALID_COMPANIES + "）"); continue;
+                    }
+
+                    // Batch no
+                    String bn = batchNoMap.computeIfAbsent(company, c -> c + ts);
+
+                    String catKey = CN_TO_KEY.getOrDefault(catCn, catCn);
 
                     // Product reference prices
-                    String pkey = d.getBrand() + "|" + d.getCategory() + "|" + d.getModel();
+                    String pkey = brand + "|" + catKey + "|" + model;
                     OpsValueAddedProduct prod = productMap.get(pkey);
+                    BigDecimal floor = null, group = null;
                     if (prod != null) {
-                        d.setRetailFloorPrice(prod.getRetailFloorPrice());
-                        d.setGroupLowestPrice(prod.getGroupLowestPrice());
+                        floor = prod.getRetailFloorPrice();
+                        group = prod.getGroupLowestPrice();
                     }
 
-                    // Commission
-                    OpsPersonalCommissionRule rule = ruleMap.get(d.getCategory());
-                    if (d.getSalePrice() != null) {
-                        BigDecimal[] cr = calcCommission(d.getSalePrice(),
-                                d.getRetailFloorPrice(), d.getGroupLowestPrice(), rule);
-                        d.setCommissionRate(cr[0]);
-                        d.setCommissionAmount(cr[1]);
-                    }
+                    // Build remark from dept
+                    String remark = dept.isEmpty() ? null : "部门: " + dept;
+
+                    OpsBusinessData d = new OpsBusinessData();
+                    d.setBatchNo(bn); d.setCompany(company); d.setCustomer(customer);
+                    d.setBrand(brand); d.setCategory(catKey); d.setModel(model);
+                    d.setSalePrice(salePrice); d.setAgent(agent);
+                    d.setSaleDate(saleDate); d.setReceiptDate(recDate); d.setReceiptNo(recNo);
+                    d.setRetailFloorPrice(floor); d.setGroupLowestPrice(group);
+                    d.setCommissionRate(null); d.setCommissionAmount(null);
+                    d.setRemark(remark);
+                    d.setOperatorId(4L);
 
                     mapper.insert(d);
                     success++;
@@ -161,7 +174,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     private String parseExcelWithPython(Path file) throws Exception {
         ProcessBuilder pb = new ProcessBuilder("python3", "-c",
-                "import openpyxl,json,sys\n"
+                "import openpyxl\n"
                         + "wb=openpyxl.load_workbook('" + file.toAbsolutePath() + "')\n"
                         + "ws=wb.active\n"
                         + "for row in ws.iter_rows(values_only=True):\n"
@@ -171,32 +184,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         String out = new String(p.getInputStream().readAllBytes(), "UTF-8");
         p.waitFor();
         return out;
-    }
-
-    private BigDecimal[] calcCommission(BigDecimal salePrice, BigDecimal floorPrice,
-                                         BigDecimal groupPrice, OpsPersonalCommissionRule rule) {
-        BigDecimal zero = BigDecimal.ZERO;
-        if (rule == null) return new BigDecimal[]{zero, zero};
-
-        BigDecimal rate = rule.getCommissionRate() != null ? rule.getCommissionRate() : zero;
-        if ("阶梯".equals(rule.getCommissionType())) {
-            if (floorPrice == null || groupPrice == null) {
-                BigDecimal amt = salePrice.multiply(rate).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-                return new BigDecimal[]{rate, amt};
-            }
-            if (salePrice.compareTo(floorPrice) >= 0) {
-                BigDecimal amt = salePrice.multiply(rate).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-                return new BigDecimal[]{rate, amt};
-            }
-            if (salePrice.compareTo(groupPrice) >= 0) {
-                BigDecimal midRate = new BigDecimal("5.00");
-                BigDecimal amt = salePrice.multiply(midRate).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-                return new BigDecimal[]{midRate, amt};
-            }
-            return new BigDecimal[]{zero, zero};
-        }
-        BigDecimal amt = salePrice.multiply(rate).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-        return new BigDecimal[]{rate, amt};
     }
 
     @Override

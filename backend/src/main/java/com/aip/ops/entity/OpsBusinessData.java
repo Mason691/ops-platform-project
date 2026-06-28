@@ -12,6 +12,7 @@ public class OpsBusinessData {
     private Long id;
     @TableField("batch_no") private String batchNo;
     @TableField("company") private String company;
+    @TableField("customer") private String customer;
     @TableField("brand") private String brand;
     @TableField("category") private String category;
     @TableField("model") private String model;
