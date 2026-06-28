@@ -7,7 +7,7 @@ import lombok.EqualsAndHashCode;
 import java.math.BigDecimal;
 
 /**
- * 个人提成规则 — 按品类/品牌/型号匹配，支持按比例或固定金额计算提成。
+ * 个人提成规则 — category 存 dict item_key, 类型分阶梯/固定。
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -17,43 +17,31 @@ public class OpsPersonalCommissionRule extends BaseEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 品类：燃气灶/抽油烟机/壁挂炉/热水器 */
+    /** 品类 (sys_dict_item.item_key, type_id=9) */
     @TableField("category")
     private String category;
 
-    /** 品牌（为空表示所有品牌） */
-    @TableField("brand")
-    private String brand;
-
-    /** 型号（为空表示所有型号） */
-    @TableField("model")
-    private String model;
-
-    /** 最低销售额 */
-    @TableField("min_amount")
-    private BigDecimal minAmount;
-
-    /** 最高销售额（0=不设上限） */
-    @TableField("max_amount")
-    private BigDecimal maxAmount;
+    /** 提成类型: 阶梯 / 固定 */
+    @TableField("commission_type")
+    private String commissionType;
 
     /** 提成比例(%) */
     @TableField("commission_rate")
     private BigDecimal commissionRate;
 
-    /** 固定提成金额 */
-    @TableField("commission_fixed")
-    private BigDecimal commissionFixed;
+    /** 阶梯规则描述 */
+    @TableField("rule_desc")
+    private String ruleDesc;
 
-    /** 规则类型：percentage/fixed */
-    @TableField("rule_type")
-    private String ruleType;
+    /** 父项ID (子项分组) */
+    @TableField("parent_id")
+    private Long parentId;
 
-    /** 优先级（数字越大越优先） */
+    /** 优先级 */
     @TableField("priority")
     private Integer priority;
 
-    /** 状态：1启用 0禁用 */
+    /** 状态: 1启用 0禁用 */
     @TableField("status")
     private Integer status;
 

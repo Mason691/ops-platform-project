@@ -28,9 +28,9 @@ public class CommissionRuleServiceImpl implements CommissionRuleService {
     /** 品类缓存（从平台数据字典加载），volatile + 幂等重载保证线程安全 */
     private volatile Set<String> categoryCache;
 
-    /** 默认品类（字典接口不可用时的兜底） */
+    /** 默认品类（字典接口不可用时的兜底，含全部 dict item_key） */
     private static final Set<String> DEFAULT_CATEGORIES =
-            Set.of("燃气灶", "抽油烟机", "壁挂炉", "热水器");
+            Set.of("1", "2", "3", "4", "5", "6", "7", "8", "9");
 
     /**
      * 从平台数据字典加载有效品类列表，结果缓存到内存。
@@ -99,8 +99,8 @@ public class CommissionRuleServiceImpl implements CommissionRuleService {
     @Transactional
     public void personalCreate(OpsPersonalCommissionRule rule) {
         validateCategory(rule.getCategory());
-        if (rule.getRuleType() == null || rule.getRuleType().isEmpty()) {
-            rule.setRuleType("percentage");
+        if (rule.getCommissionType() == null || rule.getCommissionType().isEmpty()) {
+            rule.setCommissionType("固定");
         }
         if (rule.getStatus() == null) {
             rule.setStatus(1);
