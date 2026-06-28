@@ -18,6 +18,7 @@ import javax.sql.DataSource;
 import java.sql.Statement;
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.servlet.http.HttpServletResponse;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.file.Files;
@@ -45,10 +46,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     );
 
     @Override
-    public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo) {
+    public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent) {
         LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
         if (company != null && !company.isEmpty()) qw.eq(OpsBusinessData::getCompany, company);
         if (batchNo != null && !batchNo.isEmpty()) qw.eq(OpsBusinessData::getBatchNo, batchNo);
+        if (agent != null && !agent.isEmpty()) qw.eq(OpsBusinessData::getAgent, agent);
         qw.orderByDesc(OpsBusinessData::getId);
 
         long total = mapper.selectCount(qw);
@@ -212,6 +214,43 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         BigDecimal amt = salePrice.multiply(rate).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
         return new BigDecimal[]{rate, amt};
     }
+
+    @Override
+    public void exportExcel(String company, String batchNo, String agent, HttpServletResponse response) {
+        try {
+            LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
+            if (company != null && !company.isEmpty()) qw.eq(OpsBusinessData::getCompany, company);
+            if (batchNo != null && !batchNo.isEmpty()) qw.eq(OpsBusinessData::getBatchNo, batchNo);
+            if (agent != null && !agent.isEmpty()) qw.eq(OpsBusinessData::getAgent, agent);
+            qw.orderByDesc(OpsBusinessData::getId);
+            List<OpsBusinessData> all = mapper.selectList(qw);
+
+            Path tmp = Files.createTempFile("export_", ".xlsx");
+            StringBuilder sb = new StringBuilder();
+            sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t销售日期\t收款日期\t收据号\n");
+            for (OpsBusinessData d : all) {
+                sb.append(fmt(d.getBatchNo())).append('\t')
+                  .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
+                  .append(fmt(d.getBrand())).append('\t').append(fmt(d.getCategory())).append('\t')
+                  .append(fmt(d.getModel())).append('\t').append(fmt(d.getSalePrice())).append('\t')
+                  .append(fmt(d.getRetailFloorPrice())).append('\t').append(fmt(d.getGroupLowestPrice())).append('\t')
+                  .append(fmt(d.getCommissionRate())).append('\t').append(fmt(d.getCommissionAmount())).append('\t')
+                  .append(fmt(d.getCalcStatus())).append('\t').append(fmt(d.getAgent())).append('\t')
+                  .append(fmt(d.getSaleDate())).append('\t').append(fmt(d.getReceiptDate())).append('\t')
+                  .append(fmt(d.getReceiptNo())).append('\n');
+            }
+            String script = "import openpyxl\nwb=openpyxl.Workbook()\nws=wb.active\ndata=\"\"\"" + sb + "\"\"\"\nfor line in data.strip().split('\\n'):\n  ws.append(line.split('\\t'))\nwb.save('" + tmp.toAbsolutePath() + "')\n";
+            new ProcessBuilder("python3", "-c", script).redirectErrorStream(true).start().waitFor();
+
+            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            response.setHeader("Content-Disposition", "attachment; filename=业务数据导出.xlsx");
+            Files.copy(tmp, response.getOutputStream());
+            response.getOutputStream().flush();
+            Files.deleteIfExists(tmp);
+        } catch (Exception e) { log.error("导出失败", e); }
+    }
+
+    private String fmt(Object o) { return o == null ? "" : String.valueOf(o); }
 
     @Override
     @Transactional
