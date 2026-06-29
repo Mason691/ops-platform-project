@@ -4,10 +4,13 @@ import com.aip.sdk.entity.BaseEntity;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+
 import java.math.BigDecimal;
 
 /**
- * 个人提成规则 — category 存 dict item_key, 类型分阶梯/固定。
+ * 个人提成规则 — 按品类匹配，支持固定/阶梯两种提成类型。
+ *
+ * <p>status 字段取值映射系统字典 ENABLE_DISABLE：1=启用 0=禁用</p>
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -17,7 +20,11 @@ public class OpsPersonalCommissionRule extends BaseEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 品类 (sys_dict_item.item_key, type_id=9) */
+    /** 租户ID（多租户隔离） */
+    @TableField("corp_id")
+    private Long corpId;
+
+    /** 品类 (sys_dict_item.item_key, type=PRODUCT_CATEGORY) */
     @TableField("category")
     private String category;
 
@@ -33,7 +40,7 @@ public class OpsPersonalCommissionRule extends BaseEntity {
     @TableField("rule_desc")
     private String ruleDesc;
 
-    /** 父项ID (子项分组) */
+    /** 父项ID（子项分组） */
     @TableField("parent_id")
     private Long parentId;
 
@@ -41,15 +48,14 @@ public class OpsPersonalCommissionRule extends BaseEntity {
     @TableField("priority")
     private Integer priority;
 
-    /** 状态: 1启用 0禁用 */
+    /** 状态：1=启用 0=禁用（ENABLE_DISABLE 字典） */
     @TableField("status")
     private Integer status;
 
-    /** 备注 */
-    @TableField("remark")
-    private String remark;
-
-    /** 运营商ID */
+    /**
+     * @deprecated 使用 {@link #corpId} 替代；保留字段仅用于向后兼容
+     */
+    @Deprecated
     @TableField("operator_id")
     private Long operatorId;
 }

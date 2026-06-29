@@ -24,7 +24,11 @@ VALUES
   ('com.aip.ops.entity.OpsMember',               'ops', 'OpsMember',               'mall_db.ops_member',                'opsmember',              'create_opsmember',               '{}', 0,1,0,0, 'draft',0,1,0,0),
   ('com.aip.ops.entity.OpsRemindLog',            'ops', 'OpsRemindLog',            'mall_db.ops_remind_log',            'opsremindlog',           'create_opsremindlog',            '{}', 0,1,0,0, 'draft',0,1,0,0),
   ('com.aip.ops.entity.ProductCategory',         'ops', 'ProductCategory',         'mall_db.biz_product_category',      'productcategory',        'create_productcategory',         '{}', 0,1,0,0, 'draft',0,1,0,0),
-  ('com.aip.ops.entity.PublicAccountConfig',     'ops', 'PublicAccountConfig',     'mall_db.sys_public_account_config',  'publicaccountconfig',    'create_publicaccountconfig',     '{}', 0,1,0,0, 'draft',0,1,0,0)
+  ('com.aip.ops.entity.PublicAccountConfig',     'ops', 'PublicAccountConfig',     'mall_db.sys_public_account_config',  'publicaccountconfig',    'create_publicaccountconfig',     '{}', 0,1,0,0, 'draft',0,1,0,0),
+  ('com.aip.ops.entity.OpsValueAddedProduct',      'ops', '增值产品',         'mall_db.ops_value_added_product',      'opsvalueaddedproduct',       'create_opsvalueaddedproduct',       '{}', 0,1,0,0, 'draft',0,1,0,0),
+  ('com.aip.ops.entity.OpsPersonalCommissionRule', 'ops', '个人提成规则',      'mall_db.ops_personal_commission_rule', 'opspersonalcommissionrule',  'create_opspersonalcommissionrule',  '{}', 0,1,0,0, 'draft',0,1,0,0),
+  ('com.aip.ops.entity.OpsCompanyCommissionRule',  'ops', '公司提成规则',      'mall_db.ops_company_commission_rule',  'opscompanycommissionrule',   'create_opscompanycommissionrule',   '{}', 0,1,0,0, 'draft',0,1,0,0),
+  ('com.aip.ops.entity.OpsBusinessData',           'ops', '业务数据',         'mall_db.ops_business_data',           'opsbusinessdata',            'create_opsbusinessdata',            '{}', 0,1,0,0, 'draft',0,1,0,0)
 ON DUPLICATE KEY UPDATE
   table_name = VALUES(table_name),
   form_type = VALUES(form_type),

@@ -40,8 +40,10 @@ public class CommissionRuleController {
 
     @PostMapping("/personal")
     public R<?> personalCreate(@RequestBody OpsPersonalCommissionRule rule) {
-        Long operatorId = SecurityUtils.getCurrentCorpId();
-        rule.setOperatorId(operatorId);
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        rule.setCorpId(corpId);
+        // 向后兼容：旧前端可能仍传 operatorId
+        if (rule.getOperatorId() == null) rule.setOperatorId(corpId);
         service.personalCreate(rule);
         return R.ok("创建成功");
     }
@@ -76,8 +78,10 @@ public class CommissionRuleController {
 
     @PostMapping("/company")
     public R<?> companyCreate(@RequestBody OpsCompanyCommissionRule rule) {
-        Long operatorId = SecurityUtils.getCurrentCorpId();
-        rule.setOperatorId(operatorId);
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        rule.setCorpId(corpId);
+        // 向后兼容：旧前端可能仍传 operatorId
+        if (rule.getOperatorId() == null) rule.setOperatorId(corpId);
         service.companyCreate(rule);
         return R.ok("创建成功");
     }

@@ -35,7 +35,9 @@ public class ValueAddedProductController {
 
     @PostMapping
     public R<?> create(@RequestBody OpsValueAddedProduct product) {
-        product.setOperatorId(SecurityUtils.getCurrentCorpId());
+        product.setCorpId(SecurityUtils.getCurrentCorpId());
+        // 向后兼容：旧前端可能仍传 operatorId
+        if (product.getOperatorId() == null) product.setOperatorId(product.getCorpId());
         service.create(product);
         return R.ok("创建成功");
     }

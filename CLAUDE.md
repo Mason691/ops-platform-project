@@ -137,8 +137,8 @@ ops-platform-project/
 ├── backend/
 │   ├── src/main/java/com/aip/ops/
 │   │   ├── OpsApplication.java
-│   │   ├── config/          # SecurityConfig, AuthConfig, JacksonConfig, RestTemplateConfig, WebMvcConfig
-│   │   ├── controller/      # 11 controllers
+│   │   ├── config/          # SecurityConfig, AuthConfig, JacksonConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig
+│   │   ├── controller/      # 14 controllers
 │   │   │   ├── PlatformController.java      # 核心：商品/活动/订单/积分/优惠券/直播室/用户
 │   │   │   ├── AdminController.java         # 管理后台：活动/商品 CRUD、预约查询、首页统计、商家绑定
 │   │   │   ├── AuthController.java          # 登录/注册
@@ -149,15 +149,21 @@ ops-platform-project/
 │   │   │   ├── HomeConfigController.java    # 首页配置 CRUD + 批量排序
 │   │   │   ├── PartnerController.java       # 城市合伙人管理（代理底座 internal API）
 │   │   │   ├── StationController.java       # H5 端站长申请/状态/信息（代理底座 internal API）
-│   │   │   └── AdminStationController.java  # 管理后台站长审批/列表/统计（代理底座 internal API）
-│   │   ├── entity/          # 18 entities（全部继承 SDK BaseEntity，100% 合规）
-│   │   ├── mapper/          # 18 MyBatis-Plus mappers（均继承 BaseMapper，5 个有自定义 SQL）
-│   │   ├── service/         # 5 service interfaces + 5 impls + 2 concrete services
+│   │   │   ├── AdminStationController.java  # 管理后台站长审批/列表/统计（代理底座 internal API）
+│   │   │   ├── BusinessDataController.java  # 增值业务：Excel 导入/提成计算/导出
+│   │   │   ├── CommissionRuleController.java # 增值业务：个人/公司提成规则 CRUD
+│   │   │   └── ValueAddedProductController.java # 增值业务：增值产品 CRUD
+│   │   ├── entity/          # 22 entities（全部继承 SDK BaseEntity，100% 合规）
+│   │   ├── mapper/          # 22 MyBatis-Plus mappers（均继承 BaseMapper）
+│   │   ├── service/         # 10 service interfaces + 8 impls + 2 concrete services
 │   │   │   ├── impl/UserServiceImpl.java         # 通过 PlatformInternalClient 调用底座 SSO
 │   │   │   ├── impl/OpsProductServiceImpl.java   # 商品管理 + ProductBatchClient 批量查询
 │   │   │   ├── impl/OpsActivityServiceImpl.java  # 活动管理
 │   │   │   ├── impl/HomeConfigServiceImpl.java   # 首页配置 + 公开数据
 │   │   │   ├── impl/PublicAccountConfigServiceImpl.java
+│   │   │   ├── impl/ValueAddedProductServiceImpl.java  # 增值产品 CRUD + 品类字典校验
+│   │   │   ├── impl/CommissionRuleServiceImpl.java   # 个人/公司提成规则 CRUD
+│   │   │   ├── impl/BusinessDataServiceImpl.java     # Excel 导入/提成计算/导出
 │   │   │   ├── PlatformMerchantService.java      # 通过 PlatformInternalClient 查组织信息
 │   │   │   └── ActivityReminderService.java      # @Scheduled 预约提醒（5 分钟轮询）
 │   │   ├── client/          # 子系统间 HTTP 客户端
@@ -171,7 +177,7 @@ ops-platform-project/
 ├── frontend/
 │   ├── src/pages/           # 21 page files，14 个目录（见下方"前端页面路由"）
 │   ├── src/components/      # 共享组件（ImageCropperModal.vue 已被 activity-form 内联替代）
-│   ├── src/api/index.js     # 集中 API 注册（~45 个方法）
+│   ├── src/api/index.js     # 集中 API 注册（56 个方法）
 │   ├── src/utils/           # request.js, image.js, config.js, jssdk.js, auth-bridge.js
 │   ├── src/config.js        # BASE_URL + DEFAULT_CORP_ID
 │   ├── src/App.vue          # Minimal: onLaunch/onShow + 全局 CSS
@@ -186,7 +192,7 @@ ops-platform-project/
 │   ├── .env.production      # VITE_BASE=/ops/ VITE_OPS_ENTRY=https://boss.jdzn99.com
 │   └── package.json
 ├── sql/init.sql             # 18 tables + seed data
-├── sql/                     # 14 migration SQL files
+├── sql/                     # 15 migration SQL files
 ├── Specs/                   # 功能规格文档
 ├── MEMORY.md                # 编码规范（强制）+ ADR（⚠️ 合规状态表已过期）
 ├── soul.md                  # 产品理念与设计哲学
@@ -236,7 +242,7 @@ ops-platform-project/
 | `/api/ops/points/**` | JWT | 积分流水 |
 | `/api/ops/coupon/**` | JWT | 优惠券 |
 | `/api/ops/ai/**` | 混合 | AI 聊天（chat 需 JWT，config 公开） |
-| `/api/ops/admin/**` | JWT | 管理后台（活动/商品/首页配置/站长审批） |
+| `/api/ops/admin/**` | JWT | 管理后台（活动/商品/首页配置/站长审批/增值业务） |
 | `/api/ops/station/**` | JWT | 站长申请/状态/信息（代理底座 internal API） |
 
 **AiChatProxyController 端点详情**（`/api/ops/ai`）：
@@ -248,6 +254,11 @@ ops-platform-project/
 - `POST /voice/synthesize` — TTS 语音合成
 
 **SDK 透传路径**（无需 JWT，由底座内部 Token 保护）：`/actuator/**`, `/api/public-account/**`, `/api/ops/auth/**`, `/api/ops/product/**`, `/api/ops/activity/**`
+
+**增值业务管理端点**（`/api/ops/admin`，均需 JWT）：
+- `ValueAddedProductController`（`/api/ops/admin/value-added/product`）— 增值产品 CRUD
+- `CommissionRuleController`（`/api/ops/admin/commission`）— 个人/公司提成规则 CRUD
+- `BusinessDataController`（`/api/ops/admin/business-data`）— Excel 导入/提成计算/异步导出
 
 ---
 
@@ -321,7 +332,7 @@ DB (相对路径) → Backend ImageUrlUtil → API JSON (相对路径)
 
 > MEMORY.md 第四节合规状态表为**改前快照（12% 合规）**，已全部过时。当前合规状态以本文件为准。
 
-**实体继承 BaseEntity**：全部 18 个 entity 继承 `com.aip.sdk.entity.BaseEntity`（✅ 100% 合规）。
+**实体继承 BaseEntity**：全部 22 个 entity 继承 `com.aip.sdk.entity.BaseEntity`（✅ 100% 合规）。
 - 必须加 `@EqualsAndHashCode(callSuper = true)`
 - 不要手动声明 `createTime`/`modifyTime`/`updateTime` 字段
 - `corpId` 字段已添加到所有业务表
@@ -431,6 +442,9 @@ CSS `url()` 把根相对路径（如 `/uploads/ops/img/xxx.jpg`）解析到页�
 | **ASR multipart** | 转发 ASR 请求时不要手动设置 `Content-Type: multipart/form-data`（不含 boundary 会导致 422），让 Spring 自动生成 |
 | **jweixin-1.6.0.js** | 必须用 `npm run build:h5` 而非 `npx uni build`，前者包含 `cp static/jweixin-1.6.0.js dist/build/h5/` 步骤 |
 | **nimbus-jose-jwt** | 依赖仍在 pom.xml 中但 JWT 自签已移除（改用平台 SSO），可考虑清理 |
+| **MetaObjectHandler** | ops 是独立 Spring Boot 应用，`MybatisPlusConfig.java` 自行注册 `MetaObjectHandler`（审计字段自动填充）。平台 web 模块的 `MybatisPlusConfig` 不会自动扫描到 ops |
+| **增值业务物理删除** | `ops_business_data` 的 `batchDelete()` 使用原始 JDBC 物理删除，不走 `@TableLogic`。原因：导入的统计明细纠错时需直接删除。参见 `Specs/增值业务-规格说明.md` |
+| **operatorId 废弃** | 增值业务四张表的 `operator_id` 已废弃，新代码使用 `corp_id`。`operator_id` 保留向后兼容 |
 | **无自动化测试** | 项目当前无单元测试或集成测试；所有验证依赖手动检查和生产监控 |
 | **无 Pinia/Vuex** | 前端不使用集中式状态管理，token/userId/permissions 通过 `uni.getStorageSync()` 存取 |
 

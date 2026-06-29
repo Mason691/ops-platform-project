@@ -4,10 +4,13 @@ import com.aip.sdk.entity.BaseEntity;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+
 import java.math.BigDecimal;
 
 /**
  * 公司提成规则 — 按品类/品牌/型号匹配，支持按比例或固定金额计算提成。
+ *
+ * <p>status 字段取值映射系统字典 ENABLE_DISABLE：1=启用 0=禁用</p>
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -16,6 +19,10 @@ public class OpsCompanyCommissionRule extends BaseEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
+
+    /** 租户ID（多租户隔离） */
+    @TableField("corp_id")
+    private Long corpId;
 
     /** 品类：燃气灶/抽油烟机/壁挂炉/热水器 */
     @TableField("category")
@@ -53,15 +60,14 @@ public class OpsCompanyCommissionRule extends BaseEntity {
     @TableField("priority")
     private Integer priority;
 
-    /** 状态：1启用 0禁用 */
+    /** 状态：1=启用 0=禁用（ENABLE_DISABLE 字典） */
     @TableField("status")
     private Integer status;
 
-    /** 备注 */
-    @TableField("remark")
-    private String remark;
-
-    /** 运营商ID */
+    /**
+     * @deprecated 使用 {@link #corpId} 替代；保留字段仅用于向后兼容
+     */
+    @Deprecated
     @TableField("operator_id")
     private Long operatorId;
 }

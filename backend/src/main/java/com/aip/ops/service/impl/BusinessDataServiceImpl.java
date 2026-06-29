@@ -90,7 +90,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     @Override
     @Transactional
-    public Map<String, Object> importExcel(MultipartFile file, String batchNo) {
+    public Map<String, Object> importExcel(MultipartFile file, String batchNo, Long corpId) {
         int success = 0, fail = 0;
         List<String> errors = new ArrayList<>();
         Path tmpFile = null;
@@ -151,7 +151,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                     d.setCommissionRate(null); d.setCommissionAmount(null);
                     d.setCalcStatus("未计算");
                     d.setRemark(dept.isEmpty() ? null : "部门: " + dept);
-                    d.setOperatorId(4L);
+                    d.setCorpId(corpId);
+                    d.setOperatorId(corpId); // backward compat
 
                     mapper.insert(d);
                     success++;
