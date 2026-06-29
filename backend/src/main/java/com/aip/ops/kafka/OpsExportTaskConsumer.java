@@ -36,7 +36,8 @@ public class OpsExportTaskConsumer {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    private static final String EXPORT_DIR = "/home/jason/exports/";
+    /** Export directory — MUST be under /app/uploads/ to persist via Docker volume mount */
+    private static final String EXPORT_DIR = "/app/uploads/exports/";
 
     @KafkaListener(topics = "ops-export-task", groupId = "ai-platform-group")
     public void handleExportTask(String message) {
