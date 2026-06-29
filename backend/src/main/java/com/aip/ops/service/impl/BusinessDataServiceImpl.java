@@ -21,10 +21,13 @@ import org.springframework.web.multipart.MultipartFile;
 import jakarta.servlet.http.HttpServletResponse;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.URLEncoder;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Base64;
 import java.util.*;
 
 @Slf4j
@@ -268,7 +271,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             ).redirectErrorStream(true).start().waitFor();
 
             response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            response.setHeader("Content-Disposition", "attachment; filename=业务数据导出.xlsx");
+            response.setHeader("Content-Disposition", "attachment; filename=\"=?UTF-8?B?"
+                    + Base64.getEncoder().encodeToString("业务数据导出.xlsx".getBytes(StandardCharsets.UTF_8))
+                    + "?=\"; filename*=UTF-8''" + java.net.URLEncoder.encode("业务数据导出.xlsx", "UTF-8"));
             Files.copy(xlsFile, response.getOutputStream());
             response.getOutputStream().flush();
             Files.deleteIfExists(tsvFile); Files.deleteIfExists(xlsFile);
