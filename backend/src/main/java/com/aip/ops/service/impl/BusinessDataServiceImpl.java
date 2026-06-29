@@ -7,6 +7,7 @@ import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.BusinessDataService;
+import com.aip.ops.service.DataScopeService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final OpsBusinessDataMapper mapper;
     private final OpsValueAddedProductMapper productMapper;
     private final OpsPersonalCommissionRuleMapper ruleMapper;
+    private final DataScopeService dataScopeService;
     private final DataSource dataSource;
 
     private static final Set<String> VALID_COMPANIES = Set.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
@@ -54,6 +56,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         if (company != null && !company.isEmpty()) qw.eq(OpsBusinessData::getCompany, company);
         if (batchNo != null && !batchNo.isEmpty()) qw.eq(OpsBusinessData::getBatchNo, batchNo);
         if (agent != null && !agent.isEmpty()) qw.eq(OpsBusinessData::getAgent, agent);
+        applyCorpScope(qw);
         qw.orderByDesc(OpsBusinessData::getId);
 
         long total = mapper.selectCount(qw);
@@ -79,10 +82,12 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     @Override
     public List<String> getBatches() {
-        List<OpsBusinessData> all = mapper.selectList(new LambdaQueryWrapper<OpsBusinessData>()
+        LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<OpsBusinessData>()
                 .select(OpsBusinessData::getBatchNo)
-                .groupBy(OpsBusinessData::getBatchNo)
-                .orderByDesc(OpsBusinessData::getBatchNo));
+                .groupBy(OpsBusinessData::getBatchNo);
+        applyCorpScope(qw);
+        qw.orderByDesc(OpsBusinessData::getBatchNo);
+        List<OpsBusinessData> all = mapper.selectList(qw);
         Set<String> set = new LinkedHashSet<>();
         for (OpsBusinessData d : all) if (d.getBatchNo() != null) set.add(d.getBatchNo());
         return new ArrayList<>(set);
@@ -171,8 +176,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         Map<String, OpsPersonalCommissionRule> ruleMap = new HashMap<>();
         for (OpsPersonalCommissionRule r : rules) ruleMap.putIfAbsent(r.getCategory(), r);
 
-        List<OpsBusinessData> uncalcs = mapper.selectList(
-                new LambdaQueryWrapper<OpsBusinessData>().eq(OpsBusinessData::getCalcStatus, "未计算"));
+        LambdaQueryWrapper<OpsBusinessData> uncalcQw = new LambdaQueryWrapper<OpsBusinessData>()
+                .eq(OpsBusinessData::getCalcStatus, "未计算");
+        applyCorpScope(uncalcQw);
+        List<OpsBusinessData> uncalcs = mapper.selectList(uncalcQw);
 
         int done = 0, zero = 0;
         try (var conn = dataSource.getConnection(); var stmt = conn.createStatement()) {
@@ -240,6 +247,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             if (company != null && !company.isEmpty()) qw.eq(OpsBusinessData::getCompany, company);
             if (batchNo != null && !batchNo.isEmpty()) qw.eq(OpsBusinessData::getBatchNo, batchNo);
             if (agent != null && !agent.isEmpty()) qw.eq(OpsBusinessData::getAgent, agent);
+            applyCorpScope(qw);
             qw.orderByDesc(OpsBusinessData::getId);
             List<OpsBusinessData> all = mapper.selectList(qw);
 
@@ -287,11 +295,28 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     @Transactional
     public void batchDelete(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return;
-        // physical DELETE bypassing @TableLogic
+        // physical DELETE bypassing @TableLogic, but enforce corp_id scope
         String in = ids.stream().map(Object::toString).reduce((a, b) -> a + "," + b).orElse("");
+        StringBuilder sql = new StringBuilder("DELETE FROM ops_business_data WHERE id IN (").append(in).append(")");
+        Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        if (visibleIds != null && !visibleIds.isEmpty()) {
+            String corpIn = visibleIds.stream().map(Object::toString).reduce((a, b) -> a + "," + b).orElse("");
+            sql.append(" AND corp_id IN (").append(corpIn).append(")");
+        }
         try (var conn = dataSource.getConnection(); var stmt = conn.createStatement()) {
-            stmt.executeUpdate("DELETE FROM ops_business_data WHERE id IN (" + in + ")");
+            stmt.executeUpdate(sql.toString());
         } catch (Exception e) { throw new RuntimeException("批量删除失败", e); }
+    }
+
+    /**
+     * Append corp_id scope filter to query wrapper.
+     * null visibleIds (super admin) → no filter added.
+     */
+    private void applyCorpScope(LambdaQueryWrapper<OpsBusinessData> qw) {
+        Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        if (visibleIds != null && !visibleIds.isEmpty()) {
+            qw.in(OpsBusinessData::getCorpId, visibleIds);
+        }
     }
 
     private String parseExcelWithPython(Path file) throws Exception {

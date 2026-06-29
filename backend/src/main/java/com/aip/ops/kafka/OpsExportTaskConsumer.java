@@ -4,6 +4,7 @@ import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsExportTask;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsExportTaskMapper;
+import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.OpsExportTaskService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,6 +24,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 @Component
@@ -33,6 +35,7 @@ public class OpsExportTaskConsumer {
     private final OpsExportTaskMapper taskMapper;
     private final OpsExportTaskService taskService;
     private final OpsBusinessDataMapper businessDataMapper;
+    private final DataScopeService dataScopeService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -73,6 +76,11 @@ public class OpsExportTaskConsumer {
             if (agent != null && !agent.isEmpty()) qw.eq(OpsBusinessData::getAgent, agent);
             if (brand != null && !brand.isEmpty()) qw.eq(OpsBusinessData::getBrand, brand);
             if (category != null && !category.isEmpty()) qw.eq(OpsBusinessData::getCategory, category);
+            // Apply org-level data scope based on the corp that created the task
+            Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIdsForCorp(task.getCorpId());
+            if (visibleCorpIds != null && !visibleCorpIds.isEmpty()) {
+                qw.in(OpsBusinessData::getCorpId, visibleCorpIds);
+            }
             List<OpsBusinessData> rows = businessDataMapper.selectList(qw);
             log.info("Export query returned {} rows", rows.size());
 
