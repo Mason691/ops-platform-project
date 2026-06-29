@@ -84,7 +84,7 @@ public class OpsExportTaskConsumer {
             File tsvFile = new File(dir, fileName);
             try (BufferedWriter writer = new BufferedWriter(
                     new OutputStreamWriter(new FileOutputStream(tsvFile), StandardCharsets.UTF_8))) {
-                writer.write("公司\t批次号\t代理商\t品牌\t品类\t型号\t销售价\t销售日期\t返利比例\t返利金额\t状态\n");
+                writer.write("公司\t批次号\t客户\t品牌\t品类\t型号\t销售价\t销售日期\t收据号\t收款日期\t返利比例\t返利金额\t状态\n");
                 for (OpsBusinessData row : rows) {
                     writer.write(String.join("\t",
                             nvl(row.getCompany()),
@@ -95,6 +95,8 @@ public class OpsExportTaskConsumer {
                             nvl(row.getModel()),
                             row.getSalePrice() != null ? row.getSalePrice().toString() : "",
                             nvl(row.getSaleDate()),
+                            nvl(row.getReceiptNo()),
+                            nvl(row.getReceiptDate()),
                             row.getCommissionRate() != null ? row.getCommissionRate().toString() : "",
                             row.getCommissionAmount() != null ? row.getCommissionAmount().toString() : "",
                             nvl(row.getCalcStatus())));
