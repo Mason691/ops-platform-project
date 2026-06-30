@@ -28,7 +28,8 @@ VALUES
   ('com.aip.ops.entity.OpsValueAddedProduct',      'ops', '增值产品',         'mall_db.ops_value_added_product',      'opsvalueaddedproduct',       'create_opsvalueaddedproduct',       '{}', 0,1,0,0, 'draft',0,1,0,0),
   ('com.aip.ops.entity.OpsPersonalCommissionRule', 'ops', '个人提成规则',      'mall_db.ops_personal_commission_rule', 'opspersonalcommissionrule',  'create_opspersonalcommissionrule',  '{}', 0,1,0,0, 'draft',0,1,0,0),
   ('com.aip.ops.entity.OpsCompanyCommissionRule',  'ops', '公司提成规则',      'mall_db.ops_company_commission_rule',  'opscompanycommissionrule',   'create_opscompanycommissionrule',   '{}', 0,1,0,0, 'draft',0,1,0,0),
-  ('com.aip.ops.entity.OpsBusinessData',           'ops', '业务数据',         'mall_db.ops_business_data',           'opsbusinessdata',            'create_opsbusinessdata',            '{}', 0,1,0,0, 'draft',0,1,0,0)
+  ('com.aip.ops.entity.OpsBusinessData',           'ops', '业务数据',         'mall_db.ops_business_data',           'opsbusinessdata',            'create_opsbusinessdata',            '{}', 0,1,0,0, 'draft',0,1,0,0),
+  ('com.aip.ops.entity.OpsExportTask',              'ops', '导出任务',         'mall_db.ops_export_task',              'opsexporttask',              'create_opsexporttask',              '{}', 0,1,0,0, 'draft',0,1,0,0)
 ON DUPLICATE KEY UPDATE
   table_name = VALUES(table_name),
   form_type = VALUES(form_type),

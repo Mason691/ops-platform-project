@@ -6,6 +6,7 @@ import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsExportTaskMapper;
 import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.OpsExportTaskService;
+import com.aip.ops.service.impl.BusinessDataServiceImpl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -99,7 +100,7 @@ public class OpsExportTaskConsumer {
                             nvl(row.getBatchNo()),
                             nvl(row.getAgent()),
                             nvl(row.getBrand()),
-                            nvl(row.getCategory()),
+                            nvl(BusinessDataServiceImpl.getCategoryDisplayName(row.getCategory())),
                             nvl(row.getModel()),
                             row.getSalePrice() != null ? row.getSalePrice().toString() : "",
                             nvl(row.getSaleDate()),

@@ -50,6 +50,19 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             "户内美装工程", "8", "户内美装运维", "9"
     );
 
+    /** Reverse map: dict key (1,2,3...) → Chinese display name (燃气灶,抽油烟机...) */
+    public static final Map<String, String> KEY_TO_CN = Map.of(
+            "1", "燃气灶", "2", "抽油烟机", "3", "热水器", "4", "壁挂炉",
+            "5", "壁挂炉以旧换新销售", "6", "户内美装开发", "7", "定尺波纹管",
+            "8", "户内美装工程", "9", "户内美装运维"
+    );
+
+    /** Convert category dict key to Chinese display name. Falls back to original value if not found. */
+    public static String getCategoryDisplayName(String key) {
+        if (key == null || key.isEmpty()) return "";
+        return KEY_TO_CN.getOrDefault(key, key);
+    }
+
     @Override
     public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent) {
         LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
@@ -259,7 +272,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             for (OpsBusinessData d : all) {
                 sb.append(fmt(d.getBatchNo())).append('\t')
                   .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
-                  .append(fmt(d.getBrand())).append('\t').append(fmt(d.getCategory())).append('\t')
+                  .append(fmt(d.getBrand())).append('\t').append(getCategoryDisplayName(d.getCategory())).append('\t')
                   .append(fmt(d.getModel())).append('\t').append(fmt(d.getSalePrice())).append('\t')
                   .append(fmt(d.getRetailFloorPrice())).append('\t').append(fmt(d.getGroupLowestPrice())).append('\t')
                   .append(fmt(d.getCommissionRate())).append('\t').append(fmt(d.getCommissionAmount())).append('\t')
