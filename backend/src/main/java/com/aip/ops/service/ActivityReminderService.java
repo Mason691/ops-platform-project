@@ -26,6 +26,7 @@ public class ActivityReminderService {
     private final OpsActivityMapper activityMapper;
     private final OpsActivityBookingMapper bookingMapper;
     private final OpsRemindLogMapper remindLogMapper;
+    private final OpsLiveRoomMapper liveRoomMapper;
 
     @Value("${ops.remind.hours-before:24,1}")
     private String remindHoursBefore;
@@ -34,34 +35,78 @@ public class ActivityReminderService {
     @Scheduled(fixedRate = 300_000)
     public void checkAndRemind() {
         try {
-            int[] hours = parseRemindHours();
-            if (hours.length == 0) return;
-
-            // 查找所有状态为"进行中"(status=1)且有开始时间的活动
-            List<OpsActivity> activities = activityMapper.selectList(
-                    new LambdaQueryWrapper<OpsActivity>()
-                            .eq(OpsActivity::getStatus, 1)
-                            .isNotNull(OpsActivity::getStartTime));
-
-            LocalDateTime now = LocalDateTime.now();
-            for (OpsActivity activity : activities) {
-                if (activity.getStartTime() == null) continue;
-                long hoursUntilStart = java.time.Duration.between(now, activity.getStartTime()).toHours();
-
-                for (int h : hours) {
-                    // 活动开始前 h 小时，±5分钟窗口
-                    if (hoursUntilStart <= h && hoursUntilStart > h - 1) {
-                        sendReminders(activity, h + "h");
-                        break; // 每个时间点只发一次
-                    }
-                }
-            }
+            checkActivityReminders();
+            checkLiveRoomReminders();
         } catch (Exception e) {
             log.warn("提醒任务执行异常: {}", e.getMessage());
         }
     }
 
-    private void sendReminders(OpsActivity activity, String remindType) {
+    private void checkActivityReminders() {
+        int[] hours = parseRemindHours();
+        if (hours.length == 0) return;
+
+        // 查找所有状态为"进行中"(status=1)且有开始时间的活动
+        List<OpsActivity> activities = activityMapper.selectList(
+                new LambdaQueryWrapper<OpsActivity>()
+                        .eq(OpsActivity::getStatus, 1)
+                        .isNotNull(OpsActivity::getStartTime));
+
+        LocalDateTime now = LocalDateTime.now();
+        for (OpsActivity activity : activities) {
+            if (activity.getStartTime() == null) continue;
+            long hoursUntilStart = java.time.Duration.between(now, activity.getStartTime()).toHours();
+
+            for (int h : hours) {
+                // 活动开始前 h 小时，±5分钟窗口
+                if (hoursUntilStart <= h && hoursUntilStart > h - 1) {
+                    sendActivityReminders(activity, h + "h");
+                    break; // 每个时间点只发一次
+                }
+            }
+        }
+    }
+
+    /**
+     * 检查即将开播的直播间（预告 status=0）。
+     * 在开播前 5 分钟向已设置提醒的用户发送通知。
+     */
+    private void checkLiveRoomReminders() {
+        LocalDateTime now = LocalDateTime.now();
+        // 查找所有预告中且即将在 5 分钟内开播的直播间
+        List<OpsLiveRoom> upcomingRooms = liveRoomMapper.selectList(
+                new LambdaQueryWrapper<OpsLiveRoom>()
+                        .eq(OpsLiveRoom::getStatus, 0)
+                        .isNotNull(OpsLiveRoom::getStartTime));
+
+        for (OpsLiveRoom room : upcomingRooms) {
+            if (room.getStartTime() == null) continue;
+            long minutesUntilStart = java.time.Duration.between(now, room.getStartTime()).toMinutes();
+            // 开播前 0~5 分钟窗口内发送提醒
+            if (minutesUntilStart < 0 || minutesUntilStart > 5) continue;
+
+            // 查找该直播间所有待发送的提醒记录
+            List<OpsRemindLog> pendingReminds = remindLogMapper.selectList(
+                    new LambdaQueryWrapper<OpsRemindLog>()
+                            .eq(OpsRemindLog::getLiveRoomId, room.getId())
+                            .eq(OpsRemindLog::getRemindType, "LIVE")
+                            .eq(OpsRemindLog::getStatus, 0));
+
+            for (OpsRemindLog rl : pendingReminds) {
+                // 标记已发送
+                rl.setStatus(1);
+                rl.setSendTime(now);
+                remindLogMapper.updateById(rl);
+
+                log.info("已发送直播提醒: liveRoomId={} title={} userId={}",
+                        room.getId(), room.getLiveTitle(), rl.getCreateUser());
+                // TODO: 对接微信订阅消息推送
+                // sendWechatSubscribeMessage(room, rl.getCreateUser());
+            }
+        }
+    }
+
+    private void sendActivityReminders(OpsActivity activity, String remindType) {
         List<OpsActivityBooking> bookings = bookingMapper.selectList(
                 new LambdaQueryWrapper<OpsActivityBooking>()
                         .eq(OpsActivityBooking::getActivityId, activity.getId())

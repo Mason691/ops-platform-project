@@ -138,9 +138,9 @@ ops-platform-project/
 │   ├── src/main/java/com/aip/ops/
 │   │   ├── OpsApplication.java
 │   │   ├── config/          # SecurityConfig, AuthConfig, JacksonConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig
-│   │   ├── controller/      # 14 controllers
+│   │   ├── controller/      # 15 controllers
 │   │   │   ├── PlatformController.java      # 核心：商品/活动/订单/积分/优惠券/直播室/用户
-│   │   │   ├── AdminController.java         # 管理后台：活动/商品 CRUD、预约查询、首页统计、商家绑定
+│   │   │   ├── AdminController.java         # 管理后台：活动/商品/直播室 CRUD、预约查询、首页统计、商家绑定
 │   │   │   ├── AuthController.java          # 登录/注册
 │   │   │   ├── PublicAccountController.java  # 公众号配置查询
 │   │   │   ├── FileUploadController.java    # /api/ops/files/upload — 图片/视频上传
@@ -150,34 +150,40 @@ ops-platform-project/
 │   │   │   ├── PartnerController.java       # 城市合伙人管理（代理底座 internal API）
 │   │   │   ├── StationController.java       # H5 端站长申请/状态/信息（代理底座 internal API）
 │   │   │   ├── AdminStationController.java  # 管理后台站长审批/列表/统计（代理底座 internal API）
-│   │   │   ├── BusinessDataController.java  # 增值业务：Excel 导入/提成计算/导出
+│   │   │   ├── BusinessDataController.java  # 增值业务：Excel 导入/提成计算/异步导出
 │   │   │   ├── CommissionRuleController.java # 增值业务：个人/公司提成规则 CRUD
-│   │   │   └── ValueAddedProductController.java # 增值业务：增值产品 CRUD
-│   │   ├── entity/          # 22 entities（全部继承 SDK BaseEntity，100% 合规）
-│   │   ├── mapper/          # 22 MyBatis-Plus mappers（均继承 BaseMapper）
-│   │   ├── service/         # 10 service interfaces + 8 impls + 2 concrete services
+│   │   │   ├── ValueAddedProductController.java # 增值业务：增值产品 CRUD
+│   │   │   └── PermissionController.java    # 权限概要查询（corpId/orgRoleType/canEdit）
+│   │   ├── entity/          # 23 entities（全部继承 SDK BaseEntity，100% 合规）
+│   │   ├── mapper/          # 23 MyBatis-Plus mappers（均继承 BaseMapper）
+│   │   ├── service/         # 12 service interfaces + 8 impls + 3 concrete services
 │   │   │   ├── impl/UserServiceImpl.java         # 通过 PlatformInternalClient 调用底座 SSO
 │   │   │   ├── impl/OpsProductServiceImpl.java   # 商品管理 + ProductBatchClient 批量查询
-│   │   │   ├── impl/OpsActivityServiceImpl.java  # 活动管理
+│   │   │   ├── impl/OpsActivityServiceImpl.java  # 活动管理 + 直播室关联 + liveStatus 计算
 │   │   │   ├── impl/HomeConfigServiceImpl.java   # 首页配置 + 公开数据
 │   │   │   ├── impl/PublicAccountConfigServiceImpl.java
-│   │   │   ├── impl/ValueAddedProductServiceImpl.java  # 增值产品 CRUD + 品类字典校验
-│   │   │   ├── impl/CommissionRuleServiceImpl.java   # 个人/公司提成规则 CRUD
-│   │   │   ├── impl/BusinessDataServiceImpl.java     # Excel 导入/提成计算/导出
+│   │   │   ├── impl/ValueAddedProductServiceImpl.java  # 增值产品 CRUD + 品类字典校验 + org-role 写权限
+│   │   │   ├── impl/CommissionRuleServiceImpl.java   # 个人/公司提成规则 CRUD + org-role 写权限
+│   │   │   ├── impl/BusinessDataServiceImpl.java     # Excel 导入/提成计算/异步导出 + org-scope 数据隔离
 │   │   │   ├── PlatformMerchantService.java      # 通过 PlatformInternalClient 查组织信息
-│   │   │   └── ActivityReminderService.java      # @Scheduled 预约提醒（5 分钟轮询）
+│   │   │   ├── ActivityReminderService.java      # @Scheduled 预约提醒（5 分钟轮询）
+│   │   │   ├── DataScopeService.java             # 组织级数据可见范围（超管/运营商/城市合伙人）
+│   │   │   ├── OrgRoleService.java               # 组织角色查询（superadmin/operator/partner）
+│   │   │   └── OpsExportTaskService.java + impl  # 异步导出任务状态管理
 │   │   ├── client/          # 子系统间 HTTP 客户端
 │   │   │   ├── MemberSyncClient.java        # 会员同步到底座平台
 │   │   │   └── ProductBatchClient.java      # mall-service 批量商品查询
 │   │   ├── agent/           # AI DomainAgent
 │   │   │   └── OpsAgent.java                # @AgentComponent，路由 AI 助手业务问答
-│   │   └── tool/            # MCP 工具
-│   │       └── OpsOrderQueryTool.java       # @McpTool，按条件查询订单
+│   │   ├── tool/            # MCP 工具
+│   │   │   └── OpsOrderQueryTool.java       # @McpTool，按条件查询订单
+│   │   ├── kafka/           # Kafka 消费者
+│   │   │   └── OpsExportTaskConsumer.java   # 异步导出任务消费（ops-export-task → ops-export-result）
 │   └── pom.xml
 ├── frontend/
-│   ├── src/pages/           # 21 page files，14 个目录（见下方"前端页面路由"）
-│   ├── src/components/      # 共享组件（ImageCropperModal.vue 已被 activity-form 内联替代）
-│   ├── src/api/index.js     # 集中 API 注册（56 个方法）
+│   ├── src/pages/           # 23 page files，15 个目录（见下方"前端页面路由"）
+│   ├── src/components/      # 共享组件（LiveStatusCard.vue 直播状态卡片；ImageCropperModal.vue 已被 activity-form 内联替代）
+│   ├── src/api/index.js     # 集中 API 注册（63 个方法）
 │   ├── src/utils/           # request.js, image.js, config.js, jssdk.js, auth-bridge.js
 │   ├── src/config.js        # BASE_URL + DEFAULT_CORP_ID
 │   ├── src/App.vue          # Minimal: onLaunch/onShow + 全局 CSS
@@ -192,7 +198,7 @@ ops-platform-project/
 │   ├── .env.production      # VITE_BASE=/ops/ VITE_OPS_ENTRY=https://boss.jdzn99.com
 │   └── package.json
 ├── sql/init.sql             # 18 tables + seed data
-├── sql/                     # 15 migration SQL files
+├── sql/                     # 18 migration SQL files
 ├── Specs/                   # 功能规格文档
 ├── MEMORY.md                # 编码规范（强制）+ ADR（⚠️ 合规状态表已过期）
 ├── soul.md                  # 产品理念与设计哲学
@@ -203,7 +209,7 @@ ops-platform-project/
 
 ### 前端页面路由（pages.json）
 
-入口页：`pages/ai/chat`（AI 优先设计）。22 个页面，5 个底部 Tab：
+入口页：`pages/ai/chat`（AI 优先设计）。23 个页面，5 个底部 Tab：
 
 | Tab | 页面 | 说明 |
 |-----|------|------|
@@ -213,7 +219,7 @@ ops-platform-project/
 | 活动 | `pages/activity/index`, `pages/activity/detail`, `pages/live/index` | 活动 + 直播广场 |
 | 我的 | `pages/mine/index`, `pages/order/*`, `pages/address/*`, `pages/points/log`, `pages/coupon/list`, `pages/auth/*`, `pages/booking/list` | 用户中心 |
 
-管理页面（不在 Tab 中）：`pages/admin/activity-form`, `pages/admin/home-config`  
+管理页面（不在 Tab 中）：`pages/admin/activity-form`, `pages/admin/home-config`, `pages/admin/live-room-manage`  
 站长页面（不在 Tab 中）：`pages/station/apply`, `pages/station/center`
 
 **前端架构特点**：
@@ -244,6 +250,7 @@ ops-platform-project/
 | `/api/ops/ai/**` | 混合 | AI 聊天（chat 需 JWT，config 公开） |
 | `/api/ops/admin/**` | JWT | 管理后台（活动/商品/首页配置/站长审批/增值业务） |
 | `/api/ops/station/**` | JWT | 站长申请/状态/信息（代理底座 internal API） |
+| `/api/ops/admin/permission/**` | JWT | 权限概要查询（corpId/orgRoleType/canEdit） |
 
 **AiChatProxyController 端点详情**（`/api/ops/ai`）：
 - `POST /chat` — 转发 AI 对话到底座 `POST /api/ai/chat/send`（需 JWT）
@@ -328,11 +335,69 @@ DB (相对路径) → Backend ImageUrlUtil → API JSON (相对路径)
 - 前端页面：`pages/station/apply`（申请）、`pages/station/center`（站长中心）
 - 认证方式：JWT + `X-Internal-Token` 代理底座
 
+### 组织级数据隔离与权限（Org-level Data Scope）
+
+**三层角色模型**（超管 → 运营商 → 城市合伙人）：
+
+```
+超管（corpId=0）          → 查看全部数据，无限制
+运营商（orgRoleId≠5）      → 查看自己 + 所有下属城市合伙人的数据，完全 CRUD
+城市合伙人（orgRoleId=5）  → 只查自己数据，只读（无写权限）
+```
+
+- **`DataScopeService`**：计算当前用户可见的 corpId 集合。超管返回 `null`（查全部），运营商返回 `{self + children}`，合伙人返回 `{self}`。结果缓存 60 秒。
+  - 被 `BusinessDataController` 的查询/导出/提成计算使用
+  - 被 `OpsExportTaskConsumer`（Kafka 消费者）使用（通过 `getVisibleCorpIdsForCorp()`，Kafka 无 SecurityContext）
+- **`OrgRoleService`**：判定当前用户 org 角色类型。供 `PermissionController` 和增值业务模块使用，与 `DataScopeService` 独立缓存。
+- **`PermissionController`**（`GET /api/ops/admin/permission/profile`）：返回 `{corpId, orgRoleType, canEditProducts, canEditRules}`，前端用此控制页面编辑按钮的可见性。
+- **增值业务写保护**：`ValueAddedProductController`、`CommissionRuleController`、`BusinessDataController` 的写操作均调用 `orgRoleService.isOperatorOrSuperAdmin()` 校验，城市合伙人拒绝写入。
+- **安全兜底**：任何异常（底座 API 不可达等）→ 视为运营商（不阻断写操作），但数据 scope 回退到仅自己（安全优先）。
+
+### 异步导出（Kafka）
+
+用户在前端提交导出请求 → `BusinessDataController` 创建 `OpsExportTask` 记录 → `KafkaTemplate.send("ops-export-task", ...)` → `OpsExportTaskConsumer` 消费：
+
+```
+Controller → Kafka (ops-export-task) → Consumer → DB 查询 → TSV 写入磁盘
+  → Python openpyxl 转 XLSX → 更新 task 状态 → Kafka (ops-export-result) → 前端轮询
+```
+
+关键细节：
+- **导出目录**：`/app/uploads/exports/`（Docker volume 持久化，宿主机 `/data2/boss-platform/uploads/exports/`）
+- **数据隔离**：Consumer 通过 `DataScopeService.getVisibleCorpIdsForCorp(task.corpId)` 获取组织级数据范围
+- **文件格式**：优先 XLSX（Python openpyxl 转换），降级 TSV（Python 不可用时）
+- **`OpsExportTask`** 表状态：`PENDING` → `PROCESSING` → `DONE` / `FAILED`
+- **条件启用**：`@ConditionalOnProperty(name = "spring.kafka.enabled", havingValue = "true")`，Kafka 不可用时消费者静默不加载
+
+### 直播室管理（Live Room）
+
+- **数据库**：`ops_live_room` 表（经 `migrate_live_room_ext.sql` 扩展了 `replay_url`, `viewer_count`, `actual_start_time`, `actual_end_time`）
+- **Admin 端点**（`AdminController`）：
+  - `GET /api/ops/admin/live-rooms` — 分页列表（含筛选）
+  - `POST /api/ops/admin/live-rooms` — 创建
+  - `PUT /api/ops/admin/live-rooms/{id}` — 编辑
+  - `DELETE /api/ops/admin/live-rooms/{id}` — 删除
+  - `GET /api/ops/admin/live-rooms/{id}` — 详情（含回放URL/观看人数）
+  - `PUT /api/ops/admin/live-rooms/{id}/status` — 手动切换状态（0=预告→1=直播中→2=已结束），自动记录 `actual_start_time`/`actual_end_time`
+  - `GET /api/ops/admin/live-rooms/{id}/qrcode` — 返回页面路径+视频号信息（供前端 qrcodejs 渲染）
+- **H5 端**：`LiveStatusCard.vue` 组件 — 根据直播状态展示倒计时/观看人数/回放入口
+  - 三种状态：预告（倒计时天/时/分/秒）→ 直播中（🔥 观看人数 + 📺 跳转按钮）→ 已结束（回放或暂无）
+  - 非微信环境弹引导遮罩（"请使用微信客户端打开"）
+  - 跳转通过 `wx.openChannelsLive({ finderUserName })` 打开视频号直播间
+- **管理页面**：`pages/admin/live-room-manage.vue` — 直播列表 CRUD + 状态切换 + 二维码
+
+### 活动-直播室关联
+
+- `OpsActivity` 新增 `live_room_id` 字段（关联视频号直播室）+ 瞬态字段 `liveRoomInfo`
+- `OpsActivityServiceImpl.getActivityDetail()` 返回 `liveStatus` 结构（`{displayStatus, viewerCount, hasReplay, countdownMs}`），供前端 `LiveStatusCard` 渲染
+- 活动列表接口批量填充 `liveRoomInfo`（仅对 `type=live_reserve` 活动），封面图通过 `ImageUrlUtil` 规范化
+- Admin 活动详情也返回关联直播室信息
+
 ### 底座架构合规（ADR-005，2026-06-22）
 
 > MEMORY.md 第四节合规状态表为**改前快照（12% 合规）**，已全部过时。当前合规状态以本文件为准。
 
-**实体继承 BaseEntity**：全部 22 个 entity 继承 `com.aip.sdk.entity.BaseEntity`（✅ 100% 合规）。
+**实体继承 BaseEntity**：全部 23 个 entity 继承 `com.aip.sdk.entity.BaseEntity`（✅ 100% 合规）。
 - 必须加 `@EqualsAndHashCode(callSuper = true)`
 - 不要手动声明 `createTime`/`modifyTime`/`updateTime` 字段
 - `corpId` 字段已添加到所有业务表
@@ -395,6 +460,7 @@ TTS 同理：
 | `app.upload.base-dir` | 文件上传根目录 | `/app/uploads`（Docker 容器内）→ 挂载宿主机 `/data2/boss-platform/uploads` |
 | `app.resource.base-url` | 静态资源对外域名（拼接图片 URL） | `https://boss.jdzn99.com` |
 | `ops.remind.hours-before` | 活动预约提醒提前小时数 | `24,1` |
+| `spring.kafka.enabled` | 是否启用 Kafka 异步导出 | `true`（生产）/ `false`（测试无 Kafka 时） |
 
 ## 前端环境变量
 
@@ -445,9 +511,13 @@ CSS `url()` 把根相对路径（如 `/uploads/ops/img/xxx.jpg`）解析到页�
 | **MetaObjectHandler** | ops 是独立 Spring Boot 应用，`MybatisPlusConfig.java` 自行注册 `MetaObjectHandler`（审计字段自动填充）。平台 web 模块的 `MybatisPlusConfig` 不会自动扫描到 ops |
 | **增值业务物理删除** | `ops_business_data` 的 `batchDelete()` 使用原始 JDBC 物理删除，不走 `@TableLogic`。原因：导入的统计明细纠错时需直接删除。参见 `Specs/增值业务-规格说明.md` |
 | **operatorId 废弃** | 增值业务四张表的 `operator_id` 已废弃，新代码使用 `corp_id`。`operator_id` 保留向后兼容 |
+| **OpsExportTask 物理字段** | `OpsExportTask` 实体显式声明了 `createTime`（因 SQL 使用 `DEFAULT CURRENT_TIMESTAMP`），需注意与 BaseEntity `createTime` 的重复映射。`finishTime` 不是审计字段（业务时间） |
+| **Kafka 条件加载** | `OpsExportTaskConsumer` 仅在 `spring.kafka.enabled=true` 时加载。测试环境无 Kafka → 导出为同步 TSV 文件返回 |
+| **DataScopeService 缓存** | `DataScopeService` 和 `OrgRoleService` 均有 60s 本地 Caffeine-like ConcurrentHashMap 缓存。新增组织或变更角色后最多 60s 生效 |
+| **城市合伙人只读** | 城市合伙人（orgRoleId=5）在增值模块无写权限。前端通过 `/api/ops/admin/permission/profile` 获取权限后隐藏编辑按钮，后端 `OrgRoleService.isOperatorOrSuperAdmin()` 兜底校验 |
 | **无自动化测试** | 项目当前无单元测试或集成测试；所有验证依赖手动检查和生产监控 |
 | **无 Pinia/Vuex** | 前端不使用集中式状态管理，token/userId/permissions 通过 `uni.getStorageSync()` 存取 |
 
 ---
 
-最后更新：2026-06-27 | 负责人：架构师
+最后更新：2026-06-30 | 负责人：架构师

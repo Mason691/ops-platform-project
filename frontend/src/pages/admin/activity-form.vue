@@ -65,6 +65,30 @@
         >{{ t.label }}</view>
       </view>
 
+      <!-- Live room selector (only for live_reserve type) -->
+      <template v-if="form.type === 'live_reserve'">
+        <text class="af-label">关联直播间 <text class="af-required">*</text></text>
+        <picker :range="liveRoomLabels" :value="liveRoomIdx" @change="onLiveRoomChange">
+          <view class="af-input">{{ liveRoomLabels[liveRoomIdx] || '请选择直播间' }}</view>
+        </picker>
+        <!-- Selected room info -->
+        <view v-if="selectedLiveRoom" class="af-live-preview">
+          <image
+            v-if="selectedLiveRoom.coverUrl"
+            :src="assetUrl(selectedLiveRoom.coverUrl)"
+            class="af-live-cover"
+            mode="aspectFill"
+          />
+          <view class="af-live-info">
+            <text class="af-live-title">{{ selectedLiveRoom.liveTitle }}</text>
+            <view class="af-live-badge" :class="liveRoomStatusClass(selectedLiveRoom.status)">
+              {{ liveRoomStatusLabel(selectedLiveRoom.status) }}
+            </view>
+            <text v-if="selectedLiveRoom.description" class="af-live-desc">{{ selectedLiveRoom.description }}</text>
+          </view>
+        </view>
+      </template>
+
       <text class="af-label">活动地点</text>
       <input class="af-input" v-model="form.location" placeholder="线下活动请填写地址；线上可留空" maxlength="100" />
 
@@ -190,7 +214,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick, watch, onBeforeUnmount } from 'vue'
+import { ref, reactive, onMounted, nextTick, watch, onBeforeUnmount, computed } from 'vue'
 import { api } from '@/api/index'
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
@@ -226,9 +250,49 @@ const form = reactive({
   videoCoverUrl: '',
   images: '[]',
   detailImages: [],
+  liveRoomId: null,
 })
 
 const coverUrl = ref('')
+
+// ==================== Live Room Selector ====================
+const availableLiveRooms = ref([])
+
+function liveRoomStatusLabel(s) {
+  if (s === 1) return '直播中'
+  if (s === 2) return '已结束'
+  return '预告'
+}
+function liveRoomStatusClass(s) {
+  if (s === 1) return 'live'
+  if (s === 2) return 'ended'
+  return 'upcoming'
+}
+
+const liveRoomLabels = computed(() => {
+  return availableLiveRooms.value.map(r => {
+    const prefix = r.status === 1 ? '🔴 ' : r.status === 2 ? '⚫ ' : '🟠 '
+    return prefix + (r.liveTitle || '未命名')
+    + ' (' + (r.startTime ? r.startTime.substring(0, 16) : '时间待定') + ')'
+  })
+})
+
+const liveRoomIdx = computed(() => {
+  // Return -1 if no liveRoomId set; return index if found
+  if (form.liveRoomId == null) return -1
+  const idx = availableLiveRooms.value.findIndex(r => r.id === form.liveRoomId)
+  return idx >= 0 ? idx : -1
+})
+
+const selectedLiveRoom = computed(() => {
+  if (form.liveRoomId == null) return null
+  return availableLiveRooms.value.find(r => r.id === form.liveRoomId) || null
+})
+
+function onLiveRoomChange(e) {
+  const idx = e.detail.value
+  form.liveRoomId = availableLiveRooms.value[idx]?.id || null
+}
 
 // ==================== Cropper ====================
 const cropperVisible = ref(false)
@@ -507,6 +571,7 @@ async function handleSubmit() {
     images: JSON.stringify(form.detailImages),
     detailImages: JSON.stringify(form.detailImages),
     productIds: [],
+    liveRoomId: form.liveRoomId,
   }
 
   try {
@@ -557,6 +622,11 @@ async function ensureLogin() {
 // ==================== Init (Edit mode) ====================
 onMounted(async () => {
   await ensureLogin()
+  // 加载可选直播间列表
+  try {
+    const rooms = await api.adminAvailableLiveRooms()
+    availableLiveRooms.value = Array.isArray(rooms) ? rooms : []
+  } catch (_) { availableLiveRooms.value = [] }
   const pages = getCurrentPages()
   const opts = pages[pages.length - 1]?.options || {}
   const id = opts.id
@@ -584,6 +654,7 @@ onMounted(async () => {
       let di = a.detailImages
       if (typeof di === 'string') { try { di = JSON.parse(di) } catch { di = [] } }
       form.detailImages = Array.isArray(di) ? di : []
+      form.liveRoomId = a.liveRoomId || null
       coverUrl.value = form.coverUrl ? (form.coverUrl.startsWith('/') ? 'https://test.jdzn99.com' + form.coverUrl : form.coverUrl) : ''
     } catch (e) {
       console.error('[activity-form] load failed:', e)
@@ -618,6 +689,60 @@ onMounted(async () => {
 .af-label:first-child { margin-top: 0; }
 .af-required { color: #FF6B35; }
 .af-hint { font-size: 22rpx; color: #999; display: block; margin-top: 8rpx; }
+
+/* Live room preview */
+.af-live-preview {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 16rpx;
+  padding: 16rpx;
+  background: #fff9f5;
+  border-radius: 12rpx;
+  border: 2rpx solid #ffe0cc;
+}
+.af-live-cover {
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 10rpx;
+  flex-shrink: 0;
+  background: #f0f0f0;
+}
+.af-live-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  min-width: 0;
+}
+.af-live-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.af-live-badge {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 4rpx 16rpx;
+  border-radius: 6rpx;
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #fff;
+}
+.af-live-badge.upcoming { background: #FF6B35; }
+.af-live-badge.live { background: #ff0000; }
+.af-live-badge.ended { background: #999; }
+.af-live-desc {
+  font-size: 24rpx;
+  color: #888;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 /* Inputs */
 .af-input {

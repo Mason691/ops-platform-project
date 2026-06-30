@@ -49,6 +49,22 @@ public class OpsLiveRoom extends BaseEntity {
     @TableField("status")
     private Integer status;
 
+    /** 回放视频URL（直播结束后运营填写） */
+    @TableField("replay_url")
+    private String replayUrl;
+
+    /** 观看人数（运营手动填写或API获取） */
+    @TableField("viewer_count")
+    private Integer viewerCount;
+
+    /** 实际上播时间 */
+    @TableField("actual_start_time")
+    private LocalDateTime actualStartTime;
+
+    /** 实际结束时间 */
+    @TableField("actual_end_time")
+    private LocalDateTime actualEndTime;
+
     /** 排序（数字越小越靠前） */
     @TableField("sort_order")
     private Integer sortOrder;
@@ -56,4 +72,8 @@ public class OpsLiveRoom extends BaseEntity {
     /** 备注 */
     @TableField("remark")
     private String remark;
+
+    /** 直播间简介（展示在跳转前页面，支持换行） */
+    @TableField("description")
+    private String description;
 }

@@ -33,4 +33,8 @@ public class OpsActivity extends BaseEntity {
     /** 关联商品数量（非数据库字段，由列表查询 JOIN 计算） */
     @TableField(exist = false)
     private Integer productCount;
+
+    /** 关联的直播室信息（非数据库字段，列表查询时按需填充） */
+    @TableField(exist = false)
+    private OpsLiveRoom liveRoomInfo;
 }

@@ -13,6 +13,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -41,6 +43,23 @@ public class OpsActivityServiceImpl implements OpsActivityService {
                 offset, pageSize, type, category, status);
         long total = activityMapper.countActivityPage(type, category, status);
 
+        // 为 live_reserve 类型活动批量填充关联的直播室信息
+        List<Long> liveRoomIds = records.stream()
+                .filter(a -> "live_reserve".equals(a.getType()) && a.getLiveRoomId() != null)
+                .map(OpsActivity::getLiveRoomId)
+                .distinct()
+                .collect(Collectors.toList());
+        if (!liveRoomIds.isEmpty()) {
+            List<OpsLiveRoom> liveRooms = liveRoomMapper.selectBatchIds(liveRoomIds);
+            Map<Long, OpsLiveRoom> lrMap = liveRooms.stream()
+                    .collect(Collectors.toMap(OpsLiveRoom::getId, lr -> lr, (a, b) -> a));
+            for (OpsActivity a : records) {
+                if (a.getLiveRoomId() != null) {
+                    a.setLiveRoomInfo(lrMap.get(a.getLiveRoomId()));
+                }
+            }
+        }
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("records", records);
         result.put("total", total);
@@ -65,7 +84,33 @@ public class OpsActivityServiceImpl implements OpsActivityService {
         result.put("products", enrichedProducts);
         if (a.getLiveRoomId() != null) {
             OpsLiveRoom lr = liveRoomMapper.selectById(a.getLiveRoomId());
-            result.put("liveRoom", lr);
+            if (lr != null) {
+                result.put("liveRoom", lr);
+
+                // 计算前端展示用的 liveStatus
+                Map<String, Object> liveStatus = new LinkedHashMap<>();
+                String displayStatus;
+                if (lr.getStatus() != null && lr.getStatus() == 1) {
+                    displayStatus = "live";
+                } else if (lr.getStatus() != null && lr.getStatus() == 2) {
+                    displayStatus = "ended";
+                } else {
+                    // status=0（预告），但如果已过预计开播时间，容错视为直播中
+                    if (lr.getStartTime() != null && LocalDateTime.now().isAfter(lr.getStartTime())) {
+                        displayStatus = "live";
+                    } else {
+                        displayStatus = "upcoming";
+                    }
+                }
+                liveStatus.put("displayStatus", displayStatus);
+                liveStatus.put("viewerCount", lr.getViewerCount() != null ? lr.getViewerCount() : 0);
+                liveStatus.put("hasReplay", lr.getReplayUrl() != null && !lr.getReplayUrl().isBlank());
+                if ("upcoming".equals(displayStatus) && lr.getStartTime() != null) {
+                    long diffMs = Duration.between(LocalDateTime.now(), lr.getStartTime()).toMillis();
+                    liveStatus.put("countdownMs", Math.max(0, diffMs));
+                }
+                result.put("liveStatus", liveStatus);
+            }
         }
         return result;
     }

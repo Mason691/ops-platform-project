@@ -367,6 +367,12 @@ public class PlatformController {
             }
         }
 
+        // 规范化直播间封面图
+        OpsLiveRoom lr = (OpsLiveRoom) detail.get("liveRoom");
+        if (lr != null && lr.getCoverUrl() != null && !lr.getCoverUrl().isBlank()) {
+            lr.setCoverUrl(imageUrlUtil.normalizeImage(lr.getCoverUrl()));
+        }
+
         return R.ok(detail);
     }
 
@@ -565,6 +571,77 @@ public class PlatformController {
             }
         }
         return R.ok(list);
+    }
+
+    /**
+     * 公开：获取单个直播室详情（含简介、liveStatus 计算）。
+     * 供 H5 活动详情页和直播落地页使用，无需认证。
+     */
+    @GetMapping("/live-rooms/{id}")
+    public R<?> liveRoomDetail(@PathVariable Long id) {
+        OpsLiveRoom room = liveRoomMapper.selectById(id);
+        if (room == null) return R.fail("直播间不存在");
+        if (room.getCoverUrl() != null && !room.getCoverUrl().isBlank()) {
+            room.setCoverUrl(imageUrlUtil.normalizeImage(room.getCoverUrl()));
+        }
+
+        // 计算 liveStatus，与 activity detail 保持一致
+        Map<String, Object> liveStatus = new LinkedHashMap<>();
+        String displayStatus;
+        if (room.getStatus() != null && room.getStatus() == 1) {
+            displayStatus = "live";
+        } else if (room.getStatus() != null && room.getStatus() == 2) {
+            displayStatus = "ended";
+        } else {
+            if (room.getStartTime() != null && LocalDateTime.now().isAfter(room.getStartTime())) {
+                displayStatus = "live";
+            } else {
+                displayStatus = "upcoming";
+            }
+        }
+        liveStatus.put("displayStatus", displayStatus);
+        liveStatus.put("viewerCount", room.getViewerCount() != null ? room.getViewerCount() : 0);
+        liveStatus.put("hasReplay", room.getReplayUrl() != null && !room.getReplayUrl().isBlank());
+        if ("upcoming".equals(displayStatus) && room.getStartTime() != null) {
+            long diffMs = java.time.Duration.between(LocalDateTime.now(), room.getStartTime()).toMillis();
+            liveStatus.put("countdownMs", Math.max(0, diffMs));
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("liveRoom", room);
+        result.put("liveStatus", liveStatus);
+        return R.ok(result);
+    }
+
+    /**
+     * 设置直播开播提醒。
+     * 记录到 ops_remind_log，由 ActivityReminderService 在开播前推送。
+     */
+    @PostMapping("/live-rooms/{id}/remind")
+    public R<?> remindLiveRoom(@PathVariable Long id) {
+        OpsLiveRoom room = liveRoomMapper.selectById(id);
+        if (room == null) return R.fail("直播间不存在");
+        Long userId = getUserIdOrNull();
+        if (userId == null) return R.fail("请先登录");
+
+        // 防重复：同一用户对同一直播间只记录一次
+        Long exist = remindLogMapper.selectCount(new LambdaQueryWrapper<OpsRemindLog>()
+                .eq(OpsRemindLog::getLiveRoomId, id)
+                .eq(OpsRemindLog::getRemindType, "LIVE")
+                .eq(OpsRemindLog::getCreateUser, userId));
+        if (exist > 0) {
+            return R.ok(Map.of("reminded", true, "msg", "已设置提醒"));
+        }
+
+        OpsRemindLog rl = new OpsRemindLog();
+        rl.setLiveRoomId(id);
+        rl.setRemindType("LIVE");
+        rl.setStatus(0); // 待发送
+        rl.setCorpId(getCorpId());
+        remindLogMapper.insert(rl);
+
+        log.info("设置直播提醒: liveRoomId={} userId={} title={}", id, userId, room.getLiveTitle());
+        return R.ok(Map.of("reminded", true, "msg", "已设置开播提醒"));
     }
 
     // ═══ 辅助 ═══

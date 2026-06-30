@@ -14,6 +14,7 @@ public class OpsRemindLog extends BaseEntity {
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;
     @TableField("booking_id") private Long bookingId;
+    @TableField("live_room_id") private Long liveRoomId;
     @TableField("remind_type") private String remindType;
     @TableField("status") private Integer status;
     @TableField("send_time") private LocalDateTime sendTime;

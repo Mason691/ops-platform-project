@@ -43,6 +43,11 @@
       <view class="hero-badge" :class="badgeClass">{{ statusText }}</view>
     </view>
 
+    <!-- ═══ Live room — prominent below cover for live_reserve ═══ -->
+    <view v-if="liveRoom && liveStatus" class="live-section section">
+      <LiveStatusCard :liveRoom="liveRoom" :liveStatus="liveStatus" :activityTitle="act?.title" />
+    </view>
+
     <!-- ═══ Info ═══ -->
     <view class="section">
       <text class="title">{{ act.title }}</text>
@@ -101,15 +106,6 @@
       </scroll-view>
     </view>
 
-    <!-- ═══ Live room info ═══ -->
-    <view v-if="liveRoom" class="section live-section">
-      <text class="sec-title">📺 直播预告</text>
-      <view class="live-info">
-        <text class="live-title-text">{{ liveRoom.liveTitle }}</text>
-        <text class="live-time">开播时间：{{ fmtFull(liveRoom.startTime) }}</text>
-      </view>
-    </view>
-
     <!-- ═══ Detail text ═══ -->
     <view v-if="act.detail" class="section">
       <text class="sec-title">活动详情</text>
@@ -137,31 +133,112 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { BASE_URL } from '@/config'
 import { assetUrl, onImgError } from '@/utils/image.js'
+import LiveStatusCard from '@/components/LiveStatusCard.vue'
 
-const act = ref(null), liveRoom = ref(null), products = ref([])
+const act = ref(null), liveRoom = ref(null), liveStatus = ref(null), products = ref([])
 const loadErr = ref('')
 const booked = ref(false)
 const videoFailed = ref(false)
 const videoErrorInfo = ref('')
+let pollTimer = null, pollInterval = 30000
+let lastDisplayStatus = null
 
 onMounted(async () => {
   const pages = getCurrentPages()
   const id = pages[pages.length - 1]?.options?.id
   if (!id) { loadErr.value = '缺少活动ID'; return }
+  await fetchDetail(id)
+  checkBooked(Number(id))
+  // Start polling if live or upcoming within 10min
+  if (liveStatus.value) {
+    lastDisplayStatus = liveStatus.value.displayStatus
+    schedulePolling(id)
+  }
+})
+
+// Pause polling when page hidden, resume on show
+let pageHidden = false
+uni.$on?.('onHide', () => { pageHidden = true })
+uni.$on?.('onShow', async () => {
+  if (!pageHidden) return
+  pageHidden = false
+  const pages = getCurrentPages()
+  const id = pages[pages.length - 1]?.options?.id
+  if (!id) return
+  await fetchDetail(id)
+  schedulePolling(id)
+})
+
+onBeforeUnmount(() => {
+  stopPolling()
+})
+
+async function fetchDetail(activityId) {
   try {
-    const res = await req('/api/ops/activity/' + id)
+    const res = await req('/api/ops/activity/' + activityId)
     act.value = res.activity
     liveRoom.value = res.liveRoom || null
     products.value = res.products || []
-    checkBooked(Number(id))
+    // Detect state transition
+    if (res.liveStatus) {
+      const prev = lastDisplayStatus
+      const cur = res.liveStatus.displayStatus
+      if (prev && prev !== cur) {
+        if (prev === 'upcoming' && cur === 'live') {
+          uni.showToast({ title: '直播已开始！🎉', icon: 'success', duration: 2500 })
+        } else if (prev === 'live' && cur === 'ended') {
+          uni.showToast({ title: '直播已结束', icon: 'none', duration: 2000 })
+        }
+      }
+      liveStatus.value = res.liveStatus
+      lastDisplayStatus = cur
+    }
   } catch (e) {
     loadErr.value = '加载失败，请返回重试'
     console.error(e)
   }
-})
+}
+
+function schedulePolling(activityId) {
+  if (!liveStatus.value) return
+  const ds = liveStatus.value.displayStatus
+  if (ds === 'live') {
+    pollInterval = 15000 // 15s during live
+  } else if (ds === 'upcoming') {
+    // Only poll if within 10 minutes of start time
+    if (liveStatus.value.countdownMs && liveStatus.value.countdownMs > 600_000) return
+    pollInterval = 30000
+  } else {
+    return // ended — no polling
+  }
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    try {
+      const res = await req('/api/ops/activity/' + activityId)
+      if (res.liveStatus) {
+        const prev = liveStatus.value?.displayStatus
+        liveStatus.value = res.liveStatus
+        const cur = res.liveStatus.displayStatus
+        if (prev === 'upcoming' && cur === 'live') {
+          uni.showToast({ title: '直播已开始！🎉', icon: 'success', duration: 2500 })
+          // Switch to faster polling interval
+          stopPolling()
+          schedulePolling(activityId)
+        }
+        if (cur !== 'live' && cur !== 'upcoming') {
+          stopPolling()
+        }
+      }
+    } catch (_) {}
+  }, pollInterval)
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+}
 
 async function checkBooked(activityId) {
   const token = uni.getStorageSync('ops_token')
@@ -214,12 +291,14 @@ const badgeClass = computed(() => {
   return 'badge-ended'
 })
 const btnText = computed(() => {
+  if (act.value?.type === 'live_reserve' && liveStatus.value?.displayStatus === 'live') return '📺 观看直播'
   if (booked.value) return '已预约 ✓'
   if (statusText.value === '即将开始') return '预约参加'
   if (statusText.value === '进行中') return '立即参与'
   return '已结束'
 })
 const btnClass = computed(() => {
+  if (act.value?.type === 'live_reserve' && liveStatus.value?.displayStatus === 'live') return 'btn-live'
   if (booked.value) return 'btn-done'
   if (statusText.value === '已结束') return 'btn-disabled'
   return 'btn-active'
@@ -228,9 +307,38 @@ const btnClass = computed(() => {
 // ── Actions ──
 function handleAction() {
   if (statusText.value === '已结束' || booked.value) return
+  // Live: redirect to WeChat channel
+  if (act.value?.type === 'live_reserve' && liveStatus.value?.displayStatus === 'live') {
+    openLiveRoom()
+    return
+  }
   const token = uni.getStorageSync('ops_token')
   if (!token) { uni.navigateTo({ url: '/pages/auth/login' }); return }
   doBook()
+}
+
+function openLiveRoom() {
+  if (!liveRoom.value?.finderUsername) {
+    uni.showToast({ title: '直播信息不完整', icon: 'none' })
+    return
+  }
+  if (!/micromessenger/i.test(navigator.userAgent)) {
+    uni.showToast({ title: '请在微信中打开观看直播', icon: 'none', duration: 2500 })
+    return
+  }
+  var realWx = window.wx || window.WX || (typeof wx !== 'undefined' && wx.openChannelsLive ? wx : null)
+  if (realWx && typeof realWx.openChannelsLive === 'function') {
+    realWx.openChannelsLive({
+      finderUserName: liveRoom.value.finderUsername,
+      success: function() {},
+      fail: function(err) {
+        console.warn('[detail] openChannelsLive fail:', err)
+        uni.showToast({ title: '请在微信中搜索视频号观看直播', icon: 'none', duration: 3000 })
+      }
+    })
+  } else {
+    uni.showToast({ title: '请在微信中搜索视频号 "' + liveRoom.value.finderUsername + '" 观看直播', icon: 'none', duration: 3000 })
+  }
 }
 
 async function doBook() {
@@ -423,6 +531,7 @@ function req(url, method, data) {
   font-size: 30rpx; font-weight: 600; color: #fff;
 }
 .btn-active { background: #FF6B35; }
+.btn-live { background: linear-gradient(135deg, #FF6B35, #ff4444); }
 .btn-done { background: #ccc; }
 .btn-disabled { background: #bbb; color: #fff; }
 
@@ -447,9 +556,6 @@ function req(url, method, data) {
   border-radius: 8rpx;
 }
 
-/* ── Live room ── */
-.live-section { background: linear-gradient(135deg, #fff5f0, #fff); border: 2rpx solid #FF6B35; }
-.live-info { margin-top: 16rpx; }
-.live-title-text { font-size: 28rpx; font-weight: 600; color: #333; }
-.live-time { display: block; margin-top: 8rpx; font-size: 24rpx; color: #FF6B35; }
+/* ── Live section highlight ── */
+.live-section { background: linear-gradient(135deg, #fff5f0, #fff); border: 2rpx solid rgba(255, 107, 53, 0.15); padding: 0; }
 </style>

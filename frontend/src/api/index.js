@@ -98,4 +98,15 @@ export const api = {
   uploadAvatar: (imageData) => request({url:'/api/ops/user/avatar',method:'POST',data:{imageData}}),
   // 视频直播
   activeLiveRooms: () => request({url:'/api/ops/live-rooms/active',data:{limit:20}}),
+  liveRoomDetail: (id) => request({url:'/api/ops/live-rooms/'+id}),
+  remindLiveRoom: (id) => request({url:'/api/ops/live-rooms/'+id+'/remind',method:'POST'}),
+
+  // 管理后台 — 直播管理
+  adminLiveRooms: (params) => request({url:'/api/ops/admin/live-rooms',data:params}),
+  adminCreateLiveRoom: (data) => request({url:'/api/ops/admin/live-rooms',method:'POST',data}),
+  adminUpdateLiveRoom: (id,data) => request({url:'/api/ops/admin/live-rooms/'+id,method:'PUT',data}),
+  adminDeleteLiveRoom: (id) => request({url:'/api/ops/admin/live-rooms/'+id,method:'DELETE'}),
+  adminLiveRoomDetail: (id) => request({url:'/api/ops/admin/live-rooms/'+id}),
+  adminUpdateLiveRoomStatus: (id,data) => request({url:'/api/ops/admin/live-rooms/'+id+'/status',method:'PUT',data}),
+  adminLiveRoomQrCode: (id) => request({url:'/api/ops/admin/live-rooms/'+id+'/qrcode'}),
 }

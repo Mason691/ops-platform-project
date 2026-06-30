@@ -373,6 +373,71 @@ public class AdminController {
         return R.ok();
     }
 
+    /**
+     * 获取单个直播室详情（含回放URL、观看人数等扩展字段）。
+     */
+    @GetMapping("/live-rooms/{id}")
+    public R<?> liveRoomDetail(@PathVariable Long id) {
+        OpsLiveRoom room = liveRoomMapper.selectById(id);
+        if (room == null) return R.fail("直播间不存在");
+        if (room.getCoverUrl() != null && !room.getCoverUrl().isBlank()) {
+            room.setCoverUrl(imageUrlUtil.normalizeImage(room.getCoverUrl()));
+        }
+        return R.ok(room);
+    }
+
+    /**
+     * 手动切换直播状态（预告→直播中→已结束）。
+     * status: 0=预告, 1=直播中, 2=已结束
+     * status 0→1 时自动记录实际开播时间; →2 时自动记录实际结束时间
+     */
+    @PutMapping("/live-rooms/{id}/status")
+    public R<?> updateLiveRoomStatus(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        Long operatorId = currentOperatorId();
+        OpsLiveRoom existing = liveRoomMapper.selectById(id);
+        if (existing == null) return R.fail("直播间不存在");
+        assertMerchantBound(operatorId, existing.getMerchantId());
+
+        OpsLiveRoom update = new OpsLiveRoom();
+        update.setId(id);
+        if (body.get("status") != null) {
+            int newStatus = Integer.parseInt(body.get("status").toString());
+            update.setStatus(newStatus);
+            // 自动记录实际上播/结束时间
+            if (newStatus == 1 && existing.getActualStartTime() == null) {
+                update.setActualStartTime(java.time.LocalDateTime.now());
+            }
+            if (newStatus == 2 && existing.getActualEndTime() == null) {
+                update.setActualEndTime(java.time.LocalDateTime.now());
+            }
+        }
+        if (body.get("viewerCount") != null) {
+            update.setViewerCount(Integer.parseInt(body.get("viewerCount").toString()));
+        }
+        if (body.get("replayUrl") != null) {
+            update.setReplayUrl(body.get("replayUrl").toString());
+        }
+        liveRoomMapper.updateById(update);
+        log.info("直播状态更新: id={}, status={}, viewerCount={}", id, update.getStatus(), update.getViewerCount());
+        return R.ok();
+    }
+
+    /**
+     * 生成直播间二维码信息，供前端用 qrcodejs 渲染。
+     * 返回 H5 直播广场页面 URL + 视频号信息。
+     */
+    @GetMapping("/live-rooms/{id}/qrcode")
+    public R<?> liveRoomQrCode(@PathVariable Long id) {
+        OpsLiveRoom room = liveRoomMapper.selectById(id);
+        if (room == null) return R.fail("直播间不存在");
+        // 前端已有 BASE_URL，这里返回页面路径即可
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("pagePath", "/pages/live/index");
+        data.put("finderUsername", room.getFinderUsername());
+        data.put("liveTitle", room.getLiveTitle());
+        return R.ok(data);
+    }
+
     /** 获取当前运营商第一个已绑定销售商 ID */
     private Long resolveDefaultMerchant(Long operatorId) {
         return omMapper.selectList(new LambdaQueryWrapper<OperatorMerchant>()
@@ -536,6 +601,12 @@ public class AdminController {
                     p.put("cover_image", imageUrlUtil.normalizeProductImage((String) coverImage));
                 }
             }
+        }
+
+        // 规范化直播间封面图
+        OpsLiveRoom lr = (OpsLiveRoom) detail.get("liveRoom");
+        if (lr != null && lr.getCoverUrl() != null && !lr.getCoverUrl().isBlank()) {
+            lr.setCoverUrl(imageUrlUtil.normalizeImage(lr.getCoverUrl()));
         }
 
         return R.ok(detail);
