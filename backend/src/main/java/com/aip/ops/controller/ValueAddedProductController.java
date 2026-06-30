@@ -67,18 +67,4 @@ public class ValueAddedProductController {
         service.delete(id);
         return R.ok("删除成功");
     }
-
-    /**
-     * 当前用户在该模块的权限概要，供前端渲染按钮。
-     */
-    @GetMapping("/permission/profile")
-    public R<Map<String, Object>> permissionProfile() {
-        String roleType = orgRoleService.getOrgRoleType();
-        boolean canEdit = orgRoleService.isOperatorOrSuperAdmin();
-        return R.ok(Map.of(
-                "corpId", SecurityUtils.getCurrentCorpIdOrNull(),
-                "orgRoleType", roleType,
-                "canEditProducts", canEdit
-        ));
-    }
 }
