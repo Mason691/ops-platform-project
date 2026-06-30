@@ -3,6 +3,7 @@ package com.aip.ops.controller;
 import com.aip.ops.entity.OpsCompanyCommissionRule;
 import com.aip.ops.entity.OpsPersonalCommissionRule;
 import com.aip.ops.service.CommissionRuleService;
+import com.aip.ops.service.OrgRoleService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,8 @@ import java.util.Map;
 
 /**
  * 提成规则管理 — 个人/公司双表 CRUD。
+ *
+ * 权限：运营商管理员可增删改查；城市合伙人仅可查看。
  */
 @Slf4j
 @RestController
@@ -21,6 +24,7 @@ import java.util.Map;
 public class CommissionRuleController {
 
     private final CommissionRuleService service;
+    private final OrgRoleService orgRoleService;
 
     // ═══ 个人提成规则 ═══
 
@@ -40,9 +44,11 @@ public class CommissionRuleController {
 
     @PostMapping("/personal")
     public R<?> personalCreate(@RequestBody OpsPersonalCommissionRule rule) {
+        if (!orgRoleService.isOperatorOrSuperAdmin()) {
+            return R.fail(403, "仅运营商管理员可操作");
+        }
         Long corpId = SecurityUtils.getCurrentCorpId();
         rule.setCorpId(corpId);
-        // 向后兼容：旧前端可能仍传 operatorId
         if (rule.getOperatorId() == null) rule.setOperatorId(corpId);
         service.personalCreate(rule);
         return R.ok("创建成功");
@@ -50,12 +56,18 @@ public class CommissionRuleController {
 
     @PutMapping("/personal/{id}")
     public R<?> personalUpdate(@PathVariable Long id, @RequestBody OpsPersonalCommissionRule rule) {
+        if (!orgRoleService.isOperatorOrSuperAdmin()) {
+            return R.fail(403, "仅运营商管理员可操作");
+        }
         service.personalUpdate(id, rule);
         return R.ok("更新成功");
     }
 
     @DeleteMapping("/personal/{id}")
     public R<?> personalDelete(@PathVariable Long id) {
+        if (!orgRoleService.isOperatorOrSuperAdmin()) {
+            return R.fail(403, "仅运营商管理员可操作");
+        }
         service.personalDelete(id);
         return R.ok("删除成功");
     }
@@ -78,9 +90,11 @@ public class CommissionRuleController {
 
     @PostMapping("/company")
     public R<?> companyCreate(@RequestBody OpsCompanyCommissionRule rule) {
+        if (!orgRoleService.isOperatorOrSuperAdmin()) {
+            return R.fail(403, "仅运营商管理员可操作");
+        }
         Long corpId = SecurityUtils.getCurrentCorpId();
         rule.setCorpId(corpId);
-        // 向后兼容：旧前端可能仍传 operatorId
         if (rule.getOperatorId() == null) rule.setOperatorId(corpId);
         service.companyCreate(rule);
         return R.ok("创建成功");
@@ -88,12 +102,18 @@ public class CommissionRuleController {
 
     @PutMapping("/company/{id}")
     public R<?> companyUpdate(@PathVariable Long id, @RequestBody OpsCompanyCommissionRule rule) {
+        if (!orgRoleService.isOperatorOrSuperAdmin()) {
+            return R.fail(403, "仅运营商管理员可操作");
+        }
         service.companyUpdate(id, rule);
         return R.ok("更新成功");
     }
 
     @DeleteMapping("/company/{id}")
     public R<?> companyDelete(@PathVariable Long id) {
+        if (!orgRoleService.isOperatorOrSuperAdmin()) {
+            return R.fail(403, "仅运营商管理员可操作");
+        }
         service.companyDelete(id);
         return R.ok("删除成功");
     }
