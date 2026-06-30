@@ -64,6 +64,8 @@
             'chooseImage','previewImage',
             'startRecord','stopRecord','uploadVoice','downloadVoice','translateVoice'
           ];
+          // 微信授权获取手机号（注册页使用）
+          jsApiList.push('getPhoneNumber');
           // 仅当需要跳转小程序时申请 miniProgram
           if (typeof wx.miniProgram !== 'undefined' || navigator.userAgent.indexOf('miniProgram') > -1) {
             jsApiList.push('miniProgram');

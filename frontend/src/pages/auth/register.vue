@@ -12,11 +12,33 @@
         <text class="phone-icon">📱</text>
         <text class="phone-title">微信安全授权</text>
         <text class="phone-desc">一键获取本机号码，无需手动输入</text>
-        <view class="phone-btn" @click="requestWechatAuth">
+        <view class="phone-btn" :class="{ loading: authLoading }" @click="requestWechatAuth">
           <text class="phone-btn-icon">💚</text>
-          <text>微信授权获取手机号</text>
+          <text>{{ authLoading ? '授权中...' : '微信授权获取手机号' }}</text>
         </view>
         <text class="phone-note">手机号仅用于登录，不会公开</text>
+      </view>
+
+      <!-- Manual phone input fallback -->
+      <view v-if="showManual" class="manual-phone">
+        <view class="divider"><text>或手动输入</text></view>
+        <view class="field">
+          <text class="field-label">手机号</text>
+          <input
+            class="field-input full-input"
+            v-model="manualPhone"
+            type="number"
+            maxlength="11"
+            placeholder="请输入手机号"
+          />
+        </view>
+        <view
+          class="submit-btn"
+          :class="{ disabled: !manualPhoneValid || submitting }"
+          @click="confirmManualPhone"
+        >
+          确认手机号
+        </view>
       </view>
     </view>
 
@@ -92,12 +114,27 @@ const confirmPwd    = ref('')
 const showPwd       = ref(false)
 const submitting    = ref(false)
 const phoneObtained = ref(false)
+const authLoading   = ref(false)
+const showManual    = ref(false)  // fallback: manual phone input
+const manualPhone   = ref('')
+
+// WeChat encrypted phone data (sent to backend for decryption)
+const wechatAuth = ref({ code: '', encryptedData: '', iv: '' })
+
+const manualPhoneValid = computed(() => /^1[3-9]\d{9}$/.test(manualPhone.value))
 
 // ── 计算属性 ──
 
+function confirmManualPhone() {
+  if (!manualPhoneValid.value) return
+  phone.value = manualPhone.value.trim()
+  phoneObtained.value = true
+}
+
 const maskedPhone = computed(() => {
-  const p = phone.value
-  return p ? p.slice(0, 3) + '****' + p.slice(7) : ''
+  // Show from manual input or from backend-decrypted phone after register
+  const p = phone.value || manualPhone.value
+  return p ? p.slice(0, 3) + '****' + p.slice(7) : '已通过微信授权获取'
 })
 
 
@@ -134,23 +171,84 @@ const canSubmit = computed(() => {
     && phoneObtained.value
 })
 
-// ── 微信授权（带 mock 降级） ──
+// ── 微信授权获取手机号 ──
 
-function requestWechatAuth() {
+function isWechat() {
+  return /micromessenger/i.test(navigator.userAgent)
+}
+
+async function requestWechatAuth() {
   // #ifdef H5
-  // 微信环境：调 getPhoneNumber
-  if (/micromessenger/i.test(navigator.userAgent) && typeof WeixinJSBridge !== 'undefined') {
-    WeixinJSBridge.invoke('getPhoneNumber', {}, (res) => {
-      if (res.err_msg && res.err_msg.indexOf(':ok') > -1) {
-        uni.showToast({ title: '授权成功', icon: 'success' })
-      } else {
-        uni.showToast({ title: '授权失败，请重试', icon: 'none' })
-      }
-    })
-  } else {
-    uni.showToast({ title: '请在微信中打开', icon: 'none' })
+  if (!isWechat()) {
+    showManual.value = true
+    uni.showToast({ title: '请在微信中打开，或手动输入手机号', icon: 'none' })
+    return
+  }
+  authLoading.value = true
+
+  try {
+    // Step 1: wx.login() to get code
+    const code = await getWxCode()
+    if (!code) throw new Error('wx.login 失败')
+
+    // Step 2: wx.getPhoneNumber() to get encryptedData + iv
+    const phoneData = await getWxPhoneNumber()
+    if (!phoneData) throw new Error('getPhoneNumber 失败')
+
+    // Step 3: Store encrypted data; backend decrypts during registration
+    wechatAuth.value = { code, encryptedData: phoneData.encryptedData, iv: phoneData.iv }
+    phoneObtained.value = true
+    uni.showToast({ title: '已获取手机号', icon: 'success' })
+  } catch (e) {
+    console.error('[register] WeChat auth failed:', e)
+    showManual.value = true
+    uni.showToast({ title: '授权失败，请手动输入手机号', icon: 'none' })
+  } finally {
+    authLoading.value = false
   }
   // #endif
+}
+
+/** wx.login() — get code for jscode2session */
+function getWxCode() {
+  return new Promise((resolve) => {
+    const realWx = window.wx || (typeof wx !== 'undefined' ? wx : null)
+    if (!realWx || typeof realWx.login !== 'function') {
+      console.warn('[register] wx.login not available')
+      resolve(null)
+      return
+    }
+    realWx.login({
+      success(res) { resolve(res.code || null) },
+      fail(err) { console.warn('[register] wx.login fail:', err); resolve(null) }
+    })
+  })
+}
+
+/** wx.getPhoneNumber() or WeixinJSBridge fallback */
+function getWxPhoneNumber() {
+  return new Promise((resolve) => {
+    const realWx = window.wx || (typeof wx !== 'undefined' ? wx : null)
+
+    const cb = (res) => {
+      if (res.err_msg && res.err_msg.indexOf(':ok') > -1) {
+        resolve({ encryptedData: res.encryptedData, iv: res.iv })
+      } else {
+        console.warn('[register] getPhoneNumber fail:', res.err_msg)
+        resolve(null)
+      }
+    }
+
+    // Try wx.getPhoneNumber first (newer JSSDK)
+    if (realWx && typeof realWx.getPhoneNumber === 'function') {
+      realWx.getPhoneNumber({ success: cb, fail(err) { console.warn('[register] wx.getPhoneNumber fail:', err); resolve(null) } })
+    } else if (typeof WeixinJSBridge !== 'undefined') {
+      // Fallback: WeixinJSBridge (older WeChat versions)
+      WeixinJSBridge.invoke('getPhoneNumber', {}, cb)
+    } else {
+      resolve(null)
+    }
+  })
 }
 
 // ── 提交注册 ──
@@ -162,12 +260,25 @@ async function doRegister() {
     const payload = {
       password: password.value,
       confirmPassword: confirmPwd.value,
-      phone: phone.value,
+      nickname: '燃气用户',
+    }
+
+    // Send encrypted WeChat data for backend decryption
+    if (wechatAuth.value.encryptedData) {
+      payload.encryptedData = wechatAuth.value.encryptedData
+      payload.iv = wechatAuth.value.iv
+      payload.code = wechatAuth.value.code
+    } else if (phone.value) {
+      // Fallback: manually entered phone → use as mockPhone for dev compatibility
+      payload.mockPhone = phone.value
     }
 
     const r = await api.register(payload)
+
+    // Login with returned phone (decrypted by backend) or manual phone
+    const loginPhone = r.phone || phone.value
     uni.showToast({ title: '注册成功', icon: 'success' })
-    await api.login(phone.value || r.phone, password.value)
+    await api.login(loginPhone, password.value)
     setTimeout(() => uni.switchTab({ url: '/pages/index/index' }), 600)
   } catch (e) {
     uni.showToast({ title: e.msg || '注册失败', icon: 'none' })
@@ -210,8 +321,15 @@ function toLogin() {
   max-width: 480rpx;
 }
 .phone-btn:active { opacity: .85 }
+.phone-btn.loading { opacity: .7; pointer-events: none }
 .phone-btn-icon { font-size: 36rpx }
 .phone-note { font-size: 22rpx; color: #bbb }
+
+/* Manual phone fallback */
+.manual-phone { margin-top: 32rpx; padding-top: 32rpx; border-top: 1rpx solid #eee }
+.divider { text-align: center; margin-bottom: 24rpx; font-size: 24rpx; color: #bbb; position: relative }
+.divider text { background: #fff; padding: 0 20rpx; position: relative; z-index: 1 }
+.divider::before { content: ''; position: absolute; left: 0; top: 50%; width: 100%; height: 1rpx; background: #eee }
 
 /* ── Step 2: Got Phone ── */
 .got-phone { display: flex; align-items: center; gap: 20rpx }

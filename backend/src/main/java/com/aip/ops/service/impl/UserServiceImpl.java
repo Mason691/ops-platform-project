@@ -7,6 +7,7 @@ import com.aip.ops.dto.WechatLoginRequest;
 import com.aip.ops.entity.OpsMember;
 import com.aip.ops.mapper.OpsMemberMapper;
 import com.aip.ops.service.IUserService;
+import com.aip.ops.service.WechatPhoneService;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +26,7 @@ public class UserServiceImpl implements IUserService {
     private final PasswordEncoder passwordEncoder;
     private final MemberSyncClient memberSyncClient;
     private final PlatformInternalClient platformInternalClient;
+    private final WechatPhoneService wechatPhoneService;
 
     private final long jwtExpiration;
 
@@ -36,11 +38,13 @@ public class UserServiceImpl implements IUserService {
             PasswordEncoder passwordEncoder,
             MemberSyncClient memberSyncClient,
             PlatformInternalClient platformInternalClient,
+            WechatPhoneService wechatPhoneService,
             @Value("${platform.jwt-expiration:43200}") long jwtExpiration) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.memberSyncClient = memberSyncClient;
         this.platformInternalClient = platformInternalClient;
+        this.wechatPhoneService = wechatPhoneService;
         this.jwtExpiration = jwtExpiration;
     }
 
@@ -60,9 +64,11 @@ public class UserServiceImpl implements IUserService {
             throw new IllegalArgumentException("两次输入的密码不一致");
 
         // ── 获取手机号 ──
-        String phone = resolvePhone(req);
-        if (phone == null || !PHONE_PATTERN.matcher(phone).matches())
+        PhoneResult phoneResult = resolvePhone(req);
+        if (phoneResult == null || !PHONE_PATTERN.matcher(phoneResult.phone).matches())
             throw new IllegalArgumentException("未获取到手机号，请授权后重试");
+        String phone = phoneResult.phone;
+        String wechatOpenid = phoneResult.openid;
         if (nickname == null || nickname.isEmpty())
             nickname = phone.substring(0, 3) + "****" + phone.substring(7);
 
@@ -89,6 +95,10 @@ public class UserServiceImpl implements IUserService {
         user.setPassword(passwordEncoder.encode(password));
         user.setNickname(nickname);
         user.setLastLoginTime(LocalDateTime.now());
+        // 存储微信 openid（用于后续静默登录）
+        if (wechatOpenid != null && user.getOpenid() == null) {
+            user.setOpenid(wechatOpenid);
+        }
 
         if (exist != null) {
             userMapper.updateById(user);
@@ -161,9 +171,11 @@ public class UserServiceImpl implements IUserService {
         String nickname = req.getNickname();
 
         // ── 获取手机号 ──
-        String phone = resolvePhoneForWechat(req);
-        if (phone == null || !PHONE_PATTERN.matcher(phone).matches())
+        PhoneResult phoneResult = resolvePhoneForWechat(req);
+        if (phoneResult == null || !PHONE_PATTERN.matcher(phoneResult.phone).matches())
             throw new IllegalArgumentException("未获取到手机号，请授权后重试");
+        String phone = phoneResult.phone;
+        String wechatOpenid = phoneResult.openid;
 
         if (nickname == null || nickname.isEmpty())
             nickname = phone.substring(0, 3) + "****" + phone.substring(7);
@@ -183,11 +195,17 @@ public class UserServiceImpl implements IUserService {
             user.setPointsBalance(200);
             user.setStatus(1);
             user.setNickname(nickname);
+            // 存储微信 openid
+            if (wechatOpenid != null) user.setOpenid(wechatOpenid);
             userMapper.insert(user);
             isNew = true;
             // 同步到底座平台
             syncToBasePlatform(user);
             log.info("微信登录—新用户注册: phone={}, userId={}", phone, user.getId());
+        } else if (wechatOpenid != null && user.getOpenid() == null) {
+            // 已有用户但无 openid — 补充记录
+            user.setOpenid(wechatOpenid);
+            userMapper.updateById(user);
         }
 
         if (user.getStatus() == null || user.getStatus() != 1)
@@ -214,34 +232,53 @@ public class UserServiceImpl implements IUserService {
         return result;
     }
 
-    /** 从 WechatLoginRequest 解析手机号（开发模式优先使用 mockPhone） */
-    private String resolvePhoneForWechat(WechatLoginRequest req) {
-        if (req.getMockPhone() != null && !req.getMockPhone().isBlank()) {
-            return req.getMockPhone().trim();
-        }
-        if (req.getEncryptedData() != null && req.getIv() != null && req.getCode() != null) {
-            return decryptWechatPhone(req.getCode(), req.getEncryptedData(), req.getIv());
-        }
-        return null;
-    }
-
     // ═══ 私有方法 ═══
 
     /** 获取手机号（开发模式优先使用 mockPhone） */
-    private String resolvePhone(RegisterRequest req) {
+    private PhoneResult resolvePhone(RegisterRequest req) {
         if (req.getMockPhone() != null && !req.getMockPhone().isBlank()) {
-            return req.getMockPhone().trim();
+            return new PhoneResult(req.getMockPhone().trim(), null);
         }
         if (req.getEncryptedData() != null && req.getIv() != null && req.getCode() != null) {
-            return decryptWechatPhone(req.getCode(), req.getEncryptedData(), req.getIv());
+            String[] decrypted = decryptWechatPhone(req.getCode(), req.getEncryptedData(), req.getIv());
+            if (decrypted != null) return new PhoneResult(decrypted[0], decrypted[1]);
         }
         return null;
     }
 
-    /** 从微信解密手机号（正式环境实现） */
-    private String decryptWechatPhone(String code, String encryptedData, String iv) {
-        log.warn("微信手机号解密尚未实现，需认证服务号");
+    /** 从 WechatLoginRequest 解析手机号（开发模式优先使用 mockPhone） */
+    private PhoneResult resolvePhoneForWechat(WechatLoginRequest req) {
+        if (req.getMockPhone() != null && !req.getMockPhone().isBlank()) {
+            return new PhoneResult(req.getMockPhone().trim(), null);
+        }
+        if (req.getEncryptedData() != null && req.getIv() != null && req.getCode() != null) {
+            String[] decrypted = decryptWechatPhone(req.getCode(), req.getEncryptedData(), req.getIv());
+            if (decrypted != null) return new PhoneResult(decrypted[0], decrypted[1]);
+        }
         return null;
+    }
+
+    private static class PhoneResult {
+        final String phone;
+        final String openid;
+        PhoneResult(String phone, String openid) { this.phone = phone; this.openid = openid; }
+    }
+
+    /**
+     * 从微信解密手机号，同时返回 openid（用于后续静默登录）。
+     * 返回数组：[0]=phone, [1]=openid, 解密失败返回 null
+     */
+    private String[] decryptWechatPhone(String code, String encryptedData, String iv) {
+        if (code == null || encryptedData == null || iv == null) return null;
+        try {
+            WechatPhoneService.WechatPhoneResult result =
+                    wechatPhoneService.decryptPhone(code, encryptedData, iv);
+            if (result == null) return null;
+            return new String[]{result.getPhone(), result.getOpenid()};
+        } catch (Exception e) {
+            log.error("微信手机号解密失败: {}", e.getMessage());
+            return null;
+        }
     }
 
     /** 同步会员信息到底座平台（非致命，失败不阻塞注册） */

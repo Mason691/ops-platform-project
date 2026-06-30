@@ -18,4 +18,9 @@ public class RegisterRequest {
     private String confirmPassword;
     private String nickname;
     private Long corpId;
+
+    // Explicit getters for Lombok-challenged fields
+    public String getEncryptedData() { return encryptedData; }
+    public String getIv() { return iv; }
+    public String getCode() { return code; }
 }
