@@ -89,25 +89,28 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     @Override
     public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent) {
+        // Build visible corp IDs once
+        Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        List<Long> corpIdList = (visibleIds != null && !visibleIds.isEmpty())
+                ? new ArrayList<>(visibleIds) : null;
+
+        // ── COUNT + STATS: single-row aggregate queries (no full table scan) ──
+        long total = mapper.countFiltered(company, batchNo, agent, corpIdList);
+        java.util.Map<String, java.math.BigDecimal> stats =
+                mapper.aggregateStats(company, batchNo, agent, corpIdList);
+        BigDecimal totalSale = stats != null && stats.get("totalSale") != null
+                ? stats.get("totalSale") : BigDecimal.ZERO;
+        BigDecimal totalCommission = stats != null && stats.get("totalCommission") != null
+                ? stats.get("totalCommission") : BigDecimal.ZERO;
+
+        // ── DATA: only fetch the requested page ──
+        int offset = (pageNum - 1) * pageSize;
         LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
         if (company != null && !company.isEmpty()) qw.eq(OpsBusinessData::getCompany, company);
         if (batchNo != null && !batchNo.isEmpty()) qw.eq(OpsBusinessData::getBatchNo, batchNo);
         if (agent != null && !agent.isEmpty()) qw.eq(OpsBusinessData::getAgent, agent);
-        applyCorpScope(qw);
+        if (corpIdList != null) qw.in(OpsBusinessData::getCorpId, corpIdList);
         qw.orderByDesc(OpsBusinessData::getId);
-
-        long total = mapper.selectCount(qw);
-
-        // Aggregate stats for current filter
-        List<OpsBusinessData> all = mapper.selectList(qw);
-        BigDecimal totalSale = BigDecimal.ZERO;
-        BigDecimal totalCommission = BigDecimal.ZERO;
-        for (OpsBusinessData d : all) {
-            if (d.getSalePrice() != null) totalSale = totalSale.add(d.getSalePrice());
-            if (d.getCommissionAmount() != null) totalCommission = totalCommission.add(d.getCommissionAmount());
-        }
-
-        int offset = (pageNum - 1) * pageSize;
         qw.last("LIMIT " + offset + "," + pageSize);
         List<OpsBusinessData> records = mapper.selectList(qw);
 
