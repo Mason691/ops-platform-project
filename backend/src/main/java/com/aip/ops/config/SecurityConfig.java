@@ -37,7 +37,8 @@ public class SecurityConfig {
                     "/api/ops/home-data",
                     "/api/ops/coupon/list",
                     "/api/ops/ai/config",
-                    "/api/ops/live-rooms/**"
+                    "/api/ops/live-rooms/**",
+                    "/api/ops/admin/business-data/template"
                 ).permitAll()
                 .anyRequest().authenticated())
             .exceptionHandling(exh -> exh

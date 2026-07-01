@@ -59,6 +59,9 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("agent")
     private String agent;
 
+    @TableField("agent_phone")
+    private String agentPhone;
+
     @TableField("retail_floor_price")
     private BigDecimal retailFloorPrice;
 

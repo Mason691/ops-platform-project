@@ -1,13 +1,14 @@
 package com.aip.ops.controller;
 
+import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.entity.SysExportTask;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.ExportTaskService;
+import com.aip.ops.service.ImportTaskService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -21,18 +22,30 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
+import org.springframework.core.io.ClassPathResource;
+
 @Slf4j
 @RestController
 @RequestMapping("/api/ops/admin/business-data")
-@RequiredArgsConstructor
 public class BusinessDataController {
 
     private final BusinessDataService service;
     private final ExportTaskService taskService;
+    private final ImportTaskService importTaskService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final String TOPIC_EXPORT_TASK = "async-export-task";
+    private static final String TOPIC_IMPORT_TASK = "async-import-task";
+    private static final String IMPORT_UPLOAD_DIR = "/tmp/";
+
+    public BusinessDataController(BusinessDataService service, ExportTaskService taskService,
+                                  ImportTaskService importTaskService, KafkaTemplate<String, String> kafkaTemplate) {
+        this.service = service;
+        this.taskService = taskService;
+        this.importTaskService = importTaskService;
+        this.kafkaTemplate = kafkaTemplate;
+    }
 
     @GetMapping
     public R<?> list(@RequestParam(defaultValue = "1") int pageNum,
@@ -51,6 +64,75 @@ public class BusinessDataController {
         String batchNo = "金厨美家" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         Long corpId = SecurityUtils.getCurrentCorpId();
         return R.ok(service.importExcel(file, batchNo, corpId));
+    }
+
+    /** Async import submit — saves file, creates task, sends Kafka message. */
+    @PostMapping("/import/submit")
+    public R<Map<String, Object>> importSubmit(@RequestParam("file") MultipartFile file) {
+        // Concurrency check
+        if (importTaskService.hasPendingTask("business_data")) {
+            return R.fail("有导入任务正在执行中，请等待完成后再提交");
+        }
+
+        try {
+            // Save uploaded file
+            String originalName = file.getOriginalFilename();
+            if (originalName == null) originalName = "import.xlsx";
+            String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+            String savedName = "import_business_" + ts + "_" + originalName;
+            java.nio.file.Path dest = java.nio.file.Path.of(IMPORT_UPLOAD_DIR, savedName);
+            file.transferTo(dest);
+
+            // Create task
+            SysImportTask task = importTaskService.createTask("business_data",
+                    originalName, dest.toAbsolutePath().toString(), file.getSize());
+
+            // Send to Kafka
+            try {
+                Map<String, Object> msg = new LinkedHashMap<>();
+                msg.put("taskId", task.getId());
+                kafkaTemplate.send(TOPIC_IMPORT_TASK, objectMapper.writeValueAsString(msg));
+                log.info("Import task submitted: id={} file={}", task.getId(), originalName);
+                return R.ok(Map.of("taskId", task.getId(), "status", "PENDING"));
+            } catch (Exception e) {
+                log.warn("Kafka unavailable for import, fallback to sync: taskId={}", task.getId());
+                // Fallback to sync import
+                try {
+                    Files.deleteIfExists(dest);
+                } catch (Exception ignored) {}
+                return R.ok(service.importExcel(file,
+                        "金厨美家" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss")),
+                        SecurityUtils.getCurrentCorpId()));
+            }
+        } catch (Exception e) {
+            log.error("Import task submit failed", e);
+            return R.fail("导入提交失败: " + e.getMessage());
+        }
+    }
+
+    /** Poll import task status. */
+    @GetMapping("/import/{taskId}/status")
+    public R<Map<String, Object>> importStatus(@PathVariable Long taskId) {
+        SysImportTask task = importTaskService.getById(taskId);
+        if (task == null) return R.fail("任务不存在");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("taskId", task.getId());
+        result.put("status", task.getStatus());
+        result.put("phase", task.getPhase());
+        result.put("progressMsg", task.getProgressMsg());
+        result.put("errorMsg", task.getErrorMsg());
+        result.put("totalRows", task.getTotalRows());
+        result.put("successRows", task.getSuccessRows());
+        result.put("failRows", task.getFailRows());
+        return R.ok(result);
+    }
+
+    /** Import history for current user. */
+    @GetMapping("/import/history")
+    public R<?> importHistory() {
+        Long userId = null;
+        try { userId = SecurityUtils.getCurrentUserId(); } catch (Exception ignored) {}
+        return R.ok(importTaskService.listHistory(userId, 20));
     }
 
     @PostMapping("/calc-commission")
@@ -149,5 +231,25 @@ public class BusinessDataController {
     public R<?> batchDelete(@RequestBody Map<String, List<Long>> params) {
         service.batchDelete(params.get("ids"));
         return R.ok("删除成功");
+    }
+
+    /** Download Excel import template. */
+    @GetMapping("/template")
+    public void downloadTemplate(HttpServletResponse response) throws IOException {
+        ClassPathResource resource = new ClassPathResource("templates/business_data_template.xlsx");
+        if (!resource.exists()) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            response.getWriter().write("{\"code\":404,\"msg\":\"模板文件不存在\"}");
+            return;
+        }
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setHeader("Content-Disposition",
+                "attachment; filename*=UTF-8''" + URLEncoder.encode("业务数据导入模板.xlsx", StandardCharsets.UTF_8));
+        try (InputStream in = resource.getInputStream();
+             OutputStream out = response.getOutputStream()) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+        }
     }
 }

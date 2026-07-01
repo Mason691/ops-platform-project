@@ -8,9 +8,9 @@ import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.DataScopeService;
+import com.aip.sdk.client.PlatformInternalClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,7 +33,6 @@ import java.util.*;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class BusinessDataServiceImpl implements BusinessDataService {
 
     private final OpsBusinessDataMapper mapper;
@@ -41,6 +40,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final OpsPersonalCommissionRuleMapper ruleMapper;
     private final DataScopeService dataScopeService;
     private final DataSource dataSource;
+    private final PlatformInternalClient platformInternalClient;
 
     private static final Set<String> VALID_COMPANIES = Set.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
 
@@ -57,7 +57,28 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             "8", "户内美装工程", "9", "户内美装运维"
     );
 
-    /** Convert category dict key to Chinese display name. Falls back to original value if not found. */
+    /** Category name cache from platform dict (volatile for DCL) */
+    private volatile Set<String> categoryNameCache;
+    private static final Set<String> DEFAULT_CATEGORIES = Set.of(
+            "燃气灶", "抽油烟机", "热水器", "壁挂炉",
+            "壁挂炉以旧换新销售", "户内美装开发", "定尺波纹管",
+            "户内美装工程", "户内美装运维"
+    );
+
+    public BusinessDataServiceImpl(
+            OpsBusinessDataMapper mapper,
+            OpsValueAddedProductMapper productMapper,
+            OpsPersonalCommissionRuleMapper ruleMapper,
+            DataScopeService dataScopeService,
+            DataSource dataSource,
+            PlatformInternalClient platformInternalClient) {
+        this.mapper = mapper;
+        this.productMapper = productMapper;
+        this.ruleMapper = ruleMapper;
+        this.dataScopeService = dataScopeService;
+        this.dataSource = dataSource;
+        this.platformInternalClient = platformInternalClient;
+    }
     public static String getCategoryDisplayName(String key) {
         if (key == null || key.isEmpty()) return "";
         return KEY_TO_CN.getOrDefault(key, key);
@@ -106,10 +127,20 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         return new ArrayList<>(set);
     }
 
+    /**
+     * Parsed row holder — holds parsed cell values before validation and insertion.
+     */
+    private static class ParsedRow {
+        String company, customer, brand, model, catCn, catKey;
+        BigDecimal salePrice;
+        String agent, agentPhone, dept;
+        String saleDate, receiptDate, receiptNo;
+        OpsValueAddedProduct product;
+    }
+
     @Override
     @Transactional
     public Map<String, Object> importExcel(MultipartFile file, String batchNo, Long corpId) {
-        int success = 0, fail = 0;
         List<String> errors = new ArrayList<>();
         Path tmpFile = null;
 
@@ -117,6 +148,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             tmpFile = Files.createTempFile("import_", ".xlsx");
             file.transferTo(tmpFile);
 
+            // Load product map
             List<OpsValueAddedProduct> prods = productMapper.selectList(null);
             Map<String, OpsValueAddedProduct> productMap = new HashMap<>();
             for (OpsValueAddedProduct p : prods) {
@@ -125,60 +157,167 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
             String json = parseExcelWithPython(tmpFile);
             if (json == null || json.isEmpty()) {
-                return Map.of("success", 0, "fail", 0, "errors", List.of("Python解析Excel失败"));
+                return Map.of("status", "fail", "totalErrors", 1,
+                        "errors", List.of("Python解析Excel失败"));
             }
 
             String[] rows = json.trim().split("\n");
+            if (rows.length < 2) {
+                return Map.of("status", "fail", "totalErrors", 1,
+                        "errors", List.of("Excel文件无数据行"));
+            }
+
             String[] headers = rows[0].split("\t");
             int customerIdx = indexOf(headers, "客户"), catIdx = indexOf(headers, "品类");
             int brandIdx = indexOf(headers, "品牌"), modelIdx = indexOf(headers, "型号");
             int priceIdx = indexOf(headers, "销售价"), companyIdx = indexOf(headers, "公司");
             int deptIdx = indexOf(headers, "部门"), agentIdx = indexOf(headers, "经办人");
+            int agentPhoneIdx = indexOf(headers, "经办人手机号");
             int saleDateIdx = indexOf(headers, "销售日期"), recDateIdx = indexOf(headers, "收款日期");
             int recNoIdx = indexOf(headers, "收据号");
 
             String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
             Map<String, String> batchNoMap = new HashMap<>();
+            List<ParsedRow> parsedRows = new ArrayList<>();
 
+            // ── Phase 1: Parse & validate all rows ──
             for (int i = 1; i < rows.length; i++) {
                 String[] cols = rows[i].split("\t", -1);
-                if (cols.length < 4) continue;
-                try {
-                    String company = val(cols, companyIdx), customer = val(cols, customerIdx);
-                    String brand = val(cols, brandIdx), model = val(cols, modelIdx);
-                    String catCn = val(cols, catIdx);
-                    BigDecimal salePrice = toDecimal(val(cols, priceIdx));
-                    String agent = val(cols, agentIdx), dept = val(cols, deptIdx);
-                    String saleDate = val(cols, saleDateIdx), recDate = val(cols, recDateIdx), recNo = val(cols, recNoIdx);
-
-                    if (brand.isEmpty() || model.isEmpty()) continue;
-                    if (company.isEmpty()) { fail++; errors.add("第" + (i + 1) + "行: 公司为空"); continue; }
-                    if (!VALID_COMPANIES.contains(company)) { fail++; errors.add("第" + (i + 1) + "行: 无效公司 \"" + company + "\""); continue; }
-
-                    String bn = batchNoMap.computeIfAbsent(company, c -> c + ts);
-                    String catKey = CN_TO_KEY.getOrDefault(catCn, catCn);
-                    OpsValueAddedProduct prod = productMap.get(brand + "|" + catKey + "|" + model);
-
-                    OpsBusinessData d = new OpsBusinessData();
-                    d.setBatchNo(bn); d.setCompany(company); d.setCustomer(customer);
-                    d.setBrand(brand); d.setCategory(catKey); d.setModel(model);
-                    d.setSalePrice(salePrice); d.setAgent(agent);
-                    d.setSaleDate(saleDate); d.setReceiptDate(recDate); d.setReceiptNo(recNo);
-                    d.setRetailFloorPrice(prod != null ? prod.getRetailFloorPrice() : null);
-                    d.setGroupLowestPrice(prod != null ? prod.getGroupLowestPrice() : null);
-                    d.setCommissionRate(null); d.setCommissionAmount(null);
-                    d.setCalcStatus("未计算");
-                    d.setRemark(dept.isEmpty() ? null : "部门: " + dept);
-                    d.setCorpId(corpId);
-                    d.setOperatorId(corpId); // backward compat
-
-                    mapper.insert(d);
-                    success++;
-                } catch (Exception e) { fail++; errors.add("第" + (i + 1) + "行: " + e.getMessage()); }
+                if (cols.length < 4) continue; // skip empty/note rows
+                ParsedRow pr = parseRow(cols, customerIdx, catIdx, brandIdx, modelIdx,
+                        priceIdx, companyIdx, deptIdx, agentIdx, agentPhoneIdx,
+                        saleDateIdx, recDateIdx, recNoIdx, productMap);
+                validateRow(pr, i + 1, errors);
+                if (pr != null) {
+                    // Resolve batchNo for company
+                    pr.catKey = CN_TO_KEY.getOrDefault(pr.catCn, pr.catCn);
+                    pr.product = productMap.get(pr.brand + "|" + pr.catKey + "|" + pr.model);
+                    parsedRows.add(pr);
+                }
             }
-        } catch (Exception e) { log.error("导入Excel失败", e); errors.add("导入失败: " + e.getMessage()); }
-        finally { if (tmpFile != null) try { Files.deleteIfExists(tmpFile); } catch (Exception ignored) {} }
-        return Map.of("success", success, "fail", fail, "errors", errors);
+
+            // If any validation error → reject entirely
+            if (!errors.isEmpty()) {
+                return Map.of("status", "fail", "totalErrors", errors.size(), "errors", errors);
+            }
+
+            // ── Phase 2: Insert all ──
+            int count = 0;
+            for (ParsedRow pr : parsedRows) {
+                String bn = batchNoMap.computeIfAbsent(pr.company, c -> c + ts);
+                OpsBusinessData d = new OpsBusinessData();
+                d.setBatchNo(bn); d.setCompany(pr.company); d.setCustomer(pr.customer);
+                d.setBrand(pr.brand); d.setCategory(pr.catKey); d.setModel(pr.model);
+                d.setSalePrice(pr.salePrice); d.setAgent(pr.agent);
+                d.setAgentPhone(pr.agentPhone);
+                d.setSaleDate(pr.saleDate); d.setReceiptDate(pr.receiptDate); d.setReceiptNo(pr.receiptNo);
+                d.setRetailFloorPrice(pr.product != null ? pr.product.getRetailFloorPrice() : null);
+                d.setGroupLowestPrice(pr.product != null ? pr.product.getGroupLowestPrice() : null);
+                d.setCommissionRate(null); d.setCommissionAmount(null);
+                d.setCalcStatus("未计算");
+                d.setRemark(pr.dept.isEmpty() ? null : "部门: " + pr.dept);
+                d.setCorpId(corpId);
+                d.setOperatorId(corpId); // backward compat
+                mapper.insert(d);
+                count++;
+            }
+
+            log.info("导入Excel成功: {}条", count);
+            return Map.of("status", "success", "count", count);
+
+        } catch (Exception e) {
+            log.error("导入Excel失败", e);
+            return Map.of("status", "fail", "totalErrors", 1,
+                    "errors", List.of("导入失败: " + e.getMessage()));
+        } finally {
+            if (tmpFile != null) try { Files.deleteIfExists(tmpFile); } catch (Exception ignored) {}
+        }
+    }
+
+    /** Parse a single row into a ParsedRow. Returns null if brand/model empty (skip). */
+    private ParsedRow parseRow(String[] cols, int customerIdx, int catIdx, int brandIdx,
+            int modelIdx, int priceIdx, int companyIdx, int deptIdx, int agentIdx,
+            int agentPhoneIdx, int saleDateIdx, int recDateIdx, int recNoIdx,
+            Map<String, OpsValueAddedProduct> productMap) {
+        String brand = val(cols, brandIdx), model = val(cols, modelIdx);
+        if (brand.isEmpty() || model.isEmpty()) return null;
+
+        ParsedRow pr = new ParsedRow();
+        pr.company = val(cols, companyIdx);
+        pr.customer = val(cols, customerIdx);
+        pr.brand = brand;
+        pr.model = model;
+        pr.catCn = val(cols, catIdx);
+        pr.salePrice = toDecimal(val(cols, priceIdx));
+        pr.agent = val(cols, agentIdx);
+        pr.agentPhone = val(cols, agentPhoneIdx);
+        pr.dept = val(cols, deptIdx);
+        pr.saleDate = val(cols, saleDateIdx);
+        pr.receiptDate = val(cols, recDateIdx);
+        pr.receiptNo = val(cols, recNoIdx);
+        return pr;
+    }
+
+    /** Validate a parsed row and add any errors. */
+    private void validateRow(ParsedRow pr, int rowNum, List<String> errors) {
+        if (pr == null) return; // silently skip null rows (brand/model empty)
+        // Category dict check
+        String cat = pr.catCn;
+        if (cat.isEmpty()) {
+            errors.add("第" + rowNum + "行: 品类为空");
+        } else {
+            Set<String> valid = loadValidCategories();
+            if (!valid.contains(cat)) {
+                errors.add("第" + rowNum + "行: 品类'" + cat + "'不在字典范围内");
+            }
+        }
+        if (pr.company.isEmpty())
+            errors.add("第" + rowNum + "行: 公司为空");
+        else if (!VALID_COMPANIES.contains(pr.company))
+            errors.add("第" + rowNum + "行: 无效公司 \"" + pr.company + "\"");
+        if (pr.brand.isEmpty())
+            errors.add("第" + rowNum + "行: 品牌为空");
+        if (pr.model.isEmpty())
+            errors.add("第" + rowNum + "行: 型号为空");
+        if (pr.agent.isEmpty() || pr.agent.isBlank())
+            errors.add("第" + rowNum + "行: 经办人为空");
+        String ap = pr.agentPhone;
+        if (ap.isEmpty())
+            errors.add("第" + rowNum + "行: 经办人手机号为空");
+        else if (!ap.matches("\\d{11}"))
+            errors.add("第" + rowNum + "行: 经办人手机号格式不正确");
+    }
+
+    /** Load valid category names from platform dict. Falls back to defaults on failure. */
+    private Set<String> loadValidCategories() {
+        if (categoryNameCache != null) return categoryNameCache;
+        synchronized (this) {
+            if (categoryNameCache != null) return categoryNameCache;
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> resp = platformInternalClient.get(
+                        "/api/dict/data?typeCode=PRODUCT_CATEGORY", null);
+                Object data = resp.get("data");
+                if (data instanceof List) {
+                    Set<String> set = new HashSet<>();
+                    for (Object item : (List<?>) data) {
+                        if (item instanceof Map) {
+                            Object val = ((Map<?, ?>) item).get("itemValue");
+                            if (val != null) set.add(val.toString());
+                        }
+                    }
+                    if (!set.isEmpty()) {
+                        categoryNameCache = set;
+                        log.info("Loaded {} categories from platform dict", set.size());
+                        return set;
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to load PRODUCT_CATEGORY dict, using defaults: {}", e.getMessage());
+            }
+            categoryNameCache = DEFAULT_CATEGORIES;
+            return categoryNameCache;
+        }
     }
 
     @Override
@@ -268,7 +407,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             Path xlsFile = Path.of(tsvFile.toString().replace(".tsv", ".xlsx"));
             // Write header + rows as tab-separated
             StringBuilder sb = new StringBuilder();
-            sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t销售日期\t收款日期\t收据号\n");
+            sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t收款日期\t收据号\n");
             for (OpsBusinessData d : all) {
                 sb.append(fmt(d.getBatchNo())).append('\t')
                   .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
@@ -277,6 +416,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                   .append(fmt(d.getRetailFloorPrice())).append('\t').append(fmt(d.getGroupLowestPrice())).append('\t')
                   .append(fmt(d.getCommissionRate())).append('\t').append(fmt(d.getCommissionAmount())).append('\t')
                   .append(fmt(d.getCalcStatus())).append('\t').append(fmt(d.getAgent())).append('\t')
+                  .append(fmt(d.getAgentPhone())).append('\t')
                   .append(fmt(d.getSaleDate())).append('\t').append(fmt(d.getReceiptDate())).append('\t')
                   .append(fmt(d.getReceiptNo())).append('\n');
             }
