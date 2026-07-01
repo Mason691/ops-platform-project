@@ -278,7 +278,10 @@ async function doRegister() {
     // Login with returned phone (decrypted by backend) or manual phone
     const loginPhone = r.phone || phone.value
     uni.showToast({ title: '注册成功', icon: 'success' })
-    await api.login(loginPhone, password.value)
+    const loginResult = await api.login(loginPhone, password.value)
+    uni.setStorageSync('ops_token', loginResult.token)
+    uni.setStorageSync('corp_id', String(loginResult.corpId))
+    uni.setStorageSync('ops_member', JSON.stringify(loginResult))
     setTimeout(() => uni.switchTab({ url: '/pages/index/index' }), 600)
   } catch (e) {
     uni.showToast({ title: e.msg || '注册失败', icon: 'none' })
