@@ -4,6 +4,7 @@ export const api = {
   // 登录 & 注册
   login: (phone, password) => request({url:'/api/ops/auth/login',method:'POST',data:{phone,password}}),
   register: (payload) => request({url:'/api/ops/auth/register',method:'POST',data:payload}),
+  wechatLogin: (payload) => request({url:'/api/ops/auth/wechat-login',method:'POST',data:payload}),
   getMe: () => request({url:'/api/ops/user/me'}),
 
   // 公众号配置
@@ -94,6 +95,52 @@ export const api = {
   },
   aiVoiceRecognizeWechat: (serverId) => request({url:'/api/ops/ai/voice/recognize-wechat',method:'POST',data:{serverId}}),
   aiVoiceSynthesize: (data) => request({url:'/api/ops/ai/voice/synthesize',method:'POST',data}),
+  // 增值业务 — 业务数据
+  businessDataList: (params) => request({url:'/api/ops/admin/business-data',data:params}),
+  businessDataBatches: () => request({url:'/api/ops/admin/business-data/batches'}),
+  businessDataDelete: (ids) => request({url:'/api/ops/admin/business-data/batch',method:'DELETE',data:{ids}}),
+  businessDataCalcCommission: () => request({url:'/api/ops/admin/business-data/calc-commission',method:'POST'}),
+  businessDataExport: (params) => request({url:'/api/ops/admin/business-data/export',method:'POST',data:params}),
+  // 业务数据 — 文件上传 (异步导入)
+  businessDataImportSubmit: (file) => {
+    return new Promise((resolve, reject) => {
+      const token = uni.getStorageSync('ops_token') || ''
+      const formData = new FormData()
+      formData.append('file', file)
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', '/api/ops/admin/business-data/import/submit')
+      if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token)
+      xhr.onload = () => {
+        try { const d = JSON.parse(xhr.responseText); if (d.ok && d.data) resolve(d.data); else reject(d) }
+        catch(e) { reject(xhr) }
+      }
+      xhr.onerror = () => reject(new Error('网络错误'))
+      xhr.send(formData)
+    })
+  },
+  businessDataImportStatus: (taskId) => request({url:'/api/ops/admin/business-data/import/'+taskId+'/status'}),
+  businessDataImportHistory: () => request({url:'/api/ops/admin/business-data/import/history'}),
+  // 业务数据 — 文件上传 (同步导入，降级用)
+  businessDataImport: (file) => {
+    return new Promise((resolve, reject) => {
+      const token = uni.getStorageSync('ops_token') || ''
+      const formData = new FormData()
+      formData.append('file', file)
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', '/api/ops/admin/business-data/import')
+      if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token)
+      xhr.onload = () => {
+        try { const d = JSON.parse(xhr.responseText); if (d.ok && d.data) resolve(d.data); else reject(d) }
+        catch(e) { reject(xhr) }
+      }
+      xhr.onerror = () => reject(new Error('网络错误'))
+      xhr.send(formData)
+    })
+  },
+  businessDataTemplateUrl: () => {
+    const BASE_URL = import.meta.env.VITE_OPS_ENTRY || ''
+    return BASE_URL + '/api/ops/admin/business-data/template'
+  },
   // 用户头像
   uploadAvatar: (imageData) => request({url:'/api/ops/user/avatar',method:'POST',data:{imageData}}),
   // 视频直播

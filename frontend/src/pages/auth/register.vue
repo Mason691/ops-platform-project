@@ -115,6 +115,7 @@ const showPwd       = ref(false)
 const submitting    = ref(false)
 const phoneObtained = ref(false)
 const authLoading   = ref(false)
+const wechatProcessing = ref(false)  // true while calling wechatLogin (one-click)
 const showManual    = ref(false)  // fallback: manual phone input
 const manualPhone   = ref('')
 
@@ -166,7 +167,9 @@ const pwdErr = computed(() => {
 })
 
 const canSubmit = computed(() => {
-  return password.value.length >= 6
+  return !wechatProcessing.value
+    && !submitting.value
+    && password.value.length >= 6
     && password.value === confirmPwd.value
     && phoneObtained.value
 })
@@ -195,10 +198,11 @@ async function requestWechatAuth() {
     const phoneData = await getWxPhoneNumber()
     if (!phoneData) throw new Error('getPhoneNumber 失败')
 
-    // Step 3: Store encrypted data; backend decrypts during registration
+    // Step 3: Store encrypted data and do one-click login
     wechatAuth.value = { code, encryptedData: phoneData.encryptedData, iv: phoneData.iv }
-    phoneObtained.value = true
-    uni.showToast({ title: '已获取手机号', icon: 'success' })
+
+    // 一键登录：直接调用 wechat-login，无需密码
+    await doWechatLogin()
   } catch (e) {
     console.error('[register] WeChat auth failed:', e)
     showManual.value = true
@@ -207,6 +211,37 @@ async function requestWechatAuth() {
     authLoading.value = false
   }
   // #endif
+}
+
+/** 微信一键登录：调用 wechat-login 端点，无需密码 */
+async function doWechatLogin() {
+  if (wechatProcessing.value || submitting.value) return
+  wechatProcessing.value = true
+  submitting.value = true
+  try {
+    const payload = {
+      encryptedData: wechatAuth.value.encryptedData,
+      iv: wechatAuth.value.iv,
+      code: wechatAuth.value.code,
+      nickname: '燃气用户',
+    }
+    const r = await api.wechatLogin(payload)
+    uni.setStorageSync('ops_token', r.token)
+    uni.setStorageSync('corp_id', String(r.corpId))
+    uni.setStorageSync('ops_member', JSON.stringify(r))
+    uni.showToast({ title: r.isNewUser ? '注册成功' : '登录成功', icon: 'success' })
+    setTimeout(() => uni.switchTab({ url: '/pages/index/index' }), 600)
+  } catch (e) {
+    // wechat-login 失败 → 回退到手动手机号输入
+    console.warn('[register] wechatLogin failed, fallback to manual:', e)
+    showManual.value = true
+    // 清除 wechatAuth 让手动流程走 mockPhone 路径
+    wechatAuth.value = { code: '', encryptedData: '', iv: '' }
+    uni.showToast({ title: '微信登录失败，请手动输入', icon: 'none' })
+  } finally {
+    wechatProcessing.value = false
+    submitting.value = false
+  }
 }
 
 /** wx.login() — get code for jscode2session */
@@ -263,25 +298,22 @@ async function doRegister() {
       nickname: '燃气用户',
     }
 
-    // Send encrypted WeChat data for backend decryption
+    // Send encrypted WeChat data for backend decryption (fallback path)
     if (wechatAuth.value.encryptedData) {
       payload.encryptedData = wechatAuth.value.encryptedData
       payload.iv = wechatAuth.value.iv
       payload.code = wechatAuth.value.code
     } else if (phone.value) {
-      // Fallback: manually entered phone → use as mockPhone for dev compatibility
+      // Manual phone input → use as mockPhone for dev compatibility
       payload.mockPhone = phone.value
     }
 
+    // register 现已返回 token，无需额外 login 调用
     const r = await api.register(payload)
-
-    // Login with returned phone (decrypted by backend) or manual phone
-    const loginPhone = r.phone || phone.value
+    uni.setStorageSync('ops_token', r.token)
+    uni.setStorageSync('corp_id', String(r.corpId))
+    uni.setStorageSync('ops_member', JSON.stringify(r))
     uni.showToast({ title: '注册成功', icon: 'success' })
-    const loginResult = await api.login(loginPhone, password.value)
-    uni.setStorageSync('ops_token', loginResult.token)
-    uni.setStorageSync('corp_id', String(loginResult.corpId))
-    uni.setStorageSync('ops_member', JSON.stringify(loginResult))
     setTimeout(() => uni.switchTab({ url: '/pages/index/index' }), 600)
   } catch (e) {
     uni.showToast({ title: e.msg || '注册失败', icon: 'none' })

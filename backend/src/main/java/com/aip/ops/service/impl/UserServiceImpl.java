@@ -74,19 +74,35 @@ public class UserServiceImpl implements IUserService {
 
         log.info("注册: phone={}, corpId={}", phone, corpId);
 
-        // ── 检查是否已注册 ──
+        // ── 查找现有用户 ──
         OpsMember exist = userMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
                 .eq(OpsMember::getPhone, phone)
                 .eq(OpsMember::getCorpId, corpId));
-        if (exist != null && exist.getPassword() != null)
-            throw new IllegalArgumentException("该手机号已注册，请直接登录");
 
-        // ── 创建/更新用户 ──
-        OpsMember user;
-        if (exist != null) {
-            user = exist;
-        } else {
-            user = new OpsMember();
+        // 情况1：已有密码的用户 → 验证密码，直接登录
+        if (exist != null && exist.getPassword() != null) {
+            if (!passwordEncoder.matches(password, exist.getPassword()))
+                throw new IllegalArgumentException("手机号或密码错误");
+            if (exist.getStatus() == null || exist.getStatus() != 1)
+                throw new IllegalArgumentException("账号已被禁用，请联系管理员");
+            // 补充微信 openid
+            if (wechatOpenid != null && exist.getOpenid() == null) {
+                exist.setOpenid(wechatOpenid);
+            }
+            exist.setLastLoginTime(LocalDateTime.now());
+            userMapper.updateById(exist);
+            // 确保平台已同步（之前的非致命 bug 可能导致遗漏）
+            syncToBasePlatform(exist);
+            String token = getSsoToken(exist);
+            log.info("用户已注册，直接登录: phone={}, userId={}", phone, exist.getId());
+            return buildAuthResult(exist, token);
+        }
+
+        // 情况2：新用户 或 已存在但无密码（之前仅微信创建）
+        boolean isNew = (exist == null);
+        OpsMember user = (exist != null) ? exist : new OpsMember();
+
+        if (isNew) {
             user.setPhone(phone);
             user.setCorpId(corpId);
             user.setPointsBalance(200);
@@ -95,29 +111,28 @@ public class UserServiceImpl implements IUserService {
         user.setPassword(passwordEncoder.encode(password));
         user.setNickname(nickname);
         user.setLastLoginTime(LocalDateTime.now());
-        // 存储微信 openid（用于后续静默登录）
         if (wechatOpenid != null && user.getOpenid() == null) {
             user.setOpenid(wechatOpenid);
         }
 
-        if (exist != null) {
-            userMapper.updateById(user);
-        } else {
+        if (isNew) {
+            // 平台优先：先同步平台获取 memberDbId，再插入本地
+            Map<String, Object> syncResult = memberSyncClient.sync(phone, nickname, null);
+            if (syncResult != null && syncResult.get("memberDbId") != null) {
+                user.setPlatformMemberId(Long.valueOf(syncResult.get("memberDbId").toString()));
+            }
             userMapper.insert(user);
+            log.info("用户注册成功: phone={}, userId={}, platformMemberId={}",
+                    phone, user.getId(), user.getPlatformMemberId());
+        } else {
+            // 已有用户（无密码）补充密码
+            userMapper.updateById(user);
+            // 确保平台已同步
+            syncToBasePlatform(user);
         }
 
-        // ── 同步到底座平台会员 ──
-        syncToBasePlatform(user);
-
-        log.info("用户注册成功: phone={}, userId={}, platformMemberId={}",
-                phone, user.getId(), user.getPlatformMemberId());
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("userId", user.getId());
-        result.put("phone", user.getPhone());
-        result.put("nickname", user.getNickname());
-        result.put("platformMemberId", user.getPlatformMemberId());
-        return result;
+        String token = getSsoToken(user);
+        return buildAuthResult(user, token);
     }
 
     // ═══ 登录 ═══
@@ -147,20 +162,8 @@ public class UserServiceImpl implements IUserService {
         userMapper.updateById(user);
 
         String token = getSsoToken(user);
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("userId", user.getId());
-        result.put("phone", user.getPhone());
-        result.put("nickname", user.getNickname());
-        result.put("avatar", user.getAvatar());
-        result.put("pointsBalance", user.getPointsBalance());
-        result.put("platformMemberId", user.getPlatformMemberId());
-        result.put("token", token);
-        result.put("corpId", user.getCorpId());
-        result.put("expiresIn", jwtExpiration);
-
         log.info("用户登录成功: phone={}, userId={}", phone, user.getId());
-        return result;
+        return buildAuthResult(user, token);
     }
 
     // ═══ 微信登录 ═══
@@ -195,27 +198,43 @@ public class UserServiceImpl implements IUserService {
             user.setPointsBalance(200);
             user.setStatus(1);
             user.setNickname(nickname);
-            // 存储微信 openid
+            user.setLastLoginTime(LocalDateTime.now());
             if (wechatOpenid != null) user.setOpenid(wechatOpenid);
+
+            // 平台优先：先同步获取 memberDbId，再插入本地
+            Map<String, Object> syncResult = memberSyncClient.sync(phone, nickname, null);
+            if (syncResult != null && syncResult.get("memberDbId") != null) {
+                user.setPlatformMemberId(Long.valueOf(syncResult.get("memberDbId").toString()));
+            }
             userMapper.insert(user);
             isNew = true;
-            // 同步到底座平台
-            syncToBasePlatform(user);
-            log.info("微信登录—新用户注册: phone={}, userId={}", phone, user.getId());
-        } else if (wechatOpenid != null && user.getOpenid() == null) {
-            // 已有用户但无 openid — 补充记录
-            user.setOpenid(wechatOpenid);
+            log.info("微信登录—新用户注册: phone={}, userId={}, platformMemberId={}",
+                    phone, user.getId(), user.getPlatformMemberId());
+        } else {
+            if (wechatOpenid != null && user.getOpenid() == null) {
+                user.setOpenid(wechatOpenid);
+            }
+            user.setLastLoginTime(LocalDateTime.now());
             userMapper.updateById(user);
+            // 确保平台已同步（之前的非致命 bug 可能导致遗漏）
+            syncToBasePlatform(user);
         }
 
         if (user.getStatus() == null || user.getStatus() != 1)
             throw new IllegalArgumentException("账号已被禁用，请联系管理员");
 
-        user.setLastLoginTime(LocalDateTime.now());
-        if (!isNew) userMapper.updateById(user);
-
         String token = getSsoToken(user);
+        Map<String, Object> result = buildAuthResult(user, token);
+        result.put("isNewUser", isNew);
 
+        log.info("微信登录成功: phone={}, userId={}, isNew={}", phone, user.getId(), isNew);
+        return result;
+    }
+
+    // ═══ 私有方法 ═══
+
+    /** 构建统一的认证响应（register / login / wechatLogin 共用） */
+    private Map<String, Object> buildAuthResult(OpsMember user, String token) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("userId", user.getId());
         result.put("phone", user.getPhone());
@@ -226,13 +245,8 @@ public class UserServiceImpl implements IUserService {
         result.put("token", token);
         result.put("corpId", user.getCorpId());
         result.put("expiresIn", jwtExpiration);
-        result.put("isNewUser", isNew);
-
-        log.info("微信登录成功: phone={}, userId={}, isNew={}", phone, user.getId(), isNew);
         return result;
     }
-
-    // ═══ 私有方法 ═══
 
     /** 获取手机号（开发模式优先使用 mockPhone） */
     private PhoneResult resolvePhone(RegisterRequest req) {
@@ -281,20 +295,16 @@ public class UserServiceImpl implements IUserService {
         }
     }
 
-    /** 同步会员信息到底座平台（非致命，失败不阻塞注册） */
+    /** 同步会员信息到底座平台。失败时抛出异常，阻止流程继续。 */
     private void syncToBasePlatform(OpsMember user) {
         if (user.getPlatformMemberId() != null) return; // 已同步
-        try {
-            Map<String, Object> sync = memberSyncClient.sync(
-                    user.getPhone(), user.getNickname(), user.getAvatar());
-            if (sync != null && sync.get("memberDbId") != null) {
-                Long memberDbId = Long.valueOf(sync.get("memberDbId").toString());
-                user.setPlatformMemberId(memberDbId);
-                userMapper.updateById(user);
-                log.info("底座会员关联完成: userId={} → memberDbId={}", user.getId(), memberDbId);
-            }
-        } catch (Exception e) {
-            log.error("底座会员同步异常（非致命）: phone={}, error={}", user.getPhone(), e.getMessage());
+        Map<String, Object> sync = memberSyncClient.sync(
+                user.getPhone(), user.getNickname(), user.getAvatar());
+        if (sync != null && sync.get("memberDbId") != null) {
+            Long memberDbId = Long.valueOf(sync.get("memberDbId").toString());
+            user.setPlatformMemberId(memberDbId);
+            userMapper.updateById(user);
+            log.info("底座会员关联完成: userId={} → memberDbId={}", user.getId(), memberDbId);
         }
     }
 
