@@ -156,4 +156,10 @@ export const api = {
   adminLiveRoomDetail: (id) => request({url:'/api/ops/admin/live-rooms/'+id}),
   adminUpdateLiveRoomStatus: (id,data) => request({url:'/api/ops/admin/live-rooms/'+id+'/status',method:'PUT',data}),
   adminLiveRoomQrCode: (id) => request({url:'/api/ops/admin/live-rooms/'+id+'/qrcode'}),
+
+  // 管理后台 — 会员管理
+  adminMembers: (params) => request({url:'/api/ops/admin/members',data:params}),
+  adminMemberDetail: (id) => request({url:'/api/ops/admin/members/'+id}),
+  adminMemberStatus: (id, status) => request({url:'/api/ops/admin/members/'+id+'/status',method:'PUT',data:{status}}),
+  permissionProfile: () => request({url:'/api/ops/admin/permission/profile'}),
 }

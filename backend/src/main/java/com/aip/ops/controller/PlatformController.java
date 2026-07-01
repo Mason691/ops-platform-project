@@ -58,10 +58,18 @@ public class PlatformController {
 
     @GetMapping("/user/me")
     public R<?> me() {
-        Long userId = SecurityUtils.getCurrentUserId();
+        Long platformUserId = SecurityUtils.getCurrentUserId();
         Long corpId = SecurityUtils.getCurrentCorpId();
+        // JWT userId = platform sys_member.id, stored as ops_member.platform_member_id
         OpsMember u = userMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
-                .eq(OpsMember::getId, userId).eq(OpsMember::getCorpId, corpId));
+                .eq(OpsMember::getPlatformMemberId, platformUserId)
+                .eq(OpsMember::getCorpId, corpId));
+        // Fallback: legacy users whose platformMemberId was never populated
+        if (u == null) {
+            u = userMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
+                    .eq(OpsMember::getId, platformUserId)
+                    .eq(OpsMember::getCorpId, corpId));
+        }
         if (u == null) return R.fail("用户不存在");
         Map<String,Object> r = new LinkedHashMap<>();
         r.put("id",u.getId()); r.put("phone",u.getPhone());
@@ -72,7 +80,9 @@ public class PlatformController {
 
     @PutMapping("/user/profile")
     public R<?> updateProfile(@RequestBody Map<String,String> body) {
-        OpsMember u = new OpsMember(); u.setId(SecurityUtils.getCurrentUserId());
+        Long localId = resolveLocalMemberId();
+        if (localId == null) return R.fail("用户不存在");
+        OpsMember u = new OpsMember(); u.setId(localId);
         if (body.containsKey("nickname")) u.setNickname(body.get("nickname"));
         if (body.containsKey("avatar")) u.setAvatar(body.get("avatar"));
         userMapper.updateById(u);
@@ -85,9 +95,13 @@ public class PlatformController {
      */
     @PostMapping("/user/avatar")
     public R<?> uploadAvatar(@RequestBody Map<String, String> body) {
-        Long userId = SecurityUtils.getCurrentUserId();
+        Long platformUserId = SecurityUtils.getCurrentUserId();
         String imageData = body.get("imageData");
         if (imageData == null || imageData.isEmpty()) return R.fail("图片数据为空");
+
+        // resolve local member ID (JWT userId is platform sys_member.id)
+        Long localId = resolveLocalMemberId();
+        if (localId == null) return R.fail("用户不存在");
 
         try {
             // 解析 base64 data URL: "data:image/png;base64,xxxxx"
@@ -99,7 +113,7 @@ public class PlatformController {
             if ("jpeg".equals(ext)) ext = "jpg";
 
             byte[] bytes = java.util.Base64.getDecoder().decode(base64);
-            String fileName = "avatar_" + userId + "_" + System.currentTimeMillis() + "." + ext;
+            String fileName = "avatar_" + platformUserId + "_" + System.currentTimeMillis() + "." + ext;
 
             // 保存到文件系统（绝对路径，确保 Nginx 可读）
             java.io.File uploadDir = new java.io.File(uploadBaseDir + "/avatar/");
@@ -111,16 +125,16 @@ public class PlatformController {
 
             // 更新数据库
             OpsMember u = new OpsMember();
-            u.setId(userId);
+            u.setId(localId);
             u.setAvatar(avatarUrl);
             userMapper.updateById(u);
 
             // 同步到底座平台会员头像
-            syncAvatarToPlatform(userId, avatarUrl);
+            syncAvatarToPlatform(localId, avatarUrl);
 
             return R.ok(Map.of("avatar", avatarUrl));
         } catch (Exception e) {
-            log.error("头像上传失败: userId={}", userId, e);
+            log.error("头像上传失败: localId={}", localId, e);
             return R.fail("头像上传失败，请重试");
         }
     }
@@ -647,4 +661,19 @@ public class PlatformController {
     // ═══ 辅助 ═══
     private Long getCorpId() { try { return SecurityUtils.getCurrentCorpId(); } catch (Exception e) { return 3L; } }
     private Long getUserIdOrNull() { try { return SecurityUtils.getCurrentUserId(); } catch (Exception e) { return null; } }
+
+    /** Resolve local ops_member.id from JWT userId (which is platform sys_member.id). */
+    private Long resolveLocalMemberId() {
+        Long platformUserId = SecurityUtils.getCurrentUserId();
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        OpsMember m = userMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
+                .eq(OpsMember::getPlatformMemberId, platformUserId)
+                .eq(OpsMember::getCorpId, corpId));
+        if (m != null) return m.getId();
+        // Fallback for legacy users without platformMemberId
+        m = userMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
+                .eq(OpsMember::getId, platformUserId)
+                .eq(OpsMember::getCorpId, corpId));
+        return m != null ? m.getId() : null;
+    }
 }

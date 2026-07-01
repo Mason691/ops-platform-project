@@ -16,7 +16,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.sql.DataSource;
+import java.sql.PreparedStatement;
 import java.sql.Statement;
+
+import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.servlet.http.HttpServletResponse;
@@ -201,25 +204,44 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 return Map.of("status", "fail", "totalErrors", errors.size(), "errors", errors);
             }
 
-            // ── Phase 2: Insert all ──
-            int count = 0;
-            for (ParsedRow pr : parsedRows) {
-                String bn = batchNoMap.computeIfAbsent(pr.company, c -> c + ts);
-                OpsBusinessData d = new OpsBusinessData();
-                d.setBatchNo(bn); d.setCompany(pr.company); d.setCustomer(pr.customer);
-                d.setBrand(pr.brand); d.setCategory(pr.catKey); d.setModel(pr.model);
-                d.setSalePrice(pr.salePrice); d.setAgent(pr.agent);
-                d.setAgentPhone(pr.agentPhone);
-                d.setSaleDate(pr.saleDate); d.setReceiptDate(pr.receiptDate); d.setReceiptNo(pr.receiptNo);
-                d.setRetailFloorPrice(pr.product != null ? pr.product.getRetailFloorPrice() : null);
-                d.setGroupLowestPrice(pr.product != null ? pr.product.getGroupLowestPrice() : null);
-                d.setCommissionRate(null); d.setCommissionAmount(null);
-                d.setCalcStatus("未计算");
-                d.setRemark(pr.dept.isEmpty() ? null : "部门: " + pr.dept);
-                d.setCorpId(corpId);
-                d.setOperatorId(corpId); // backward compat
-                mapper.insert(d);
-                count++;
+            // ── Phase 2: JDBC batch insert (single tx, DataSourceUtils participates in @Transactional) ──
+            String insertSql = "INSERT INTO ops_business_data "
+                    + "(batch_no, company, customer, brand, category, model, "
+                    + "sale_price, agent, agent_phone, sale_date, receipt_date, receipt_no, "
+                    + "retail_floor_price, group_lowest_price, calc_status, remark, "
+                    + "corp_id, operator_id) "
+                    + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+
+            int count;
+            java.sql.Connection conn = DataSourceUtils.getConnection(dataSource);
+            try (PreparedStatement ps = conn.prepareStatement(insertSql)) {
+                count = 0;
+                for (ParsedRow pr : parsedRows) {
+                    String bn = batchNoMap.computeIfAbsent(pr.company, c -> c + ts);
+                    int idx = 1;
+                    ps.setString(idx++, bn);
+                    ps.setString(idx++, pr.company);
+                    ps.setString(idx++, pr.customer);
+                    ps.setString(idx++, pr.brand);
+                    ps.setString(idx++, pr.catKey);
+                    ps.setString(idx++, pr.model);
+                    ps.setBigDecimal(idx++, pr.salePrice);
+                    ps.setString(idx++, pr.agent);
+                    ps.setString(idx++, pr.agentPhone);
+                    ps.setString(idx++, pr.saleDate);
+                    ps.setString(idx++, pr.receiptDate);
+                    ps.setString(idx++, pr.receiptNo);
+                    ps.setBigDecimal(idx++, pr.product != null ? pr.product.getRetailFloorPrice() : null);
+                    ps.setBigDecimal(idx++, pr.product != null ? pr.product.getGroupLowestPrice() : null);
+                    ps.setString(idx++, "未计算");
+                    ps.setString(idx++, pr.dept.isEmpty() ? null : "部门: " + pr.dept);
+                    ps.setLong(idx++, corpId);
+                    ps.setLong(idx++, corpId);
+                    ps.addBatch();
+                    count++;
+                    if (count % 500 == 0) { ps.executeBatch(); }
+                }
+                if (count % 500 != 0) { ps.executeBatch(); }
             }
 
             log.info("导入Excel成功: {}条", count);
@@ -475,7 +497,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private String parseExcelWithPython(Path file) throws Exception {
         ProcessBuilder pb = new ProcessBuilder("python3", "-c",
                 "import openpyxl\n"
-                        + "wb=openpyxl.load_workbook('" + file.toAbsolutePath() + "')\n"
+                        + "wb=openpyxl.load_workbook('" + file.toAbsolutePath() + "', read_only=True)\n"
                         + "ws=wb.active\n"
                         + "for row in ws.iter_rows(values_only=True):\n"
                         + "  print('\\t'.join(str(v) if v is not None else '' for v in row))\n");

@@ -57,7 +57,7 @@ function handleAuthMessage(payload) {
   if (token) {
     // 使用 uni 存储 API 保存认证信息
     uni.setStorageSync('ops_token', token)
-    if (corpId != null) uni.setStorageSync('ops_corp_id', String(corpId))
+    if (corpId != null) uni.setStorageSync('corp_id', String(corpId))
     if (userId != null) uni.setStorageSync('ops_user_id', String(userId))
     if (permissions) uni.setStorageSync('ops_permissions', JSON.stringify(permissions))
     if (isAdmin) uni.setStorageSync('ops_is_admin', '1')

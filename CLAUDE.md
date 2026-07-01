@@ -138,7 +138,7 @@ ops-platform-project/
 │   ├── src/main/java/com/aip/ops/
 │   │   ├── OpsApplication.java
 │   │   ├── config/          # SecurityConfig, AuthConfig, JacksonConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig
-│   │   ├── controller/      # 15 controllers
+│   │   ├── controller/      # 17 controllers
 │   │   │   ├── PlatformController.java      # 核心：商品/活动/订单/积分/优惠券/直播室/用户
 │   │   │   ├── AdminController.java         # 管理后台：活动/商品/直播室 CRUD、预约查询、首页统计、商家绑定
 │   │   │   ├── AuthController.java          # 登录/注册
@@ -150,13 +150,15 @@ ops-platform-project/
 │   │   │   ├── PartnerController.java       # 城市合伙人管理（代理底座 internal API）
 │   │   │   ├── StationController.java       # H5 端站长申请/状态/信息（代理底座 internal API）
 │   │   │   ├── AdminStationController.java  # 管理后台站长审批/列表/统计（代理底座 internal API）
-│   │   │   ├── BusinessDataController.java  # 增值业务：Excel 导入/提成计算/异步导出
+│   │   │   ├── BusinessDataController.java  # 增值业务：Excel 导入/提成计算/异步导出/模板下载
 │   │   │   ├── CommissionRuleController.java # 增值业务：个人/公司提成规则 CRUD
 │   │   │   ├── ValueAddedProductController.java # 增值业务：增值产品 CRUD
+│   │   │   ├── MemberController.java        # 会员管理：分页查询/详情/启用禁用
+│   │   │   ├── ExportTaskController.java    # 通用异步导出：提交/状态轮询/下载/历史
 │   │   │   └── PermissionController.java    # 权限概要查询（corpId/orgRoleType/canEdit）
-│   │   ├── entity/          # 23 entities（全部继承 SDK BaseEntity，100% 合规）
-│   │   ├── mapper/          # 23 MyBatis-Plus mappers（均继承 BaseMapper）
-│   │   ├── service/         # 12 service interfaces + 8 impls + 3 concrete services
+│   │   ├── entity/          # 25 entities（全部继承 SDK BaseEntity，100% 合规）(注: SysImportTask 未继承 BaseEntity，自管理审计字段)
+│   │   ├── mapper/          # 25 MyBatis-Plus mappers（均继承 BaseMapper）
+│   │   ├── service/         # 17 service interfaces + 13 impls
 │   │   │   ├── impl/UserServiceImpl.java         # 通过 PlatformInternalClient 调用底座 SSO
 │   │   │   ├── impl/OpsProductServiceImpl.java   # 商品管理 + ProductBatchClient 批量查询
 │   │   │   ├── impl/OpsActivityServiceImpl.java  # 活动管理 + 直播室关联 + liveStatus 计算
@@ -165,11 +167,15 @@ ops-platform-project/
 │   │   │   ├── impl/ValueAddedProductServiceImpl.java  # 增值产品 CRUD + 品类字典校验 + org-role 写权限
 │   │   │   ├── impl/CommissionRuleServiceImpl.java   # 个人/公司提成规则 CRUD + org-role 写权限
 │   │   │   ├── impl/BusinessDataServiceImpl.java     # Excel 导入/提成计算/异步导出 + org-scope 数据隔离
+│   │   │   ├── impl/WechatPhoneServiceImpl.java      # 微信手机号 AES 解密（jscode2session → session_key → 解密）
+│   │   │   ├── impl/MemberServiceImpl.java           # 会员列表/详情/启用禁用
+│   │   │   ├── impl/ImportTaskServiceImpl.java       # 异步导入任务生命周期管理
+│   │   │   ├── impl/ExportTaskServiceImpl.java       # 通用异步导出任务管理
 │   │   │   ├── PlatformMerchantService.java      # 通过 PlatformInternalClient 查组织信息
 │   │   │   ├── ActivityReminderService.java      # @Scheduled 预约提醒（5 分钟轮询）
 │   │   │   ├── DataScopeService.java             # 组织级数据可见范围（超管/运营商/城市合伙人）
 │   │   │   ├── OrgRoleService.java               # 组织角色查询（superadmin/operator/partner）
-│   │   │   └── OpsExportTaskService.java + impl  # 异步导出任务状态管理
+│   │   │   └── OpsExportTaskService.java + impl  # 遗留导出任务管理（已被 ExportTaskService 取代）
 │   │   ├── client/          # 子系统间 HTTP 客户端
 │   │   │   ├── MemberSyncClient.java        # 会员同步到底座平台
 │   │   │   └── ProductBatchClient.java      # mall-service 批量商品查询
@@ -177,11 +183,19 @@ ops-platform-project/
 │   │   │   └── OpsAgent.java                # @AgentComponent，路由 AI 助手业务问答
 │   │   ├── tool/            # MCP 工具
 │   │   │   └── OpsOrderQueryTool.java       # @McpTool，按条件查询订单
+│   │   ├── export/          # 通用异步导出策略（ExportHandler 接口 + 策略模式）
+│   │   │   ├── ExportHandler.java           # 导出处理器接口（getTaskType + export）
+│   │   │   └── BusinessDataExportHandler.java  # 业务数据 TSV 导出（支持多条件筛选 + org-scope）
+│   │   ├── imports/         # 通用异步导入策略（ImportHandler 接口 + 策略模式）
+│   │   │   ├── ImportHandler.java           # 导入处理器接口（getTaskType + execute）
+│   │   │   ├── ImportResult.java            # 分阶段校验结果（FILE/HEADER/ROW_CHECK → INSERT）
+│   │   │   └── BusinessDataImportHandler.java  # 业务数据导入：全量校验 → JDBC batch 原子写入
 │   │   ├── kafka/           # Kafka 消费者
-│   │   │   └── OpsExportTaskConsumer.java   # 异步导出任务消费（ops-export-task → ops-export-result）
+│   │   │   ├── ExportTaskConsumer.java      # 异步导出消费（async-export-task → handler.export() → async-export-result）
+│   │   │   └── ImportTaskConsumer.java      # 异步导入消费（async-import-task → handler.execute() → async-import-result）
 │   └── pom.xml
 ├── frontend/
-│   ├── src/pages/           # 23 page files，15 个目录（见下方"前端页面路由"）
+│   ├── src/pages/           # 23 page files，15 个目录（见下方"前端页面路由"）+ business-data 管理页
 │   ├── src/components/      # 共享组件（LiveStatusCard.vue 直播状态卡片；ImageCropperModal.vue 已被 activity-form 内联替代）
 │   ├── src/api/index.js     # 集中 API 注册（63 个方法）
 │   ├── src/utils/           # request.js, image.js, config.js, jssdk.js, auth-bridge.js
@@ -248,8 +262,10 @@ ops-platform-project/
 | `/api/ops/points/**` | JWT | 积分流水 |
 | `/api/ops/coupon/**` | JWT | 优惠券 |
 | `/api/ops/ai/**` | 混合 | AI 聊天（chat 需 JWT，config 公开） |
-| `/api/ops/admin/**` | JWT | 管理后台（活动/商品/首页配置/站长审批/增值业务） |
+| `/api/ops/admin/**` | JWT | 管理后台（活动/商品/首页配置/站长审批/增值业务/会员管理/通用导出） |
 | `/api/ops/station/**` | JWT | 站长申请/状态/信息（代理底座 internal API） |
+| `/api/ops/admin/members/**` | JWT | 会员管理（列表/详情/启用禁用），仅运营商/超管可写 |
+| `/api/ops/admin/export/**` | JWT | 通用异步导出（提交/状态/下载/历史） |
 | `/api/ops/admin/permission/**` | JWT | 权限概要查询（corpId/orgRoleType/canEdit） |
 
 **AiChatProxyController 端点详情**（`/api/ops/ai`）：
@@ -353,21 +369,56 @@ DB (相对路径) → Backend ImageUrlUtil → API JSON (相对路径)
 - **增值业务写保护**：`ValueAddedProductController`、`CommissionRuleController`、`BusinessDataController` 的写操作均调用 `orgRoleService.isOperatorOrSuperAdmin()` 校验，城市合伙人拒绝写入。
 - **安全兜底**：任何异常（底座 API 不可达等）→ 视为运营商（不阻断写操作），但数据 scope 回退到仅自己（安全优先）。
 
-### 异步导出（Kafka）
+### 异步导出（Kafka + ExportHandler 策略模式）
 
-用户在前端提交导出请求 → `BusinessDataController` 创建 `OpsExportTask` 记录 → `KafkaTemplate.send("ops-export-task", ...)` → `OpsExportTaskConsumer` 消费：
+导出采用**通用框架 + 策略模式**：`ExportTaskController` 提供统一 API，具体导出逻辑由 `ExportHandler` 实现类完成。
 
 ```
-Controller → Kafka (ops-export-task) → Consumer → DB 查询 → TSV 写入磁盘
-  → Python openpyxl 转 XLSX → 更新 task 状态 → Kafka (ops-export-result) → 前端轮询
+Controller (ExportTaskController / BusinessDataController)
+  → ExportTaskService.createTask() → SysExportTask 记录
+  → KafkaTemplate.send("async-export-task", {taskId, filters})
+  → ExportTaskConsumer → handlerMap.get(taskType) → handler.export(task, outputStream)
+  → Python openpyxl TSV→XLSX 转换 → 更新 task 状态 → async-export-result → 前端轮询
 ```
 
 关键细节：
+- **通用端点**：`ExportTaskController`（`/api/ops/admin/export`）— `POST /submit` / `GET /{id}/status` / `GET /{id}/download` / `GET /history`
+- **业务数据端点**：`BusinessDataController` 保留向后兼容的 `/export` / `/export/{id}/status` / `/export/{id}/download`
+- **ExportHandler 接口**：`getTaskType()` 返回类型标识（如 `"business_data"`），Spring 自动收集所有 `@Component` 实现
 - **导出目录**：`/app/uploads/exports/`（Docker volume 持久化，宿主机 `/data2/boss-platform/uploads/exports/`）
 - **数据隔离**：Consumer 通过 `DataScopeService.getVisibleCorpIdsForCorp(task.corpId)` 获取组织级数据范围
 - **文件格式**：优先 XLSX（Python openpyxl 转换），降级 TSV（Python 不可用时）
-- **`OpsExportTask`** 表状态：`PENDING` → `PROCESSING` → `DONE` / `FAILED`
-- **条件启用**：`@ConditionalOnProperty(name = "spring.kafka.enabled", havingValue = "true")`，Kafka 不可用时消费者静默不加载
+- **`SysExportTask`** 表状态：`PENDING` → `PROCESSING` → `DONE` / `FAILED`
+- **Kafka topic**：`async-export-task`（提交）/ `async-export-result`（结果通知）
+- **条件启用**：`@ConditionalOnProperty(name = "spring.kafka.enabled", havingValue = "true")`，Kafka 不可用时降级为同步导出
+
+### 异步导入（Kafka + ImportHandler 策略模式）
+
+导入采用**与导出对称的通用框架**：`ImportHandler` 接口 + `ImportTaskConsumer` + 分阶段校验。
+
+```
+Controller (BusinessDataController)
+  → 上传文件保存到 /tmp/ → ImportTaskService.createTask() → SysImportTask 记录
+  → KafkaTemplate.send("async-import-task", {taskId})
+  → ImportTaskConsumer → handlerMap.get(taskType) → handler.execute(task)
+  → 分阶段校验（FILE_CHECK → HEADER_CHECK → ROW_CHECK）→ 全量通过后 JDBC batch 原子写入
+  → async-import-result → 前端轮询
+```
+
+关键细节：
+- **API 端点**（`BusinessDataController`）：
+  - `POST /api/ops/admin/business-data/import/submit` — 上传文件提交异步导入
+  - `GET /api/ops/admin/business-data/import/{taskId}/status` — 轮询导入进度
+  - `GET /api/ops/admin/business-data/import/history` — 当前用户导入历史
+  - `GET /api/ops/admin/business-data/template` — 下载 Excel 导入模板
+- **ImportHandler 接口**：`getTaskType()` + `execute(SysImportTask)`，返回 `ImportResult`（含 phase/status/errors）
+- **分阶段校验**：`FILE_CHECK`（文件存在+格式）→ `HEADER_CHECK`（必填列）→ `ROW_CHECK`（品类字典校验+公司白名单+手机号格式）→ `INSERT`（单事务 JDBC batch，500 条/批）
+- **原子性**：任一行校验失败 → 整个文件拒绝，不写入任何数据（全量校验通过后才 INSERT）
+- **并发控制**：提交前检查 `importTaskService.hasPendingTask("business_data")`，同一类型同时只能有一个进行中的任务
+- **品类字典**：通过 `PlatformInternalClient` 调用底座 `GET /api/dict/data?typeCode=PRODUCT_CATEGORY` 获取有效品类，缓存到 `volatile` 字段；底座不可达时降级为硬编码默认值
+- **`SysImportTask`** 表状态：`PENDING` → `PROCESSING` → `DONE` / `FAILED`，中间阶段通过 `phase` 字段细化
+- **Kafka topic**：`async-import-task`（提交）/ `async-import-result`（结果通知）
+- **注意**：`SysImportTask` 实体**未继承 BaseEntity**，自行声明了所有审计字段（createTime/modifyTime 等）
 
 ### 直播室管理（Live Room）
 
@@ -417,6 +468,20 @@ Controller → Kafka (ops-export-task) → Consumer → DB 查询 → TSV 写入
 - `service/PlatformMerchantService.java`：通过 `PlatformInternalClient` 查询组织信息，替代了跨库查 `ai_platform.sys_corp`
 - 所有 mapper SQL 仅 JOIN 本地表（`ops_*`, `biz_*`），不再跨库
 - 认证方式：`X-Internal-Token` 请求头（平台共享密钥）
+
+### 微信手机号授权（WechatPhoneService）
+
+小程序端 `wx.getPhoneNumber()` 返回的加密数据在后端解密：
+
+```
+小程序 wx.login() → code → 后端 jscode2session → session_key + openid
+小程序 wx.getPhoneNumber() → encryptedData + iv → 后端 AES/CBC/PKCS5Padding 解密 → 手机号
+```
+
+- **`WechatPhoneService.decryptPhone(code, encryptedData, iv)`**：返回 `WechatPhoneResult(phone, openid, unionid)`
+- **公众号配置来源**：从 `PublicAccountConfig` 表取默认公众号（`is_default=1 & status=1`），降级取任意启用配置
+- **解密细节**：AES-128-CBC，密钥和 IV 均为 Base64 解码的 session_key/iv；优先取 `purePhoneNumber`（无国家代码），其次 `phoneNumber`
+- **错误处理**：任何步骤失败返回 `null`（不抛异常），调用方检查 null 后降级到 mock 登录或提示用户
 
 ### AI 语音代理链路（ASR / TTS）
 
@@ -511,8 +576,12 @@ CSS `url()` 把根相对路径（如 `/uploads/ops/img/xxx.jpg`）解析到页�
 | **MetaObjectHandler** | ops 是独立 Spring Boot 应用，`MybatisPlusConfig.java` 自行注册 `MetaObjectHandler`（审计字段自动填充）。平台 web 模块的 `MybatisPlusConfig` 不会自动扫描到 ops |
 | **增值业务物理删除** | `ops_business_data` 的 `batchDelete()` 使用原始 JDBC 物理删除，不走 `@TableLogic`。原因：导入的统计明细纠错时需直接删除。参见 `Specs/增值业务-规格说明.md` |
 | **operatorId 废弃** | 增值业务四张表的 `operator_id` 已废弃，新代码使用 `corp_id`。`operator_id` 保留向后兼容 |
-| **OpsExportTask 物理字段** | `OpsExportTask` 实体显式声明了 `createTime`（因 SQL 使用 `DEFAULT CURRENT_TIMESTAMP`），需注意与 BaseEntity `createTime` 的重复映射。`finishTime` 不是审计字段（业务时间） |
-| **Kafka 条件加载** | `OpsExportTaskConsumer` 仅在 `spring.kafka.enabled=true` 时加载。测试环境无 Kafka → 导出为同步 TSV 文件返回 |
+| **SysExportTask 物理字段** | `SysExportTask` 实体显式声明了 `createTime`（因 SQL 使用 `DEFAULT CURRENT_TIMESTAMP`），需注意与 BaseEntity `createTime` 的重复映射。`finishTime` 不是审计字段（业务时间） |
+| **SysImportTask 未继承 BaseEntity** | `SysImportTask` 自行声明了所有审计字段（createTime/modifyTime/createUser 等），不依赖 BaseEntity 的自动填充。新增实体时注意此例外 |
+| **Kafka 条件加载** | `ExportTaskConsumer` 和 `ImportTaskConsumer` 仅在 `spring.kafka.enabled=true` 时加载。测试环境无 Kafka → 导入/导出降级为同步执行 |
+| **Kafka topic 命名** | 导出 topic 为 `async-export-task` / `async-export-result`；导入 topic 为 `async-import-task` / `async-import-result`。注意不是旧的 `ops-export-task` |
+| **导入并发控制** | `BusinessDataController.importSubmit()` 提交前检查 `hasPendingTask("business_data")`，防止同一类型并发导入 |
+| **导入文件暂存** | 异步导入的 Excel 文件暂存 `/tmp/`（`IMPORT_UPLOAD_DIR`），Kafka 消费者从该路径读取。生产环境需确保 `/tmp/` 有足够空间且不被定期清理 |
 | **DataScopeService 缓存** | `DataScopeService` 和 `OrgRoleService` 均有 60s 本地 Caffeine-like ConcurrentHashMap 缓存。新增组织或变更角色后最多 60s 生效 |
 | **城市合伙人只读** | 城市合伙人（orgRoleId=5）在增值模块无写权限。前端通过 `/api/ops/admin/permission/profile` 获取权限后隐藏编辑按钮，后端 `OrgRoleService.isOperatorOrSuperAdmin()` 兜底校验 |
 | **无自动化测试** | 项目当前无单元测试或集成测试；所有验证依赖手动检查和生产监控 |
@@ -520,4 +589,4 @@ CSS `url()` 把根相对路径（如 `/uploads/ops/img/xxx.jpg`）解析到页�
 
 ---
 
-最后更新：2026-06-30 | 负责人：架构师
+最后更新：2026-07-01 | 负责人：架构师

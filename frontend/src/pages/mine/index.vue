@@ -32,7 +32,11 @@ async function loadUser(){
   const token = uni.getStorageSync('ops_token')
   if (!token) { isLogin.value = false; return }
   try { user.value = await api.getMe(); isLogin.value = true; checkStation() }
-  catch { isLogin.value = false; uni.removeStorageSync('ops_token') }
+  catch (e) {
+    isLogin.value = false
+    // Only clear token on authentication errors (401)
+    if (e && e.code === 401) { uni.removeStorageSync('ops_token') }
+  }
 }
 async function checkStation(){
   try{
