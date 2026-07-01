@@ -303,6 +303,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             errors.add("第" + rowNum + "行: 型号为空");
         if (pr.agent.isEmpty() || pr.agent.isBlank())
             errors.add("第" + rowNum + "行: 经办人为空");
+        if (pr.salePrice == null)
+            errors.add("第" + rowNum + "行: 销售价为空或格式不正确");
+        else if (pr.salePrice.compareTo(java.math.BigDecimal.ZERO) < 0)
+            errors.add("第" + rowNum + "行: 销售价不能为负数");
         String ap = pr.agentPhone;
         if (ap.isEmpty())
             errors.add("第" + rowNum + "行: 经办人手机号为空");
