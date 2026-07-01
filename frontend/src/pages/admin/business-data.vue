@@ -85,23 +85,23 @@
     </view>
 
     <!-- ═══ Import Modal ═══ -->
-    <view v-if="showImport" class="bd-overlay" @click.self="closeImport">
+    <view v-if="showImport" class="bd-overlay" :class="{ locked: importState === 'processing' }" @click.self="importState !== 'processing' && closeImport()">
       <view class="bd-modal">
         <view class="bd-modal-header">
           <text class="bd-modal-title">导入业务数据</text>
-          <text class="bd-modal-close" @click="closeImport">✕</text>
+          <text v-if="importState !== 'processing'" class="bd-modal-close" @click="closeImport">✕</text>
         </view>
 
         <view class="bd-modal-body">
-          <!-- Step 1: Select file -->
-          <view v-if="!importResult" class="bd-import-step">
+          <!-- ═══ State 1: File selection ═══ -->
+          <view v-if="importState === 'idle'" class="bd-import-step">
             <view class="bd-template-link" @click="downloadTemplate">
               📥 下载导入模板（Excel格式）
             </view>
 
             <view class="bd-file-area" @click="selectFile">
               <text class="bd-file-icon">📁</text>
-              <text v-if="!selectedFile" class="bd-file-hint">点击选择Excel文件</text>
+              <text v-if="!selectedFile" class="bd-file-hint">点击选择Excel文件（.xlsx / .xls）</text>
               <template v-else>
                 <text class="bd-file-name">{{ selectedFile.name }}</text>
                 <text class="bd-file-size">{{ formatSize(selectedFile.size) }}</text>
@@ -115,41 +115,83 @@
               @change="onFileChange"
             />
 
-            <view
-              class="bd-btn bd-btn--upload"
-              :class="{ loading: importing, disabled: !selectedFile || importing }"
-              @click="doImport"
-            >
-              {{ importing ? '验证中...' : '开始导入' }}
+            <view class="bd-required-note">
+              <text class="bd-required-title">📋 必填列说明</text>
+              <text class="bd-required-item">品类：必须与平台数据字典中的品类名称一致</text>
+              <text class="bd-required-item">品牌 / 型号：不能为空</text>
+              <text class="bd-required-item">公司：临洮 / 广河 / 康乐 / 武山 / 彭阳 / 德保</text>
+              <text class="bd-required-item">经办人 / 经办人手机号：均不能为空，手机号 11 位数字</text>
+            </view>
+
+            <view class="bd-modal-footer">
+              <view class="bd-btn bd-btn--cancel" @click="closeImport">取消</view>
+              <view
+                class="bd-btn bd-btn--upload"
+                :class="{ loading: importing, disabled: !selectedFile || importing }"
+                @click="doImport"
+              >
+                {{ importing ? '提交中...' : '提交导入' }}
+              </view>
             </view>
           </view>
 
-          <!-- Step 2: Polling -->
-          <view v-if="importPolling" class="bd-import-result">
-            <text class="bd-result-icon">⏳</text>
-            <text class="bd-result-title">正在校验数据，请稍候...</text>
-            <text class="bd-result-phase">{{ importPhase }}</text>
+          <!-- ═══ State 2: Processing (non-closable) ═══ -->
+          <view v-if="importState === 'processing'" class="bd-import-processing">
+            <view class="bd-spinner">
+              <view class="bd-spinner-ring"></view>
+            </view>
+            <text class="bd-processing-title">正在处理导入任务</text>
+            <text class="bd-processing-sub">请勿关闭页面或进行其他操作</text>
+
+            <!-- Step indicator -->
+            <view class="bd-steps">
+              <view class="bd-step" :class="{ active: importStepIdx >= 0, done: importStepIdx > 0 }">
+                <view class="bd-step-dot">1</view>
+                <text class="bd-step-text">文件校验</text>
+              </view>
+              <view class="bd-step-line" :class="{ active: importStepIdx >= 1 }"></view>
+              <view class="bd-step" :class="{ active: importStepIdx >= 1, done: importStepIdx > 1 }">
+                <view class="bd-step-dot">2</view>
+                <text class="bd-step-text">数据校验</text>
+              </view>
+              <view class="bd-step-line" :class="{ active: importStepIdx >= 2 }"></view>
+              <view class="bd-step" :class="{ active: importStepIdx >= 2, done: importStepIdx > 2 }">
+                <view class="bd-step-dot">3</view>
+                <text class="bd-step-text">导入中</text>
+              </view>
+            </view>
+
+            <text class="bd-processing-phase">{{ importPhase }}</text>
+            <text class="bd-processing-elapsed">已等待 {{ elapsedSeconds }} 秒</text>
           </view>
 
-          <!-- Step 3: Result -->
-          <view v-else-if="importResult" class="bd-import-result">
+          <!-- ═══ State 3: Result ═══ -->
+          <view v-if="importState === 'done'" class="bd-import-result">
             <!-- Success -->
-            <view v-if="importResult.status === 'success'" class="bd-result-success">
+            <view v-if="importResult?.status === 'success'" class="bd-result-success">
               <text class="bd-result-icon">✅</text>
-              <text class="bd-result-title">全部验证通过，成功导入{{ importResult.count }}条业务数据</text>
+              <text class="bd-result-title">全部验证通过，成功导入 {{ importResult.count }} 条业务数据</text>
+              <view class="bd-modal-footer">
+                <view class="bd-btn bd-btn--upload" @click="closeImportAndRefresh">关闭并刷新列表</view>
+              </view>
             </view>
             <!-- Fail -->
             <view v-else class="bd-result-fail">
               <text class="bd-result-icon">❌</text>
-              <text class="bd-result-title">
-                共发现{{ importResult.totalErrors }}行数据不完整，请修正后重新导入，当前未导入任何数据
-              </text>
+              <text class="bd-result-title">共发现 {{ importResult?.totalErrors || 0 }} 处错误，未导入任何数据</text>
+              <text class="bd-result-subtitle">请修正以上问题后重新导入</text>
               <view class="bd-error-list">
-                <text v-for="(e, i) in importResult.errors" :key="i" class="bd-error-item">{{ e }}</text>
+                <view class="bd-error-actions">
+                  <text class="bd-error-count">错误详情（{{ importResult?.errors?.length || 0 }} 条）</text>
+                  <text class="bd-error-copy" @click="copyErrors">📋 复制全部</text>
+                </view>
+                <text v-for="(e, i) in (importResult?.errors || [])" :key="i" class="bd-error-item">{{ e }}</text>
+              </view>
+              <view class="bd-modal-footer">
+                <view class="bd-btn bd-btn--cancel" @click="resetImport">重新选择文件</view>
+                <view class="bd-btn bd-btn--retry" @click="closeImport">关闭</view>
               </view>
             </view>
-
-            <view class="bd-btn bd-btn--retry" @click="resetImport">重新选择文件</view>
           </view>
         </view>
       </view>
@@ -158,7 +200,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { api } from '@/api/index'
 
 // ── State ──
@@ -176,14 +218,17 @@ const filterCompany = ref('')
 const filterBatchNo = ref('')
 const filterAgent = ref('')
 
-// Import
+// Import — three-state machine: idle → processing → done
 const showImport = ref(false)
 const selectedFile = ref(null)
 const importing = ref(false)
-const importResult = ref(null)
-const importPolling = ref(false)
+const importState = ref('idle')       // 'idle' | 'processing' | 'done'
+const importStepIdx = ref(0)          // 0=file check, 1=data check, 2=importing
 const importPhase = ref('')
+const importResult = ref(null)
+const elapsedSeconds = ref(0)
 let pollTimer = null
+let elapsedTimer = null
 const fileInput = ref(null)
 
 // ── Computed ──
@@ -279,7 +324,7 @@ async function doCalc() {
   } catch (e) { uni.showToast({ title: '计算失败', icon: 'none' }) }
 }
 
-// ── Import (Async) ──
+// ── Import (Async, 3-state) ──
 function selectFile() { fileInput.value?.click() }
 function onFileChange(e) {
   const file = e.target?.files?.[0]
@@ -295,67 +340,134 @@ function downloadTemplate() {
   window.open(url, '_blank')
 }
 
+/** Phase name → step index mapping */
+function phaseToStepIdx(phase) {
+  if (!phase) return 0
+  if (phase === 'FILE_CHECK' || phase === 'HEADER_CHECK') return 0
+  if (phase === 'ROW_CHECK' || phase === 'BUSINESS_CHECK') return 1
+  if (phase === 'INSERT') return 2
+  return 0
+}
+
 async function doImport() {
   if (!selectedFile.value || importing.value) return
   importing.value = true
+  importState.value = 'processing'
   importResult.value = null
-  importPolling.value = false
+  importStepIdx.value = 0
+  elapsedSeconds.value = 0
+
+  // Elapsed-time counter
+  elapsedTimer = setInterval(() => { elapsedSeconds.value++ }, 1000)
+
   try {
-    // Submit async import task
     const submit = await api.businessDataImportSubmit(selectedFile.value)
     const taskId = submit.taskId
     if (!taskId) {
-      // Fallback to sync result
+      // Sync fallback: jump to done immediately
+      importState.value = 'done'
       importResult.value = submit
+      clearInterval(elapsedTimer)
       return
     }
-    // Start polling
-    importPolling.value = true
+
     importPhase.value = '已提交，等待处理...'
+    let pollCount = 0
+    const MAX_POLLS = 150 // 5 minutes at 2s intervals
+
     pollTimer = setInterval(async () => {
+      pollCount++
+      if (pollCount > MAX_POLLS) {
+        clearInterval(pollTimer)
+        clearInterval(elapsedTimer)
+        importState.value = 'done'
+        importResult.value = { status: 'fail', totalErrors: 1, errors: ['轮询超时：导入任务处理时间超过 5 分钟，请稍后在导入历史中查看结果'] }
+        return
+      }
       try {
         const status = await api.businessDataImportStatus(taskId)
-        importPhase.value = status.phase || status.status
+        importPhase.value = phaseLabel(status.phase || status.status)
+        importStepIdx.value = phaseToStepIdx(status.phase)
         if (status.status === 'DONE') {
           clearInterval(pollTimer)
+          clearInterval(elapsedTimer)
+          importState.value = 'done'
           importResult.value = { status: 'success', count: status.successRows }
-          setTimeout(() => {
-            showImport.value = false
-            importResult.value = null
-            selectedFile.value = null
-            importPolling.value = false
-            loadData()
-          }, 2000)
         } else if (status.status === 'FAILED') {
           clearInterval(pollTimer)
-          importPolling.value = false
+          clearInterval(elapsedTimer)
+          importState.value = 'done'
           const errs = status.errorMsg ? status.errorMsg.split('; ') : []
           importResult.value = { status: 'fail', totalErrors: status.failRows, errors: errs, phase: status.phase }
         }
-      } catch (e) { /* keep polling */ }
+      } catch (e) { /* keep polling on transient errors */ }
     }, 2000)
   } catch (e) {
+    clearInterval(elapsedTimer)
+    importState.value = 'done'
     importResult.value = { status: 'fail', totalErrors: 1, errors: [e.msg || '提交失败'] }
   } finally { importing.value = false }
 }
 
+function phaseLabel(phase) {
+  const map = {
+    'PENDING': '任务已提交，等待处理...',
+    'PROCESSING': '正在校验数据中...',
+    'FILE_CHECK': '正在校验文件格式...',
+    'HEADER_CHECK': '正在校验表头列名...',
+    'ROW_CHECK': '正在逐行校验数据...',
+    'BUSINESS_CHECK': '正在执行业务规则校验...',
+    'INSERT': '校验通过，正在导入数据...',
+    'DONE': '导入完成',
+    'FAILED': '导入失败',
+  }
+  return map[phase] || phase
+}
+
 function resetImport() {
-  if (pollTimer) clearInterval(pollTimer)
+  clearAllTimers()
+  importState.value = 'idle'
   importResult.value = null
-  importPolling.value = false
+  importStepIdx.value = 0
   importPhase.value = ''
+  elapsedSeconds.value = 0
   selectedFile.value = null
 }
 
 function closeImport() {
-  if (importing.value) return
-  if (pollTimer) clearInterval(pollTimer)
+  if (importState.value === 'processing') return
+  clearAllTimers()
+  importState.value = 'idle'
   showImport.value = false
   importResult.value = null
-  importPolling.value = false
+  importStepIdx.value = 0
   importPhase.value = ''
+  elapsedSeconds.value = 0
   selectedFile.value = null
 }
+
+function closeImportAndRefresh() {
+  closeImport()
+  loadData()
+}
+
+function clearAllTimers() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
+}
+
+function copyErrors() {
+  const text = (importResult.value?.errors || []).join('\n')
+  if (!text) return
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => uni.showToast({ title: '已复制', icon: 'success' }))
+  } else {
+    uni.setClipboardData({ data: text, success: () => uni.showToast({ title: '已复制', icon: 'success' }) })
+  }
+}
+
+// Cleanup on destroy
+onBeforeUnmount(() => { clearAllTimers() })
 </script>
 
 <style scoped>
@@ -432,7 +544,56 @@ function closeImport() {
 .bd-result-title { font-size: 28rpx; color: #333; line-height: 1.6 }
 .bd-result-success .bd-result-title { color: #07C160 }
 .bd-result-fail .bd-result-title { color: #e53935 }
+.bd-result-subtitle { display: block; font-size: 24rpx; color: #999; margin-top: 8rpx }
 .bd-result-phase { font-size: 24rpx; color: #999; margin-top: 8rpx }
-.bd-error-list { max-height: 300rpx; overflow-y: auto; margin-top: 20rpx; text-align: left; background: #fff5f5; border-radius: 12rpx; padding: 16rpx 20rpx }
+.bd-error-list { max-height: 260rpx; overflow-y: auto; margin-top: 20rpx; text-align: left; background: #fff5f5; border-radius: 12rpx; padding: 16rpx 20rpx }
+.bd-error-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12rpx; padding-bottom: 12rpx; border-bottom: 1rpx solid #ffdcdc }
+.bd-error-count { font-size: 24rpx; color: #e53935; font-weight: 600 }
+.bd-error-copy { font-size: 22rpx; color: #FF6B35 }
 .bd-error-item { display: block; font-size: 24rpx; color: #e53935; line-height: 1.8 }
+
+/* Modal overlay lock (no click-close during processing) */
+.bd-overlay.locked { pointer-events: none }
+.bd-overlay.locked .bd-modal { pointer-events: auto }
+
+/* Modal footer */
+.bd-modal-footer { display: flex; gap: 16rpx; margin-top: 30rpx; justify-content: center }
+.bd-btn--cancel { background: #f0f0f0; color: #666; flex: 1 }
+.bd-btn--upload { background: #FF6B35; color: #fff; flex: 1; height: 80rpx; line-height: 80rpx }
+
+/* Required fields note */
+.bd-required-note { background: #fffbf0; border-radius: 12rpx; padding: 20rpx 24rpx; margin-top: 24rpx }
+.bd-required-title { display: block; font-size: 24rpx; font-weight: 600; color: #e67e00; margin-bottom: 8rpx }
+.bd-required-item { display: block; font-size: 22rpx; color: #996600; line-height: 1.8; padding-left: 12rpx }
+
+/* Processing state */
+.bd-import-processing { display: flex; flex-direction: column; align-items: center; padding: 20rpx 0 }
+.bd-spinner { margin-bottom: 24rpx }
+.bd-spinner-ring {
+  width: 72rpx; height: 72rpx;
+  border: 6rpx solid #f0f0f0;
+  border-top-color: #FF6B35;
+  border-radius: 50%;
+  animation: bd-spin .8s linear infinite;
+}
+@keyframes bd-spin { to { transform: rotate(360deg) } }
+.bd-processing-title { font-size: 30rpx; color: #333; font-weight: 600 }
+.bd-processing-sub { font-size: 24rpx; color: #999; margin-top: 8rpx }
+
+/* Step indicator */
+.bd-steps { display: flex; align-items: center; margin: 32rpx 0 20rpx; width: 100% }
+.bd-step { display: flex; flex-direction: column; align-items: center; flex: 1 }
+.bd-step-dot {
+  width: 48rpx; height: 48rpx; line-height: 48rpx; text-align: center;
+  border-radius: 50%; font-size: 24rpx; font-weight: 700;
+  background: #e0e0e0; color: #999; transition: all .3s;
+}
+.bd-step.active .bd-step-dot { background: #FF6B35; color: #fff }
+.bd-step.done .bd-step-dot { background: #07C160; color: #fff }
+.bd-step-text { font-size: 22rpx; color: #999; margin-top: 8rpx; transition: color .3s }
+.bd-step.active .bd-step-text, .bd-step.done .bd-step-text { color: #333; font-weight: 500 }
+.bd-step-line { flex: 1; height: 4rpx; background: #e0e0e0; margin: 0 8rpx; margin-bottom: 40rpx; transition: background .3s }
+.bd-step-line.active { background: #FF6B35 }
+.bd-processing-phase { font-size: 24rpx; color: #FF6B35; margin-top: 4rpx }
+.bd-processing-elapsed { font-size: 22rpx; color: #bbb; margin-top: 6rpx }
 </style>
