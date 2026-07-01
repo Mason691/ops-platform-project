@@ -1,8 +1,8 @@
 package com.aip.ops.controller;
 
-import com.aip.ops.entity.OpsExportTask;
+import com.aip.ops.entity.SysExportTask;
 import com.aip.ops.service.BusinessDataService;
-import com.aip.ops.service.OpsExportTaskService;
+import com.aip.ops.service.ExportTaskService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,11 +28,11 @@ import java.util.*;
 public class BusinessDataController {
 
     private final BusinessDataService service;
-    private final OpsExportTaskService taskService;
+    private final ExportTaskService taskService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    private static final String TOPIC_EXPORT_TASK = "ops-export-task";
+    private static final String TOPIC_EXPORT_TASK = "async-export-task";
 
     @GetMapping
     public R<?> list(@RequestParam(defaultValue = "1") int pageNum,
@@ -62,10 +62,6 @@ public class BusinessDataController {
      */
     @PostMapping("/export")
     public R<Map<String, Object>> exportAsync(@RequestBody Map<String, String> params) {
-        Long corpId = SecurityUtils.getCurrentCorpIdOrNull();
-        Long userId = SecurityUtils.getCurrentUserId();
-        String userName = SecurityUtils.getCurrentUser() != null
-                ? SecurityUtils.getCurrentUser().getUsername() : "";
         String company = params.get("company");
         String batchNo = params.get("batchNo");
         String agent = params.get("agent");
@@ -73,7 +69,6 @@ public class BusinessDataController {
         String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
         String fileName = "业务数据_" + ts + ".xlsx";
 
-        // Save filters as JSON
         Map<String, String> filters = new LinkedHashMap<>();
         if (company != null) filters.put("company", company);
         if (batchNo != null) filters.put("batchNo", batchNo);
@@ -81,7 +76,7 @@ public class BusinessDataController {
         String filtersJson;
         try { filtersJson = objectMapper.writeValueAsString(filters); } catch (Exception e) { filtersJson = "{}"; }
 
-        OpsExportTask task = taskService.createTask(corpId, userId, userName, filtersJson, fileName);
+        SysExportTask task = taskService.createTask("business_data", filtersJson, fileName);
 
         // Send to Kafka
         try {
@@ -89,41 +84,27 @@ public class BusinessDataController {
             msg.put("taskId", task.getId());
             msg.put("filters", filtersJson);
             kafkaTemplate.send(TOPIC_EXPORT_TASK, objectMapper.writeValueAsString(msg));
-            log.info("Export task submitted: id={}, kafka=sent", task.getId());
+            log.info("Export task submitted: id={} type=business_data kafka=sent", task.getId());
         } catch (Exception e) {
-            // Kafka unavailable: fall back to sync export
             log.warn("Kafka unavailable, fallback to sync export for taskId={}", task.getId());
             try {
                 taskService.updateStatus(task.getId(), "PROCESSING", "Kafka不可用，同步导出中...");
-                service.exportExcel(company, batchNo, agent, null); // sync export marks done internally
-                // Since the sync export doesn't use taskService directly, we need a different approach
-                // For simplicity: mark as DONE with placeholder
+                service.exportExcel(company, batchNo, agent, null);
                 taskService.markDone(task.getId(), "/home/jason/exports/" + fileName, 0L);
-                Map<String, Object> result = new LinkedHashMap<>();
-                result.put("taskId", task.getId());
-                result.put("status", "DONE");
-                result.put("fallback", true);
-                return R.ok(result);
+                return R.ok(Map.of("taskId", task.getId(), "status", "DONE", "fallback", true));
             } catch (Exception ex) {
                 taskService.markFailed(task.getId(), ex.getMessage());
-                Map<String, Object> result = new LinkedHashMap<>();
-                result.put("taskId", task.getId());
-                result.put("status", "FAILED");
-                result.put("error", ex.getMessage());
-                return R.ok(result);
+                return R.ok(Map.of("taskId", task.getId(), "status", "FAILED", "error", ex.getMessage()));
             }
         }
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("taskId", task.getId());
-        result.put("status", "PENDING");
-        return R.ok(result);
+        return R.ok(Map.of("taskId", task.getId(), "status", "PENDING"));
     }
 
-    /** Poll task status. */
+    /** Poll task status — delegates to generic ExportTaskService. */
     @GetMapping("/export/{taskId}/status")
     public R<Map<String, Object>> exportStatus(@PathVariable Long taskId) {
-        OpsExportTask task = taskService.getById(taskId);
+        SysExportTask task = taskService.getById(taskId);
         if (task == null) return R.fail("任务不存在");
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("taskId", task.getId());
@@ -137,10 +118,10 @@ public class BusinessDataController {
         return R.ok(result);
     }
 
-    /** Download exported file. */
+    /** Download exported file — delegates to generic ExportTaskService. */
     @GetMapping("/export/{taskId}/download")
     public void exportDownload(@PathVariable Long taskId, HttpServletResponse response) throws IOException {
-        OpsExportTask task = taskService.getById(taskId);
+        SysExportTask task = taskService.getById(taskId);
         if (task == null || !"DONE".equals(task.getStatus())) {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             response.getWriter().write("{\"code\":404,\"msg\":\"文件不存在或尚未生成\"}");

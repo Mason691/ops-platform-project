@@ -1,0 +1,103 @@
+package com.aip.ops.export;
+
+import com.aip.ops.entity.OpsBusinessData;
+import com.aip.ops.entity.SysExportTask;
+import com.aip.ops.mapper.OpsBusinessDataMapper;
+import com.aip.ops.service.DataScopeService;
+import com.aip.ops.service.impl.BusinessDataServiceImpl;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.io.BufferedWriter;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * 业务数据导出处理器。
+ * 从 sys_export_task.filters JSON 中提取筛选条件，
+ * 查询 ops_business_data 并输出 TSV 格式。
+ */
+@Slf4j
+@Component
+public class BusinessDataExportHandler implements ExportHandler {
+
+    private final OpsBusinessDataMapper mapper;
+    private final DataScopeService dataScopeService;
+    private final ObjectMapper objectMapper;
+
+    public BusinessDataExportHandler(OpsBusinessDataMapper mapper,
+                                     DataScopeService dataScopeService,
+                                     ObjectMapper objectMapper) {
+        this.mapper = mapper;
+        this.dataScopeService = dataScopeService;
+        this.objectMapper = objectMapper;
+    }
+
+    @Override
+    public String getTaskType() {
+        return "business_data";
+    }
+
+    @Override
+    public void export(SysExportTask task, OutputStream out) throws Exception {
+        // 解析筛选条件
+        String company = null, batchNo = null, agent = null, brand = null, category = null;
+        if (task.getFilters() != null && !task.getFilters().isEmpty()) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> filters = objectMapper.readValue(task.getFilters(), Map.class);
+            company = filters.get("company");
+            batchNo = filters.get("batchNo");
+            agent = filters.get("agent");
+            brand = filters.get("brand");
+            category = filters.get("category");
+        }
+
+        // 构建查询
+        LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
+        if (company != null && !company.isEmpty()) qw.eq(OpsBusinessData::getCompany, company);
+        if (batchNo != null && !batchNo.isEmpty()) qw.eq(OpsBusinessData::getBatchNo, batchNo);
+        if (agent != null && !agent.isEmpty()) qw.eq(OpsBusinessData::getAgent, agent);
+        if (brand != null && !brand.isEmpty()) qw.eq(OpsBusinessData::getBrand, brand);
+        if (category != null && !category.isEmpty()) qw.eq(OpsBusinessData::getCategory, category);
+
+        // 组织级数据隔离
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIdsForCorp(task.getCorpId());
+        if (visibleCorpIds != null && !visibleCorpIds.isEmpty()) {
+            qw.in(OpsBusinessData::getCorpId, visibleCorpIds);
+        }
+
+        List<OpsBusinessData> rows = mapper.selectList(qw);
+        log.info("BusinessData export query: {} rows", rows.size());
+
+        // 写 TSV
+        try (BufferedWriter writer = new BufferedWriter(
+                new OutputStreamWriter(out, StandardCharsets.UTF_8))) {
+            writer.write("公司\t批次号\t客户\t品牌\t品类\t型号\t销售价\t销售日期\t收据号\t收款日期\t返利比例\t返利金额\t状态\n");
+            for (OpsBusinessData row : rows) {
+                writer.write(String.join("\t",
+                        nvl(row.getCompany()),
+                        nvl(row.getBatchNo()),
+                        nvl(row.getAgent()),
+                        nvl(row.getBrand()),
+                        nvl(BusinessDataServiceImpl.getCategoryDisplayName(row.getCategory())),
+                        nvl(row.getModel()),
+                        row.getSalePrice() != null ? row.getSalePrice().toString() : "",
+                        nvl(row.getSaleDate()),
+                        nvl(row.getReceiptNo()),
+                        nvl(row.getReceiptDate()),
+                        row.getCommissionRate() != null ? row.getCommissionRate().toString() : "",
+                        row.getCommissionAmount() != null ? row.getCommissionAmount().toString() : "",
+                        nvl(row.getCalcStatus())));
+                writer.newLine();
+            }
+        }
+    }
+
+    private static String nvl(String s) { return s == null ? "" : s; }
+}
