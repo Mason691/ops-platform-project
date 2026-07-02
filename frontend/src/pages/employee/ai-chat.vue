@@ -45,6 +45,7 @@
         <image class="msg-avatar" :src="aiAvatar" mode="aspectFill" />
         <view class="msg-bubble bubble-ai typing-bubble">
           <view class="typing-dots"><view class="dot" v-for="d in 3" :key="d"></view></view>
+          <text class="progress-text" v-if="progressMsg">{{ progressMsg }}</text>
         </view>
       </view>
 
@@ -133,6 +134,7 @@ const userAvatar    = ref('/static/default-avatar.png')
 const messages      = ref([])
 const inputText     = ref('')
 const loading       = ref(false)
+const progressMsg   = ref('')
 const scrollTop     = ref(0)
 const recording     = ref(false)
 const recordingHint = ref('松开发送，上滑取消')
@@ -226,40 +228,119 @@ async function sendMsg() {
     return
   }
 
+  const empCtx = {
+    corpId: empCorpId.value,
+    corpName: empCorpName.value,
+    roleName: empRoleName.value,
+    roleType: empRoleType.value,
+  }
+
   messages.value.push({ role: 'user', content: text })
   inputText.value = ''
-  loading.value = true; scrollToBottom()
+  loading.value = true; progressMsg.value = ''; scrollToBottom()
 
   // Stop any currently playing audio
   stopPlayback()
 
   try {
-    const res = await api.employeeAiChat({
+    const res = await api.employeeAiChatAsync({
       message: text,
       conversationId,
-      employeeContext: {
-        corpId: empCorpId.value,
-        corpName: empCorpName.value,
-        roleName: empRoleName.value,
-        roleType: empRoleType.value,
-      }
+      employeeContext: empCtx
+    })
+    const taskId = res?.taskId
+    if (taskId) {
+      await listenForResultEmployee(taskId)
+      return
+    }
+    // 降级同步
+    if (res?.reply) {
+      const idx = messages.value.length
+      messages.value.push({ role: 'assistant', content: res.reply })
+      if (res?.conversationId) conversationId = res.conversationId
+      if (voiceEnabled.value) autoPlayReply(res.reply, idx)
+    }
+  } catch (e) {
+    console.warn('[EmployeeAI] async失败，回退同步:', e?.msg || e)
+    await sendSyncEmployee(text, empCtx)
+  } finally { loading.value = false; progressMsg.value = ''; scrollToBottom() }
+}
+
+/** 同步回退 */
+async function sendSyncEmployee(text, empCtx) {
+  try {
+    const res = await api.employeeAiChat({
+      message: text, conversationId, employeeContext: empCtx
     })
     const reply = res?.reply || res?.data?.reply
     if (reply) {
       const idx = messages.value.length
       messages.value.push({ role: 'assistant', content: reply })
       if (res?.conversationId) conversationId = res.conversationId
-
-      // Auto-play TTS
       if (voiceEnabled.value) autoPlayReply(reply, idx)
     } else {
       messages.value.push({ role: 'assistant', content: '抱歉，AI 助手暂时无响应，请稍后重试。' })
     }
-  } catch (e) {
-    console.warn('[EmployeeAI] chat失败:', e?.msg || e)
-    const errMsg = e?.msg || '请求超时，请检查网络后重试'
-    messages.value.push({ role: 'assistant', content: errMsg })
-  } finally { loading.value = false; scrollToBottom() }
+  } catch (e2) {
+    console.warn('[EmployeeAI] 同步也失败:', e2?.msg || e2)
+    messages.value.push({ role: 'assistant', content: e2?.msg || '请求超时，请检查网络后重试' })
+  }
+}
+
+/** SSE + 轮询兜底 */
+async function listenForResultEmployee(taskId) {
+  try {
+    const token = uni.getStorageSync('ops_token') || ''
+    const url = api.employeeAiChatSseUrl(taskId)
+    const es = new EventSource(url + '?token=' + encodeURIComponent(token))
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => { es.close(); reject(new Error('SSE timeout')) }, 35000)
+      es.addEventListener('status', (e) => {
+        try { const d = JSON.parse(e.data); if (d.message) progressMsg.value = d.message } catch (_) {}
+      })
+      es.addEventListener('result', (e) => {
+        clearTimeout(timeout)
+        try {
+          const d = JSON.parse(e.data)
+          if (d.reply) {
+            const idx = messages.value.length
+            messages.value.push({ role: 'assistant', content: d.reply })
+            if (d.conversationId) conversationId = d.conversationId
+            if (voiceEnabled.value) autoPlayReply(d.reply, idx)
+          }
+        } catch (_) {}
+        es.close(); resolve()
+      })
+      es.onerror = () => { clearTimeout(timeout); es.close(); reject(new Error('SSE error')) }
+    })
+    return
+  } catch (_) {
+    await pollForResultEmployee(taskId)
+  }
+}
+
+/** 轮询兜底 */
+async function pollForResultEmployee(taskId) {
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 1000))
+    try {
+      const status = await api.employeeAiChatStatus(taskId)
+      if (status.status === 'COMPLETED') {
+        if (status.reply) {
+          const idx = messages.value.length
+          messages.value.push({ role: 'assistant', content: status.reply })
+          if (status.conversationId) conversationId = status.conversationId
+          if (voiceEnabled.value && status.reply) autoPlayReply(status.reply, idx)
+        }
+        return
+      } else if (status.status === 'FAILED' || status.status === 'TIMEOUT') {
+        messages.value.push({ role: 'assistant', content: status.reply || status.errorMsg || 'AI 处理失败，请稍后重试' })
+        return
+      }
+      if (status.progressMsg) progressMsg.value = status.progressMsg
+    } catch (_) {}
+  }
+  messages.value.push({ role: 'assistant', content: 'AI 服务处理超时，请简化问题后重试' })
 }
 
 /** Auto-play TTS for assistant reply. */
@@ -529,6 +610,7 @@ function goCompanySelect() {
 .dot{width:14rpx;height:14rpx;background:#ccc;border-radius:50%;animation:bounce 1.4s infinite both}
 .dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
 @keyframes bounce{0%,80%,100%{transform:scale(.6);opacity:.4}40%{transform:scale(1);opacity:1}}
+.progress-text{display:block;margin-top:12rpx;font-size:24rpx;color:#999;line-height:1.5}
 
 /* quick bar */
 .quick-bar{flex-shrink:0;padding:16rpx 24rpx;background:transparent}

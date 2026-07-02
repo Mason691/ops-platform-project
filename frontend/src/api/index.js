@@ -68,10 +68,22 @@ export const api = {
   history: (params) => request({url:'/api/ops/history',data:params}),
   // AI 助手
   aiChat: (data) => request({url:'/api/ops/ai/chat',method:'POST',data}),
+  aiChatAsync: (data) => request({url:'/api/ops/ai/chat/async',method:'POST',data}),
+  aiChatStatus: (taskId) => request({url:'/api/ops/ai/chat/'+taskId+'/status'}),
+  aiChatSseUrl: (taskId) => {
+    const entry = import.meta.env.VITE_OPS_ENTRY || ''
+    return entry + '/api/ops/ai/chat/' + taskId + '/stream'
+  },
   aiConfig: () => request({url:'/api/ops/ai/config'}),
 
   // Employee AI 助手
   employeeAiChat: (data) => request({url:'/api/ops/ai/employee/chat',method:'POST',data}),
+  employeeAiChatAsync: (data) => request({url:'/api/ops/ai/employee/chat/async',method:'POST',data}),
+  employeeAiChatStatus: (taskId) => request({url:'/api/ops/ai/employee/chat/'+taskId+'/status'}),
+  employeeAiChatSseUrl: (taskId) => {
+    const entry = import.meta.env.VITE_OPS_ENTRY || ''
+    return entry + '/api/ops/ai/employee/chat/' + taskId + '/stream'
+  },
   employeeAiConfig: () => request({url:'/api/ops/ai/employee/config'}),
   employeeAiProfile: () => request({url:'/api/ops/ai/employee/profile'}),
 

@@ -1,11 +1,15 @@
 package com.aip.ops.controller;
 
 import com.aip.ops.entity.OpsMember;
+import com.aip.ops.kafka.AiChatTaskProducer;
 import com.aip.ops.mapper.OpsMemberMapper;
+import com.aip.ops.service.AiChatTaskService;
 import com.aip.ops.service.EmployeeService;
+import com.aip.ops.service.SseEmitterManager;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -16,6 +20,7 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
@@ -40,13 +45,25 @@ public class EmployeeAiController {
     private final RestTemplate restTemplate;
     private final EmployeeService employeeService;
     private final OpsMemberMapper memberMapper;
+    private final AiChatTaskService aiChatTaskService;
+    private final AiChatTaskProducer aiChatTaskProducer;
+    private final SseEmitterManager sseEmitterManager;
+    private final ObjectMapper objectMapper;
 
     public EmployeeAiController(@Qualifier("aiRestTemplate") RestTemplate restTemplate,
                                  EmployeeService employeeService,
-                                 OpsMemberMapper memberMapper) {
+                                 OpsMemberMapper memberMapper,
+                                 AiChatTaskService aiChatTaskService,
+                                 AiChatTaskProducer aiChatTaskProducer,
+                                 SseEmitterManager sseEmitterManager,
+                                 ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
         this.employeeService = employeeService;
         this.memberMapper = memberMapper;
+        this.aiChatTaskService = aiChatTaskService;
+        this.aiChatTaskProducer = aiChatTaskProducer;
+        this.sseEmitterManager = sseEmitterManager;
+        this.objectMapper = objectMapper;
     }
 
     @Value("${platform.base-url}")
@@ -54,6 +71,9 @@ public class EmployeeAiController {
 
     @Value("${platform.internal-token}")
     private String internalToken;
+
+    @Value("${spring.kafka.enabled:false}")
+    private boolean kafkaEnabled;
 
     // ═══ Chat ═══
 
@@ -107,6 +127,93 @@ public class EmployeeAiController {
             log.error("Employee AI chat 调用失败 userId={}: {}", userId, e.getMessage(), e);
             return R.fail("AI 服务异常，请联系管理员");
         }
+    }
+
+    // ═══ Async Chat ═══
+
+    /**
+     * 异步员工 AI 对话：提交任务到 Kafka，立即返回 taskId。
+     */
+    @PostMapping("/chat/async")
+    public R<?> chatAsync(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        String message = (String) body.get("message");
+        if (message == null || message.isBlank()) return R.fail("消息不能为空");
+
+        Long userId = SecurityUtils.getCurrentUserId();
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        Long convId = body.get("conversationId") != null
+                ? Long.valueOf(body.get("conversationId").toString()) : null;
+
+        // Enrich with employee context
+        @SuppressWarnings("unchecked")
+        Map<String, Object> employeeContext = body.get("employeeContext") instanceof Map
+                ? new LinkedHashMap<>((Map<String, Object>) body.get("employeeContext")) : new LinkedHashMap<>();
+        employeeContext.putIfAbsent("phone", resolvePhone(userId, corpId));
+
+        // Kafka 禁用时降级为同步调用
+        if (!kafkaEnabled) {
+            log.debug("Kafka disabled, falling back to sync employee chat for userId={}", userId);
+            return chat(body, request);
+        }
+
+        String taskId = aiChatTaskProducer.publishTask(
+                corpId, userId, null, convId, message,
+                "ops-platform", employeeContext, null);
+
+        String empCtxJson = null;
+        try { empCtxJson = objectMapper.writeValueAsString(employeeContext); } catch (Exception ignored) {}
+
+        aiChatTaskService.createTask(taskId, corpId, userId, null, convId,
+                message, "ops-platform", empCtxJson);
+
+        return R.ok(Map.of("taskId", taskId, "status", "PROCESSING"));
+    }
+
+    /**
+     * SSE 流式监听员工 AI 对话任务状态。
+     */
+    @GetMapping("/chat/{taskId}/stream")
+    public SseEmitter streamStatus(@PathVariable String taskId) {
+        SseEmitter emitter = sseEmitterManager.createEmitter(taskId);
+
+        try {
+            var existingTask = aiChatTaskService.getByTaskId(taskId);
+            if (existingTask != null && "COMPLETED".equals(existingTask.getStatus())) {
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("type", "result");
+                result.put("taskId", taskId);
+                result.put("status", "COMPLETED");
+                result.put("reply", existingTask.getReply());
+                result.put("partialResults", existingTask.getPartial() != null && existingTask.getPartial() == 1);
+                emitter.send(SseEmitter.event().name("result").data(objectMapper.writeValueAsString(result)));
+                emitter.complete();
+                return emitter;
+            }
+        } catch (Exception e) {
+            log.debug("Error checking existing task for SSE: {}", e.getMessage());
+        }
+
+        return emitter;
+    }
+
+    /**
+     * 轮询员工 AI 对话任务状态。
+     */
+    @GetMapping("/chat/{taskId}/status")
+    public R<Map<String, Object>> taskStatus(@PathVariable String taskId) {
+        var task = aiChatTaskService.getByTaskId(taskId);
+        if (task == null) return R.fail("任务不存在");
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("taskId", task.getTaskId());
+        result.put("status", task.getStatus());
+        result.put("phase", task.getPhase());
+        result.put("progressMsg", task.getProgressMsg());
+        result.put("reply", task.getReply());
+        result.put("errorMsg", task.getErrorMsg());
+        result.put("partial", task.getPartial() != null && task.getPartial() == 1);
+        result.put("conversationId", task.getConversationId());
+        return R.ok(result);
     }
 
     // ═══ Config & Profile ═══

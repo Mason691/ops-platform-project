@@ -1,10 +1,15 @@
 package com.aip.ops.controller;
 
 import com.aip.ops.entity.PublicAccountConfig;
+import com.aip.ops.kafka.AiChatTaskProducer;
+import com.aip.ops.kafka.ChatResultMessage;
+import com.aip.ops.service.AiChatTaskService;
+import com.aip.ops.service.SseEmitterManager;
 import com.aip.ops.service.impl.PublicAccountConfigServiceImpl;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -16,6 +21,7 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
@@ -37,11 +43,23 @@ public class AiChatProxyController {
 
     private final RestTemplate restTemplate;
     private final PublicAccountConfigServiceImpl publicAccountConfigService;
+    private final AiChatTaskService aiChatTaskService;
+    private final AiChatTaskProducer aiChatTaskProducer;
+    private final SseEmitterManager sseEmitterManager;
+    private final ObjectMapper objectMapper;
 
     public AiChatProxyController(@Qualifier("aiRestTemplate") RestTemplate restTemplate,
-                                  PublicAccountConfigServiceImpl publicAccountConfigService) {
+                                  PublicAccountConfigServiceImpl publicAccountConfigService,
+                                  AiChatTaskService aiChatTaskService,
+                                  AiChatTaskProducer aiChatTaskProducer,
+                                  SseEmitterManager sseEmitterManager,
+                                  ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
         this.publicAccountConfigService = publicAccountConfigService;
+        this.aiChatTaskService = aiChatTaskService;
+        this.aiChatTaskProducer = aiChatTaskProducer;
+        this.sseEmitterManager = sseEmitterManager;
+        this.objectMapper = objectMapper;
     }
 
     @Value("${platform.base-url}")
@@ -49,6 +67,9 @@ public class AiChatProxyController {
 
     @Value("${platform.internal-token}")
     private String internalToken;
+
+    @Value("${spring.kafka.enabled:false}")
+    private boolean kafkaEnabled;
 
     // ═══ 对话 ═══
 
@@ -93,6 +114,98 @@ public class AiChatProxyController {
             log.error("AI chat 调用失败: {}", e.getMessage(), e);
             return R.fail("AI 服务异常，请联系管理员");
         }
+    }
+
+    // ═══ 异步对话 ═══
+
+    /**
+     * 异步 AI 对话：提交任务到 Kafka，立即返回 taskId。
+     * Kafka 禁用时降级为同步调用。
+     */
+    @PostMapping("/chat/async")
+    public R<?> chatAsync(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        String message = (String) body.get("message");
+        if (message == null || message.isBlank()) return R.fail("消息不能为空");
+
+        Long userId = SecurityUtils.getCurrentUserId();
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        Long convId = body.get("conversationId") != null
+                ? Long.valueOf(body.get("conversationId").toString()) : null;
+
+        // Kafka 禁用时降级为同步调用
+        if (!kafkaEnabled) {
+            log.debug("Kafka disabled, falling back to sync chat for userId={}", userId);
+            return chat(body, request);
+        }
+
+        // 异步模式：创建任务 → 发送 Kafka → 立即返回
+        String taskId = aiChatTaskProducer.publishTask(
+                corpId, userId, null, convId, message,
+                "ops-platform", null, null);
+
+        aiChatTaskService.createTask(taskId, corpId, userId, null, convId,
+                message, "ops-platform", null);
+
+        return R.ok(Map.of("taskId", taskId, "status", "PROCESSING"));
+    }
+
+    /**
+     * SSE 流式监听任务状态和结果。
+     * 前端连接此端点后，会实时收到 status 和 result 事件。
+     */
+    @GetMapping("/chat/{taskId}/stream")
+    public SseEmitter streamStatus(@PathVariable String taskId) {
+        SseEmitter emitter = sseEmitterManager.createEmitter(taskId);
+
+        // 检查是否已有结果（Consumer 已处理完，但 SSE 还没来得及连接）
+        try {
+            var existingTask = aiChatTaskService.getByTaskId(taskId);
+            if (existingTask != null && "COMPLETED".equals(existingTask.getStatus())) {
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("type", "result");
+                result.put("taskId", taskId);
+                result.put("status", "COMPLETED");
+                result.put("reply", existingTask.getReply());
+                result.put("conversationId", existingTask.getConversationId());
+                result.put("partialResults", existingTask.getPartial() != null && existingTask.getPartial() == 1);
+                emitter.send(SseEmitter.event().name("result").data(objectMapper.writeValueAsString(result)));
+                emitter.complete();
+                return emitter;
+            } else if (existingTask != null && "FAILED".equals(existingTask.getStatus())) {
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("type", "result");
+                result.put("taskId", taskId);
+                result.put("status", "FAILED");
+                result.put("reply", existingTask.getErrorMsg());
+                emitter.send(SseEmitter.event().name("result").data(objectMapper.writeValueAsString(result)));
+                emitter.complete();
+                return emitter;
+            }
+        } catch (Exception e) {
+            log.debug("Error checking existing task for SSE: {}", e.getMessage());
+        }
+
+        return emitter;
+    }
+
+    /**
+     * 轮询任务状态（SSE 不可用时的兜底方案，如微信小程序）。
+     */
+    @GetMapping("/chat/{taskId}/status")
+    public R<Map<String, Object>> taskStatus(@PathVariable String taskId) {
+        var task = aiChatTaskService.getByTaskId(taskId);
+        if (task == null) return R.fail("任务不存在");
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("taskId", task.getTaskId());
+        result.put("status", task.getStatus());
+        result.put("phase", task.getPhase());
+        result.put("progressMsg", task.getProgressMsg());
+        result.put("reply", task.getReply());
+        result.put("errorMsg", task.getErrorMsg());
+        result.put("partial", task.getPartial() != null && task.getPartial() == 1);
+        result.put("conversationId", task.getConversationId());
+        return R.ok(result);
     }
 
     // ═══ 配置与问候 ═══
