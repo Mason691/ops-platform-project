@@ -12,7 +12,14 @@
     <meta name="x5-video-player-type" content="h5" />
     <meta name="x5-video-player-fullscreen" content="true" />
     <meta name="x5-video-orientation" content="portrait" />
-    <title>金地燃气聚合展示引流平台</title>
+    <title>金地燃气</title>
+    <!-- ═══ 微信浏览器：隐藏 uni-app 内置导航栏，避免与微信原生标题栏形成双层标题 ═══ -->
+    <!-- 使用 document.write 同步注入 CSS，确保在 uni-app 渲染前生效，无闪烁 -->
+    <script>
+      if (/micromessenger/i.test(navigator.userAgent)) {
+        document.write('<style>uni-page-head{display:none!important}uni-page-head~.uni-placeholder{display:none!important}<\/style>');
+      }
+    </script>
     <!-- ═══ 微信 JSSDK — 加载本地 jweixin SDK（避免 CDN 超时） ═══ -->
     <script src="./jweixin-1.6.0.js"></script>
     <script>
@@ -85,6 +92,8 @@
 
           wx.ready(function() {
             console.log('[JSSDK] ✅ wx.ready');
+            // 同步 document.title，确保微信原生标题栏显示正确标题
+            document.title = '金地燃气';
           });
 
           wx.error(function(res) {

@@ -104,18 +104,11 @@ async function changeAvatar(){
 
 async function checkEmployee(){
   try {
-    const cached = uni.getStorageSync('ops_employee')
-    if (cached) {
-      const data = JSON.parse(cached)
-      isEmployee.value = !!data.isEmployee
-      employeeCompanies.value = data.companies || []
-      return
-    }
     const resp = await api.employeeIdentity()
     isEmployee.value = !!resp.isEmployee
     employeeCompanies.value = resp.companies || []
     uni.setStorageSync('ops_employee', JSON.stringify(resp))
-  } catch { isEmployee.value = false }
+  } catch { /* keep current state on error */ }
 }
 function goEmployee(){
   if (!isEmployee.value) return
