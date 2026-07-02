@@ -12,8 +12,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -78,9 +83,22 @@ public class EmployeeAiController {
                     platformBaseUrl + "/api/ai/chat/send",
                     HttpMethod.POST, new HttpEntity<>(reqBody, headers), Map.class);
             return R.ok(resp.getBody() != null ? resp.getBody().get("data") : null);
+        } catch (HttpClientErrorException e) {
+            String detail = extractErrorDetail(e.getResponseBodyAsString());
+            log.error("Employee AI chat 鉴权/客户端错误 userId={}: status={}, detail={}",
+                    userId, e.getStatusCode(), detail, e);
+            return R.fail(httpClientErrorMessage(e));
+        } catch (HttpServerErrorException e) {
+            String detail = extractErrorDetail(e.getResponseBodyAsString());
+            log.error("Employee AI chat 底座服务错误 userId={}: status={}, detail={}",
+                    userId, e.getStatusCode(), detail, e);
+            return R.fail("AI 服务暂时不可用（HTTP " + e.getStatusCode().value() + "），请稍后重试");
+        } catch (ResourceAccessException e) {
+            log.error("Employee AI chat 网络异常 userId={}: {}", userId, e.getMessage(), e);
+            return R.fail(resourceAccessErrorMessage(e));
         } catch (Exception e) {
-            log.warn("Employee AI chat 调用失败 userId={}: {}", userId, e.getMessage());
-            return R.ok(Map.of("reply", "抱歉，AI 助手正在休息，请稍后重试。"));
+            log.error("Employee AI chat 调用失败 userId={}: {}", userId, e.getMessage(), e);
+            return R.fail("AI 服务异常，请联系管理员");
         }
     }
 
@@ -134,6 +152,49 @@ public class EmployeeAiController {
     }
 
     // ═══ Helpers ═══
+
+    /** 将 HTTP 客户端错误映射为用户可读的中文提示 */
+    private String httpClientErrorMessage(HttpClientErrorException e) {
+        return switch (e.getStatusCode().value()) {
+            case 401 -> "AI 服务鉴权失败，请联系管理员检查 API Key 配置";
+            case 403 -> "AI 服务拒绝访问，请检查账号权限";
+            case 404 -> "AI 服务端点不存在，请检查服务配置";
+            case 429 -> "AI 服务调用过于频繁，请稍后再试";
+            default -> {
+                String detail = extractErrorDetail(e.getResponseBodyAsString());
+                yield detail != null ? detail : "AI 服务请求错误（HTTP " + e.getStatusCode().value() + "）";
+            }
+        };
+    }
+
+    /** 将网络/IO 异常映射为用户可读的中文提示 */
+    private String resourceAccessErrorMessage(ResourceAccessException e) {
+        Throwable cause = e.getCause();
+        if (cause instanceof SocketTimeoutException) {
+            return "AI 服务响应超时，请稍后重试";
+        }
+        if (cause instanceof ConnectException) {
+            return "AI 服务连接失败，请检查网络";
+        }
+        return "AI 服务网络异常，请稍后重试";
+    }
+
+    /** 尝试从 JSON 响应体中提取 msg 字段 */
+    private String extractErrorDetail(String body) {
+        if (body == null || body.isEmpty()) return null;
+        try {
+            int idx = body.indexOf("\"msg\"");
+            if (idx < 0) return null;
+            int start = body.indexOf("\"", idx + 5);
+            if (start < 0) return null;
+            int end = body.indexOf("\"", start + 1);
+            if (end < 0) return null;
+            String msg = body.substring(start + 1, end);
+            return msg.isEmpty() ? null : msg;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
 
     private String resolvePhone(Long userId, Long corpId) {
         OpsMember member = memberMapper.selectOne(new LambdaQueryWrapper<OpsMember>()

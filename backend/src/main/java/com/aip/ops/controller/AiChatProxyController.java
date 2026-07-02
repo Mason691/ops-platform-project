@@ -11,9 +11,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -68,9 +73,20 @@ public class AiChatProxyController {
                     platformBaseUrl + "/api/ai/chat/send",
                     HttpMethod.POST, new HttpEntity<>(reqBody, headers), Map.class);
             return R.ok(resp.getBody() != null ? resp.getBody().get("data") : null);
+        } catch (HttpClientErrorException e) {
+            String detail = extractErrorDetail(e.getResponseBodyAsString());
+            log.error("AI chat 鉴权/客户端错误: status={}, detail={}", e.getStatusCode(), detail, e);
+            return R.fail(httpClientErrorMessage(e));
+        } catch (HttpServerErrorException e) {
+            String detail = extractErrorDetail(e.getResponseBodyAsString());
+            log.error("AI chat 底座服务错误: status={}, detail={}", e.getStatusCode(), detail, e);
+            return R.fail("AI 服务暂时不可用（HTTP " + e.getStatusCode().value() + "），请稍后重试");
+        } catch (ResourceAccessException e) {
+            log.error("AI chat 网络异常: {}", e.getMessage(), e);
+            return R.fail(resourceAccessErrorMessage(e));
         } catch (Exception e) {
-            log.warn("AI chat 调用失败: {}", e.getMessage());
-            return R.ok(Map.of("reply", "抱歉，AI 助手正在休息，请稍后重试。"));
+            log.error("AI chat 调用失败: {}", e.getMessage(), e);
+            return R.fail("AI 服务异常，请联系管理员");
         }
     }
 
@@ -141,11 +157,23 @@ public class AiChatProxyController {
                 return R.ok(data);
             }
             return R.fail("语音识别服务返回空结果");
+        } catch (HttpClientErrorException.Unauthorized e) {
+            log.error("ASR API Key 无效 corpId={}", resolveCorpId(request), e);
+            return R.fail("ASR API Key 无效，请联系管理员配置语音识别服务");
+        } catch (HttpClientErrorException.Forbidden e) {
+            log.error("ASR 服务拒绝访问 corpId={}", resolveCorpId(request), e);
+            return R.fail("ASR 服务拒绝访问，请检查账号权限");
+        } catch (HttpClientErrorException e) {
+            log.error("ASR 请求错误 corpId={}: status={}", resolveCorpId(request), e.getStatusCode(), e);
+            return R.fail("语音识别请求错误（HTTP " + e.getStatusCode().value() + "）");
+        } catch (HttpServerErrorException e) {
+            log.error("ASR 服务端错误 corpId={}: status={}", resolveCorpId(request), e.getStatusCode(), e);
+            return R.fail("语音识别服务异常，请稍后重试");
+        } catch (ResourceAccessException e) {
+            log.error("ASR 网络异常 corpId={}: {}", resolveCorpId(request), e.getMessage(), e);
+            return R.fail(resourceAccessErrorMessage(e));
         } catch (Exception e) {
-            log.warn("ASR 识别失败 corpId={}: {}", resolveCorpId(request), e.getMessage());
-            if (e.getMessage() != null && e.getMessage().contains("401")) {
-                return R.fail("ASR API Key 无效，请联系管理员配置语音识别服务");
-            }
+            log.error("ASR 识别失败 corpId={}: {}", resolveCorpId(request), e.getMessage(), e);
             return R.fail("语音识别服务暂不可用，请稍后重试");
         }
     }
@@ -281,11 +309,23 @@ public class AiChatProxyController {
                 return R.ok(data);
             }
             return R.fail("语音识别服务返回空结果");
+        } catch (HttpClientErrorException.Unauthorized e) {
+            log.error("ASR API Key 无效 corpId={}", corpId, e);
+            return R.fail("ASR API Key 无效，请联系管理员配置语音识别服务");
+        } catch (HttpClientErrorException.Forbidden e) {
+            log.error("ASR 服务拒绝访问 corpId={}", corpId, e);
+            return R.fail("ASR 服务拒绝访问，请检查账号权限");
+        } catch (HttpClientErrorException e) {
+            log.error("ASR 请求错误 corpId={}: status={}", corpId, e.getStatusCode(), e);
+            return R.fail("语音识别请求错误（HTTP " + e.getStatusCode().value() + "）");
+        } catch (HttpServerErrorException e) {
+            log.error("ASR 服务端错误 corpId={}: status={}", corpId, e.getStatusCode(), e);
+            return R.fail("语音识别服务异常，请稍后重试");
+        } catch (ResourceAccessException e) {
+            log.error("ASR 网络异常 corpId={}: {}", corpId, e.getMessage(), e);
+            return R.fail(resourceAccessErrorMessage(e));
         } catch (Exception e) {
-            log.warn("ASR 识别失败 corpId={}: {}", corpId, e.getMessage());
-            if (e.getMessage() != null && e.getMessage().contains("401")) {
-                return R.fail("ASR API Key 无效，请联系管理员配置语音识别服务");
-            }
+            log.error("ASR 识别失败 corpId={}: {}", corpId, e.getMessage(), e);
             return R.fail("语音识别服务暂不可用，请稍后重试");
         }
     }
@@ -325,16 +365,71 @@ public class AiChatProxyController {
                 return R.fail(errMsg);
             }
             return R.fail("TTS 服务暂不可用");
+        } catch (HttpClientErrorException.Unauthorized e) {
+            log.error("TTS API Key 无效 corpId={}", resolveCorpId(request), e);
+            return R.fail("TTS API Key 无效，请联系管理员更新语音配置");
+        } catch (HttpClientErrorException.Forbidden e) {
+            log.error("TTS 服务拒绝访问 corpId={}", resolveCorpId(request), e);
+            return R.fail("TTS 服务拒绝访问，请检查账号权限");
+        } catch (HttpClientErrorException e) {
+            log.error("TTS 请求错误 corpId={}: status={}", resolveCorpId(request), e.getStatusCode(), e);
+            return R.fail("语音合成请求错误（HTTP " + e.getStatusCode().value() + "）");
+        } catch (HttpServerErrorException e) {
+            log.error("TTS 服务端错误 corpId={}: status={}", resolveCorpId(request), e.getStatusCode(), e);
+            return R.fail("语音合成服务异常，请稍后重试");
+        } catch (ResourceAccessException e) {
+            log.error("TTS 网络异常 corpId={}: {}", resolveCorpId(request), e.getMessage(), e);
+            return R.fail(resourceAccessErrorMessage(e));
         } catch (Exception e) {
-            log.warn("TTS 合成失败 corpId={}: {}", resolveCorpId(request), e.getMessage());
-            if (e.getMessage() != null && e.getMessage().contains("401")) {
-                return R.fail("TTS API Key 无效，请联系管理员更新语音配置");
-            }
+            log.error("TTS 合成失败 corpId={}: {}", resolveCorpId(request), e.getMessage(), e);
             return R.fail("语音合成暂不可用");
         }
     }
 
     // ═══ 辅助 ═══
+
+    /** 将 HTTP 客户端错误映射为用户可读的中文提示 */
+    private String httpClientErrorMessage(HttpClientErrorException e) {
+        return switch (e.getStatusCode().value()) {
+            case 401 -> "AI 服务鉴权失败，请联系管理员检查 API Key 配置";
+            case 403 -> "AI 服务拒绝访问，请检查账号权限";
+            case 404 -> "AI 服务端点不存在，请检查服务配置";
+            case 429 -> "AI 服务调用过于频繁，请稍后再试";
+            default -> {
+                String detail = extractErrorDetail(e.getResponseBodyAsString());
+                yield detail != null ? detail : "AI 服务请求错误（HTTP " + e.getStatusCode().value() + "）";
+            }
+        };
+    }
+
+    /** 将网络/IO 异常映射为用户可读的中文提示 */
+    private String resourceAccessErrorMessage(ResourceAccessException e) {
+        Throwable cause = e.getCause();
+        if (cause instanceof SocketTimeoutException) {
+            return "AI 服务响应超时，请稍后重试";
+        }
+        if (cause instanceof ConnectException) {
+            return "AI 服务连接失败，请检查网络";
+        }
+        return "AI 服务网络异常，请稍后重试";
+    }
+
+    /** 尝试从 JSON 响应体中提取 msg 字段 */
+    private String extractErrorDetail(String body) {
+        if (body == null || body.isEmpty()) return null;
+        try {
+            int idx = body.indexOf("\"msg\"");
+            if (idx < 0) return null;
+            int start = body.indexOf("\"", idx + 5);
+            if (start < 0) return null;
+            int end = body.indexOf("\"", start + 1);
+            if (end < 0) return null;
+            String msg = body.substring(start + 1, end);
+            return msg.isEmpty() ? null : msg;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
 
     private Long resolveCorpId(HttpServletRequest request) {
         try { return SecurityUtils.getCurrentCorpId(); } catch (Exception e) { /* no JWT */ }
