@@ -117,36 +117,40 @@ public class EmployeeServiceImpl implements EmployeeService {
         Object orderCountObj = current.get("orderCount");
         long orderCount = orderCountObj instanceof Number ? ((Number) orderCountObj).longValue() : 0L;
 
-        // Previous month for MoM comparison
-        String prevMonth = previousMonth(month);
-        Map<String, Object> prev = employeeMapper.selectMonthlyStats(phone, prevMonth);
-        BigDecimal prevSale = toBigDecimal(prev.get("totalSale"));
-        BigDecimal prevCommission = toBigDecimal(prev.get("totalCommission"));
-        Object prevOrderObj = prev.get("orderCount");
-        long prevOrderCount = prevOrderObj instanceof Number ? ((Number) prevOrderObj).longValue() : 0L;
-
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("totalSale", totalSale);
         result.put("totalCommission", totalCommission);
         result.put("orderCount", orderCount);
 
-        if (prevSale.compareTo(BigDecimal.ZERO) > 0) {
-            result.put("momSaleChange", totalSale.subtract(prevSale)
-                    .divide(prevSale, 4, RoundingMode.HALF_UP)
-                    .multiply(BigDecimal.valueOf(100))
-                    .setScale(1, RoundingMode.HALF_UP));
-        }
-        if (prevCommission.compareTo(BigDecimal.ZERO) > 0) {
-            result.put("momCommissionChange", totalCommission.subtract(prevCommission)
-                    .divide(prevCommission, 4, RoundingMode.HALF_UP)
-                    .multiply(BigDecimal.valueOf(100))
-                    .setScale(1, RoundingMode.HALF_UP));
-        }
-        if (prevOrderCount > 0) {
-            result.put("momOrderChange", BigDecimal.valueOf(orderCount - prevOrderCount)
-                    .divide(BigDecimal.valueOf(prevOrderCount), 4, RoundingMode.HALF_UP)
-                    .multiply(BigDecimal.valueOf(100))
-                    .setScale(1, RoundingMode.HALF_UP));
+        // Previous month for MoM comparison — only when month is ISO format (YYYY-MM)
+        try {
+            String prevMonth = previousMonth(month);
+            Map<String, Object> prev = employeeMapper.selectMonthlyStats(phone, prevMonth);
+            BigDecimal prevSale = toBigDecimal(prev.get("totalSale"));
+            BigDecimal prevCommission = toBigDecimal(prev.get("totalCommission"));
+            Object prevOrderObj = prev.get("orderCount");
+            long prevOrderCount = prevOrderObj instanceof Number ? ((Number) prevOrderObj).longValue() : 0L;
+
+            if (prevSale.compareTo(BigDecimal.ZERO) > 0) {
+                result.put("momSaleChange", totalSale.subtract(prevSale)
+                        .divide(prevSale, 4, RoundingMode.HALF_UP)
+                        .multiply(BigDecimal.valueOf(100))
+                        .setScale(1, RoundingMode.HALF_UP));
+            }
+            if (prevCommission.compareTo(BigDecimal.ZERO) > 0) {
+                result.put("momCommissionChange", totalCommission.subtract(prevCommission)
+                        .divide(prevCommission, 4, RoundingMode.HALF_UP)
+                        .multiply(BigDecimal.valueOf(100))
+                        .setScale(1, RoundingMode.HALF_UP));
+            }
+            if (prevOrderCount > 0) {
+                result.put("momOrderChange", BigDecimal.valueOf(orderCount - prevOrderCount)
+                        .divide(BigDecimal.valueOf(prevOrderCount), 4, RoundingMode.HALF_UP)
+                        .multiply(BigDecimal.valueOf(100))
+                        .setScale(1, RoundingMode.HALF_UP));
+            }
+        } catch (Exception e) {
+            log.debug("MoM comparison skipped for month={}: {}", month, e.getMessage());
         }
 
         return result;

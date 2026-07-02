@@ -153,7 +153,9 @@ async function fetchStats() {
   try {
     const s = await api.employeeStats(currentMonth.value)
     if (s) Object.assign(stats, s)
-  } catch { /* ignore */ }
+  } catch(e) {
+    console.warn('[Employee] fetchStats failed:', e?.msg || e)
+  }
 }
 
 async function fetchSummary() {
