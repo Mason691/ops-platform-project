@@ -2,8 +2,10 @@ package com.aip.ops.config;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpRequest;
 import org.springframework.http.client.ClientHttpRequestExecution;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
@@ -13,25 +15,37 @@ import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.List;
 
 @Configuration
 public class RestTemplateConfig {
 
     private static final Logger log = LoggerFactory.getLogger(RestTemplateConfig.class);
 
+    /** 通用 RestTemplate：短超时，用于普通 API 调用。标记为 @Primary 作为默认注入。 */
     @Bean
+    @Primary
     public RestTemplate restTemplate() {
+        return buildRestTemplate(5_000, 10_000);
+    }
+
+    /**
+     * AI 专用 RestTemplate：长超时，用于 AI 对话代理（ReAct 循环可能多轮 LLM 调用）。
+     * 员工 AI 助手尤其耗时：至少 2-3 轮 DeepSeek 调用 + execute_python 工具执行。
+     */
+    @Bean
+    @Qualifier("aiRestTemplate")
+    public RestTemplate aiRestTemplate() {
+        return buildRestTemplate(10_000, 120_000);
+    }
+
+    private RestTemplate buildRestTemplate(int connectTimeout, int readTimeout) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(5000);
-        factory.setReadTimeout(10000);
+        factory.setConnectTimeout(connectTimeout);
+        factory.setReadTimeout(readTimeout);
 
         RestTemplate restTemplate = new RestTemplate(factory);
-
-        // 添加日志拦截器：记录每次代理请求的 URL、方法和耗时。
-        // 不读取响应体（避免消费 InputStream），错误详情由各 Controller 的
-        // catch 块通过异常对象（HttpClientErrorException 等）输出。
-        restTemplate.setInterceptors(Collections.singletonList(new LoggingInterceptor()));
-
+        restTemplate.setInterceptors(List.of(new LoggingInterceptor()));
         return restTemplate;
     }
 

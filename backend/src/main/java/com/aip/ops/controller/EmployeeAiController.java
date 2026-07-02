@@ -7,8 +7,8 @@ import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.servlet.http.HttpServletRequest;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
@@ -35,12 +35,19 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/api/ops/ai/employee")
-@RequiredArgsConstructor
 public class EmployeeAiController {
 
     private final RestTemplate restTemplate;
     private final EmployeeService employeeService;
     private final OpsMemberMapper memberMapper;
+
+    public EmployeeAiController(@Qualifier("aiRestTemplate") RestTemplate restTemplate,
+                                 EmployeeService employeeService,
+                                 OpsMemberMapper memberMapper) {
+        this.restTemplate = restTemplate;
+        this.employeeService = employeeService;
+        this.memberMapper = memberMapper;
+    }
 
     @Value("${platform.base-url}")
     private String platformBaseUrl;
