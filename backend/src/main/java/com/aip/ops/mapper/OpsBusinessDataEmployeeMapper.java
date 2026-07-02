@@ -56,4 +56,19 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
             + "AND SUBSTRING(sale_date, 1, 7) = #{month}")
     Map<String, Object> selectMonthlyStats(@Param("agentPhone") String agentPhone,
                                             @Param("month") String month);
+
+    /** All records for this employee (for grouping/overview in Java). */
+    @Select("SELECT brand, model, sale_price as salePrice, commission_amount as commissionAmount, "
+            + "sale_date as saleDate, customer, category "
+            + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
+            + "AND calc_status = '已计算' AND delete_flag = 0 "
+            + "ORDER BY sale_date DESC")
+    List<Map<String, Object>> selectAllRecords(@Param("agentPhone") String agentPhone);
+
+    /** All-time totals across all months. */
+    @Select("SELECT COALESCE(SUM(sale_price),0) as totalSale, "
+            + "COALESCE(SUM(commission_amount),0) as totalCommission, COUNT(*) as orderCount "
+            + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
+            + "AND calc_status = '已计算' AND delete_flag = 0")
+    Map<String, Object> selectAllTimeTotals(@Param("agentPhone") String agentPhone);
 }

@@ -51,4 +51,10 @@ public class EmployeeController {
     public R<?> getStats(@RequestParam String month) {
         return R.ok(employeeService.getMonthlyStats(month));
     }
+
+    /** All-in-one overview: all-time totals + monthly breakdown with detail records. */
+    @GetMapping("/business-data/overview")
+    public R<?> getOverview() {
+        return R.ok(employeeService.getOverview());
+    }
 }

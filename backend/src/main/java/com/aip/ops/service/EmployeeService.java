@@ -27,4 +27,11 @@ public interface EmployeeService {
 
     /** Monthly aggregate stats with month-over-month comparison. */
     Map<String, Object> getMonthlyStats(String month);
+
+    /**
+     * All-in-one overview: all-time totals + monthly breakdown with detail records.
+     * Returns {allTime: {totalSale, totalCommission, orderCount},
+     *          months: [{month, monthLabel, totalSale, totalCommission, orderCount, details: [...]}]}
+     */
+    Map<String, Object> getOverview();
 }

@@ -198,6 +198,130 @@ public class EmployeeServiceImpl implements EmployeeService {
         return y + "-" + (m - 1 < 10 ? "0" : "") + (m - 1);
     }
 
+    // ---- overview (all-time totals + monthly breakdown) ----
+
+    @Override
+    public Map<String, Object> getOverview() {
+        String phone = resolvePhone();
+
+        List<Map<String, Object>> all = employeeMapper.selectAllRecords(phone);
+        BigDecimal allTimeSale = BigDecimal.ZERO;
+        BigDecimal allTimeCommission = BigDecimal.ZERO;
+
+        // Group by month — monthKey → {monthLabel, totals, details[]}
+        Map<String, MonthGroup> groups = new LinkedHashMap<>();
+
+        for (Map<String, Object> row : all) {
+            BigDecimal sale = toBigDecimal(row.get("salePrice"));
+            BigDecimal commission = toBigDecimal(row.get("commissionAmount"));
+            allTimeSale = allTimeSale.add(sale);
+            allTimeCommission = allTimeCommission.add(commission);
+
+            String saleDate = row.get("saleDate") instanceof String
+                    ? (String) row.get("saleDate") : "";
+            MonthKey mk = extractMonth(saleDate);
+
+            MonthGroup g = groups.computeIfAbsent(mk.sortKey, k -> {
+                MonthGroup mg = new MonthGroup();
+                mg.monthKey = mk.key;
+                mg.monthLabel = mk.label;
+                return mg;
+            });
+            g.totalSale = g.totalSale.add(sale);
+            g.totalCommission = g.totalCommission.add(commission);
+            g.orderCount++;
+
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("brand", row.get("brand"));
+            detail.put("model", row.get("model"));
+            detail.put("salePrice", sale);
+            detail.put("commissionAmount", commission);
+            detail.put("saleDate", saleDate);
+            detail.put("customer", row.get("customer"));
+            detail.put("category", row.get("category"));
+            String catKey = (String) row.get("category");
+            detail.put("categoryName", BusinessDataServiceImpl.KEY_TO_CN.getOrDefault(catKey, catKey));
+            g.details.add(detail);
+        }
+
+        // Build months list (sorted by sortKey descending)
+        List<Map<String, Object>> months = new ArrayList<>();
+        List<String> sortedKeys = new ArrayList<>(groups.keySet());
+        sortedKeys.sort(java.util.Comparator.reverseOrder());
+        for (String sk : sortedKeys) {
+            MonthGroup g = groups.get(sk);
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("month", g.monthKey);
+            m.put("monthLabel", g.monthLabel);
+            m.put("totalSale", g.totalSale.setScale(2, RoundingMode.HALF_UP));
+            m.put("totalCommission", g.totalCommission.setScale(2, RoundingMode.HALF_UP));
+            m.put("orderCount", g.orderCount);
+            m.put("details", g.details);
+            months.add(m);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("allTime", Map.of(
+                "totalSale", allTimeSale.setScale(2, RoundingMode.HALF_UP),
+                "totalCommission", allTimeCommission.setScale(2, RoundingMode.HALF_UP),
+                "orderCount", all.size()));
+        result.put("months", months);
+        return result;
+    }
+
+    /** Holds month aggregation data during grouping. */
+    private static class MonthGroup {
+        String monthKey, monthLabel;
+        BigDecimal totalSale = BigDecimal.ZERO;
+        BigDecimal totalCommission = BigDecimal.ZERO;
+        int orderCount;
+        List<Map<String, Object>> details = new ArrayList<>();
+    }
+
+    /** Extract month key + label from a sale_date string in any supported format. */
+    private static MonthKey extractMonth(String raw) {
+        if (raw == null || raw.isBlank()) return new MonthKey("未知", "未知", "00-未知");
+
+        raw = raw.trim();
+
+        // ISO: 2026-06-23
+        if (raw.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            String k = raw.substring(0, 7); // "2026-06"
+            int y = Integer.parseInt(raw.substring(0, 4));
+            int m = Integer.parseInt(raw.substring(5, 7));
+            return new MonthKey(k, y + "年" + m + "月", k);
+        }
+
+        // Chinese with year: 2026年6月23日
+        java.util.regex.Matcher ym = java.util.regex.Pattern.compile(
+                "(\\d{4})\\s*年\\s*(\\d{1,2})\\s*月").matcher(raw);
+        if (ym.find()) {
+            String k = String.format("%s-%02d", ym.group(1), Integer.parseInt(ym.group(2)));
+            return new MonthKey(k, ym.group(1) + "年" + Integer.parseInt(ym.group(2)) + "月", k);
+        }
+
+        // Chinese without year: 6月23日 / 06月23日
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "(\\d{1,2})\\s*月").matcher(raw);
+        if (m.find()) {
+            int mon = Integer.parseInt(m.group(1));
+            String k = String.format("01-%02d", mon); // sort key: prefix with "01-" for legacy records
+            return new MonthKey(k, mon + "月", k);
+        }
+
+        return new MonthKey(raw, raw, "00-" + raw);
+    }
+
+    private static class MonthKey {
+        final String key;    // "2026-06" or "01-06" for sorting
+        final String label;  // "2026年6月" or "6月"
+        final String sortKey; // same as key, for Map grouping
+
+        MonthKey(String key, String label, String sortKey) {
+            this.key = key; this.label = label; this.sortKey = sortKey;
+        }
+    }
+
     // ---- cache entry ----
 
     private static class CacheEntry {
