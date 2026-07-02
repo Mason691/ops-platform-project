@@ -287,40 +287,8 @@ async function sendSyncEmployee(text, empCtx) {
   }
 }
 
-/** SSE + 轮询兜底 */
+/** 通过轮询监听异步任务结果 */
 async function listenForResultEmployee(taskId) {
-  try {
-    const token = uni.getStorageSync('ops_token') || ''
-    const url = api.employeeAiChatSseUrl(taskId)
-    const es = new EventSource(url + '?token=' + encodeURIComponent(token))
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => { es.close(); reject(new Error('SSE timeout')) }, 35000)
-      es.addEventListener('status', (e) => {
-        try { const d = JSON.parse(e.data); if (d.message) progressMsg.value = d.message } catch (_) {}
-      })
-      es.addEventListener('result', (e) => {
-        clearTimeout(timeout)
-        try {
-          const d = JSON.parse(e.data)
-          if (d.reply) {
-            const idx = messages.value.length
-            messages.value.push({ role: 'assistant', content: d.reply })
-            if (d.conversationId) conversationId = d.conversationId
-            if (voiceEnabled.value) autoPlayReply(d.reply, idx)
-          }
-        } catch (_) {}
-        es.close(); resolve()
-      })
-      es.onerror = () => { clearTimeout(timeout); es.close(); reject(new Error('SSE error')) }
-    })
-    return
-  } catch (_) {
-    await pollForResultEmployee(taskId)
-  }
-}
-
-/** 轮询兜底 */
-async function pollForResultEmployee(taskId) {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 1000))
     try {

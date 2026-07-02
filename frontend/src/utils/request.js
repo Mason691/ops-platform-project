@@ -8,7 +8,7 @@ export function request(options) {
       url: BASE_URL + options.url,
       method: options.method || 'GET',
       data: options.data || {},
-      timeout: 12000,
+      timeout: 120000,
       header: {
         'Content-Type': 'application/json',
         'X-Corp-Id': String(corpId),

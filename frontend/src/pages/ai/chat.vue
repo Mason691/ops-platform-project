@@ -206,52 +206,9 @@ async function sendSync(text) {
   }
 }
 
-/** 通过 SSE + 轮询兜底监听异步任务结果 */
+/** 通过轮询监听异步任务结果（H5 下 EventSource 不支持自定义 Header，直接轮询更可靠） */
 async function listenForResult(taskId) {
-  // 先尝试 SSE
-  let sseConnected = false
-  try {
-    const token = uni.getStorageSync('ops_token') || ''
-    const url = api.aiChatSseUrl(taskId)
-    const es = new EventSource(url + '?token=' + encodeURIComponent(token))
-
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => { es.close(); reject(new Error('SSE timeout')) }, 35000)
-
-      es.addEventListener('status', (e) => {
-        try {
-          const data = JSON.parse(e.data)
-          if (data.message) progressMsg.value = data.message
-        } catch (_) {}
-      })
-
-      es.addEventListener('result', (e) => {
-        clearTimeout(timeout)
-        sseConnected = true
-        try {
-          const data = JSON.parse(e.data)
-          if (data.reply) {
-            const idx = messages.value.length
-            messages.value.push({ role: 'assistant', content: data.reply })
-            if (data.conversationId) conversationId = data.conversationId
-            if (voiceEnabled.value) autoPlayReply(data.reply, idx)
-          }
-        } catch (_) {}
-        es.close()
-        resolve()
-      })
-
-      es.onerror = () => { clearTimeout(timeout); es.close(); reject(new Error('SSE error')) }
-    })
-    return
-  } catch (_) {
-    // SSE 失败，降级为轮询
-    if (!sseConnected) await pollForResult(taskId)
-  }
-}
-
-/** 轮询兜底 */
-async function pollForResult(taskId) {
+  // 轮询：最多 30 次 × 1s = 30s，足够 Kafka 管道完成
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 1000))
     try {
@@ -271,6 +228,8 @@ async function pollForResult(taskId) {
       if (status.progressMsg) progressMsg.value = status.progressMsg
     } catch (_) { /* 网络抖动，继续轮询 */ }
   }
+  // 轮询超时，回退同步
+  loading.value = false; progressMsg.value = ''
   messages.value.push({ role: 'assistant', content: 'AI 服务处理超时，请简化问题后重试' })
 }
 
