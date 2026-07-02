@@ -65,6 +65,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         BigDecimal salePrice;
         String agent, agentPhone, dept;
         String saleDate, receiptDate, receiptNo;
+        String receiptDateRaw; // raw value for validation (empty=ok, non-empty+null=error)
         OpsValueAddedProduct product;
     }
 
@@ -322,6 +323,11 @@ public class BusinessDataImportHandler implements ImportHandler {
             errors.add("第" + rowNum + "行: 经办人手机号为空");
         else if (!ap.matches("\\d{11}"))
             errors.add("第" + rowNum + "行: 经办人手机号格式不正确");
+        // Date validation
+        if (pr.saleDate == null)
+            errors.add("第" + rowNum + "行: 销售日期格式不正确（支持: 2026-06-23 / 6月23日 / 2026年6月23日）");
+        if (pr.receiptDateRaw != null && !pr.receiptDateRaw.isEmpty() && pr.receiptDate == null)
+            errors.add("第" + rowNum + "行: 收款日期格式不正确（支持: 2026-06-23 / 6月23日 / 2026年6月23日）");
     }
 
     // ═══════ Receipt group validation ═══════
@@ -404,8 +410,11 @@ public class BusinessDataImportHandler implements ImportHandler {
         pr.agent = val(cols, agentIdx);
         pr.agentPhone = val(cols, agentPhoneIdx);
         pr.dept = val(cols, deptIdx);
-        pr.saleDate = val(cols, saleDateIdx);
-        pr.receiptDate = val(cols, recDateIdx);
+        // Normalize dates: convert Chinese/ISO/Excel formats → YYYY-MM-DD
+        pr.saleDate = normalizeDate(val(cols, saleDateIdx));
+        String rawReceipt = val(cols, recDateIdx);
+        pr.receiptDateRaw = rawReceipt;
+        pr.receiptDate = normalizeDate(rawReceipt);
         pr.receiptNo = val(cols, recNoIdx);
         return pr;
     }
@@ -441,5 +450,86 @@ public class BusinessDataImportHandler implements ImportHandler {
     private BigDecimal toDecimal(String s) {
         if (s == null || s.isEmpty()) return null;
         try { return new BigDecimal(s); } catch (Exception e) { return null; }
+    }
+
+    /**
+     * Normalize a date string from Excel to YYYY-MM-DD format.
+     * Returns null if the input is empty or cannot be parsed.
+     * <p>
+     * Supported formats:
+     * <ul>
+     *   <li>ISO: 2026-06-23 / 2026/06/23 / 2026.06.23</li>
+     *   <li>Chinese: 2026年6月23日 / 6月23日</li>
+     *   <li>Excel serial number (days since 1899-12-30)</li>
+     *   <li>openpyxl datetime: 2026-06-23 00:00:00</li>
+     * </ul>
+     * For formats without a year (e.g. 6月23日), the current year is used.
+     */
+    private String normalizeDate(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        raw = raw.trim();
+
+        // 1. Excel serial number (days since 1899-12-30)
+        try {
+            double serial = Double.parseDouble(raw);
+            if (serial > 1 && serial < 100000) {
+                long epochDay = (long) serial - 2; // 1900-01-01 = serial 1 for Excel
+                return java.time.LocalDate.of(1900, 1, 1)
+                        .plusDays(epochDay)
+                        .format(DateTimeFormatter.ISO_LOCAL_DATE);
+            }
+        } catch (NumberFormatException ignored) {}
+
+        // 2. openpyxl datetime: "2026-06-23 00:00:00"
+        if (raw.contains(" ") && raw.length() >= 10) {
+            String datePart = raw.substring(0, 10);
+            if (datePart.matches("\\d{4}-\\d{2}-\\d{2}")) return datePart;
+        }
+
+        // 3. ISO: 2026-06-23 / 2026/06/23 / 2026.06.23
+        if (raw.matches("\\d{4}[-/.](0[1-9]|1[0-2])[-/.](0[1-9]|[12]\\d|3[01])")) {
+            return raw.replace('/', '-').replace('.', '-');
+        }
+
+        // 4. Chinese with year: "2026年6月23日" or "2026年06月23日"
+        java.util.regex.Matcher ym = java.util.regex.Pattern.compile(
+                "(\\d{4})\\s*年\\s*(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日").matcher(raw);
+        if (ym.matches()) {
+            return String.format("%s-%02d-%02d",
+                    ym.group(1),
+                    Integer.parseInt(ym.group(2)),
+                    Integer.parseInt(ym.group(3)));
+        }
+
+        // 5. Chinese without year: "6月23日" or "06月23日"
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "^(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日$").matcher(raw);
+        if (m.matches()) {
+            int year = java.time.LocalDate.now().getYear();
+            return String.format("%d-%02d-%02d",
+                    year,
+                    Integer.parseInt(m.group(1)),
+                    Integer.parseInt(m.group(2)));
+        }
+
+        return null; // unparseable
+    }
+
+    /** Parse a date string (already normalized or raw) for validation. */
+    private java.time.LocalDate parseDate(String s) {
+        s = s.trim();
+        // Try ISO first
+        try { return java.time.LocalDate.parse(s, DateTimeFormatter.ISO_LOCAL_DATE); }
+        catch (Exception ignored) {}
+        // Try Chinese
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "(\\d{4})\\s*年\\s*(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日").matcher(s);
+        if (m.matches()) {
+            return java.time.LocalDate.of(
+                    Integer.parseInt(m.group(1)),
+                    Integer.parseInt(m.group(2)),
+                    Integer.parseInt(m.group(3)));
+        }
+        throw new IllegalArgumentException("无法解析日期: " + s);
     }
 }

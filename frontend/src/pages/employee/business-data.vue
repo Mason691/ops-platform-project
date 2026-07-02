@@ -199,8 +199,12 @@ async function toggleCategory(cat) {
 
 function formatMonth(ym) {
   if (!ym) return ''
+  // Supports both "YYYY-MM" (ISO) and legacy Chinese "M月D日" format
   const parts = ym.split('-')
-  return parts[0] + '年' + parseInt(parts[1]) + '月'
+  if (parts.length === 2) {
+    return parts[0] + '年' + parseInt(parts[1]) + '月'
+  }
+  return ym
 }
 
 function formatMoney(val) {
