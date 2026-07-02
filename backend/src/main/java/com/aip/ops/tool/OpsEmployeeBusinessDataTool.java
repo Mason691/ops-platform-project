@@ -39,7 +39,7 @@ public class OpsEmployeeBusinessDataTool implements McpToolDefinition {
     @Override
     public String getDescription() {
         return "查询员工的增值业务数据：按月份查询销售额、提成金额、订单数，支持按品类筛选和查看明细。" +
-               "数据范围限定为当前员工手机号关联的已计算业务记录。";
+               "数据范围限定为当前员工手机号关联的业务记录。";
     }
 
     @Override
