@@ -319,7 +319,11 @@ async function doDelete() {
 async function doCalc() {
   try {
     const r = await api.businessDataCalcCommission()
-    uni.showToast({ title: `计算完成：${r.total}条`, icon: 'success' })
+    let msg = `计算完成：${r.total}条`
+    if (r.splitGroups > 0) {
+      msg += `，其中${r.splitGroups}个收据组合并均分提成`
+    }
+    uni.showToast({ title: msg, icon: 'success', duration: 2500 })
     loadData()
   } catch (e) { uni.showToast({ title: '计算失败', icon: 'none' }) }
 }
@@ -344,7 +348,7 @@ function downloadTemplate() {
 function phaseToStepIdx(phase) {
   if (!phase) return 0
   if (phase === 'FILE_CHECK' || phase === 'HEADER_CHECK') return 0
-  if (phase === 'ROW_CHECK' || phase === 'BUSINESS_CHECK') return 1
+  if (phase === 'ROW_CHECK' || phase === 'BUSINESS_CHECK' || phase === 'RECEIPT_CHECK') return 1
   if (phase === 'INSERT') return 2
   return 0
 }
@@ -417,6 +421,7 @@ function phaseLabel(phase) {
     'HEADER_CHECK': '正在校验表头列名...',
     'ROW_CHECK': '正在逐行校验数据...',
     'BUSINESS_CHECK': '正在执行业务规则校验...',
+    'RECEIPT_CHECK': '正在校验收据号关联数据...',
     'INSERT': '校验通过，正在导入数据...',
     'DONE': '导入完成',
     'FAILED': '导入失败',

@@ -32,6 +32,7 @@ import java.net.URLEncoder;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
+import java.util.Objects;
 import java.util.*;
 
 @Slf4j
@@ -207,6 +208,14 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 return Map.of("status", "fail", "totalErrors", errors.size(), "errors", errors);
             }
 
+            // ── Phase 1b: Receipt number group validation ──
+            List<String> receiptErrors = new ArrayList<>();
+            validateReceiptGroups(parsedRows, receiptErrors);
+            if (!receiptErrors.isEmpty()) {
+                return Map.of("status", "fail", "totalErrors",
+                        receiptErrors.size(), "errors", receiptErrors);
+            }
+
             // ── Phase 2: JDBC batch insert (single tx, DataSourceUtils participates in @Transactional) ──
             String insertSql = "INSERT INTO ops_business_data "
                     + "(batch_no, company, customer, brand, category, model, "
@@ -317,6 +326,63 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             errors.add("第" + rowNum + "行: 经办人手机号格式不正确");
     }
 
+    /**
+     * Validate that rows sharing the same receipt number have consistent
+     * customer, category, brand, model, and sale price.
+     */
+    private void validateReceiptGroups(List<ParsedRow> rows, List<String> errors) {
+        Map<String, List<Integer>> groups = new LinkedHashMap<>();
+        for (int i = 0; i < rows.size(); i++) {
+            ParsedRow pr = rows.get(i);
+            if (pr.receiptNo != null && !pr.receiptNo.isEmpty()) {
+                groups.computeIfAbsent(pr.receiptNo, k -> new ArrayList<>()).add(i);
+            }
+        }
+
+        for (Map.Entry<String, List<Integer>> entry : groups.entrySet()) {
+            String receiptNo = entry.getKey();
+            List<Integer> indices = entry.getValue();
+            if (indices.size() <= 1) continue;
+
+            int baseIdx = indices.get(0);
+            ParsedRow base = rows.get(baseIdx);
+            int baseRowNum = baseIdx + 2;
+
+            for (int j = 1; j < indices.size(); j++) {
+                int compIdx = indices.get(j);
+                ParsedRow comp = rows.get(compIdx);
+                int compRowNum = compIdx + 2;
+
+                if (!Objects.equals(base.customer, comp.customer)) {
+                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
+                            + "行与第" + compRowNum + "行的客户名称不一致");
+                }
+                if (!Objects.equals(base.catCn, comp.catCn)) {
+                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
+                            + "行与第" + compRowNum + "行的品类不一致");
+                }
+                if (!Objects.equals(base.brand, comp.brand)) {
+                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
+                            + "行与第" + compRowNum + "行的品牌不一致");
+                }
+                if (!Objects.equals(base.model, comp.model)) {
+                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
+                            + "行与第" + compRowNum + "行的型号不一致");
+                }
+                if (compareBigDecimal(base.salePrice, comp.salePrice) != 0) {
+                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
+                            + "行与第" + compRowNum + "行的销售价不一致");
+                }
+            }
+        }
+    }
+
+    private int compareBigDecimal(BigDecimal a, BigDecimal b) {
+        if (a == null && b == null) return 0;
+        if (a == null || b == null) return -1;
+        return a.compareTo(b);
+    }
+
     /** Load valid category names from platform dict. Falls back to defaults on failure. */
     private Set<String> loadValidCategories() {
         if (categoryNameCache != null) return categoryNameCache;
@@ -352,6 +418,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     @Override
     @Transactional
     public Map<String, Object> calcCommission() {
+        // Load rules (unchanged)
         List<OpsPersonalCommissionRule> rules = ruleMapper.selectList(
                 new LambdaQueryWrapper<OpsPersonalCommissionRule>().eq(OpsPersonalCommissionRule::getStatus, 1));
         Map<String, OpsPersonalCommissionRule> ruleMap = new HashMap<>();
@@ -362,37 +429,160 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         applyCorpScope(uncalcQw);
         List<OpsBusinessData> uncalcs = mapper.selectList(uncalcQw);
 
-        int done = 0, zero = 0;
+        if (uncalcs.isEmpty()) {
+            return Map.of("total", 0, "commissioned", 0, "zero", 0, "splitGroups", 0);
+        }
+
+        // ── Phase 1: Compute per-row commission (in-memory) ──
+        Map<Long, BigDecimal[]> results = new LinkedHashMap<>();
+        for (OpsBusinessData d : uncalcs) {
+            OpsPersonalCommissionRule rule = ruleMap.get(d.getCategory());
+            BigDecimal[] cr = calcCommissionAmount(d.getSalePrice(),
+                    d.getRetailFloorPrice(), d.getGroupLowestPrice(), rule);
+            results.put(d.getId(), new BigDecimal[]{cr[0], cr[1]});
+        }
+
+        // ── Phase 2: Split by receipt group ──
+        int splitGroups = splitCommissionByReceiptGroup(uncalcs, results);
+
+        // Count commissioned / zero AFTER splitting (results may have changed)
+        int commissioned = 0, zero = 0;
+        for (BigDecimal[] cr : results.values()) {
+            if (cr[1].compareTo(BigDecimal.ZERO) > 0) commissioned++; else zero++;
+        }
+
+        // ── Phase 3: Batch SQL update (preserves existing CASE WHEN pattern) ──
         try (var conn = dataSource.getConnection(); var stmt = conn.createStatement()) {
-            // Batch UPDATE using CASE WHEN — single SQL per batch of 500
             int batchSize = 500;
             for (int i = 0; i < uncalcs.size(); i += batchSize) {
                 int end = Math.min(i + batchSize, uncalcs.size());
-                StringBuilder rateSql = new StringBuilder("UPDATE ops_business_data SET commission_rate = CASE ");
-                StringBuilder amtSql  = new StringBuilder("UPDATE ops_business_data SET commission_amount = CASE ");
+                StringBuilder rateSql = new StringBuilder(
+                        "UPDATE ops_business_data SET commission_rate = CASE ");
+                StringBuilder amtSql  = new StringBuilder(
+                        "UPDATE ops_business_data SET commission_amount = CASE ");
                 StringBuilder ids = new StringBuilder();
                 for (int j = i; j < end; j++) {
-                    OpsBusinessData d = uncalcs.get(j);
-                    OpsPersonalCommissionRule rule = ruleMap.get(d.getCategory());
-                    BigDecimal[] cr = calcCommissionAmount(d.getSalePrice(),
-                            d.getRetailFloorPrice(), d.getGroupLowestPrice(), rule);
-                    String id = String.valueOf(d.getId());
-                    rateSql.append("WHEN id=").append(id).append(" THEN ").append(cr[0]).append(" ");
-                    amtSql.append("WHEN id=").append(id).append(" THEN ").append(cr[1]).append(" ");
+                    Long id = uncalcs.get(j).getId();
+                    BigDecimal[] cr = results.get(id);
+                    rateSql.append("WHEN id=").append(id)
+                            .append(" THEN ").append(cr[0]).append(" ");
+                    amtSql.append("WHEN id=").append(id)
+                            .append(" THEN ").append(cr[1]).append(" ");
                     ids.append(id).append(",");
-                    if (cr[1].compareTo(BigDecimal.ZERO) > 0) done++; else zero++;
                 }
                 ids.setLength(ids.length() - 1);
-                rateSql.append("END, calc_status='已计算' WHERE id IN (").append(ids).append(")");
+                rateSql.append("END, calc_status='已计算' WHERE id IN (")
+                        .append(ids).append(")");
                 amtSql.append("END WHERE id IN (").append(ids).append(")");
                 stmt.addBatch(rateSql.toString());
                 stmt.addBatch(amtSql.toString());
                 stmt.executeBatch();
             }
-        } catch (Exception e) { log.error("批量计算提成失败", e); throw new RuntimeException("批量计算提成失败", e); }
+        } catch (Exception e) {
+            log.error("批量计算提成失败", e);
+            throw new RuntimeException("批量计算提成失败", e);
+        }
 
-        log.info("提成计算完成: {}条有提成, {}条0提成, 共{}条", done, zero, uncalcs.size());
-        return Map.of("total", uncalcs.size(), "commissioned", done, "zero", zero);
+        // ── Phase 4: Verify receipt group consistency ──
+        verifyReceiptGroupConsistency(uncalcs, results);
+
+        log.info("提成计算完成: {}条有提成, {}条0提成, {}个分组均分, 共{}条",
+                commissioned, zero, splitGroups, uncalcs.size());
+        return Map.of("total", uncalcs.size(), "commissioned", commissioned,
+                "zero", zero, "splitGroups", splitGroups);
+    }
+
+    /**
+     * Split commission evenly within receipt groups (N > 1).
+     * The last row in each group absorbs rounding remainder so the
+     * sum of adjusted amounts matches the original total exactly.
+     *
+     * @return number of receipt groups that were split
+     */
+    private int splitCommissionByReceiptGroup(List<OpsBusinessData> records,
+                                               Map<Long, BigDecimal[]> results) {
+        // Build receipt groups
+        Map<String, List<OpsBusinessData>> groups = new LinkedHashMap<>();
+        for (OpsBusinessData d : records) {
+            String rn = d.getReceiptNo();
+            if (rn != null && !rn.isEmpty()) {
+                groups.computeIfAbsent(rn, k -> new ArrayList<>()).add(d);
+            }
+        }
+
+        int splitGroups = 0;
+        for (Map.Entry<String, List<OpsBusinessData>> entry : groups.entrySet()) {
+            List<OpsBusinessData> group = entry.getValue();
+            if (group.size() <= 1) continue;
+            splitGroups++;
+
+            // Use FIRST row's commission as the total for this receipt order.
+            // Since RECEIPT_CHECK guarantees consistent customer/category/
+            // brand/model/salePrice within the group, any row gives the same
+            // commission result.  We pick the first for traceability.
+            BigDecimal[] firstResult = results.get(group.get(0).getId());
+            BigDecimal totalAmount = (firstResult != null && firstResult[1] != null)
+                    ? firstResult[1] : BigDecimal.ZERO;
+            BigDecimal originalRate = (firstResult != null && firstResult[0] != null)
+                    ? firstResult[0] : BigDecimal.ZERO;
+
+            int n = group.size();
+            // Rate per row = rule rate ÷ N (spec §2.4)
+            BigDecimal perRowRate = originalRate.divide(
+                    BigDecimal.valueOf(n), 2, RoundingMode.HALF_UP);
+            // Amount per row = totalAmount ÷ N, last row absorbs rounding
+            BigDecimal baseAmount = totalAmount.divide(
+                    BigDecimal.valueOf(n), 2, RoundingMode.HALF_UP);
+            BigDecimal used = baseAmount.multiply(BigDecimal.valueOf(n - 1));
+            BigDecimal remainder = totalAmount.subtract(used);
+
+            log.info("Receipt group {}: N={}, totalAmount={}, baseAmount={}, "
+                    + "remainder={}, originalRate={}, perRowRate={}",
+                    entry.getKey(), n, totalAmount, baseAmount, remainder,
+                    originalRate, perRowRate);
+
+            for (int i = 0; i < n; i++) {
+                OpsBusinessData d = group.get(i);
+                BigDecimal finalAmount = (i < n - 1) ? baseAmount : remainder;
+                results.put(d.getId(), new BigDecimal[]{perRowRate, finalAmount});
+            }
+        }
+        return splitGroups;
+    }
+
+    /**
+     * Verify that no receipt group row has a negative or null amount
+     * after splitting. Throws on data inconsistency to trigger rollback.
+     */
+    private void verifyReceiptGroupConsistency(List<OpsBusinessData> records,
+                                                Map<Long, BigDecimal[]> results) {
+        Map<String, List<OpsBusinessData>> groups = new LinkedHashMap<>();
+        for (OpsBusinessData d : records) {
+            String rn = d.getReceiptNo();
+            if (rn != null && !rn.isEmpty()) {
+                groups.computeIfAbsent(rn, k -> new ArrayList<>()).add(d);
+            }
+        }
+
+        for (Map.Entry<String, List<OpsBusinessData>> entry : groups.entrySet()) {
+            List<OpsBusinessData> group = entry.getValue();
+            if (group.size() <= 1) continue;
+
+            BigDecimal groupSum = BigDecimal.ZERO;
+            for (OpsBusinessData d : group) {
+                BigDecimal[] cr = results.get(d.getId());
+                if (cr == null || cr[1] == null || cr[1].compareTo(BigDecimal.ZERO) < 0) {
+                    String msg = "Receipt group " + entry.getKey()
+                            + " row id=" + d.getId()
+                            + " has invalid amount after split: "
+                            + (cr != null ? cr[1] : null);
+                    log.error(msg);
+                    throw new RuntimeException("提成均分校验失败：" + msg);
+                }
+                groupSum = groupSum.add(cr[1]);
+            }
+            log.debug("Receipt group {}: split total = {}", entry.getKey(), groupSum);
+        }
     }
 
     private BigDecimal[] calcCommissionAmount(BigDecimal salePrice, BigDecimal floorPrice,

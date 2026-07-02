@@ -70,6 +70,11 @@ export const api = {
   aiChat: (data) => request({url:'/api/ops/ai/chat',method:'POST',data}),
   aiConfig: () => request({url:'/api/ops/ai/config'}),
 
+  // Employee AI 助手
+  employeeAiChat: (data) => request({url:'/api/ops/ai/employee/chat',method:'POST',data}),
+  employeeAiConfig: () => request({url:'/api/ops/ai/employee/config'}),
+  employeeAiProfile: () => request({url:'/api/ops/ai/employee/profile'}),
+
   // 站长
   stationApply: (data) => request({url:'/api/ops/station/apply',method:'POST',data}),
   stationApplyStatus: () => request({url:'/api/ops/station/apply/status'}),
@@ -162,4 +167,11 @@ export const api = {
   adminMemberDetail: (id) => request({url:'/api/ops/admin/members/'+id}),
   adminMemberStatus: (id, status) => request({url:'/api/ops/admin/members/'+id+'/status',method:'PUT',data:{status}}),
   permissionProfile: () => request({url:'/api/ops/admin/permission/profile'}),
+
+  // 员工身份 & 业务数据
+  employeeIdentity: () => request({url:'/api/ops/employee/identity'}),
+  employeeMonths: () => request({url:'/api/ops/employee/business-data/months'}),
+  employeeSummary: (month) => request({url:'/api/ops/employee/business-data/summary',data:{month}}),
+  employeeDetail: (month, category) => request({url:'/api/ops/employee/business-data/detail',data:{month, category}}),
+  employeeStats: (month) => request({url:'/api/ops/employee/business-data/stats',data:{month}}),
 }

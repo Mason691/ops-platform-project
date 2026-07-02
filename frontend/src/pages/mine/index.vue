@@ -13,13 +13,14 @@
       <view class="menu-item" @click="goPage('/pages/booking/list')"><text>📅 我的预约</text><text class="arrow">›</text></view>
       <view class="menu-item" @click="goPage('/pages/address/list')"><text>📍 收货地址</text><text class="arrow">›</text></view>
       <view class="menu-item" @click="goStation" v-if="isLogin"><text>{{ stationMenuText }}</text><text class="arrow">›</text></view>
+      <view class="menu-item" @click="goEmployee" v-if="isLogin && isEmployee"><text>🏢 我是员工</text><text class="arrow">›</text></view>
     </view>
     <view class="logout" v-if="isLogin" @click="doLogout"><text>退出登录</text></view>
   </view>
 </template>
 <script setup>
 import {ref,computed,onMounted} from 'vue';import {api} from '@/api/index';import {onShow} from '@dcloudio/uni-app'
-const isLogin=ref(false),user=ref({}),avatarKey=ref(0),stationLabel=ref('成为站长'),stationIsMaster=ref(false)
+const isLogin=ref(false),user=ref({}),avatarKey=ref(0),stationLabel=ref('成为站长'),stationIsMaster=ref(false),isEmployee=ref(false),employeeCompanies=ref([])
 const avatarUrl=computed(()=>{
   const ua=user.value.avatar
   if(!ua) return '/static/gas-avatar.png'
@@ -28,7 +29,7 @@ const avatarUrl=computed(()=>{
 async function loadUser(){
   const token = uni.getStorageSync('ops_token')
   if (!token) { isLogin.value = false; return }
-  try { user.value = await api.getMe(); isLogin.value = true; checkStation() }
+  try { user.value = await api.getMe(); isLogin.value = true; checkStation(); checkEmployee() }
   catch (e) {
     isLogin.value = false
     // Only clear token on authentication errors (401)
@@ -101,6 +102,33 @@ async function changeAvatar(){
   }
 }
 
+async function checkEmployee(){
+  try {
+    const cached = uni.getStorageSync('ops_employee')
+    if (cached) {
+      const data = JSON.parse(cached)
+      isEmployee.value = !!data.isEmployee
+      employeeCompanies.value = data.companies || []
+      return
+    }
+    const resp = await api.employeeIdentity()
+    isEmployee.value = !!resp.isEmployee
+    employeeCompanies.value = resp.companies || []
+    uni.setStorageSync('ops_employee', JSON.stringify(resp))
+  } catch { isEmployee.value = false }
+}
+function goEmployee(){
+  if (!isEmployee.value) return
+  const companies = employeeCompanies.value
+  if (!companies || companies.length === 0) return
+  uni.setStorageSync('ops_employee_companies', JSON.stringify(companies))
+  if (companies.length === 1) {
+    uni.setStorageSync('ops_employee_active_company', JSON.stringify(companies[0]))
+    uni.navigateTo({ url: '/pages/employee/dashboard' })
+  } else {
+    uni.navigateTo({ url: '/pages/employee/company-select' })
+  }
+}
 function goLogin(){uni.navigateTo({url:'/pages/auth/login'})}
 function goPage(url){if(!isLogin.value){goLogin();return};uni.navigateTo({url})}
 function goStation(){

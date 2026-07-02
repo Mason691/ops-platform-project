@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.sql.PreparedStatement;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Objects;
 import java.util.*;
 
 /**
@@ -169,6 +170,13 @@ public class BusinessDataImportHandler implements ImportHandler {
             return ImportResult.fail("ROW_CHECK", errors, totalRows);
         }
 
+        // ── Phase 1b: Receipt number group validation ──
+        List<String> receiptErrors = new ArrayList<>();
+        validateReceiptGroups(parsedRows, receiptErrors);
+        if (!receiptErrors.isEmpty()) {
+            return ImportResult.fail("RECEIPT_CHECK", receiptErrors, totalRows);
+        }
+
         // ── Phase 2: Single-transaction JDBC batch insert ──
         // DataSourceUtils returns the Spring-managed connection
         // (participates in @Transactional — all-or-nothing)
@@ -314,6 +322,66 @@ public class BusinessDataImportHandler implements ImportHandler {
             errors.add("第" + rowNum + "行: 经办人手机号为空");
         else if (!ap.matches("\\d{11}"))
             errors.add("第" + rowNum + "行: 经办人手机号格式不正确");
+    }
+
+    // ═══════ Receipt group validation ═══════
+
+    /**
+     * Validate that rows sharing the same receipt number have consistent
+     * customer, category, brand, model, and sale price.
+     */
+    private void validateReceiptGroups(List<ParsedRow> rows, List<String> errors) {
+        // Build index: receiptNo → list of (rowIndex)
+        Map<String, List<Integer>> groups = new LinkedHashMap<>();
+        for (int i = 0; i < rows.size(); i++) {
+            ParsedRow pr = rows.get(i);
+            if (pr.receiptNo != null && !pr.receiptNo.isEmpty()) {
+                groups.computeIfAbsent(pr.receiptNo, k -> new ArrayList<>()).add(i);
+            }
+        }
+
+        for (Map.Entry<String, List<Integer>> entry : groups.entrySet()) {
+            String receiptNo = entry.getKey();
+            List<Integer> indices = entry.getValue();
+            if (indices.size() <= 1) continue;
+
+            int baseIdx = indices.get(0);
+            ParsedRow base = rows.get(baseIdx);
+            int baseRowNum = baseIdx + 2; // header = row 1, data starts at row 2
+
+            for (int j = 1; j < indices.size(); j++) {
+                int compIdx = indices.get(j);
+                ParsedRow comp = rows.get(compIdx);
+                int compRowNum = compIdx + 2;
+
+                if (!Objects.equals(base.customer, comp.customer)) {
+                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
+                            + "行与第" + compRowNum + "行的客户名称不一致");
+                }
+                if (!Objects.equals(base.catCn, comp.catCn)) {
+                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
+                            + "行与第" + compRowNum + "行的品类不一致");
+                }
+                if (!Objects.equals(base.brand, comp.brand)) {
+                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
+                            + "行与第" + compRowNum + "行的品牌不一致");
+                }
+                if (!Objects.equals(base.model, comp.model)) {
+                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
+                            + "行与第" + compRowNum + "行的型号不一致");
+                }
+                if (compareBigDecimal(base.salePrice, comp.salePrice) != 0) {
+                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
+                            + "行与第" + compRowNum + "行的销售价不一致");
+                }
+            }
+        }
+    }
+
+    private int compareBigDecimal(BigDecimal a, BigDecimal b) {
+        if (a == null && b == null) return 0;
+        if (a == null || b == null) return -1;
+        return a.compareTo(b);
     }
 
     // ═══════ Parsing ═══════
