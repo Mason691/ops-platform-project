@@ -73,7 +73,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import api from '@/api/index.js'
+import { api } from '@/api/index.js'
 
 const styles = [
   { value: 'caring', label: '🌸 贴心助理', desc: '温柔耐心，主动关怀' },
