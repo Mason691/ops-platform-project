@@ -16,6 +16,7 @@
           <view class="wc-feat"><text>🔥</text><text>活动资讯</text></view>
           <view class="wc-feat"><text>📋</text><text>订单答疑</text></view>
         </view>
+        <navigator url="/pages/ai/settings" class="settings-link">⚙️ 个性化设置</navigator>
       </view>
 
       <view class="msg-item" v-for="(m, i) in messages" :key="i"
@@ -485,6 +486,7 @@ function request(opts) {
 .wc-desc{font-size:26rpx;color:#999;margin-bottom:24rpx}
 .wc-features{display:flex;flex-wrap:wrap;gap:12rpx;justify-content:center}
 .wc-feat{display:flex;align-items:center;gap:6rpx;padding:10rpx 20rpx;background:#FFF3EE;border-radius:12rpx;font-size:24rpx;color:#FF6B35}
+.settings-link{display:block;text-align:center;margin-top:20rpx;font-size:24rpx;color:#999;text-decoration:none}
 /* chat area */
 .chat-body{flex:1;height:0;padding:16rpx 24rpx;overflow-y:auto}
 .msg-item{display:flex;align-items:flex-start;margin-bottom:24rpx}

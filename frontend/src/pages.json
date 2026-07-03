@@ -18,6 +18,7 @@
     {"path":"pages/auth/register","style":{"navigationBarTitleText":"注册"}},
     {"path":"pages/live/index","style":{"navigationBarTitleText":"直播广场","navigationBarBackgroundColor":"#ff4444","navigationBarTextStyle":"white"}},
     {"path":"pages/booking/list","style":{"navigationBarTitleText":"我的预约"}},
+    {"path":"pages/ai/settings","style":{"navigationBarTitleText":"AI助手设置"}},
     {"path":"pages/station/apply","style":{"navigationBarTitleText":"站长申请"}},
     {"path":"pages/station/center","style":{"navigationBarTitleText":"站长中心"}},
     {"path":"pages/employee/dashboard","style":{"navigationBarTitleText":"员工工作台","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},

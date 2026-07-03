@@ -415,7 +415,7 @@ Controller (BusinessDataController)
 - **分阶段校验**：`FILE_CHECK`（文件存在+格式）→ `HEADER_CHECK`（必填列）→ `ROW_CHECK`（品类字典校验+公司白名单+手机号格式）→ `INSERT`（单事务 JDBC batch，500 条/批）
 - **原子性**：任一行校验失败 → 整个文件拒绝，不写入任何数据（全量校验通过后才 INSERT）
 - **并发控制**：提交前检查 `importTaskService.hasPendingTask("business_data")`，同一类型同时只能有一个进行中的任务
-- **品类字典**：通过 `PlatformInternalClient` 调用底座 `GET /api/dict/data?typeCode=PRODUCT_CATEGORY` 获取有效品类，缓存到 `volatile` 字段；底座不可达时降级为硬编码默认值
+- **品类字典**：通过 `PlatformInternalClient` 调用底座 `GET /api/dict/data?typeCode=PRODUCT_CATEGORY` 获取有效品类，缓存到 `volatile` 字段；底座不可达时降级为硬编码默认值。**注意**：底座已建 `dict`/`dictType`/`menu`/`region`/`orgAiConfig` Caffeine 缓存层，通过平台 API 查询这些数据时会自动命中缓存，无需子系统侧再次缓存。
 - **`SysImportTask`** 表状态：`PENDING` → `PROCESSING` → `DONE` / `FAILED`，中间阶段通过 `phase` 字段细化
 - **Kafka topic**：`async-import-task`（提交）/ `async-import-result`（结果通知）
 - **注意**：`SysImportTask` 实体**未继承 BaseEntity**，自行声明了所有审计字段（createTime/modifyTime 等）
@@ -586,6 +586,7 @@ CSS `url()` 把根相对路径（如 `/uploads/ops/img/xxx.jpg`）解析到页�
 | **城市合伙人只读** | 城市合伙人（orgRoleId=5）在增值模块无写权限。前端通过 `/api/ops/admin/permission/profile` 获取权限后隐藏编辑按钮，后端 `OrgRoleService.isOperatorOrSuperAdmin()` 兜底校验 |
 | **无自动化测试** | 项目当前无单元测试或集成测试；所有验证依赖手动检查和生产监控 |
 | **无 Pinia/Vuex** | 前端不使用集中式状态管理，token/userId/permissions 通过 `uni.getStorageSync()` 存取 |
+| **平台核心数据已建缓存层** | 底座平台的菜单、字典、地区、组织配置已通过 `@Cacheable` 建 Caffeine 缓存。子系统通过 `PlatformInternalClient` 调平台 API 查这些数据时会自动命中缓存。**禁止**子系统侧对这些数据再做 DB 直查或重复缓存 |
 
 ---
 

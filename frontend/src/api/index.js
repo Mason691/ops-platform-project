@@ -112,6 +112,16 @@ export const api = {
   },
   aiVoiceRecognizeWechat: (serverId) => request({url:'/api/ops/ai/voice/recognize-wechat',method:'POST',data:{serverId}}),
   aiVoiceSynthesize: (data) => request({url:'/api/ops/ai/voice/synthesize',method:'POST',data}),
+  // 会员 AI 设置
+  memberAiGetProfile: () => request({url:'/api/ops/ai/member/profile'}),
+  memberAiUpdateStyle: (style) => request({url:'/api/ops/ai/member/profile/style',method:'PUT',data:{style}}),
+  memberAiGetPreferences: () => request({url:'/api/ops/ai/member/preferences'}),
+  memberAiSetPreference: (key, value) => request({url:'/api/ops/ai/member/preferences',method:'PUT',data:{key,value}}),
+  memberAiDeletePreference: (key) => request({url:'/api/ops/ai/member/preferences/'+key,method:'DELETE'}),
+  memberAiGetHabits: () => request({url:'/api/ops/ai/member/habits'}),
+  memberAiAcknowledgeHabit: (key) => request({url:'/api/ops/ai/member/habits/'+key+'/acknowledge',method:'PUT'}),
+  memberAiDeleteHabit: (key) => request({url:'/api/ops/ai/member/habits/'+key,method:'DELETE'}),
+  memberAiGetMemories: () => request({url:'/api/ops/ai/member/memories'}),
   // 增值业务 — 业务数据
   businessDataList: (params) => request({url:'/api/ops/admin/business-data',data:params}),
   businessDataBatches: () => request({url:'/api/ops/admin/business-data/batches'}),

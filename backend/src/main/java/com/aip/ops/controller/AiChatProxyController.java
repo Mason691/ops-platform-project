@@ -210,28 +210,53 @@ public class AiChatProxyController {
 
     // ═══ 配置与问候 ═══
 
+    /**
+     * AI 配置（公开）— 代理到平台 GreetingService，返回动态个性化问候。
+     * 尝试转发用户 JWT 以获取个性化数据；无 JWT 时返回通用问候。
+     */
     @GetMapping("/config")
-    public R<Map<String, Object>> aiConfig() {
-        return R.ok(Map.of(
-                "nickname", "小金",
-                "greeting", "您好！我是小金，您的燃气生活助手～\n可以帮您查积分、兑商品、看活动，有什么需要？",
-                "voiceEnabled", true
-        ));
+    public R<Map<String, Object>> aiConfig(HttpServletRequest request) {
+        String authHeader = request.getHeader("Authorization");
+        // Only try the platform call if the user has a JWT (authenticated),
+        // otherwise skip directly to fallback for unauthenticated visitors.
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            try {
+                HttpHeaders headers = new HttpHeaders();
+                headers.set("Authorization", authHeader);
+                ResponseEntity<Map> resp = restTemplate.exchange(
+                        platformBaseUrl + "/api/ai/greeting",
+                        HttpMethod.GET, new HttpEntity<>(headers), Map.class);
+                if (resp.getBody() != null) {
+                    Object data = resp.getBody().get("data");
+                    if (data instanceof Map) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> d = (Map<String, Object>) data;
+                        Map<String, Object> result = new LinkedHashMap<>();
+                        result.put("nickname", d.getOrDefault("nickname", "小金"));
+                        result.put("avatar", d.getOrDefault("avatar", ""));
+                        result.put("greeting", d.getOrDefault("greetingText", "您好！有什么可以帮您？"));
+                        result.put("hasPendingTasks", d.getOrDefault("hasPendingTasks", false));
+                        result.put("pendingTaskCount", d.getOrDefault("pendingTaskCount", 0));
+                        result.put("voiceEnabled", true);
+                        return R.ok(result);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to fetch greeting from platform, using fallback: {}", e.getMessage());
+            }
+        }
+        // Fallback for unauthenticated visitors
+        Map<String, Object> fb = new LinkedHashMap<>();
+        fb.put("nickname", "小金");
+        fb.put("greeting", "您好！我是小金，您的燃气生活助手～\n可以帮您查积分、兑商品、看活动，有什么需要？");
+        fb.put("voiceEnabled", true);
+        return R.ok(fb);
     }
 
     @GetMapping("/profile")
-    public R<Map<String, Object>> aiProfile() {
-        Map<String, Object> result = new LinkedHashMap<>();
-        try {
-            Long userId = SecurityUtils.getCurrentUserId();
-            result.put("nickname", "燃气用户");
-            result.put("avatar", null);
-            result.put("greeting", "您好！我是小金，您的燃气生活助手～\n可以帮您查积分、兑商品、看活动，有什么需要？");
-        } catch (Exception e) {
-            result.put("nickname", "访客");
-            result.put("greeting", "你好！我是你的燃气小助手，可以帮你选商品、查积分、找优惠～\n登录后更懂你。");
-        }
-        return R.ok(result);
+    public R<Map<String, Object>> aiProfile(HttpServletRequest request) {
+        // Delegate to /config for consistency — both return the same greeting data
+        return aiConfig(request);
     }
 
     // ═══ 语音识别（ASR）— 参照 MiniAiController.asr() ═══
@@ -502,6 +527,109 @@ public class AiChatProxyController {
             log.error("TTS 合成失败 corpId={}: {}", resolveCorpId(request), e.getMessage(), e);
             return R.fail("语音合成暂不可用");
         }
+    }
+
+    // ═══ 会员 AI 设置代理 ═══
+
+    /**
+     * 代理会员 AI 设置请求到底座平台。
+     * 透传 JWT Authorization，底座通过 member_id 识别会员。
+     */
+    private R<?> proxyMemberAi(String path, HttpServletRequest request) {
+        return proxyMemberAiMethod(path, null, HttpMethod.GET, request);
+    }
+
+    private R<?> proxyMemberAiWithBody(String path, Object body, HttpServletRequest request) {
+        return proxyMemberAiMethod(path, body, HttpMethod.PUT, request);
+    }
+
+    private R<?> proxyMemberAiPut(String path, Object body, HttpServletRequest request) {
+        return proxyMemberAiMethod(path, body, HttpMethod.PUT, request);
+    }
+
+    private R<?> proxyMemberAiDelete(String path, HttpServletRequest request) {
+        return proxyMemberAiMethod(path, null, HttpMethod.DELETE, request);
+    }
+
+    private R<?> proxyMemberAiMethod(String path, Object body, HttpMethod method,
+                                      HttpServletRequest request) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", request.getHeader("Authorization"));
+        if (body != null) headers.setContentType(MediaType.APPLICATION_JSON);
+
+        try {
+            HttpEntity<?> entity = body != null
+                    ? new HttpEntity<>(body, headers)
+                    : new HttpEntity<>(headers);
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    platformBaseUrl + "/api/ai/member" + path,
+                    method, entity, Map.class);
+            return R.ok(resp.getBody() != null ? resp.getBody().get("data") : null);
+        } catch (HttpClientErrorException e) {
+            String detail = extractErrorDetail(e.getResponseBodyAsString());
+            log.error("Member AI proxy client error: path={} status={}", path, e.getStatusCode(), e);
+            return R.fail(detail != null ? detail : httpClientErrorMessage(e));
+        } catch (Exception e) {
+            log.error("Member AI proxy error: path={}", path, e);
+            return R.fail("服务异常，请稍后重试");
+        }
+    }
+
+    @GetMapping("/member/profile")
+    public R<?> memberProfile(HttpServletRequest request) {
+        return proxyMemberAi("/profile", request);
+    }
+
+    @PutMapping("/member/profile/style")
+    public R<?> memberUpdateStyle(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        return proxyMemberAiWithBody("/profile/style", body, request);
+    }
+
+    @PutMapping("/member/profile/persona")
+    public R<?> memberUpdatePersona(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        return proxyMemberAiWithBody("/profile/persona", body, request);
+    }
+
+    @GetMapping("/member/preferences")
+    public R<?> memberPreferences(HttpServletRequest request) {
+        return proxyMemberAi("/preferences", request);
+    }
+
+    @PutMapping("/member/preferences")
+    public R<?> memberSetPreference(@RequestBody Map<String, Object> body, HttpServletRequest request) {
+        return proxyMemberAiWithBody("/preferences", body, request);
+    }
+
+    @DeleteMapping("/member/preferences/{key}")
+    public R<?> memberDeletePreference(@PathVariable String key, HttpServletRequest request) {
+        return proxyMemberAiDelete("/preferences/" + key, request);
+    }
+
+    @GetMapping("/member/habits")
+    public R<?> memberHabits(HttpServletRequest request) {
+        return proxyMemberAi("/habits", request);
+    }
+
+    @PutMapping("/member/habits/{key}/acknowledge")
+    public R<?> memberAcknowledgeHabit(@PathVariable String key, HttpServletRequest request) {
+        return proxyMemberAiPut("/habits/" + key + "/acknowledge", Map.of(), request);
+    }
+
+    @DeleteMapping("/member/habits/{key}")
+    public R<?> memberDeleteHabit(@PathVariable String key, HttpServletRequest request) {
+        return proxyMemberAiDelete("/habits/" + key, request);
+    }
+
+    @GetMapping("/member/memories")
+    public R<?> memberMemories(HttpServletRequest request) {
+        return proxyMemberAi("/memories", request);
+    }
+
+    @PutMapping("/member/memories/{id}/importance")
+    public R<?> memberUpdateMemoryImportance(@PathVariable Long id,
+                                              @RequestBody Map<String, Object> body,
+                                              HttpServletRequest request) {
+        return proxyMemberAiWithBody("/memories/" + id + "/importance", body, request);
     }
 
     // ═══ 辅助 ═══
