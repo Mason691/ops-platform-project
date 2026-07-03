@@ -42,6 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AiChatProxyController {
 
     private final RestTemplate restTemplate;
+    private final RestTemplate asrRestTemplate;
     private final PublicAccountConfigServiceImpl publicAccountConfigService;
     private final AiChatTaskService aiChatTaskService;
     private final AiChatTaskProducer aiChatTaskProducer;
@@ -49,12 +50,14 @@ public class AiChatProxyController {
     private final ObjectMapper objectMapper;
 
     public AiChatProxyController(@Qualifier("aiRestTemplate") RestTemplate restTemplate,
+                                  @Qualifier("asrRestTemplate") RestTemplate asrRestTemplate,
                                   PublicAccountConfigServiceImpl publicAccountConfigService,
                                   AiChatTaskService aiChatTaskService,
                                   AiChatTaskProducer aiChatTaskProducer,
                                   SseEmitterManager sseEmitterManager,
                                   ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
+        this.asrRestTemplate = asrRestTemplate;
         this.publicAccountConfigService = publicAccountConfigService;
         this.aiChatTaskService = aiChatTaskService;
         this.aiChatTaskProducer = aiChatTaskProducer;
@@ -287,7 +290,7 @@ public class AiChatProxyController {
                     new org.springframework.util.LinkedMultiValueMap<>();
             parts.add("audio", resource);
 
-            ResponseEntity<Map> resp = restTemplate.exchange(
+            ResponseEntity<Map> resp = asrRestTemplate.exchange(
                     platformBaseUrl + "/api/internal/asr/recognize",
                     HttpMethod.POST, new HttpEntity<>(parts, headers), Map.class);
 
@@ -439,7 +442,7 @@ public class AiChatProxyController {
                     new org.springframework.util.LinkedMultiValueMap<>();
             parts.add("audio", resource);
 
-            ResponseEntity<Map> resp = restTemplate.exchange(
+            ResponseEntity<Map> resp = asrRestTemplate.exchange(
                     platformBaseUrl + "/api/internal/asr/recognize",
                     HttpMethod.POST, new HttpEntity<>(parts, headers), Map.class);
 

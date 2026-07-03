@@ -39,6 +39,16 @@ public class RestTemplateConfig {
         return buildRestTemplate(10_000, 120_000);
     }
 
+    /**
+     * ASR 专用 RestTemplate：超长超时，用于语音识别代理。
+     * 音频可达 50MB，第三方 ASR（SiliconFlow）处理大文件可能需要 2-5 分钟。
+     */
+    @Bean
+    @Qualifier("asrRestTemplate")
+    public RestTemplate asrRestTemplate() {
+        return buildRestTemplate(15_000, 300_000);
+    }
+
     private RestTemplate buildRestTemplate(int connectTimeout, int readTimeout) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(connectTimeout);
