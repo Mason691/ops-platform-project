@@ -588,8 +588,14 @@ public class AiChatProxyController {
                     platformBaseUrl + platformPath,
                     HttpMethod.GET, entity, Map.class);
             Map body = resp.getBody();
-            // 平台 API 返回 { code: 200, data: [...] }
-            if (body != null && body.containsKey("data")) {
+            if (body == null) return R.fail("平台无响应");
+            // Check business error code before extracting data
+            Object code = body.get("code");
+            if (code instanceof Number && ((Number) code).intValue() != 200) {
+                String msg = body.get("msg") instanceof String ? (String) body.get("msg") : "平台业务错误";
+                return R.fail(msg);
+            }
+            if (body.containsKey("data")) {
                 return R.ok(body.get("data"));
             }
             return R.ok(body);
@@ -597,6 +603,17 @@ public class AiChatProxyController {
             String detail = extractErrorDetail(e.getResponseBodyAsString());
             log.error("Platform proxy client error: path={} status={}", platformPath, e.getStatusCode(), e);
             return R.fail(detail != null ? detail : httpClientErrorMessage(e));
+        } catch (HttpServerErrorException e) {
+            log.error("Platform proxy server error: path={} status={}", platformPath, e.getStatusCode(), e);
+            String detail = extractErrorDetail(e.getResponseBodyAsString());
+            return R.fail(detail != null ? detail : "AI 服务暂时不可用（HTTP " + e.getStatusCode().value() + "）");
+        } catch (ResourceAccessException e) {
+            log.error("Platform proxy network error: path={}", platformPath, e);
+            String detail = e.getMessage();
+            if (detail != null && (detail.contains("timeout") || detail.contains("Timeout"))) {
+                return R.fail("AI 服务响应超时，请稍后重试");
+            }
+            return R.fail("AI 服务连接失败，请检查网络");
         } catch (Exception e) {
             log.error("Platform proxy error: path={}", platformPath, e);
             return R.fail("服务异常，请稍后重试");
