@@ -21,8 +21,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * 本服务仅负责验证码校验、IP 频率限制、输入格式校验等前置安全层。
  * 实际的身份认证（密码验证、账号状态检查、JWT 签发）由底座平台
  * {@code POST /api/auth/employee/login} 接口统一处理。
- * <p>
- * 不再使用本地 ops_employee 表。
  */
 @Slf4j
 @Service
