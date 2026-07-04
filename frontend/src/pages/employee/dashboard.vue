@@ -50,6 +50,12 @@ const companies = ref([])
 const hasMultiple = computed(() => companies.value.length > 1)
 
 onMounted(() => {
+  // Auth guard: redirect to login if not authenticated as employee
+  const empToken = uni.getStorageSync('ops_employee_token')
+  if (!empToken) {
+    uni.redirectTo({ url: '/pages/employee/login' })
+    return
+  }
   const active = uni.getStorageSync('ops_employee_active_company')
   if (active) {
     try { company.value = JSON.parse(active) } catch(e) { company.value = {} }

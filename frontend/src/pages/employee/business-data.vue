@@ -102,7 +102,15 @@ const allTime = reactive({ totalSale: 0, totalCommission: 0, orderCount: 0 })
 const months = ref([])
 const expanded = reactive({})
 
-onMounted(() => { loadData() })
+onMounted(() => {
+  // Auth guard
+  const empToken = uni.getStorageSync('ops_employee_token')
+  if (!empToken) {
+    uni.redirectTo({ url: '/pages/employee/login' })
+    return
+  }
+  loadData()
+})
 
 async function loadData() {
   loading.value = true; errorMsg.value = ''

@@ -200,4 +200,9 @@ export const api = {
   employeeDetail: (month, category) => request({url:'/api/ops/employee/business-data/detail',data:{month, category}}),
   employeeStats: (month) => request({url:'/api/ops/employee/business-data/stats',data:{month}}),
   employeeOverview: () => request({url:'/api/ops/employee/business-data/overview'}),
+
+  // 员工登录（独立于会员登录）
+  employeeCaptcha: () => request({url:'/api/ops/auth/employee/captcha'}),
+  employeeLogin: (data) => request({url:'/api/ops/auth/employee/login',method:'POST',data}),
+  employeeRefreshToken: () => request({url:'/api/ops/auth/employee/refresh-token',method:'POST'}),
 }

@@ -188,17 +188,23 @@ onShow(async () => {
   if (savedUser) {
     try { const su = JSON.parse(savedUser); if (su?.avatar) userAvatar.value = su.avatar } catch (_) {}
   }
-  const token = uni.getStorageSync('ops_token')
+  const token = uni.getStorageSync('ops_token') || uni.getStorageSync('ops_employee_token')
   if (token) {
     try { const me = await api.getMe(); if (me?.avatar) userAvatar.value = me.avatar } catch (_) {}
   }
 })
 
 onMounted(async () => {
+  // Auth guard
+  const empToken = uni.getStorageSync('ops_employee_token')
+  if (!empToken) {
+    uni.redirectTo({ url: '/pages/employee/login' })
+    return
+  }
   // Load employee company info
   loadEmployeeContext()
 
-  const token = uni.getStorageSync('ops_token')
+  const token = uni.getStorageSync('ops_token') || uni.getStorageSync('ops_employee_token')
   if (!token) { checking.value = false; return }
 
   // Fetch employee AI config
@@ -323,7 +329,7 @@ async function sendSyncEmployee(text, empCtx) {
 async function listenForResultEmployee(taskId) {
   try {
     const sseUrl = api.employeeAiChatSseUrl(taskId)
-    const token = uni.getStorageSync('ops_token') || ''
+    const token = uni.getStorageSync('ops_employee_token') || uni.getStorageSync('ops_token') || ''
     const response = await fetch(sseUrl, {
       headers: token ? { Authorization: 'Bearer ' + token } : {}
     })

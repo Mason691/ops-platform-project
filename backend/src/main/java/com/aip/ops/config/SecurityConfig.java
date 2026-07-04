@@ -32,7 +32,8 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/actuator/**", "/uploads/**",
                     "/api/public-account/**",
-                    "/api/ops/auth/**", "/api/ops/product/**",
+                    "/api/ops/auth/**",
+                    "/api/ops/product/**",
                     "/api/ops/activity/**",
                     "/api/ops/home-data",
                     "/api/ops/coupon/list",

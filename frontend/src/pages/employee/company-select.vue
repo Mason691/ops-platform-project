@@ -25,6 +25,12 @@ import { ref, onMounted } from 'vue'
 const companies = ref([])
 
 onMounted(() => {
+  // Auth guard
+  const empToken = uni.getStorageSync('ops_employee_token')
+  if (!empToken) {
+    uni.redirectTo({ url: '/pages/employee/login' })
+    return
+  }
   const cached = uni.getStorageSync('ops_employee_companies')
   if (cached) {
     try { companies.value = JSON.parse(cached) } catch(e) { companies.value = [] }

@@ -16,8 +16,37 @@ export default {
         fail() { /* offline — keep existing state */ }
       })
     }
+
+    // Handle WeChat Official Account custom menu redirects.
+    // Custom menus don't support hash fragments (e.g. #/pages/employee/login),
+    // so we use query params: ?from=employee or ?route=pages/employee/login
+    this.handleDeepLink()
   },
-  onShow() {}
+  onShow() {},
+  methods: {
+    handleDeepLink() {
+      try {
+        const params = new URLSearchParams(window.location.search)
+        const route = params.get('route')
+        const from = params.get('from')
+
+        if (route) {
+          // Direct route: ?route=pages/employee/login
+          uni.navigateTo({ url: '/' + route })
+          return
+        }
+
+        if (from === 'employee') {
+          const empToken = uni.getStorageSync('ops_employee_token')
+          if (empToken) {
+            uni.redirectTo({ url: '/pages/employee/dashboard' })
+          } else {
+            uni.redirectTo({ url: '/pages/employee/login' })
+          }
+        }
+      } catch (_) { /* ignore — non-browser env or parsing error */ }
+    }
+  }
 }
 </script>
 <style>
