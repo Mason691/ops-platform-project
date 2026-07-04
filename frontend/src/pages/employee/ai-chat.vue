@@ -61,6 +61,22 @@
       <text class="rec-text">{{ recordingHint }}</text>
     </view>
 
+    <!-- Skill selector (visible when skills are installed) -->
+    <view class="skill-bar" v-if="installedSkills.length">
+      <text class="skill-label">技能</text>
+      <picker mode="selector" :range="skillNames" @change="onSkillChange">
+        <view class="skill-picker">
+          <text :class="{ 'skill-active': selectedSkillIdx >= 0 }">
+            {{ selectedSkillIdx >= 0 ? skillNames[selectedSkillIdx] : '选择技能（可选）' }}
+          </text>
+          <text class="picker-arrow">▼</text>
+        </view>
+      </picker>
+      <view v-if="selectedSkillIdx >= 0" class="skill-clear" @tap="clearSkill">
+        <text>✕</text>
+      </view>
+    </view>
+
     <!-- Quick questions -->
     <view class="quick-bar" v-if="quickQuestions.length && messages.length <= 2">
       <scroll-view scroll-x="true" :show-scrollbar="false" class="quick-scroll">
@@ -123,7 +139,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index.js'
 import { isWechat, isWxRecordAvailable, wxStartRecord, wxStopRecordAndUpload } from '@/utils/jssdk.js'
@@ -144,6 +160,11 @@ const quickQuestions = ref([
   '本月销售额多少？', '我的提成明细',
   '各品类销售情况', '帮我分析业务趋势',
 ])
+
+// ── Skills ──
+const installedSkills = ref([])
+const selectedSkillIdx = ref(-1)
+const skillNames = computed(() => installedSkills.value.map(s => s.skillName || s.name || ''))
 
 // Employee context
 const empCorpId   = ref(null)
@@ -188,6 +209,12 @@ onMounted(async () => {
     if (cfg?.quickQuestions) quickQuestions.value = cfg.quickQuestions
   } catch (_) {}
 
+  // Load installed skills
+  try {
+    const skills = await api.installedSkills()
+    if (Array.isArray(skills)) installedSkills.value = skills
+  } catch (_) { /* skills are optional */ }
+
   // Fetch employee AI profile (personalized greeting)
   try {
     const r = await api.employeeAiProfile()
@@ -228,6 +255,10 @@ async function sendMsg() {
     return
   }
 
+  // 技能前缀（与 Web 端一致）
+  const skill = selectedSkillIdx.value >= 0 ? installedSkills.value[selectedSkillIdx.value] : null
+  const actualText = skill ? `【${skill.skillName || skill.name}】${text}` : text
+
   const empCtx = {
     corpId: empCorpId.value,
     corpName: empCorpName.value,
@@ -235,8 +266,9 @@ async function sendMsg() {
     roleType: empRoleType.value,
   }
 
-  messages.value.push({ role: 'user', content: text })
+  messages.value.push({ role: 'user', content: actualText })
   inputText.value = ''
+  selectedSkillIdx.value = -1
   loading.value = true; progressMsg.value = ''; scrollToBottom()
 
   // Stop any currently playing audio
@@ -244,7 +276,7 @@ async function sendMsg() {
 
   try {
     const res = await api.employeeAiChatAsync({
-      message: text,
+      message: actualText,
       conversationId,
       employeeContext: empCtx
     })
@@ -262,7 +294,7 @@ async function sendMsg() {
     }
   } catch (e) {
     console.warn('[EmployeeAI] async失败，回退同步:', e?.msg || e)
-    await sendSyncEmployee(text, empCtx)
+    await sendSyncEmployee(actualText, empCtx)
   } finally { loading.value = false; progressMsg.value = ''; scrollToBottom() }
 }
 
@@ -329,6 +361,14 @@ async function autoPlayReply(text, msgIdx) {
 }
 
 function sendQuick(q) { inputText.value = q; sendMsg() }
+
+// ── Skills ──
+function onSkillChange(e) {
+  selectedSkillIdx.value = e.detail.value
+}
+function clearSkill() {
+  selectedSkillIdx.value = -1
+}
 
 // ── Voice input ──
 
@@ -579,6 +619,24 @@ function goCompanySelect() {
 .dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
 @keyframes bounce{0%,80%,100%{transform:scale(.6);opacity:.4}40%{transform:scale(1);opacity:1}}
 .progress-text{display:block;margin-top:12rpx;font-size:24rpx;color:#999;line-height:1.5}
+
+/* skill bar */
+.skill-bar{
+  display:flex; align-items:center; gap:12rpx;
+  padding:12rpx 24rpx; flex-shrink:0; background:transparent;
+}
+.skill-label{font-size:24rpx; color:#999; flex-shrink:0}
+.skill-picker{
+  display:flex; align-items:center; gap:8rpx;
+  padding:12rpx 24rpx; background:#fff; border-radius:24rpx;
+  border:2rpx solid #FF6B35; font-size:26rpx; color:#999;
+}
+.skill-active{color:#FF6B35; font-weight:600}
+.picker-arrow{font-size:20rpx; color:#999}
+.skill-clear{
+  width:40rpx; height:40rpx; display:flex; align-items:center; justify-content:center;
+  font-size:24rpx; color:#999; background:#f5f5f5; border-radius:50%;
+}
 
 /* quick bar */
 .quick-bar{flex-shrink:0;padding:16rpx 24rpx;background:transparent}

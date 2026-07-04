@@ -87,6 +87,9 @@ export const api = {
   employeeAiConfig: () => request({url:'/api/ops/ai/employee/config'}),
   employeeAiProfile: () => request({url:'/api/ops/ai/employee/profile'}),
 
+  // 技能市场（代理到平台 /api/skill/installed）
+  installedSkills: () => request({url:'/api/ops/ai/skills/installed'}),
+
   // 站长
   stationApply: (data) => request({url:'/api/ops/station/apply',method:'POST',data}),
   stationApplyStatus: () => request({url:'/api/ops/station/apply/status'}),

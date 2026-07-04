@@ -578,6 +578,31 @@ public class AiChatProxyController {
         }
     }
 
+    /** 通用 GET 代理到平台 API（JWT 透传） */
+    private R<?> proxyPlatformGet(String platformPath, HttpServletRequest request) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", request.getHeader("Authorization"));
+        try {
+            HttpEntity<Void> entity = new HttpEntity<>(headers);
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    platformBaseUrl + platformPath,
+                    HttpMethod.GET, entity, Map.class);
+            Map body = resp.getBody();
+            // 平台 API 返回 { code: 200, data: [...] }
+            if (body != null && body.containsKey("data")) {
+                return R.ok(body.get("data"));
+            }
+            return R.ok(body);
+        } catch (HttpClientErrorException e) {
+            String detail = extractErrorDetail(e.getResponseBodyAsString());
+            log.error("Platform proxy client error: path={} status={}", platformPath, e.getStatusCode(), e);
+            return R.fail(detail != null ? detail : httpClientErrorMessage(e));
+        } catch (Exception e) {
+            log.error("Platform proxy error: path={}", platformPath, e);
+            return R.fail("服务异常，请稍后重试");
+        }
+    }
+
     @GetMapping("/member/profile")
     public R<?> memberProfile(HttpServletRequest request) {
         return proxyMemberAi("/profile", request);
@@ -633,6 +658,14 @@ public class AiChatProxyController {
                                               @RequestBody Map<String, Object> body,
                                               HttpServletRequest request) {
         return proxyMemberAiWithBody("/memories/" + id + "/importance", body, request);
+    }
+
+    // ═══ 技能代理 ═══
+
+    /** 获取当前组织已安装的技能列表（代理到平台 /api/skill/installed） */
+    @GetMapping("/skills/installed")
+    public R<?> installedSkills(HttpServletRequest request) {
+        return proxyPlatformGet("/api/skill/installed", request);
     }
 
     // ═══ 辅助 ═══
