@@ -319,8 +319,63 @@ async function sendSyncEmployee(text, empCtx) {
   }
 }
 
-/** 通过轮询监听异步任务结果 */
+/** SSE实时监听异步任务结果，失败时自动降级为轮询 */
 async function listenForResultEmployee(taskId) {
+  try {
+    const sseUrl = api.employeeAiChatSseUrl(taskId)
+    const token = uni.getStorageSync('ops_token') || ''
+    const response = await fetch(sseUrl, {
+      headers: token ? { Authorization: 'Bearer ' + token } : {}
+    })
+    if (!response.ok) throw new Error('SSE HTTP ' + response.status)
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+      for (const line of lines) {
+        // SSE lines: "event: name\ndata: {...}" or "data: {...}"
+        if (line.startsWith('data:')) {
+          try {
+            const data = JSON.parse(line.slice(5).trim())
+            if (data.status === 'COMPLETED' || (data.type === 'RESULT' && data.reply)) {
+              const reply = data.reply || data.content || ''
+              if (reply) {
+                const idx = messages.value.length
+                messages.value.push({ role: 'assistant', content: reply })
+                if (data.conversationId) conversationId = data.conversationId
+                if (voiceEnabled.value && reply) autoPlayReply(reply, idx)
+              }
+              return
+            }
+            if (data.status === 'FAILED' || data.status === 'TIMEOUT') {
+              messages.value.push({
+                role: 'assistant',
+                content: data.reply || data.errorMsg || ('AI 处理' + (data.status === 'TIMEOUT' ? '超时' : '失败') + '，请稍后重试')
+              })
+              return
+            }
+            if (data.message) progressMsg.value = data.message
+          } catch (_) {}
+        }
+      }
+    }
+    // SSE stream ended without COMPLETED/FAILED — fallback to polling
+    messages.value.push({ role: 'assistant', content: 'AI 服务处理超时，请简化问题后重试' })
+  } catch (e) {
+    // SSE连接失败，降级为轮询
+    console.warn('[EmployeeAI] SSE失败，降级轮询:', e?.message || e)
+    await pollForResultEmployee(taskId)
+  }
+}
+
+/** 轮询降级（SSE连接失败时使用） */
+async function pollForResultEmployee(taskId) {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 1000))
     try {
