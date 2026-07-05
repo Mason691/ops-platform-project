@@ -150,18 +150,31 @@ public class OpsEmployeeBusinessDataTool implements McpToolDefinition {
         return result;
     }
 
-    /** Resolve employee phone from member record. */
+    /**
+     * Resolve employee phone from member record.
+     * Uses JWT member_id claim (sys_member.id) for correct platformMemberId matching,
+     * falling back to JWT sub (sys_user.id) for member-JWT callers.
+     */
     private String resolvePhone(Long userId, Long corpId) {
+        Long memberId = resolveMemberId(userId);
         OpsMember member = memberMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
-                .eq(OpsMember::getPlatformMemberId, userId)
+                .eq(OpsMember::getPlatformMemberId, memberId)
                 .eq(OpsMember::getCorpId, corpId));
         if (member == null) {
-            // Fallback for legacy accounts without platformMemberId populated
             member = memberMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
-                    .eq(OpsMember::getId, userId)
+                    .eq(OpsMember::getId, memberId)
                     .eq(OpsMember::getCorpId, corpId));
         }
         return member != null ? member.getPhone() : null;
+    }
+
+    private static Long resolveMemberId(Long fallbackUserId) {
+        try {
+            var user = com.aip.sdk.security.SecurityUtils.getCurrentUser();
+            return user.getMemberId() != null ? user.getMemberId() : fallbackUserId;
+        } catch (Exception e) {
+            return fallbackUserId;
+        }
     }
 
     private static BigDecimal toBigDecimal(Object val) {

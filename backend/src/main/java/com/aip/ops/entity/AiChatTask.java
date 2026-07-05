@@ -58,6 +58,9 @@ public class AiChatTask {
     @TableField("error_msg")
     private String errorMsg;
 
+    @TableField("report_token")
+    private String reportToken;
+
     @TableField("partial")
     private Integer partial;
 

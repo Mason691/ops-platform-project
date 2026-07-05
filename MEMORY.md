@@ -18,7 +18,7 @@
 ### 1.3 命名规范
 - Java: `com.aip.ops.*`
 - 表前缀: `ops_`（运营平台业务表），`biz_`（跨子系统共享业务表），`sys_`（系统级配置表）
-- 前端路由: `/aa/ops/`（生产环境 hash 模式）
+- 前端路由: `/ops/`（生产环境 hash 模式）
 
 ---
 
@@ -54,7 +54,7 @@
 
 ---
 
-最后更新：2026-06-10
+最后更新：2026-07-05
 - [Build & Deploy Workflow](build-deploy-workflow.md) — always build locally, deploy to remote, never compile on server
 
 ---

@@ -7,6 +7,7 @@ import com.aip.ops.service.AiChatTaskService;
 import com.aip.ops.service.EmployeeService;
 import com.aip.ops.service.SseEmitterManager;
 import com.aip.sdk.result.R;
+import com.aip.sdk.security.LoginUser;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -174,20 +175,36 @@ public class EmployeeAiController {
      */
     @GetMapping("/chat/{taskId}/stream")
     public SseEmitter streamStatus(@PathVariable String taskId) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        Long corpId = SecurityUtils.getCurrentCorpId();
+
         SseEmitter emitter = sseEmitterManager.createEmitter(taskId);
 
         try {
             var existingTask = aiChatTaskService.getByTaskId(taskId);
-            if (existingTask != null && "COMPLETED".equals(existingTask.getStatus())) {
-                Map<String, Object> result = new LinkedHashMap<>();
-                result.put("type", "result");
-                result.put("taskId", taskId);
-                result.put("status", "COMPLETED");
-                result.put("reply", existingTask.getReply());
-                result.put("partialResults", existingTask.getPartial() != null && existingTask.getPartial() == 1);
-                emitter.send(SseEmitter.event().name("result").data(objectMapper.writeValueAsString(result)));
-                emitter.complete();
-                return emitter;
+            if (existingTask != null) {
+                // Security: verify task ownership
+                if (!ownsTask(existingTask, userId, corpId)) {
+                    try {
+                        emitter.send(SseEmitter.event().name("error")
+                                .data("{\"error\":\"无权访问此任务\"}"));
+                        emitter.complete();
+                    } catch (Exception ignored) {}
+                    return emitter;
+                }
+
+                if ("COMPLETED".equals(existingTask.getStatus())) {
+                    Map<String, Object> result = new LinkedHashMap<>();
+                    result.put("type", "result");
+                    result.put("taskId", taskId);
+                    result.put("status", "COMPLETED");
+                    result.put("reply", existingTask.getReply());
+                    result.put("reportToken", existingTask.getReportToken());
+                    result.put("partialResults", existingTask.getPartial() != null && existingTask.getPartial() == 1);
+                    emitter.send(SseEmitter.event().name("result").data(objectMapper.writeValueAsString(result)));
+                    emitter.complete();
+                    return emitter;
+                }
             }
         } catch (Exception e) {
             log.debug("Error checking existing task for SSE: {}", e.getMessage());
@@ -201,8 +218,12 @@ public class EmployeeAiController {
      */
     @GetMapping("/chat/{taskId}/status")
     public R<Map<String, Object>> taskStatus(@PathVariable String taskId) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        Long corpId = SecurityUtils.getCurrentCorpId();
+
         var task = aiChatTaskService.getByTaskId(taskId);
         if (task == null) return R.fail("任务不存在");
+        if (!ownsTask(task, userId, corpId)) return R.forbidden();
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("taskId", task.getTaskId());
@@ -210,10 +231,52 @@ public class EmployeeAiController {
         result.put("phase", task.getPhase());
         result.put("progressMsg", task.getProgressMsg());
         result.put("reply", task.getReply());
+        result.put("reportToken", task.getReportToken());
         result.put("errorMsg", task.getErrorMsg());
         result.put("partial", task.getPartial() != null && task.getPartial() == 1);
         result.put("conversationId", task.getConversationId());
         return R.ok(result);
+    }
+
+    /**
+     * 报告下载代理 — 代理到平台端的 {@code GET /api/ai/chat/report/{token}}。
+     * <p>
+     * 平台 ReportFileService 按 corpId 隔离报告访问，下载时通过
+     * X-Internal-Corp-Id 头传递当前用户的 corpId 供平台校验。
+     */
+    @GetMapping("/report/{token}")
+    public ResponseEntity<byte[]> downloadReport(@PathVariable String token) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        Long corpId = SecurityUtils.getCurrentCorpId();
+
+        String url = platformBaseUrl + "/api/ai/chat/report/" + token;
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Internal-Token", internalToken);
+        headers.set("X-Internal-Corp-Id", String.valueOf(corpId));
+        headers.set("X-Internal-User-Id", String.valueOf(userId));
+
+        try {
+            ResponseEntity<byte[]> resp = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
+
+            if (resp.getBody() == null) {
+                return ResponseEntity.notFound().build();
+            }
+
+            HttpHeaders downloadHeaders = new HttpHeaders();
+            String disposition = resp.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION);
+            String contentType = resp.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE);
+            if (disposition != null) downloadHeaders.set(HttpHeaders.CONTENT_DISPOSITION, disposition);
+            if (contentType != null) downloadHeaders.setContentType(MediaType.parseMediaType(contentType));
+
+            return new ResponseEntity<>(resp.getBody(), downloadHeaders, HttpStatus.OK);
+        } catch (HttpClientErrorException e) {
+            log.warn("Report download denied: token={} userId={} status={}", token, userId, e.getStatusCode());
+            return ResponseEntity.status(e.getStatusCode()).build();
+        } catch (Exception e) {
+            log.error("Report download failed: token={} userId={}", token, userId, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
     }
 
     // ═══ Config & Profile ═══
@@ -311,15 +374,32 @@ public class EmployeeAiController {
         }
     }
 
+    /**
+     * Resolve employee phone. For employee JWTs, uses JWT member_id claim
+     * (sys_member.id) to match OpsMember.platformMemberId, then falls back to
+     * the direct userId for member-JWT callers.
+     */
     private String resolvePhone(Long userId, Long corpId) {
+        LoginUser user = SecurityUtils.getCurrentUser();
+        Long memberId = user.getMemberId() != null ? user.getMemberId() : userId;
         OpsMember member = memberMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
-                .eq(OpsMember::getPlatformMemberId, userId)
+                .eq(OpsMember::getPlatformMemberId, memberId)
                 .eq(OpsMember::getCorpId, corpId));
         if (member == null) {
             member = memberMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
-                    .eq(OpsMember::getId, userId)
+                    .eq(OpsMember::getId, memberId)
                     .eq(OpsMember::getCorpId, corpId));
         }
         return member != null ? member.getPhone() : null;
+    }
+
+    /**
+     * Verify that the requesting user owns the task.
+     * Super-admins (corpId=0) can view any task.
+     */
+    private boolean ownsTask(com.aip.ops.entity.AiChatTask task, Long userId, Long corpId) {
+        if (corpId == 0L) return true;
+        return task.getUserId() != null && task.getUserId().equals(userId)
+                && task.getCorpId() != null && task.getCorpId().equals(corpId);
     }
 }

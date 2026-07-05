@@ -48,7 +48,8 @@ public class AiChatResultConsumer {
             try {
                 if ("COMPLETED".equals(result.getStatus())) {
                     boolean partial = Boolean.TRUE.equals(result.getPartialResults());
-                    taskService.markDone(taskId, result.getReply(), result.getConversationId(), partial);
+                    taskService.markDone(taskId, result.getReply(), result.getConversationId(),
+                            partial, result.getReportToken());
                 } else if ("FAILED".equals(result.getStatus()) || "TIMEOUT".equals(result.getStatus())) {
                     String errorMsg = result.getReply() != null ? result.getReply() : "AI 服务异常";
                     taskService.markFailed(taskId, errorMsg);

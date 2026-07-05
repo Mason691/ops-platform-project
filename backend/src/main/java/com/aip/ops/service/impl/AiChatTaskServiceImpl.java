@@ -63,16 +63,18 @@ public class AiChatTaskServiceImpl implements AiChatTaskService {
 
     @Override
     @Transactional
-    public void markDone(String taskId, String reply, Long conversationId, boolean partial) {
+    public void markDone(String taskId, String reply, Long conversationId, boolean partial,
+                         String reportToken) {
         mapper.update(null, Wrappers.<AiChatTask>lambdaUpdate()
                 .eq(AiChatTask::getTaskId, taskId)
                 .set(AiChatTask::getStatus, "COMPLETED")
                 .set(AiChatTask::getReply, reply)
                 .set(conversationId != null, AiChatTask::getConversationId, conversationId)
                 .set(AiChatTask::getPartial, partial ? 1 : 0)
+                .set(reportToken != null, AiChatTask::getReportToken, reportToken)
                 .set(AiChatTask::getFinishTime, LocalDateTime.now())
                 .set(AiChatTask::getModifyTime, LocalDateTime.now()));
-        log.info("AI chat task done: taskId={}", taskId);
+        log.info("AI chat task done: taskId={} hasReport={}", taskId, reportToken != null);
     }
 
     @Override

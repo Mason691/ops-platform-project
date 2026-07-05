@@ -87,6 +87,12 @@ export const api = {
   employeeAiConfig: () => request({url:'/api/ops/ai/employee/config'}),
   employeeAiProfile: () => request({url:'/api/ops/ai/employee/profile'}),
 
+  /** Build download URL for an AI-generated report by token */
+  employeeAiReportDownloadUrl: (token) => {
+    const entry = import.meta.env.VITE_OPS_ENTRY || ''
+    return entry + '/api/ops/ai/employee/report/' + token
+  },
+
   // 技能市场（代理到平台 /api/skill/installed）
   installedSkills: () => request({url:'/api/ops/ai/skills/installed'}),
 

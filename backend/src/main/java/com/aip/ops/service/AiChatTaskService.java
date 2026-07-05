@@ -22,8 +22,8 @@ public interface AiChatTaskService {
     /** 更新任务状态 + 阶段 + 进度描述 */
     void updateStatus(String taskId, String status, String phase, String progressMsg);
 
-    /** 标记任务完成（含 AI 回复） */
-    void markDone(String taskId, String reply, Long conversationId, boolean partial);
+    /** 标记任务完成（含 AI 回复和可选报告下载令牌） */
+    void markDone(String taskId, String reply, Long conversationId, boolean partial, String reportToken);
 
     /** 标记任务失败（含错误信息） */
     void markFailed(String taskId, String errorMsg);

@@ -158,18 +158,23 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     // ---- private helpers ----
 
-    /** Resolve the current member entity (with fallback for legacy accounts). */
+    /** Resolve the current member entity (with fallback for legacy accounts).
+     * Uses JWT member_id claim when available (employee JWTs carry it from sys_user.platformMemberId). */
     private OpsMember resolveMember() {
         Long platformUserId = SecurityUtils.getCurrentUserId();
         Long corpId = SecurityUtils.getCurrentCorpId();
+        // Prefer JWT member_id claim for correct platformMemberId matching (employee JWTs)
+        Long memberId;
+        try { memberId = SecurityUtils.getCurrentUser().getMemberId(); } catch (Exception e) { memberId = null; }
+        if (memberId == null) memberId = platformUserId;
 
         OpsMember member = memberMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
-                .eq(OpsMember::getPlatformMemberId, platformUserId)
+                .eq(OpsMember::getPlatformMemberId, memberId)
                 .eq(OpsMember::getCorpId, corpId));
         if (member == null) {
             // Fallback for legacy accounts without platformMemberId populated
             member = memberMapper.selectOne(new LambdaQueryWrapper<OpsMember>()
-                    .eq(OpsMember::getId, platformUserId)
+                    .eq(OpsMember::getId, memberId)
                     .eq(OpsMember::getCorpId, corpId));
         }
         return member;

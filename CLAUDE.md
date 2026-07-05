@@ -88,8 +88,8 @@ ops-platform-project/
 │   │   ├── OpsApplication.java
 │   │   ├── config/          # SecurityConfig, AuthConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig, JacksonConfig
 │   │   ├── controller/      # 21 controllers（见下方）
-│   │   ├── entity/          # 27 entities（全部继承 SDK BaseEntity，SysImportTask 例外）
-│   │   ├── mapper/          # 28 MyBatis-Plus mappers
+│   │   ├── entity/          # 26 entities（全部继承 SDK BaseEntity，SysImportTask 例外）
+│   │   ├── mapper/          # 27 MyBatis-Plus mappers
 │   │   ├── service/         # 22 service interfaces + 16 impls
 │   │   ├── client/          # 子系统间 HTTP 客户端（MemberSyncClient, ProductBatchClient）
 │   │   ├── agent/           # AI DomainAgent（OpsAgent.java）
@@ -160,9 +160,9 @@ ops-platform-project/
 
 **双通道认证**：会员和员工使用**独立**的认证体系：
 - **会员登录**：`AuthController` `/api/ops/auth/*` → 底座 SSO（PHONE 类型），token 存 `ops_token`
-- **员工登录**：`EmployeeAuthController` `/api/ops/auth/employee/*` → 手机号+密码+图形验证码，token 存 `ops_employee_token`
+- **员工登录**：`EmployeeAuthController` `/api/ops/auth/employee/*` → 手机号+密码+图形验证码，由 `EmployeeAuthServiceImpl` 委托底座 `POST /api/auth/employee/login`（平台 `sys_user` 表鉴权），子系统不存储员工账号/密码，token 存 `ops_employee_token`
 - 两个 token 在 `request.js` 中按优先级使用（`ops_token` 优先，fallback `ops_employee_token`）
-- 员工账号由管理员创建（`ops_employee` 表），BCrypt 密码加密，支持登录失败锁定（5次失败锁15分钟）、IP 级别频率限制（每分钟10次）
+- 子系统只负责前置安全层：图形验证码校验、IP 频率限制（每分钟10次）、输入格式校验
 
 **图形验证码**（`CaptchaService`）：
 - 纯内存实现（无 Redis 依赖），适用于单实例部署
@@ -356,7 +356,7 @@ cd frontend && npm run build:h5
 |------|------|
 | **服务器 JDK** | 测试服务器默认 JDK 8，运行 JAR 必须用 `/home/jason/jdk17/bin/java`；生产 Docker 用 `eclipse-temurin:17-jre` |
 | **Maven offline** | 必须 `-o`（离线模式），本地仓库 `/home/jason/m2_local` |
-| **生产 base 路径** | 生产 base 是 `/ops/`（`.env.production` `VITE_BASE=/ops/`）；manifest.json 仍为 `/aa/ops/`（被构建覆盖） |
+| **生产 base 路径** | 生产 base 是 `/ops/`（`.env.production` `VITE_BASE=/ops/`），manifest.json 已同步为 `/ops/` |
 | **H5 图片 URL** | uni-app `<image>` 渲染为 CSS `background-image`，根相对路径被解析到 `/ops/` → 必须用完整 HTTPS 路径 |
 | **文件上传目录** | `app.upload.base-dir` 用绝对路径配置，不是 `user.dir`，否则 JAR 从不同目录启动时文件错位 |
 | **ASR multipart** | 转发 ASR 请求时**不要手动设置 `Content-Type`**（不含 boundary 导致 422），让 Spring 自动生成 |
@@ -378,4 +378,13 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-07-04 | 负责人：架构师（员工登录系统已添加）
+最后更新：2026-07-05 | 负责人：架构师（员工认证已重构为委托平台 sys_user）
+
+### 自定义 Claude 命令
+
+项目 `.claude/commands/` 目录提供两个自定义命令：
+
+| 命令 | 说明 |
+|------|------|
+| `/pr` | 基于当前 git diff 生成结构化 PR 描述（标题/动机/变更/影响/测试/风险） |
+| `/loop` | 严格开发闭环：plan → implement → verify → code-review → PR 描述，自动循环不中断 |

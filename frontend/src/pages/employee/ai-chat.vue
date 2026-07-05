@@ -36,6 +36,11 @@
               <text class="voice-icon">{{ playingIdx === i ? '⏹' : '🔊' }}</text>
             </view>
           </view>
+          <view v-if="m.role === 'assistant' && m.reportToken" class="msg-actions">
+            <view class="report-download-btn" @tap="downloadReport(m.reportToken)">
+              <text>📥 下载报告</text>
+            </view>
+          </view>
         </view>
         <image v-if="m.role === 'user'" class="msg-avatar"
                :src="userAvatar" mode="aspectFill" />
@@ -288,6 +293,7 @@ async function sendMsg() {
     })
     const taskId = res?.taskId
     if (taskId) {
+      progressMsg.value = '任务已提交，正在处理中...'
       await listenForResultEmployee(taskId)
       return
     }
@@ -349,14 +355,15 @@ async function listenForResultEmployee(taskId) {
         if (line.startsWith('data:')) {
           try {
             const data = JSON.parse(line.slice(5).trim())
-            if (data.status === 'COMPLETED' || (data.type === 'RESULT' && data.reply)) {
+            if (data.status === 'COMPLETED' || (data.type === 'RESULT' && (data.reply || data.reportToken))) {
               const reply = data.reply || data.content || ''
-              if (reply) {
-                const idx = messages.value.length
-                messages.value.push({ role: 'assistant', content: reply })
-                if (data.conversationId) conversationId = data.conversationId
-                if (voiceEnabled.value && reply) autoPlayReply(reply, idx)
-              }
+              const reportToken = data.reportToken || ''
+              const msg = { role: 'assistant', content: reply || '报告已生成，点击下方按钮下载查看。' }
+              if (reportToken) msg.reportToken = reportToken
+              const idx = messages.value.length
+              messages.value.push(msg)
+              if (data.conversationId) conversationId = data.conversationId
+              if (voiceEnabled.value && reply) autoPlayReply(reply, idx)
               return
             }
             if (data.status === 'FAILED' || data.status === 'TIMEOUT') {
@@ -387,11 +394,15 @@ async function pollForResultEmployee(taskId) {
     try {
       const status = await api.employeeAiChatStatus(taskId)
       if (status.status === 'COMPLETED') {
-        if (status.reply) {
+        const reply = status.reply || ''
+        const reportToken = status.reportToken || ''
+        if (reply || reportToken) {
+          const msg = { role: 'assistant', content: reply || '报告已生成，点击下方按钮下载查看。' }
+          if (reportToken) msg.reportToken = reportToken
           const idx = messages.value.length
-          messages.value.push({ role: 'assistant', content: status.reply })
+          messages.value.push(msg)
           if (status.conversationId) conversationId = status.conversationId
-          if (voiceEnabled.value && status.reply) autoPlayReply(status.reply, idx)
+          if (voiceEnabled.value && reply) autoPlayReply(reply, idx)
         }
         return
       } else if (status.status === 'FAILED' || status.status === 'TIMEOUT') {
@@ -422,6 +433,49 @@ async function autoPlayReply(text, msgIdx) {
 }
 
 function sendQuick(q) { inputText.value = q; sendMsg() }
+
+/** Download AI-generated report by token. Uses fetch with auth header on H5, uni.downloadFile on MP. */
+async function downloadReport(token) {
+  if (!token) return
+  const url = api.employeeAiReportDownloadUrl(token)
+  // #ifdef H5
+  const authToken = uni.getStorageSync('ops_employee_token') || uni.getStorageSync('ops_token') || ''
+  try {
+    const resp = await fetch(url, {
+      headers: authToken ? { Authorization: 'Bearer ' + authToken } : {}
+    })
+    if (!resp.ok) {
+      uni.showToast({ title: '下载失败（' + resp.status + '），请稍后重试', icon: 'none' })
+      return
+    }
+    const blob = await resp.blob()
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = 'report'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(blobUrl)
+  } catch (e) {
+    console.warn('[EmployeeAI] Report download failed:', e)
+    uni.showToast({ title: '下载失败，请检查网络', icon: 'none' })
+  }
+  // #endif
+  // #ifdef MP-WEIXIN
+  uni.downloadFile({
+    url,
+    success(res) {
+      if (res.statusCode === 200) {
+        uni.openDocument({ filePath: res.tempFilePath, showMenu: true })
+      } else {
+        uni.showToast({ title: '下载失败，请稍后重试', icon: 'none' })
+      }
+    },
+    fail() { uni.showToast({ title: '下载失败，请检查网络', icon: 'none' }) }
+  })
+  // #endif
+}
 
 // ── Skills ──
 function onSkillChange(e) {
@@ -675,6 +729,8 @@ function goCompanySelect() {
 .voice-btn-sm.playing{opacity:1;animation:speaker-pulse .8s infinite}
 .voice-btn-sm.playing .voice-icon{transform:scale(1.1)}
 @keyframes speaker-pulse{0%,100%{color:#FF6B35}50%{color:#ff8c5a}}
+.report-download-btn{display:inline-flex;align-items:center;gap:6rpx;padding:12rpx 24rpx;background:linear-gradient(135deg,#FF6B35,#ff8c5a);color:#fff;border-radius:20rpx;font-size:26rpx;margin-top:8rpx;cursor:pointer;transition:all .15s}
+.report-download-btn:active{opacity:.85;transform:scale(.97)}
 .typing-bubble{padding:24rpx 36rpx}.typing-dots{display:flex;gap:8rpx}
 .dot{width:14rpx;height:14rpx;background:#ccc;border-radius:50%;animation:bounce 1.4s infinite both}
 .dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
