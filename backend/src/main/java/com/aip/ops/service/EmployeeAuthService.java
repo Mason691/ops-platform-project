@@ -17,4 +17,7 @@ public interface EmployeeAuthService {
 
     /** Refresh SSO token using current employee context. */
     Map<String, Object> refreshToken();
+
+    /** Change password for current employee. Verifies old password then updates via platform. */
+    void changePassword(String oldPassword, String newPassword);
 }

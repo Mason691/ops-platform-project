@@ -211,4 +211,5 @@ export const api = {
   employeeCaptcha: () => request({url:'/api/ops/auth/employee/captcha'}),
   employeeLogin: (data) => request({url:'/api/ops/auth/employee/login',method:'POST',data}),
   employeeRefreshToken: () => request({url:'/api/ops/auth/employee/refresh-token',method:'POST'}),
+  employeeChangePassword: (data) => request({url:'/api/ops/employee/change-password',method:'POST',data}),
 }

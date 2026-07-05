@@ -24,6 +24,7 @@
     {"path":"pages/employee/login","style":{"navigationBarTitleText":"员工登录","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/dashboard","style":{"navigationBarTitleText":"员工工作台","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/company-select","style":{"navigationBarTitleText":"选择公司","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
+    {"path":"pages/employee/profile","style":{"navigationBarTitleText":"我的","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/business-data","style":{"navigationBarTitleText":"业务数据","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/ai-chat","style":{"navigationBarTitleText":"AI助手","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
   ],

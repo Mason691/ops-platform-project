@@ -1,13 +1,12 @@
 package com.aip.ops.controller;
 
+import com.aip.ops.service.EmployeeAuthService;
 import com.aip.ops.service.EmployeeService;
 import com.aip.sdk.result.R;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+import java.util.Map;
 
 /**
  * Employee identity verification and personal business data viewing.
@@ -20,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class EmployeeController {
 
     private final EmployeeService employeeService;
+    private final EmployeeAuthService employeeAuthService;
 
     /** Check if current member is also an employee. Returns associated companies. */
     @GetMapping("/identity")
@@ -56,5 +56,16 @@ public class EmployeeController {
     @GetMapping("/business-data/overview")
     public R<?> getOverview() {
         return R.ok(employeeService.getOverview());
+    }
+
+    /** Self-service password change. Requires valid JWT. */
+    @PostMapping("/change-password")
+    public R<?> changePassword(@RequestBody Map<String, String> body) {
+        String oldPassword = body.get("oldPassword");
+        String newPassword = body.get("newPassword");
+        if (oldPassword == null || oldPassword.isBlank()) return R.fail("当前密码不能为空");
+        if (newPassword == null || newPassword.length() < 6) return R.fail("新密码至少6位");
+        employeeAuthService.changePassword(oldPassword, newPassword);
+        return R.ok(null);
     }
 }

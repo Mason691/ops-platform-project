@@ -176,6 +176,43 @@ public class EmployeeAuthServiceImpl implements EmployeeAuthService {
         }
     }
 
+    @Override
+    public void changePassword(String oldPassword, String newPassword) {
+        LoginUser user = SecurityUtils.getCurrentUser();
+        Long userId = user.getUserId();
+        String phone = user.getUsername();
+
+        if (oldPassword == null || oldPassword.isBlank()) throw new IllegalArgumentException("当前密码不能为空");
+        if (newPassword == null || newPassword.length() < 6) throw new IllegalArgumentException("新密码至少6位");
+
+        // ── 1. Verify old password via platform employee login ──
+        Map<String, Object> verifyReq = new LinkedHashMap<>();
+        verifyReq.put("phone", phone);
+        verifyReq.put("password", oldPassword);
+        try {
+            Map<String, Object> resp = platformInternalClient.post("/api/auth/employee/login", verifyReq, null);
+            Object code = resp.get("code");
+            if (!(code instanceof Number) || ((Number) code).intValue() != 200) {
+                throw new IllegalArgumentException("当前密码错误");
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("当前密码验证失败，请稍后重试");
+        }
+
+        // ── 2. Reset password on platform via internal API ──
+        try {
+            Map<String, Object> pwdReq = new LinkedHashMap<>();
+            pwdReq.put("userId", userId);
+            pwdReq.put("newPassword", newPassword);
+            platformInternalClient.post("/api/internal/user/reset-password", pwdReq, null);
+        } catch (RuntimeException e) {
+            log.error("员工修改密码失败 userId={}: {}", userId, e.getMessage());
+            throw new IllegalArgumentException("密码修改失败，请稍后重试");
+        }
+    }
+
     // ═══ Helpers ═══
 
     /** Simple sliding-window rate limiter (1-minute window, per IP). */
