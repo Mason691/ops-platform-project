@@ -2,8 +2,11 @@
   <view class="page">
     <!-- Header -->
     <view class="header">
-      <text class="company-name">{{ company.corpName || '员工工作台' }}</text>
-      <text class="role-badge">{{ company.roleName || company.roleType || '员工' }}</text>
+      <text class="employee-name">{{ employeeName }}</text>
+      <view class="header-row">
+        <text class="company-name">{{ company.corpName || '员工工作台' }}</text>
+        <text class="role-badge">{{ company.roleName || company.roleType || '员工' }}</text>
+      </view>
       <view class="switch-btn" v-if="hasMultiple" @click="switchCompany">
         <text>切换公司</text>
       </view>
@@ -47,6 +50,7 @@ import { api } from '@/api/index.js'
 
 const company = ref({})
 const companies = ref([])
+const employeeName = ref('')
 
 const hasMultiple = computed(() => companies.value.length > 1)
 
@@ -56,6 +60,11 @@ onMounted(async () => {
   if (!empToken) {
     uni.redirectTo({ url: '/pages/employee/login' })
     return
+  }
+  // 读取员工姓名
+  const info = uni.getStorageSync('ops_employee_info')
+  if (info) {
+    try { employeeName.value = JSON.parse(info).name || '' } catch(e) {}
   }
   // 先从 localStorage 即时展示
   const active = uni.getStorageSync('ops_employee_active_company')
@@ -102,8 +111,10 @@ function goBackMember() {
 <style scoped>
 .page { min-height: 100vh; background: #f5f5f5; padding-bottom: 120rpx; }
 .header { background: linear-gradient(135deg, #FF6B35, #FF8C5A); padding: 60rpx 32rpx 48rpx; text-align: center; }
-.company-name { font-size: 40rpx; color: #fff; font-weight: 700; display: block; }
-.role-badge { display: inline-block; margin-top: 12rpx; font-size: 24rpx; color: #FF6B35; background: #fff; padding: 6rpx 24rpx; border-radius: 20rpx; }
+.employee-name { font-size: 36rpx; color: #fff; font-weight: 700; display: block; margin-bottom: 16rpx; }
+.header-row { display: flex; align-items: center; justify-content: center; gap: 16rpx; flex-wrap: wrap; }
+.company-name { font-size: 28rpx; color: rgba(255,255,255,.9); font-weight: 600; }
+.role-badge { display: inline-block; font-size: 22rpx; color: #fff; background: rgba(255,255,255,.2); padding: 4rpx 18rpx; border-radius: 20rpx; }
 .switch-btn { margin-top: 20rpx; }
 .switch-btn text { font-size: 24rpx; color: rgba(255,255,255,.8); padding: 8rpx 24rpx; border: 1rpx solid rgba(255,255,255,.4); border-radius: 32rpx; }
 
