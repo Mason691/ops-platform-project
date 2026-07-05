@@ -2,8 +2,14 @@
   <view class="page">
     <!-- Header -->
     <view class="header">
-      <image :src="avatarUrl" class="avatar" mode="aspectFill"/>
-      <text class="name">{{ info.name || '员工' }}</text>
+      <view class="avatar-wrap" @click="changeAvatar">
+        <image :src="avatarUrl" class="avatar" mode="aspectFill"/>
+        <text class="avatar-hint">更换头像</text>
+      </view>
+      <view class="name-row" @click="showNickModal = true">
+        <text class="name">{{ info.name || '员工' }}</text>
+        <text class="edit-icon">✎</text>
+      </view>
       <text class="phone">{{ info.phone || '' }}</text>
       <text class="role-tag">{{ info.role || '员工' }}</text>
     </view>
@@ -24,12 +30,25 @@
       </view>
     </view>
 
-    <!-- Password Change -->
+    <!-- Personal Settings -->
     <view class="section">
       <view class="section-title">安全设置</view>
       <view class="menu-item" @click="showPwdModal = true">
         <text class="menu-label">修改密码</text>
         <text class="menu-arrow">›</text>
+      </view>
+    </view>
+
+    <!-- Nickname Modal -->
+    <view class="modal-mask" v-if="showNickModal" @click="showNickModal = false">
+      <view class="modal-box" @click.stop>
+        <text class="modal-title">修改昵称</text>
+        <input class="modal-input" v-model="nickInput" placeholder="输入新昵称"/>
+        <text class="modal-error" v-if="nickError">{{ nickError }}</text>
+        <view class="modal-btns">
+          <view class="btn-cancel" @click="showNickModal = false"><text>取消</text></view>
+          <view class="btn-confirm" @click="updateNickname"><text>确认修改</text></view>
+        </view>
       </view>
     </view>
 
@@ -62,12 +81,16 @@ import { api } from '@/api/index.js'
 const info = ref({})
 const activeCompany = ref({})
 const showPwdModal = ref(false)
+const showNickModal = ref(false)
 const oldPwd = ref('')
 const newPwd = ref('')
 const confirmPwd = ref('')
 const pwdError = ref('')
+const nickInput = ref('')
+const nickError = ref('')
+const avatarKey = ref(0)
 
-const avatarUrl = computed(() => '/static/gas-avatar.png')
+const avatarUrl = ref('/static/gas-avatar.png')
 
 onMounted(() => {
   const empToken = uni.getStorageSync('ops_employee_token')
@@ -83,7 +106,45 @@ onMounted(() => {
   if (active) {
     try { activeCompany.value = JSON.parse(active) } catch(e) {}
   }
+  nickInput.value = info.value.name || ''
 })
+
+function changeAvatar() {
+  uni.chooseImage({
+    count: 1,
+    sizeType: ['compressed'],
+    sourceType: ['album', 'camera'],
+    success(res) {
+      const filePath = res.tempFilePaths[0]
+      uni.showLoading({ title: '上传中...' })
+      api.employeeUploadAvatar(filePath).then(r => {
+        uni.hideLoading()
+        avatarUrl.value = r.avatar + '?t=' + Date.now()
+        avatarKey.value++
+        uni.showToast({ title: '头像已更新', icon: 'success' })
+      }).catch(e => {
+        uni.hideLoading()
+        uni.showToast({ title: (e && e.msg) || '上传失败', icon: 'none' })
+      })
+    }
+  })
+}
+
+async function updateNickname() {
+  nickError.value = ''
+  const name = (nickInput.value || '').trim()
+  if (!name) { nickError.value = '昵称不能为空'; return }
+  if (name.length > 50) { nickError.value = '昵称长度不能超过50个字符'; return }
+  try {
+    await api.employeeUpdateProfile({ realName: name })
+    info.value.name = name
+    uni.setStorageSync('ops_employee_info', JSON.stringify({ ...info.value, name }))
+    uni.showToast({ title: '昵称已更新', icon: 'success' })
+    showNickModal.value = false
+  } catch (e) {
+    nickError.value = e.msg || '修改失败'
+  }
+}
 
 async function changePassword() {
   pwdError.value = ''

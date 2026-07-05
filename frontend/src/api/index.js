@@ -215,4 +215,16 @@ export const api = {
   employeeLogin: (data) => request({url:'/api/ops/auth/employee/login',method:'POST',data}),
   employeeRefreshToken: () => request({url:'/api/ops/auth/employee/refresh-token',method:'POST'}),
   employeeChangePassword: (data) => request({url:'/api/ops/employee/change-password',method:'POST',data}),
+  employeeUploadAvatar: (filePath) => new Promise((resolve, reject) => {
+    const token = uni.getStorageSync('ops_token') || uni.getStorageSync('ops_employee_token') || ''
+    uni.uploadFile({
+      url: import.meta.env.VITE_OPS_ENTRY + '/api/ops/employee/avatar' || '/api/ops/employee/avatar',
+      filePath,
+      name: 'file',
+      header: token ? { Authorization: 'Bearer ' + token } : {},
+      success(res) { try { const d = JSON.parse(res.data); if (d.ok) resolve(d.data); else reject(d) } catch(e) { reject(e) } },
+      fail(err) { reject(err) }
+    })
+  }),
+  employeeUpdateProfile: (data) => request({url:'/api/ops/employee/profile',method:'PUT',data}),
 }
