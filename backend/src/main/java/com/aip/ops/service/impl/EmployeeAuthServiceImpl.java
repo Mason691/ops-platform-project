@@ -198,9 +198,9 @@ public class EmployeeAuthServiceImpl implements EmployeeAuthService {
      * Map platform employee login response to the frontend format.
      * <p>
      * Platform returns: {token, userId, username, realName, phone, corpId,
-     *                     isAdmin, permissions, roles, corpName, expiresIn}
+     *                     isAdmin, permissions, roles, corpName, companies, expiresIn}
      * <p>
-     * Frontend expects: {token, employeeId, name, phone, role, corpId, expiresIn}
+     * Frontend expects: {token, employeeId, name, phone, role, corpId, companies, expiresIn}
      */
     private Map<String, Object> mapLoginResult(Map<String, Object> data, String phone) {
         Map<String, Object> result = new LinkedHashMap<>();
@@ -211,6 +211,7 @@ public class EmployeeAuthServiceImpl implements EmployeeAuthService {
         result.put("role", extractRole(data));                     // first role name
         result.put("corpId", data.get("corpId"));
         result.put("expiresIn", data.getOrDefault("expiresIn", jwtExpiration));
+        result.put("companies", data.getOrDefault("companies", List.of())); // 多组织列表
         return result;
     }
 

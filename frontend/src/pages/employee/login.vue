@@ -116,6 +116,32 @@ onMounted(() => {
   // Check if already logged in as employee
   const empToken = uni.getStorageSync('ops_employee_token')
   if (empToken) {
+    // 有 token 时智能路由：避免 login→dashboard→company-select 的无效跳转链
+    const activeCompany = uni.getStorageSync('ops_employee_active_company')
+    if (activeCompany) {
+      // 已选过组织 → 直接进工作台
+      uni.redirectTo({ url: '/pages/employee/dashboard' })
+      return
+    }
+    // 没选过组织 → 看有几个
+    const cached = uni.getStorageSync('ops_employee_companies')
+    if (cached) {
+      try {
+        const companies = JSON.parse(cached)
+        if (Array.isArray(companies) && companies.length > 1) {
+          // 多组织且未选择 → 直接进选择页
+          uni.redirectTo({ url: '/pages/employee/company-select' })
+          return
+        }
+        if (Array.isArray(companies) && companies.length === 1) {
+          // 单组织 → 自动选中 → 进工作台
+          uni.setStorageSync('ops_employee_active_company', JSON.stringify(companies[0]))
+          uni.redirectTo({ url: '/pages/employee/dashboard' })
+          return
+        }
+      } catch(e) { /* 缓存异常，走兜底 */ }
+    }
+    // 兜底
     uni.redirectTo({ url: '/pages/employee/dashboard' })
     return
   }
@@ -152,9 +178,21 @@ async function doLogin() {
       role: r.role,
       corpId: r.corpId
     }))
+    // 存储组织列表，对齐 goEmployee() 一致体验
+    const companies = Array.isArray(r.companies) ? r.companies : []
+    uni.setStorageSync('ops_employee_companies', JSON.stringify(companies))
     uni.showToast({ title: '登录成功', icon: 'success' })
     setTimeout(() => {
-      uni.redirectTo({ url: '/pages/employee/dashboard' })
+      if (companies.length > 1) {
+        // 多组织：先进选择页（与会员端"我是员工"体验一致）
+        uni.redirectTo({ url: '/pages/employee/company-select' })
+      } else {
+        // 单组织：直接进工作台
+        if (companies.length === 1) {
+          uni.setStorageSync('ops_employee_active_company', JSON.stringify(companies[0]))
+        }
+        uni.redirectTo({ url: '/pages/employee/dashboard' })
+      }
     }, 500)
   } catch (e) {
     uni.showToast({ title: e.msg || '登录失败', icon: 'none' })

@@ -21,19 +21,35 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { api } from '@/api/index.js'
 
 const companies = ref([])
+const loading = ref(true)
 
-onMounted(() => {
+onMounted(async () => {
   // Auth guard
   const empToken = uni.getStorageSync('ops_employee_token')
   if (!empToken) {
     uni.redirectTo({ url: '/pages/employee/login' })
     return
   }
+  // 先从 localStorage 即时展示（登录时已存入）
   const cached = uni.getStorageSync('ops_employee_companies')
   if (cached) {
     try { companies.value = JSON.parse(cached) } catch(e) { companies.value = [] }
+  }
+  // 再从平台拉取最新数据（与会员端"我是员工"同源，角色解析更精确）
+  try {
+    const resp = await api.employeeIdentity()
+    if (resp.companies && resp.companies.length > 0) {
+      companies.value = resp.companies
+      uni.setStorageSync('ops_employee_companies', JSON.stringify(resp.companies))
+    }
+  } catch (e) {
+    // API 失败时用 localStorage 中的数据降级
+    console.warn('获取组织列表失败，使用缓存数据', e)
+  } finally {
+    loading.value = false
   }
 })
 

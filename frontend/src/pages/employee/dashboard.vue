@@ -43,19 +43,21 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { api } from '@/api/index.js'
 
 const company = ref({})
 const companies = ref([])
 
 const hasMultiple = computed(() => companies.value.length > 1)
 
-onMounted(() => {
+onMounted(async () => {
   // Auth guard: redirect to login if not authenticated as employee
   const empToken = uni.getStorageSync('ops_employee_token')
   if (!empToken) {
     uni.redirectTo({ url: '/pages/employee/login' })
     return
   }
+  // 先从 localStorage 即时展示
   const active = uni.getStorageSync('ops_employee_active_company')
   if (active) {
     try { company.value = JSON.parse(active) } catch(e) { company.value = {} }
@@ -64,6 +66,19 @@ onMounted(() => {
   if (cached) {
     try { companies.value = JSON.parse(cached) } catch(e) { companies.value = [] }
   }
+  // 从平台拉取最新组织数据（与 company-select 同源）
+  try {
+    const resp = await api.employeeIdentity()
+    if (resp.companies && resp.companies.length > 0) {
+      companies.value = resp.companies
+      uni.setStorageSync('ops_employee_companies', JSON.stringify(resp.companies))
+      // 单组织登录时尚未设置 active，用第一个
+      if (!company.value.corpId) {
+        company.value = resp.companies[0]
+        uni.setStorageSync('ops_employee_active_company', JSON.stringify(resp.companies[0]))
+      }
+    }
+  } catch (e) { /* 降级使用缓存数据 */ }
   if (!company.value.corpId) {
     uni.showToast({ title: '未选择公司', icon: 'none' })
     setTimeout(() => { uni.navigateTo({ url: '/pages/employee/company-select' }) }, 1000)
