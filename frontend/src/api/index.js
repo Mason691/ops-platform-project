@@ -108,7 +108,7 @@ export const api = {
     // Upload audio blob as multipart/form-data via XMLHttpRequest
     // (uni.uploadFile requires filePath, not blob; XHR works in H5)
     return new Promise((resolve, reject) => {
-      const token = uni.getStorageSync('ops_token') || ''
+      const token = uni.getStorageSync('ops_token') || uni.getStorageSync('ops_employee_token') || ''
       const formData = new FormData()
       formData.append('audio', blob, 'recording.webm')
       const xhr = new XMLHttpRequest()
