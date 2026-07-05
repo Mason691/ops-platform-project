@@ -84,9 +84,9 @@
         <text class="bar-icon">🤖</text>
         <text class="bar-label">AI助手</text>
       </view>
-      <view class="bar-item" @click="goBackMember">
+      <view class="bar-item" @click="goProfile">
         <text class="bar-icon">👤</text>
-        <text class="bar-label">返回会员端</text>
+        <text class="bar-label">我的</text>
       </view>
     </view>
   </view>
@@ -137,7 +137,7 @@ function formatMoney(val) {
 }
 
 function goAiChat() { uni.navigateTo({ url: '/pages/employee/ai-chat' }) }
-function goBackMember() { uni.switchTab({ url: '/pages/index/index' }) }
+function goProfile() { uni.navigateTo({ url: '/pages/employee/profile' }) }
 </script>
 
 <style scoped>
