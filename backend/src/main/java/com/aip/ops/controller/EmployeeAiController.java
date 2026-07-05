@@ -29,13 +29,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Employee AI assistant proxy — separate from the member-facing {@link AiChatProxyController}.
+ * 员工 AI 助手 — 对接底座平台 Hermes Agent（与会员 AI 共用同一主 Agent）。
  * <p>
- * Enriches AI requests with employee identity context (company, role, phone) so the
- * base platform's HermesCoreAgent can switch to an employee persona and activate
- * employee-specific tools (e.g. {@code ops_query_employee_business_data}).
+ * 注入员工身份上下文（公司、角色、手机号），底座 Agent 据此激活员工专用工具
+ * （如 {@code ops_query_employee_business_data}），同时保留全部平台通用能力：
+ * 组织知识库搜索、数据分析、技能调用、报告生成。
  * <p>
- * Voice endpoints (ASR/TTS) are persona-agnostic and remain in {@link AiChatProxyController}.
+ * 语音端点（ASR/TTS）与角色无关，统一走 {@link AiChatProxyController}。
  */
 @Slf4j
 @RestController
@@ -222,11 +222,12 @@ public class EmployeeAiController {
     public R<Map<String, Object>> config() {
         return R.ok(Map.of(
                 "nickname", "小金",
-                "greeting", "您好！我是您的业务数据AI助手，可以帮您查询业绩、分析数据、了解公司政策。",
+                "greeting", "您好！我是您的企业AI助手，对接底座平台智能引擎，"
+                        + "支持组织知识库搜索、业务数据分析、技能工具调用和报告生成。",
                 "voiceEnabled", true,
                 "quickQuestions", List.of(
-                        "本月销售额多少？", "我的提成明细",
-                        "各品类销售情况", "帮我分析业务趋势"
+                        "本月业务数据概览", "帮我分析销售趋势",
+                        "搜索公司知识库", "生成业务分析报告"
                 )
         ));
     }
@@ -245,22 +246,22 @@ public class EmployeeAiController {
                 Map<String, Object> c = companies.get(0);
                 String corpName = c.getOrDefault("corpName", "").toString();
                 String roleName = c.getOrDefault("roleName", "").toString();
-                String greeting = "您好！我是您的业务数据AI助手～\n"
+                String greeting = "您好！我是您的企业AI助手～\n"
                         + "当前公司：" + corpName + "（" + roleName + "）\n"
-                        + "可以帮您查询业绩、分析数据、了解提成规则，有什么需要？";
+                        + "支持组织知识库、数据分析、技能工具和报告生成，有什么需要？";
                 result.put("greeting", greeting);
                 result.put("corpName", corpName);
                 result.put("roleName", roleName);
             } else {
-                result.put("greeting", "您好！我是您的业务数据AI助手～\n"
-                        + "可以帮您查询业绩、分析数据、了解公司政策，有什么需要？");
+                result.put("greeting", "您好！我是您的企业AI助手～\n"
+                        + "支持组织知识库、数据分析、技能工具和报告生成，有什么需要？");
             }
             result.put("nickname", "员工");
             result.put("avatar", null);
         } catch (Exception e) {
             result.put("nickname", "员工");
-            result.put("greeting", "您好！我是您的业务数据AI助手～\n"
-                    + "可以帮您查询业绩、分析数据、了解公司政策，有什么需要？");
+            result.put("greeting", "您好！我是您的企业AI助手～\n"
+                    + "支持组织知识库、数据分析、技能工具和报告生成，有什么需要？");
         }
         return R.ok(result);
     }

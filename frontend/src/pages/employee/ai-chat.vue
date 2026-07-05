@@ -10,7 +10,7 @@
           <image class="wc-avatar-img" :src="aiAvatar" mode="aspectFill"/>
         </view>
         <text class="wc-title">{{ aiNickname }}</text>
-        <text class="wc-desc">你的业务数据AI助手</text>
+        <text class="wc-desc">企业AI助手 · 知识库 · 数据分析 · 技能报告</text>
         <view class="wc-company" v-if="empCorpName">
           <text>{{ empCorpName }} · {{ empRoleName || '员工' }}</text>
         </view>
@@ -225,7 +225,7 @@ onMounted(async () => {
   try {
     const r = await api.employeeAiProfile()
     if (r?.greeting) messages.value.push({ role: 'assistant', content: r.greeting })
-    else messages.value.push({ role: 'assistant', content: '您好！我是您的业务数据AI助手～\n可以帮您查询业绩、分析数据、了解公司政策，有什么需要？' })
+    else messages.value.push({ role: 'assistant', content: '您好！我是您的企业AI助手～\n支持组织知识库、数据分析、技能工具和报告生成，有什么需要？' })
     if (r?.corpName) empCorpName.value = r.corpName
     if (r?.roleName) empRoleName.value = r.roleName
   } catch (_) {}
