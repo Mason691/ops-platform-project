@@ -2,6 +2,9 @@
   <view class="page">
     <!-- Header -->
     <view class="header">
+      <view class="logout-icon" @click="doLogout">
+        <text>🚪</text>
+      </view>
       <text class="employee-name">{{ employeeName }}</text>
       <view class="header-row">
         <text class="company-name">{{ company.corpName || '员工工作台' }}</text>
@@ -97,6 +100,21 @@ onMounted(async () => {
 function switchCompany() {
   uni.navigateTo({ url: '/pages/employee/company-select' })
 }
+function doLogout() {
+  uni.showModal({
+    title: '确认退出',
+    content: '退出后需要重新登录，确定要退出吗？',
+    success(res) {
+      if (res.confirm) {
+        uni.removeStorageSync('ops_employee_token')
+        uni.removeStorageSync('ops_employee_info')
+        uni.removeStorageSync('ops_employee_companies')
+        uni.removeStorageSync('ops_employee_active_company')
+        uni.redirectTo({ url: '/pages/employee/login' })
+      }
+    }
+  })
+}
 function goBusinessData() {
   uni.navigateTo({ url: '/pages/employee/business-data' })
 }
@@ -110,8 +128,9 @@ function goBackMember() {
 
 <style scoped>
 .page { min-height: 100vh; background: #f5f5f5; padding-bottom: 120rpx; }
-.header { background: linear-gradient(135deg, #FF6B35, #FF8C5A); padding: 60rpx 32rpx 48rpx; text-align: center; }
-.employee-name { font-size: 36rpx; color: #fff; font-weight: 700; display: block; margin-bottom: 16rpx; }
+.header { background: linear-gradient(135deg, #FF6B35, #FF8C5A); padding: 60rpx 32rpx 48rpx; text-align: center; position: relative; }
+.logout-icon { position: absolute; top: 24rpx; right: 24rpx; font-size: 40rpx; padding: 8rpx; }
+.employee-name { font-size: 36rpx; color: #fff; font-weight: 700; display: block; margin-top: 24rpx; margin-bottom: 16rpx; }
 .header-row { display: flex; align-items: center; justify-content: center; gap: 16rpx; flex-wrap: wrap; }
 .company-name { font-size: 28rpx; color: rgba(255,255,255,.9); font-weight: 600; }
 .role-badge { display: inline-block; font-size: 22rpx; color: #fff; background: rgba(255,255,255,.2); padding: 4rpx 18rpx; border-radius: 20rpx; }
