@@ -164,7 +164,8 @@ async function doLogin() {
       name: r.name,
       phone: r.phone,
       role: r.role,
-      corpId: r.corpId
+      corpId: r.corpId,
+      avatar: r.avatar || ''
     }))
     // 存储组织列表，默认选中第一个组织，直接进业务主页（在主页再切换公司）
     const companies = Array.isArray(r.companies) ? r.companies : []

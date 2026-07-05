@@ -249,6 +249,7 @@ public class EmployeeAuthServiceImpl implements EmployeeAuthService {
         result.put("corpId", data.get("corpId"));
         result.put("expiresIn", data.getOrDefault("expiresIn", jwtExpiration));
         result.put("companies", data.getOrDefault("companies", List.of())); // 多组织列表
+        result.put("avatar", data.getOrDefault("avatar", ""));             // sys_user头像
         return result;
     }
 

@@ -6,6 +6,7 @@ import com.aip.ops.mapper.OpsMemberMapper;
 import com.aip.ops.service.AiChatTaskService;
 import com.aip.ops.service.EmployeeService;
 import com.aip.ops.service.SseEmitterManager;
+import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.LoginUser;
 import com.aip.sdk.security.SecurityUtils;
@@ -50,6 +51,7 @@ public class EmployeeAiController {
     private final AiChatTaskProducer aiChatTaskProducer;
     private final SseEmitterManager sseEmitterManager;
     private final ObjectMapper objectMapper;
+    private final PlatformInternalClient platformInternalClient;
 
     public EmployeeAiController(@Qualifier("aiRestTemplate") RestTemplate restTemplate,
                                  EmployeeService employeeService,
@@ -57,7 +59,8 @@ public class EmployeeAiController {
                                  AiChatTaskService aiChatTaskService,
                                  AiChatTaskProducer aiChatTaskProducer,
                                  SseEmitterManager sseEmitterManager,
-                                 ObjectMapper objectMapper) {
+                                 ObjectMapper objectMapper,
+                                 PlatformInternalClient platformInternalClient) {
         this.restTemplate = restTemplate;
         this.employeeService = employeeService;
         this.memberMapper = memberMapper;
@@ -65,6 +68,7 @@ public class EmployeeAiController {
         this.aiChatTaskProducer = aiChatTaskProducer;
         this.sseEmitterManager = sseEmitterManager;
         this.objectMapper = objectMapper;
+        this.platformInternalClient = platformInternalClient;
     }
 
     @Value("${platform.base-url}")
@@ -283,8 +287,28 @@ public class EmployeeAiController {
 
     @GetMapping("/config")
     public R<Map<String, Object>> config() {
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        // 从底座平台获取组织 AI 配置（头像 + 昵称），若未配置则使用默认值
+        String aiAvatar = null;
+        String aiNickname = "小金";
+        try {
+            Map<String, Object> orgCfg = platformInternalClient.get(
+                    "/api/internal/user/org-ai-config?corpId=" + corpId, null);
+            Object data = orgCfg.get("data");
+            if (data instanceof Map) {
+                Map<?, ?> d = (Map<?, ?>) data;
+                if (d.get("aiNickname") instanceof String && !((String) d.get("aiNickname")).isBlank()) {
+                    aiNickname = (String) d.get("aiNickname");
+                }
+                if (d.get("aiAvatar") instanceof String) {
+                    aiAvatar = (String) d.get("aiAvatar");
+                }
+            }
+        } catch (Exception e) { /* 平台不可达时使用默认值 */ }
+
         return R.ok(Map.of(
-                "nickname", "小金",
+                "nickname", aiNickname,
+                "aiAvatar", aiAvatar,
                 "greeting", "您好！我是您的企业AI助手，对接底座平台智能引擎，"
                         + "支持组织知识库搜索、业务数据分析、技能工具调用和报告生成。",
                 "voiceEnabled", true,

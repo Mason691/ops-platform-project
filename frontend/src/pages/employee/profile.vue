@@ -30,11 +30,14 @@
       </view>
     </view>
 
-    <!-- Personal Settings -->
+    <!-- Menu -->
     <view class="section">
-      <view class="section-title">安全设置</view>
+      <view class="menu-item" @click="switchCompany">
+        <text class="menu-label">🔄 切换组织</text>
+        <text class="menu-arrow">›</text>
+      </view>
       <view class="menu-item" @click="showPwdModal = true">
-        <text class="menu-label">修改密码</text>
+        <text class="menu-label">🔒 修改密码</text>
         <text class="menu-arrow">›</text>
       </view>
     </view>
@@ -107,6 +110,8 @@ onMounted(() => {
     try { activeCompany.value = JSON.parse(active) } catch(e) {}
   }
   nickInput.value = info.value.name || ''
+  // 读取 sys_user 头像（若未上传过则用默认头像）
+  if (info.value.avatar) avatarUrl.value = info.value.avatar
 })
 
 function changeAvatar() {
@@ -163,6 +168,10 @@ async function changePassword() {
   } catch (e) {
     pwdError.value = e.msg || '修改失败，请重试'
   }
+}
+
+function switchCompany() {
+  uni.navigateTo({ url: '/pages/employee/company-select' })
 }
 
 function doLogout() {
