@@ -109,6 +109,9 @@
                @confirm="sendMsg"
                @focus="scrollToBottom" />
       </view>
+      <view class="file-btn" @tap="chooseFile" v-if="!loading">
+        <text class="file-btn-icon">📎</text>
+      </view>
       <view class="send-main-btn" :class="{ disabled: loading || !inputText.trim() }"
             @tap="sendMsg">
         <text class="send-arrow">↑</text>
@@ -483,6 +486,106 @@ function onSkillChange(e) {
 }
 function clearSkill() {
   selectedSkillIdx.value = -1
+}
+
+// ── File upload ──
+
+const ALLOWED_EXTS = ['.xlsx','.xls','.pdf','.docx','.doc','.txt','.csv']
+const MAX_FILE_SIZE = 10 * 1024 * 1024
+
+function chooseFile() {
+  // #ifdef H5
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.xlsx,.xls,.pdf,.docx,.doc,.txt,.csv'
+  input.onchange = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+    if (!ALLOWED_EXTS.includes(ext)) {
+      uni.showToast({ title: '不支持的文件格式：'+ext, icon: 'none' })
+      return
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      uni.showToast({ title: '文件大小不超过10MB', icon: 'none' })
+      return
+    }
+    await uploadAndAnalyze(file)
+  }
+  input.click()
+  // #endif
+  // #ifndef H5
+  uni.showToast({ title: '请在网页版使用文件上传功能', icon: 'none' })
+  // #endif
+}
+
+async function uploadAndAnalyze(file) {
+  const question = inputText.value?.trim() || undefined
+
+  // Show uploading message
+  messages.value.push({ role: 'user', content: '📄 ' + file.name })
+  const loadIdx = messages.value.length
+  messages.value.push({ role: 'assistant', content: '正在分析 ' + file.name + '…' })
+  scrollToBottom()
+
+  try {
+    // Upload via XMLHttpRequest (FormData) for H5 compatibility
+    const token = uni.getStorageSync('token')
+    const baseUrl = import.meta.env?.VITE_API_BASE || '/api'
+    const formData = new FormData()
+    formData.append('file', file)
+    if (question) formData.append('question', question)
+
+    const uploadRes = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', baseUrl + '/ai/file/upload')
+      xhr.setRequestHeader('Authorization', 'Bearer ' + token)
+      xhr.onload = () => { try { resolve(JSON.parse(xhr.responseText)) } catch(e) { reject(e) } }
+      xhr.onerror = reject
+      xhr.send(formData)
+    })
+
+    if (uploadRes.code !== 200 && uploadRes.code !== 202) {
+      messages.value[loadIdx] = { ...messages.value[loadIdx], content: '上传失败: ' + (uploadRes.msg || '') }
+      return
+    }
+
+    const fileId = uploadRes.data?.fileId
+    if (!fileId) {
+      messages.value[loadIdx] = { ...messages.value[loadIdx], content: '上传异常，未获取到文件ID' }
+      return
+    }
+
+    // Poll for result
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 5000))
+      try {
+        const result = await api.fileAnalysisResult(fileId)
+        if (result?.status === 1) {
+          messages.value[loadIdx] = {
+            ...messages.value[loadIdx],
+            content: result.analysisResult || '分析完成',
+            fileAnalysis: { fileId, status: 'done' }
+          }
+          if (voiceEnabled.value) autoPlayReply(result.analysisResult || '', loadIdx)
+          return
+        } else if (result?.status === 2) {
+          messages.value[loadIdx] = {
+            ...messages.value[loadIdx],
+            content: '文件分析失败: ' + (result.analysisResult || '请检查文件后重试'),
+            fileAnalysis: { fileId, status: 'failed' }
+          }
+          return
+        }
+      } catch (_) { /* retry on next poll */ }
+    }
+    messages.value[loadIdx] = { ...messages.value[loadIdx], content: '分析超时，请稍后重试' }
+  } catch (e) {
+    messages.value[loadIdx] = { ...messages.value[loadIdx], content: '上传失败，请检查网络连接' }
+    console.error('[FileUpload]', e)
+  } finally {
+    scrollToBottom()
+  }
 }
 
 // ── Voice input ──

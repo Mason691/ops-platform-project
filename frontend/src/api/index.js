@@ -96,6 +96,9 @@ export const api = {
   // 技能市场（代理到平台 /api/skill/installed）
   installedSkills: () => request({url:'/api/ops/ai/skills/installed'}),
 
+  // 文件分析 — 直接调平台 API
+  fileAnalysisResult: (fileId) => request({url:'/api/ai/file/'+fileId+'/result'}),
+
   // 站长
   stationApply: (data) => request({url:'/api/ops/station/apply',method:'POST',data}),
   stationApplyStatus: () => request({url:'/api/ops/station/apply/status'}),
