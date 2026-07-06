@@ -166,9 +166,10 @@ public class BusinessDataImportHandler implements ImportHandler {
                     agentPhoneIdx, saleDateIdx, recDateIdx, recNoIdx);
             if (pr != null) {
                 checkCategory(pr, i + 1, validCategories, errors);
+                // Resolve category key BEFORE validation (needed for tiered check)
+                pr.catKey = mapCategoryKey(pr.catCn);
                 validateFields(pr, i + 1, errors, tieredCategories);
                 // Resolve product mapping (needed for INSERT phase)
-                pr.catKey = mapCategoryKey(pr.catCn);
                 pr.product = productMap.get(pr.brand + "|" + pr.catKey
                         + "|" + pr.model);
                 parsedRows.add(pr);
@@ -341,8 +342,8 @@ public class BusinessDataImportHandler implements ImportHandler {
             errors.add("第" + rowNum + "行: 公司为空");
         else if (!VALID_COMPANIES.contains(pr.company))
             errors.add("第" + rowNum + "行: 无效公司 \"" + pr.company + "\"");
-        // Brand/model required only for tiered commission categories
-        if (tieredCategories.contains(pr.catCn)) {
+        // Brand/model required only for tiered commission categories (by category key)
+        if (pr.catKey != null && tieredCategories.contains(pr.catKey)) {
             if (pr.brand.isEmpty())
                 errors.add("第" + rowNum + "行: 该品类存在阶梯提成规则，品牌不能为空");
             if (pr.model.isEmpty())
