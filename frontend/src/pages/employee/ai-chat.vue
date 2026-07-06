@@ -7,7 +7,8 @@
       <!-- Welcome card (employee-specific) -->
       <view class="welcome-card" v-if="messages.length===0 && !loading">
         <view class="wc-avatar">
-          <image class="wc-avatar-img" :src="aiAvatar" mode="aspectFill"/>
+          <image v-if="!avatarIsEmoji" class="wc-avatar-img" :src="aiAvatar" mode="aspectFill"/>
+          <text v-else class="wc-avatar-emoji">{{ aiAvatar }}</text>
         </view>
         <text class="wc-title">{{ aiNickname }}</text>
         <text class="wc-desc">企业AI助手 · 知识库 · 数据分析 · 技能报告</text>
@@ -24,8 +25,9 @@
 
       <view class="msg-item" v-for="(m, i) in messages" :key="i"
             :class="m.role === 'assistant' ? 'msg-left' : 'msg-right'">
-        <image v-if="m.role === 'assistant'" class="msg-avatar"
+        <image v-if="m.role === 'assistant' && !avatarIsEmoji" class="msg-avatar"
                :src="aiAvatar" mode="aspectFill" />
+        <text v-if="m.role === 'assistant' && avatarIsEmoji" class="msg-avatar-emoji">{{ aiAvatar }}</text>
         <view class="msg-main">
           <view class="msg-bubble"
                 :class="m.role === 'assistant' ? 'bubble-ai' : 'bubble-user'">
@@ -47,7 +49,8 @@
       </view>
 
       <view v-if="loading" class="msg-item msg-left">
-        <image class="msg-avatar" :src="aiAvatar" mode="aspectFill" />
+        <image v-if="!avatarIsEmoji" class="msg-avatar" :src="aiAvatar" mode="aspectFill" />
+        <text v-else class="msg-avatar-emoji">{{ aiAvatar }}</text>
         <view class="msg-bubble bubble-ai typing-bubble">
           <view class="typing-dots"><view class="dot" v-for="d in 3" :key="d"></view></view>
           <text class="progress-text" v-if="progressMsg">{{ progressMsg }}</text>
@@ -155,6 +158,10 @@ import { isWechat, isWxRecordAvailable, wxStartRecord, wxStopRecordAndUpload } f
 const aiNickname    = ref('小金')
 const aiAvatar      = ref('/static/ai-avatar.png')
 const userAvatar    = ref('/static/default-avatar.png')
+const avatarIsEmoji = computed(() => {
+  const v = aiAvatar.value
+  return v && !v.startsWith('http') && !v.startsWith('/') && !v.startsWith('data:')
+})
 const messages      = ref([])
 const inputText     = ref('')
 const loading       = ref(false)
@@ -807,6 +814,7 @@ function goCompanySelect() {
 }
 .wc-avatar{margin-bottom:20rpx}
 .wc-avatar-img{width:120rpx;height:120rpx;border-radius:50%;border:4rpx solid #FF6B35}
+.wc-avatar-emoji{font-size:100rpx;line-height:120rpx}
 .wc-title{font-size:38rpx;color:#333;font-weight:700;margin-bottom:8rpx}
 .wc-desc{font-size:26rpx;color:#999;margin-bottom:8rpx}
 .wc-company{font-size:24rpx;color:#FF6B35;background:#FFF3EE;padding:6rpx 20rpx;border-radius:12rpx;margin-bottom:20rpx}
@@ -820,6 +828,8 @@ function goCompanySelect() {
 .msg-left{flex-direction:row}.msg-right{flex-direction:row-reverse}
 .msg-avatar{width:72rpx;height:72rpx;border-radius:50%;flex-shrink:0;background:#fff;box-shadow:0 2rpx 8rpx rgba(0,0,0,.08)}
 .msg-left .msg-avatar{margin-right:16rpx}.msg-right .msg-avatar{margin-left:16rpx}
+.msg-avatar-emoji{font-size:48rpx;line-height:72rpx;text-align:center;width:72rpx;height:72rpx;flex-shrink:0}
+.msg-left .msg-avatar-emoji{margin-right:16rpx}.msg-right .msg-avatar-emoji{margin-left:16rpx}
 .msg-main{display:flex;flex-direction:column;max-width:72%}
 .msg-bubble{padding:20rpx 24rpx;border-radius:16rpx;box-shadow:0 2rpx 8rpx rgba(0,0,0,.04)}
 .msg-text{font-size:28rpx;line-height:1.6;word-break:break-all;white-space:pre-wrap}
