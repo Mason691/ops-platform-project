@@ -17,6 +17,7 @@ public class ImportResult {
     private int successRows;
     private int failRows;
     private List<String> errors = new ArrayList<>();
+    private String message;     // human-readable summary, e.g. "文件业务数据为291条，成功导入291条"
 
     public ImportResult() {}
 
@@ -27,6 +28,7 @@ public class ImportResult {
         r.count = count;
         r.totalRows = totalRows;
         r.successRows = count;
+        r.message = "文件业务数据为" + totalRows + "条，成功导入" + count + "条";
         return r;
     }
 
@@ -37,6 +39,7 @@ public class ImportResult {
         r.errors = errors;
         r.totalRows = totalRows;
         r.failRows = errors.size();
+        r.message = "文件业务数据为" + totalRows + "条，导入失败。原因：" + String.join("；", errors);
         return r;
     }
 
@@ -49,6 +52,7 @@ public class ImportResult {
         m.put("successRows", successRows);
         m.put("failRows", failRows);
         m.put("errors", errors);
+        m.put("message", message);
         return m;
     }
 
