@@ -198,7 +198,11 @@ let audioChunks = []
 let currentAudio = null
 
 onShow(async () => {
-  // Load user avatar
+  // Load user avatar — 优先员工头像 (sys_user.avatar)
+  const empInfo = uni.getStorageSync('ops_employee_info')
+  if (empInfo) {
+    try { const ei = JSON.parse(empInfo); if (ei?.avatar) userAvatar.value = ei.avatar } catch (_) {}
+  }
   const savedUser = uni.getStorageSync('ops_member') || uni.getStorageSync('ops_user')
   if (savedUser) {
     try { const su = JSON.parse(savedUser); if (su?.avatar) userAvatar.value = su.avatar } catch (_) {}
@@ -246,8 +250,10 @@ onMounted(async () => {
     if (r?.roleName) empRoleName.value = r.roleName
   } catch (_) {}
 
-  // Refresh user avatar
+  // Refresh user avatar — 优先员工头像
   try {
+    const empInfo = uni.getStorageSync('ops_employee_info')
+    if (empInfo) { const ei = JSON.parse(empInfo); if (ei?.avatar) userAvatar.value = ei.avatar }
     if (token) { const me = await api.getMe(); if (me?.avatar) userAvatar.value = me.avatar }
   } catch (_) {}
 })
