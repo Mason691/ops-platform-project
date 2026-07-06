@@ -251,6 +251,7 @@ public class AiChatProxyController {
         // Fallback for unauthenticated visitors
         Map<String, Object> fb = new LinkedHashMap<>();
         fb.put("nickname", "小金");
+        fb.put("avatar", "");
         fb.put("greeting", "您好！我是小金，您的燃气生活助手～\n可以帮您查积分、兑商品、看活动，有什么需要？");
         fb.put("voiceEnabled", true);
         return R.ok(fb);
