@@ -321,6 +321,7 @@ public class EmployeeAiController {
 
     @GetMapping("/profile")
     public R<Map<String, Object>> profile() {
+        Long corpId = SecurityUtils.getCurrentCorpId();
         Map<String, Object> result = new LinkedHashMap<>();
         try {
             Map<String, Object> identity = employeeService.checkIdentity();
@@ -335,11 +336,11 @@ public class EmployeeAiController {
                 roleName = c.getOrDefault("roleName", "").toString();
             }
 
-            // Try to get platform personalized greeting
+            // Try to get platform personalized greeting via internal endpoint
             String greeting = null;
             try {
                 Map<String, Object> greetingResp = platformInternalClient.get(
-                        "/api/ai/greeting", null);
+                        "/api/internal/ai/greeting?corpId=" + corpId, null);
                 if (greetingResp != null && greetingResp.get("data") instanceof Map) {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> gd = (Map<String, Object>) greetingResp.get("data");
