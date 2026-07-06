@@ -8,8 +8,10 @@ import com.aip.ops.service.ImportTaskService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -18,6 +20,7 @@ import java.io.*;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -37,7 +40,22 @@ public class BusinessDataController {
 
     private static final String TOPIC_EXPORT_TASK = "async-export-task";
     private static final String TOPIC_IMPORT_TASK = "async-import-task";
-    private static final String IMPORT_UPLOAD_DIR = "/tmp/";
+
+    /** Import file upload directory — configurable, defaults to persistent path.
+     *  DO NOT use /tmp/ in production: tmpfs / systemd-tmpfiles-clean will
+     *  delete files before the async Kafka consumer can process them. */
+    @Value("${app.import.upload-dir:#{systemProperties['user.home'] + '/data/imports'}}")
+    private String importUploadDir;
+
+    @PostConstruct
+    void ensureImportDir() {
+        try {
+            Files.createDirectories(Path.of(importUploadDir));
+            log.info("Import upload dir ready: {}", importUploadDir);
+        } catch (IOException e) {
+            log.error("Cannot create import upload dir: {}", importUploadDir, e);
+        }
+    }
 
     public BusinessDataController(BusinessDataService service, ExportTaskService taskService,
                                   ImportTaskService importTaskService, KafkaTemplate<String, String> kafkaTemplate) {
@@ -66,48 +84,45 @@ public class BusinessDataController {
         return R.ok(service.importExcel(file, batchNo, corpId));
     }
 
-    /** Async import submit — saves file, creates task, sends Kafka message. */
+    /**
+     * Import business data synchronously.
+     * Processes the Excel file in the request thread and returns the result
+     * immediately. This avoids the Kafka async pipeline's dependency on
+     * shared consumer groups and ephemeral file storage.
+     * <p>
+     * Response format matches the async style so the frontend works unchanged:
+     * success → { status: "success", count: N }
+     * failure → { status: "fail", totalErrors: N, errors: [...] }
+     */
     @PostMapping("/import/submit")
     public R<Map<String, Object>> importSubmit(@RequestParam("file") MultipartFile file) {
-        // Concurrency check
-        if (importTaskService.hasPendingTask("business_data")) {
-            return R.fail("有导入任务正在执行中，请等待完成后再提交");
-        }
+        String batchNo = "金厨美家" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        Map<String, Object> result = service.importExcel(file, batchNo, corpId);
 
+        // Save a task record for audit/history (non-blocking, best-effort)
         try {
-            // Save uploaded file
             String originalName = file.getOriginalFilename();
             if (originalName == null) originalName = "import.xlsx";
-            String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-            String savedName = "import_business_" + ts + "_" + originalName;
-            java.nio.file.Path dest = java.nio.file.Path.of(IMPORT_UPLOAD_DIR, savedName);
-            file.transferTo(dest);
-
-            // Create task
             SysImportTask task = importTaskService.createTask("business_data",
-                    originalName, dest.toAbsolutePath().toString(), file.getSize());
-
-            // Send to Kafka
-            try {
-                Map<String, Object> msg = new LinkedHashMap<>();
-                msg.put("taskId", task.getId());
-                kafkaTemplate.send(TOPIC_IMPORT_TASK, objectMapper.writeValueAsString(msg));
-                log.info("Import task submitted: id={} file={}", task.getId(), originalName);
-                return R.ok(Map.of("taskId", task.getId(), "status", "PENDING"));
-            } catch (Exception e) {
-                log.warn("Kafka unavailable for import, fallback to sync: taskId={}", task.getId());
-                // Fallback to sync import
-                try {
-                    Files.deleteIfExists(dest);
-                } catch (Exception ignored) {}
-                return R.ok(service.importExcel(file,
-                        "金厨美家" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss")),
-                        SecurityUtils.getCurrentCorpId()));
+                    originalName, "sync://memory", file.getSize());
+            if ("success".equals(result.get("status"))) {
+                importTaskService.markDone(task.getId(),
+                        (int) result.getOrDefault("count", 0),
+                        (int) result.getOrDefault("count", 0));
+            } else {
+                @SuppressWarnings("unchecked")
+                List<String> errors = (List<String>) result.getOrDefault("errors", List.of());
+                importTaskService.markFailed(task.getId(), "SYNC",
+                        String.join("; ", errors),
+                        (int) result.getOrDefault("totalErrors", 0),
+                        (int) result.getOrDefault("totalErrors", 0));
             }
         } catch (Exception e) {
-            log.error("Import task submit failed", e);
-            return R.fail("导入提交失败: " + e.getMessage());
+            log.warn("Failed to save import audit record", e);
         }
+
+        return R.ok(result);
     }
 
     /** Poll import task status. */

@@ -428,7 +428,7 @@ public class BusinessDataImportHandler implements ImportHandler {
                 + file.toAbsolutePath() + "', read_only=True)\n"
                 + "ws=wb.active\n"
                 + "for row in ws.iter_rows(values_only=True):\n"
-                + "  print('\\t'.join(str(v) if v is not None"
+                + "  print('\\t'.join(str(v).replace('\\n',' ').replace('\\r',' ') if v is not None"
                 + " else '' for v in row))\n");
         pb.redirectErrorStream(true);
         Process p = pb.start();

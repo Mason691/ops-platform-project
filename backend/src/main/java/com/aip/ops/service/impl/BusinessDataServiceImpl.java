@@ -286,8 +286,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         pr.agent = val(cols, agentIdx);
         pr.agentPhone = val(cols, agentPhoneIdx);
         pr.dept = val(cols, deptIdx);
-        pr.saleDate = val(cols, saleDateIdx);
-        pr.receiptDate = val(cols, recDateIdx);
+        pr.saleDate = normalizeDate(val(cols, saleDateIdx));
+        pr.receiptDate = normalizeDate(val(cols, recDateIdx));
         pr.receiptNo = val(cols, recNoIdx);
         return pr;
     }
@@ -691,13 +691,18 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         }
     }
 
+    /**
+     * Parse Excel to tab-separated text via Python/openpyxl.
+     * Newlines inside cells are replaced with spaces to prevent the
+     * one-row-per-line output contract from being broken.
+     */
     private String parseExcelWithPython(Path file) throws Exception {
         ProcessBuilder pb = new ProcessBuilder("python3", "-c",
                 "import openpyxl\n"
                         + "wb=openpyxl.load_workbook('" + file.toAbsolutePath() + "', read_only=True)\n"
                         + "ws=wb.active\n"
                         + "for row in ws.iter_rows(values_only=True):\n"
-                        + "  print('\\t'.join(str(v) if v is not None else '' for v in row))\n");
+                        + "  print('\\t'.join(str(v).replace('\\n',' ').replace('\\r',' ') if v is not None else '' for v in row))\n");
         pb.redirectErrorStream(true);
         Process p = pb.start();
         String out = new String(p.getInputStream().readAllBytes(), "UTF-8");
@@ -717,5 +722,20 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private BigDecimal toDecimal(String s) {
         if (s == null || s.isEmpty()) return null;
         try { return new BigDecimal(s); } catch (Exception e) { return null; }
+    }
+
+    /**
+     * Normalize a date string from openpyxl to YYYY-MM-DD.
+     * openpyxl outputs datetime objects as "2026-06-30 00:00:00".
+     * Returns empty string if input is blank.
+     */
+    private String normalizeDate(String raw) {
+        if (raw == null || raw.isBlank()) return "";
+        // openpyxl: "2026-06-30 00:00:00" → extract date part
+        if (raw.contains(" ") && raw.length() >= 10) {
+            String datePart = raw.substring(0, 10);
+            if (datePart.matches("\\d{4}-\\d{2}-\\d{2}")) return datePart;
+        }
+        return raw.trim();
     }
 }
