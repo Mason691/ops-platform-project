@@ -303,15 +303,22 @@ public class BusinessDataImportHandler implements ImportHandler {
         }
     }
 
+    /** Categories that require brand/model (appliances). */
+    private static final Set<String> BRAND_REQUIRED_CATEGORIES =
+            Set.of("燃气灶", "抽油烟机", "热水器", "壁挂炉");
+
     private void validateFields(ParsedRow pr, int rowNum, List<String> errors) {
         if (pr.company.isEmpty())
             errors.add("第" + rowNum + "行: 公司为空");
         else if (!VALID_COMPANIES.contains(pr.company))
             errors.add("第" + rowNum + "行: 无效公司 \"" + pr.company + "\"");
-        if (pr.brand.isEmpty())
-            errors.add("第" + rowNum + "行: 品牌为空");
-        if (pr.model.isEmpty())
-            errors.add("第" + rowNum + "行: 型号为空");
+        // Brand/model only required for appliance categories
+        if (BRAND_REQUIRED_CATEGORIES.contains(pr.catCn)) {
+            if (pr.brand.isEmpty())
+                errors.add("第" + rowNum + "行: 品牌为空（品类" + pr.catCn + "必须填写品牌）");
+            if (pr.model.isEmpty())
+                errors.add("第" + rowNum + "行: 型号为空（品类" + pr.catCn + "必须填写型号）");
+        }
         if (pr.agent == null || pr.agent.isBlank())
             errors.add("第" + rowNum + "行: 经办人为空");
         if (pr.salePrice == null)
@@ -398,7 +405,9 @@ public class BusinessDataImportHandler implements ImportHandler {
             int recDateIdx, int recNoIdx) {
         String brand = val(cols, brandIdx);
         String model = val(cols, modelIdx);
-        if (brand.isEmpty() || model.isEmpty()) return null;
+        String cat = val(cols, catIdx);
+        // Only skip completely empty rows; non-appliance cats can lack brand/model
+        if (cat.isEmpty() && brand.isEmpty() && model.isEmpty()) return null;
 
         ParsedRow pr = new ParsedRow();
         pr.company = val(cols, companyIdx);
@@ -424,11 +433,20 @@ public class BusinessDataImportHandler implements ImportHandler {
     private String parseExcelWithPython(Path file) throws Exception {
         ProcessBuilder pb = new ProcessBuilder("python3", "-c",
                 "import openpyxl\n"
-                + "wb=openpyxl.load_workbook('"
-                + file.toAbsolutePath() + "', read_only=True)\n"
-                + "ws=wb.active\n"
+                + "wb = openpyxl.load_workbook('"
+                + file.toAbsolutePath() + "')\n"
+                + "ws = wb.active\n"
+                + "# Fill merged cell values to all constituent cells\n"
+                + "for mg in ws.merged_cells.ranges:\n"
+                + "    min_col, min_row, max_col, max_row = mg.min_col, mg.min_row, mg.max_col, mg.max_row\n"
+                + "    val = ws.cell(min_row, min_col).value\n"
+                + "    for r in range(min_row, max_row + 1):\n"
+                + "        for c in range(min_col, max_col + 1):\n"
+                + "            cell = ws.cell(r, c)\n"
+                + "            if cell.value is None:\n"
+                + "                cell.value = val\n"
                 + "for row in ws.iter_rows(values_only=True):\n"
-                + "  print('\\t'.join(str(v).replace('\\n',' ').replace('\\r',' ') if v is not None"
+                + "    print('\\t'.join(str(v).replace('\\n',' ').replace('\\r',' ') if v is not None"
                 + " else '' for v in row))\n");
         pb.redirectErrorStream(true);
         Process p = pb.start();
