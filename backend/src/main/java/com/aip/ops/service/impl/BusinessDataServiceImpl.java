@@ -32,6 +32,7 @@ import java.net.URLEncoder;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.*;
 
@@ -48,25 +49,29 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     private static final Set<String> VALID_COMPANIES = Set.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
 
-    private static final Map<String, String> CN_TO_KEY = Map.of(
-            "燃气灶", "1", "抽油烟机", "2", "热水器", "3", "壁挂炉", "4",
-            "壁挂炉以旧换新销售", "5", "户内美装开发", "6", "定尺波纹管", "7",
-            "户内美装工程", "8", "户内美装运维", "9"
+    private static final Map<String, String> CN_TO_KEY = Map.ofEntries(
+            Map.entry("燃气灶", "1"), Map.entry("抽油烟机", "2"),
+            Map.entry("热水器", "3"), Map.entry("壁挂炉", "4"),
+            Map.entry("壁挂炉以旧换新销售", "5"), Map.entry("户内美装销售", "6"),
+            Map.entry("定尺波纹管", "7"), Map.entry("户内美装工程", "8"),
+            Map.entry("户内美装运维", "9"), Map.entry("保险", "10")
     );
 
     /** Reverse map: dict key (1,2,3...) → Chinese display name (燃气灶,抽油烟机...) */
-    public static final Map<String, String> KEY_TO_CN = Map.of(
-            "1", "燃气灶", "2", "抽油烟机", "3", "热水器", "4", "壁挂炉",
-            "5", "壁挂炉以旧换新销售", "6", "户内美装开发", "7", "定尺波纹管",
-            "8", "户内美装工程", "9", "户内美装运维"
+    public static final Map<String, String> KEY_TO_CN = Map.ofEntries(
+            Map.entry("1", "燃气灶"), Map.entry("2", "抽油烟机"),
+            Map.entry("3", "热水器"), Map.entry("4", "壁挂炉"),
+            Map.entry("5", "壁挂炉以旧换新销售"), Map.entry("6", "户内美装销售"),
+            Map.entry("7", "定尺波纹管"), Map.entry("8", "户内美装工程"),
+            Map.entry("9", "户内美装运维"), Map.entry("10", "保险")
     );
 
     /** Category name cache from platform dict (volatile for DCL) */
     private volatile Set<String> categoryNameCache;
     private static final Set<String> DEFAULT_CATEGORIES = Set.of(
             "燃气灶", "抽油烟机", "热水器", "壁挂炉",
-            "壁挂炉以旧换新销售", "户内美装开发", "定尺波纹管",
-            "户内美装工程", "户内美装运维"
+            "壁挂炉以旧换新销售", "户内美装销售", "定尺波纹管",
+            "户内美装工程", "户内美装运维", "保险"
     );
 
     public BusinessDataServiceImpl(
@@ -188,6 +193,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             Map<String, String> batchNoMap = new HashMap<>();
             List<ParsedRow> parsedRows = new ArrayList<>();
 
+            // ── Resolve tiered-commission categories (品牌/型号必填) ──
+            Set<String> tieredCategories = loadTieredCommissionCategories(
+                    corpId != null ? corpId : 4L);
+
             // ── Phase 1: Parse & validate all rows ──
             for (int i = 1; i < rows.length; i++) {
                 String[] cols = rows[i].split("\t", -1);
@@ -195,10 +204,12 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 ParsedRow pr = parseRow(cols, customerIdx, catIdx, brandIdx, modelIdx,
                         priceIdx, companyIdx, deptIdx, agentIdx, agentPhoneIdx,
                         saleDateIdx, recDateIdx, recNoIdx, productMap);
-                validateRow(pr, i + 1, errors);
                 if (pr != null) {
-                    // Resolve batchNo for company
+                    // Resolve category key BEFORE validation (needed for tiered check)
                     pr.catKey = CN_TO_KEY.getOrDefault(pr.catCn, pr.catCn);
+                }
+                validateRow(pr, i + 1, errors, tieredCategories);
+                if (pr != null) {
                     pr.product = productMap.get(pr.brand + "|" + pr.catKey + "|" + pr.model);
                     parsedRows.add(pr);
                 }
@@ -269,13 +280,15 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         }
     }
 
-    /** Parse a single row into a ParsedRow. Returns null if brand/model empty (skip). */
+    /** Parse a single row into a ParsedRow. Only skip completely empty rows. */
     private ParsedRow parseRow(String[] cols, int customerIdx, int catIdx, int brandIdx,
             int modelIdx, int priceIdx, int companyIdx, int deptIdx, int agentIdx,
             int agentPhoneIdx, int saleDateIdx, int recDateIdx, int recNoIdx,
             Map<String, OpsValueAddedProduct> productMap) {
         String brand = val(cols, brandIdx), model = val(cols, modelIdx);
-        if (brand.isEmpty() || model.isEmpty()) return null;
+        String cat = val(cols, catIdx);
+        // Only skip completely empty rows; non-appliance categories can lack brand/model
+        if (cat.isEmpty() && brand.isEmpty() && model.isEmpty()) return null;
 
         ParsedRow pr = new ParsedRow();
         pr.company = val(cols, companyIdx);
@@ -294,7 +307,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     /** Validate a parsed row and add any errors. */
-    private void validateRow(ParsedRow pr, int rowNum, List<String> errors) {
+    private void validateRow(ParsedRow pr, int rowNum, List<String> errors, Set<String> tieredCategories) {
         if (pr == null) return; // silently skip null rows (brand/model empty)
         // Category dict check
         String cat = pr.catCn;
@@ -310,10 +323,13 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             errors.add("第" + rowNum + "行: 公司为空");
         else if (!VALID_COMPANIES.contains(pr.company))
             errors.add("第" + rowNum + "行: 无效公司 \"" + pr.company + "\"");
-        if (pr.brand.isEmpty())
-            errors.add("第" + rowNum + "行: 品牌为空");
-        if (pr.model.isEmpty())
-            errors.add("第" + rowNum + "行: 型号为空");
+        // Brand/model required only for tiered commission categories
+        if (pr.catKey != null && tieredCategories.contains(pr.catKey)) {
+            if (pr.brand.isEmpty())
+                errors.add("第" + rowNum + "行: 该品类存在阶梯提成规则，品牌不能为空");
+            if (pr.model.isEmpty())
+                errors.add("第" + rowNum + "行: 该品类存在阶梯提成规则，型号不能为空");
+        }
         if (pr.agent.isEmpty() || pr.agent.isBlank())
             errors.add("第" + rowNum + "行: 经办人为空");
         if (pr.salePrice == null)
@@ -382,6 +398,27 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         if (a == null && b == null) return 0;
         if (a == null || b == null) return -1;
         return a.compareTo(b);
+    }
+
+    /** Load categories with "阶梯" commission type from ops_personal_commission_rule. */
+    private Set<String> loadTieredCommissionCategories(Long corpId) {
+        try {
+            List<OpsPersonalCommissionRule> rules = ruleMapper.selectList(
+                    new LambdaQueryWrapper<OpsPersonalCommissionRule>()
+                            .eq(OpsPersonalCommissionRule::getCorpId, corpId)
+                            .eq(OpsPersonalCommissionRule::getCommissionType, "阶梯")
+                            .eq(OpsPersonalCommissionRule::getStatus, 1));
+            if (rules.isEmpty()) return Set.of();
+            Set<String> cats = new HashSet<>();
+            for (OpsPersonalCommissionRule r : rules) {
+                if (r.getCategory() != null && !r.getCategory().isBlank())
+                    cats.add(r.getCategory());
+            }
+            return cats;
+        } catch (Exception e) {
+            log.warn("Failed to load tiered commission categories for corpId={}", corpId, e);
+            return Set.of();
+        }
     }
 
     /** Load valid category names from platform dict. Falls back to defaults on failure. */
@@ -700,10 +737,21 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private String parseExcelWithPython(Path file) throws Exception {
         ProcessBuilder pb = new ProcessBuilder("python3", "-c",
                 "import openpyxl\n"
-                        + "wb=openpyxl.load_workbook('" + file.toAbsolutePath() + "', read_only=True)\n"
-                        + "ws=wb.active\n"
-                        + "for row in ws.iter_rows(values_only=True):\n"
-                        + "  print('\\t'.join(str(v).replace('\\n',' ').replace('\\r',' ') if v is not None else '' for v in row))\n");
+                        + "wb = openpyxl.load_workbook('" + file.toAbsolutePath() + "')\n"
+                        + "ws = wb.active\n"
+                        + "fills = {}\n"
+                        + "for mg in ws.merged_cells.ranges:\n"
+                        + "    val = ws.cell(mg.min_row, mg.min_col).value\n"
+                        + "    for r in range(mg.min_row, mg.max_row + 1):\n"
+                        + "        for c in range(mg.min_col, mg.max_col + 1):\n"
+                        + "            fills[(r, c)] = val\n"
+                        + "for row_idx, row in enumerate(ws.iter_rows(values_only=True), 1):\n"
+                        + "    vals = []\n"
+                        + "    for col_idx, v in enumerate(row, 1):\n"
+                        + "        if v is None and (row_idx, col_idx) in fills:\n"
+                        + "            v = fills[(row_idx, col_idx)]\n"
+                        + "        vals.append(str(v).replace('\\n',' ').replace('\\r',' ') if v is not None else '')\n"
+                        + "    print('\\t'.join(vals))\n");
         pb.redirectErrorStream(true);
         Process p = pb.start();
         String out = new String(p.getInputStream().readAllBytes(), "UTF-8");
