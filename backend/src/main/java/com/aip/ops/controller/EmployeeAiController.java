@@ -323,32 +323,46 @@ public class EmployeeAiController {
     public R<Map<String, Object>> profile() {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
-            // Try to personalize with employee identity
             Map<String, Object> identity = employeeService.checkIdentity();
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> companies = identity.get("companies") instanceof List
                     ? (List<Map<String, Object>>) identity.get("companies") : List.of();
 
+            String corpName = "", roleName = "";
             if (!companies.isEmpty()) {
                 Map<String, Object> c = companies.get(0);
-                String corpName = c.getOrDefault("corpName", "").toString();
-                String roleName = c.getOrDefault("roleName", "").toString();
-                String greeting = "您好！我是您的企业AI助手～\n"
-                        + "当前公司：" + corpName + "（" + roleName + "）\n"
-                        + "支持组织知识库、数据分析、技能工具和报告生成，有什么需要？";
-                result.put("greeting", greeting);
-                result.put("corpName", corpName);
-                result.put("roleName", roleName);
-            } else {
-                result.put("greeting", "您好！我是您的企业AI助手～\n"
-                        + "支持组织知识库、数据分析、技能工具和报告生成，有什么需要？");
+                corpName = c.getOrDefault("corpName", "").toString();
+                roleName = c.getOrDefault("roleName", "").toString();
             }
+
+            // Try to get platform personalized greeting
+            String greeting = null;
+            try {
+                Map<String, Object> greetingResp = platformInternalClient.get(
+                        "/api/ai/greeting", null);
+                if (greetingResp != null && greetingResp.get("data") instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> gd = (Map<String, Object>) greetingResp.get("data");
+                    if (gd.get("greetingText") instanceof String s && !s.isBlank()) {
+                        greeting = s;
+                    }
+                }
+            } catch (Exception ignored) { /* fall back to static greeting */ }
+
+            if (greeting == null) {
+                greeting = !corpName.isEmpty()
+                    ? "您好！我是您的企业AI助手～\n当前公司：" + corpName + "（" + roleName + "）\n支持组织知识库、数据分析、技能工具和报告生成，有什么需要？"
+                    : "您好！我是您的企业AI助手～\n支持组织知识库、数据分析、技能工具和报告生成，有什么需要？";
+            }
+
+            result.put("greeting", greeting);
+            result.put("corpName", corpName);
+            result.put("roleName", roleName);
             result.put("nickname", "员工");
             result.put("avatar", null);
         } catch (Exception e) {
             result.put("nickname", "员工");
-            result.put("greeting", "您好！我是您的企业AI助手～\n"
-                    + "支持组织知识库、数据分析、技能工具和报告生成，有什么需要？");
+            result.put("greeting", "您好！我是您的企业AI助手～\n支持组织知识库、数据分析、技能工具和报告生成，有什么需要？");
         }
         return R.ok(result);
     }
