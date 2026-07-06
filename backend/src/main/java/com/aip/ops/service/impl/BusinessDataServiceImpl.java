@@ -3,11 +3,15 @@ package com.aip.ops.service.impl;
 import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsPersonalCommissionRule;
 import com.aip.ops.entity.OpsValueAddedProduct;
+import com.aip.ops.entity.SysImportTask;
+import com.aip.ops.imports.BusinessDataImportHandler;
+import com.aip.ops.imports.ImportResult;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.DataScopeService;
+import com.aip.ops.service.ImportTaskService;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -46,6 +50,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final DataScopeService dataScopeService;
     private final DataSource dataSource;
     private final PlatformInternalClient platformInternalClient;
+    private final BusinessDataImportHandler importHandler;
+    private final ImportTaskService importTaskService;
 
     private static final Set<String> VALID_COMPANIES = Set.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
 
@@ -80,13 +86,17 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             OpsPersonalCommissionRuleMapper ruleMapper,
             DataScopeService dataScopeService,
             DataSource dataSource,
-            PlatformInternalClient platformInternalClient) {
+            PlatformInternalClient platformInternalClient,
+            BusinessDataImportHandler importHandler,
+            ImportTaskService importTaskService) {
         this.mapper = mapper;
         this.productMapper = productMapper;
         this.ruleMapper = ruleMapper;
         this.dataScopeService = dataScopeService;
         this.dataSource = dataSource;
         this.platformInternalClient = platformInternalClient;
+        this.importHandler = importHandler;
+        this.importTaskService = importTaskService;
     }
     public static String getCategoryDisplayName(String key) {
         if (key == null || key.isEmpty()) return "";
@@ -154,123 +164,30 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     @Override
     @Transactional
     public Map<String, Object> importExcel(MultipartFile file, String batchNo, Long corpId) {
-        List<String> errors = new ArrayList<>();
         Path tmpFile = null;
-
         try {
+            // Save uploaded file to temp path
             tmpFile = Files.createTempFile("import_", ".xlsx");
             file.transferTo(tmpFile);
 
-            // Load product map
-            List<OpsValueAddedProduct> prods = productMapper.selectList(null);
-            Map<String, OpsValueAddedProduct> productMap = new HashMap<>();
-            for (OpsValueAddedProduct p : prods) {
-                productMap.put(p.getBrand() + "|" + p.getCategory() + "|" + p.getModel(), p);
+            // Create task record and delegate to unified import handler
+            String originalName = file.getOriginalFilename() != null
+                    ? file.getOriginalFilename() : "import.xlsx";
+            SysImportTask task = importTaskService.createTask("business_data",
+                    originalName, tmpFile.toAbsolutePath().toString(), file.getSize());
+            ImportResult result = importHandler.execute(task);
+
+            // Map ImportResult → controller response format
+            Map<String, Object> response = new LinkedHashMap<>();
+            if ("success".equals(result.getStatus())) {
+                response.put("status", "success");
+                response.put("count", result.getCount());
+            } else {
+                response.put("status", "fail");
+                response.put("totalErrors", result.getFailRows());
+                response.put("errors", result.getErrors());
             }
-
-            String json = parseExcelWithPython(tmpFile);
-            if (json == null || json.isEmpty()) {
-                return Map.of("status", "fail", "totalErrors", 1,
-                        "errors", List.of("Python解析Excel失败"));
-            }
-
-            String[] rows = json.trim().split("\n");
-            if (rows.length < 2) {
-                return Map.of("status", "fail", "totalErrors", 1,
-                        "errors", List.of("Excel文件无数据行"));
-            }
-
-            String[] headers = rows[0].split("\t");
-            int customerIdx = indexOf(headers, "客户"), catIdx = indexOf(headers, "品类");
-            int brandIdx = indexOf(headers, "品牌"), modelIdx = indexOf(headers, "型号");
-            int priceIdx = indexOf(headers, "销售价"), companyIdx = indexOf(headers, "公司");
-            int deptIdx = indexOf(headers, "部门"), agentIdx = indexOf(headers, "经办人");
-            int agentPhoneIdx = indexOf(headers, "经办人手机号");
-            int saleDateIdx = indexOf(headers, "销售日期"), recDateIdx = indexOf(headers, "收款日期");
-            int recNoIdx = indexOf(headers, "收据号");
-
-            String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
-            Map<String, String> batchNoMap = new HashMap<>();
-            List<ParsedRow> parsedRows = new ArrayList<>();
-
-            // ── Resolve tiered-commission categories (品牌/型号必填) ──
-            Set<String> tieredCategories = loadTieredCommissionCategories(
-                    corpId != null ? corpId : 4L);
-
-            // ── Phase 1: Parse & validate all rows ──
-            for (int i = 1; i < rows.length; i++) {
-                String[] cols = rows[i].split("\t", -1);
-                if (cols.length < 4) continue; // skip empty/note rows
-                ParsedRow pr = parseRow(cols, customerIdx, catIdx, brandIdx, modelIdx,
-                        priceIdx, companyIdx, deptIdx, agentIdx, agentPhoneIdx,
-                        saleDateIdx, recDateIdx, recNoIdx, productMap);
-                if (pr != null) {
-                    // Resolve category key BEFORE validation (needed for tiered check)
-                    pr.catKey = CN_TO_KEY.getOrDefault(pr.catCn, pr.catCn);
-                }
-                validateRow(pr, i + 1, errors, tieredCategories);
-                if (pr != null) {
-                    pr.product = productMap.get(pr.brand + "|" + pr.catKey + "|" + pr.model);
-                    parsedRows.add(pr);
-                }
-            }
-
-            // If any validation error → reject entirely
-            if (!errors.isEmpty()) {
-                return Map.of("status", "fail", "totalErrors", errors.size(), "errors", errors);
-            }
-
-            // ── Phase 1b: Receipt number group validation ──
-            List<String> receiptErrors = new ArrayList<>();
-            validateReceiptGroups(parsedRows, receiptErrors);
-            if (!receiptErrors.isEmpty()) {
-                return Map.of("status", "fail", "totalErrors",
-                        receiptErrors.size(), "errors", receiptErrors);
-            }
-
-            // ── Phase 2: JDBC batch insert (single tx, DataSourceUtils participates in @Transactional) ──
-            String insertSql = "INSERT INTO ops_business_data "
-                    + "(batch_no, company, customer, brand, category, model, "
-                    + "sale_price, agent, agent_phone, sale_date, receipt_date, receipt_no, "
-                    + "retail_floor_price, group_lowest_price, calc_status, remark, "
-                    + "corp_id, operator_id) "
-                    + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
-
-            int count;
-            java.sql.Connection conn = DataSourceUtils.getConnection(dataSource);
-            try (PreparedStatement ps = conn.prepareStatement(insertSql)) {
-                count = 0;
-                for (ParsedRow pr : parsedRows) {
-                    String bn = batchNoMap.computeIfAbsent(pr.company, c -> c + ts);
-                    int idx = 1;
-                    ps.setString(idx++, bn);
-                    ps.setString(idx++, pr.company);
-                    ps.setString(idx++, pr.customer);
-                    ps.setString(idx++, pr.brand);
-                    ps.setString(idx++, pr.catKey);
-                    ps.setString(idx++, pr.model);
-                    ps.setBigDecimal(idx++, pr.salePrice);
-                    ps.setString(idx++, pr.agent);
-                    ps.setString(idx++, pr.agentPhone);
-                    ps.setString(idx++, pr.saleDate);
-                    ps.setString(idx++, pr.receiptDate);
-                    ps.setString(idx++, pr.receiptNo);
-                    ps.setBigDecimal(idx++, pr.product != null ? pr.product.getRetailFloorPrice() : null);
-                    ps.setBigDecimal(idx++, pr.product != null ? pr.product.getGroupLowestPrice() : null);
-                    ps.setString(idx++, "未计算");
-                    ps.setString(idx++, pr.dept.isEmpty() ? null : "部门: " + pr.dept);
-                    ps.setLong(idx++, corpId);
-                    ps.setLong(idx++, corpId);
-                    ps.addBatch();
-                    count++;
-                    if (count % 500 == 0) { ps.executeBatch(); }
-                }
-                if (count % 500 != 0) { ps.executeBatch(); }
-            }
-
-            log.info("导入Excel成功: {}条", count);
-            return Map.of("status", "success", "count", count);
-
+            return response;
         } catch (Exception e) {
             log.error("导入Excel失败", e);
             return Map.of("status", "fail", "totalErrors", 1,
