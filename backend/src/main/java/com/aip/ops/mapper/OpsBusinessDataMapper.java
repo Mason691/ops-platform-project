@@ -21,11 +21,13 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
             + "<if test='batchNo != null and batchNo != \"\"'>AND batch_no = #{batchNo}</if> "
             + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "
+            + "<if test='receiptNo != null and receiptNo != \"\"'>AND receipt_no = #{receiptNo}</if> "
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
             + "</script>")
     Map<String, BigDecimal> aggregateStats(@Param("company") String company,
                                            @Param("batchNo") String batchNo,
                                            @Param("agent") String agent,
+                                           @Param("receiptNo") String receiptNo,
                                            @Param("corpIds") List<Long> corpIds);
 
     /** Count only — delegates to COUNT(*) for speed. */
@@ -34,10 +36,12 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
             + "<if test='batchNo != null and batchNo != \"\"'>AND batch_no = #{batchNo}</if> "
             + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "
+            + "<if test='receiptNo != null and receiptNo != \"\"'>AND receipt_no = #{receiptNo}</if> "
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
             + "</script>")
     long countFiltered(@Param("company") String company,
                        @Param("batchNo") String batchNo,
                        @Param("agent") String agent,
+                       @Param("receiptNo") String receiptNo,
                        @Param("corpIds") List<Long> corpIds);
 }

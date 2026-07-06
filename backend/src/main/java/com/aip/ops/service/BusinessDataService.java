@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 public interface BusinessDataService {
-    Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent);
+    Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo);
     List<String> getBatches();
     Map<String, Object> importExcel(MultipartFile file, String batchNo, Long corpId);
     void batchDelete(List<Long> ids);

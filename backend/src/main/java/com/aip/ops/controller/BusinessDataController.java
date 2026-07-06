@@ -70,8 +70,9 @@ public class BusinessDataController {
                      @RequestParam(defaultValue = "10") int pageSize,
                      @RequestParam(required = false) String company,
                      @RequestParam(required = false) String batchNo,
-                     @RequestParam(required = false) String agent) {
-        return R.ok(service.page(pageNum, pageSize, company, batchNo, agent));
+                     @RequestParam(required = false) String agent,
+                     @RequestParam(required = false) String receiptNo) {
+        return R.ok(service.page(pageNum, pageSize, company, batchNo, agent, receiptNo));
     }
 
     @GetMapping("/batches")

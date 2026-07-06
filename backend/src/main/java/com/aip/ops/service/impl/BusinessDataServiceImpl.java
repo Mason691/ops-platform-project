@@ -89,16 +89,16 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
-    public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent) {
+    public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo) {
         // Build visible corp IDs once
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
         List<Long> corpIdList = (visibleIds != null && !visibleIds.isEmpty())
                 ? new ArrayList<>(visibleIds) : null;
 
         // ── COUNT + STATS: single-row aggregate queries (no full table scan) ──
-        long total = mapper.countFiltered(company, batchNo, agent, corpIdList);
+        long total = mapper.countFiltered(company, batchNo, agent, receiptNo, corpIdList);
         java.util.Map<String, java.math.BigDecimal> stats =
-                mapper.aggregateStats(company, batchNo, agent, corpIdList);
+                mapper.aggregateStats(company, batchNo, agent, receiptNo, corpIdList);
         BigDecimal totalSale = stats != null && stats.get("totalSale") != null
                 ? stats.get("totalSale") : BigDecimal.ZERO;
         BigDecimal totalCommission = stats != null && stats.get("totalCommission") != null
@@ -110,6 +110,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         if (company != null && !company.isEmpty()) qw.eq(OpsBusinessData::getCompany, company);
         if (batchNo != null && !batchNo.isEmpty()) qw.eq(OpsBusinessData::getBatchNo, batchNo);
         if (agent != null && !agent.isEmpty()) qw.eq(OpsBusinessData::getAgent, agent);
+        if (receiptNo != null && !receiptNo.isEmpty()) qw.eq(OpsBusinessData::getReceiptNo, receiptNo);
         if (corpIdList != null) qw.in(OpsBusinessData::getCorpId, corpIdList);
         qw.orderByDesc(OpsBusinessData::getId);
         qw.last("LIMIT " + offset + "," + pageSize);
