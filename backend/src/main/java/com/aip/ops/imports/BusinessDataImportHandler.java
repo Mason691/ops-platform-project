@@ -1,9 +1,11 @@
 package com.aip.ops.imports;
 
 import com.aip.ops.entity.OpsBusinessData;
+import com.aip.ops.entity.OpsPersonalCommissionRule;
 import com.aip.ops.entity.OpsValueAddedProduct;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
+import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.sdk.client.PlatformInternalClient;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +34,7 @@ public class BusinessDataImportHandler implements ImportHandler {
 
     private final OpsBusinessDataMapper mapper;
     private final OpsValueAddedProductMapper productMapper;
+    private final OpsPersonalCommissionRuleMapper commissionRuleMapper;
     private final PlatformInternalClient platformInternalClient;
     private final DataSource dataSource;
 
@@ -48,10 +51,12 @@ public class BusinessDataImportHandler implements ImportHandler {
 
     public BusinessDataImportHandler(OpsBusinessDataMapper mapper,
                                      OpsValueAddedProductMapper productMapper,
+                                     OpsPersonalCommissionRuleMapper commissionRuleMapper,
                                      PlatformInternalClient platformInternalClient,
                                      DataSource dataSource) {
         this.mapper = mapper;
         this.productMapper = productMapper;
+        this.commissionRuleMapper = commissionRuleMapper;
         this.platformInternalClient = platformInternalClient;
         this.dataSource = dataSource;
     }
@@ -142,6 +147,10 @@ public class BusinessDataImportHandler implements ImportHandler {
                     + p.getModel(), p);
         }
 
+        // ── Resolve tiered-commission categories (品牌/型号必填) ──
+        Set<String> tieredCategories = loadTieredCommissionCategories(
+                task.getCorpId() != null ? task.getCorpId() : 4L);
+
         // ── Phase 1: Parse + validate ALL rows ──
         List<ParsedRow> parsedRows = new ArrayList<>();
         List<String> errors = new ArrayList<>();
@@ -157,7 +166,7 @@ public class BusinessDataImportHandler implements ImportHandler {
                     agentPhoneIdx, saleDateIdx, recDateIdx, recNoIdx);
             if (pr != null) {
                 checkCategory(pr, i + 1, validCategories, errors);
-                validateFields(pr, i + 1, errors);
+                validateFields(pr, i + 1, errors, tieredCategories);
                 // Resolve product mapping (needed for INSERT phase)
                 pr.catKey = mapCategoryKey(pr.catCn);
                 pr.product = productMap.get(pr.brand + "|" + pr.catKey
@@ -303,21 +312,41 @@ public class BusinessDataImportHandler implements ImportHandler {
         }
     }
 
-    /** Categories that require brand/model (appliances). */
-    private static final Set<String> BRAND_REQUIRED_CATEGORIES =
-            Set.of("燃气灶", "抽油烟机", "热水器", "壁挂炉");
+    /** Categories whose personal commission type is "阶梯" — brand/model are required. */
+    private Set<String> loadTieredCommissionCategories(Long corpId) {
+        try {
+            List<OpsPersonalCommissionRule> rules = commissionRuleMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<OpsPersonalCommissionRule>()
+                            .eq(OpsPersonalCommissionRule::getCorpId, corpId)
+                            .eq(OpsPersonalCommissionRule::getCommissionType, "阶梯")
+                            .eq(OpsPersonalCommissionRule::getStatus, 1));
+            if (rules.isEmpty()) return Set.of();
+            Set<String> cats = new HashSet<>();
+            for (OpsPersonalCommissionRule r : rules) {
+                if (r.getCategory() != null && !r.getCategory().isBlank())
+                    cats.add(r.getCategory());
+            }
+            log.info("Tiered commission categories for corpId={}: {}", corpId, cats);
+            return cats;
+        } catch (Exception e) {
+            log.warn("Failed to load tiered commission categories for corpId={}, falling back to empty: {}",
+                    corpId, e.getMessage());
+            return Set.of();
+        }
+    }
 
-    private void validateFields(ParsedRow pr, int rowNum, List<String> errors) {
+    private void validateFields(ParsedRow pr, int rowNum, List<String> errors,
+                                Set<String> tieredCategories) {
         if (pr.company.isEmpty())
             errors.add("第" + rowNum + "行: 公司为空");
         else if (!VALID_COMPANIES.contains(pr.company))
             errors.add("第" + rowNum + "行: 无效公司 \"" + pr.company + "\"");
-        // Brand/model only required for appliance categories
-        if (BRAND_REQUIRED_CATEGORIES.contains(pr.catCn)) {
+        // Brand/model required only for tiered commission categories
+        if (tieredCategories.contains(pr.catCn)) {
             if (pr.brand.isEmpty())
-                errors.add("第" + rowNum + "行: 品牌为空（品类" + pr.catCn + "必须填写品牌）");
+                errors.add("第" + rowNum + "行: 该品类存在阶梯提成规则，品牌不能为空");
             if (pr.model.isEmpty())
-                errors.add("第" + rowNum + "行: 型号为空（品类" + pr.catCn + "必须填写型号）");
+                errors.add("第" + rowNum + "行: 该品类存在阶梯提成规则，型号不能为空");
         }
         if (pr.agent == null || pr.agent.isBlank())
             errors.add("第" + rowNum + "行: 经办人为空");
@@ -436,18 +465,20 @@ public class BusinessDataImportHandler implements ImportHandler {
                 + "wb = openpyxl.load_workbook('"
                 + file.toAbsolutePath() + "')\n"
                 + "ws = wb.active\n"
-                + "# Fill merged cell values to all constituent cells\n"
+                + "# Build fill map from merged cell ranges (MergedCell is read-only)\n"
+                + "fills = {}\n"
                 + "for mg in ws.merged_cells.ranges:\n"
-                + "    min_col, min_row, max_col, max_row = mg.min_col, mg.min_row, mg.max_col, mg.max_row\n"
-                + "    val = ws.cell(min_row, min_col).value\n"
-                + "    for r in range(min_row, max_row + 1):\n"
-                + "        for c in range(min_col, max_col + 1):\n"
-                + "            cell = ws.cell(r, c)\n"
-                + "            if cell.value is None:\n"
-                + "                cell.value = val\n"
-                + "for row in ws.iter_rows(values_only=True):\n"
-                + "    print('\\t'.join(str(v).replace('\\n',' ').replace('\\r',' ') if v is not None"
-                + " else '' for v in row))\n");
+                + "    val = ws.cell(mg.min_row, mg.min_col).value\n"
+                + "    for r in range(mg.min_row, mg.max_row + 1):\n"
+                + "        for c in range(mg.min_col, mg.max_col + 1):\n"
+                + "            fills[(r, c)] = val\n"
+                + "for row_idx, row in enumerate(ws.iter_rows(values_only=True), 1):\n"
+                + "    vals = []\n"
+                + "    for col_idx, v in enumerate(row, 1):\n"
+                + "        if v is None and (row_idx, col_idx) in fills:\n"
+                + "            v = fills[(row_idx, col_idx)]\n"
+                + "        vals.append(str(v).replace('\\n',' ').replace('\\r',' ') if v is not None else '')\n"
+                + "    print('\\t'.join(vals))\n");
         pb.redirectErrorStream(true);
         Process p = pb.start();
         String out = new String(p.getInputStream().readAllBytes(), "UTF-8");
