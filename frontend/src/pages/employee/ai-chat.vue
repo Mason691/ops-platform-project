@@ -219,7 +219,7 @@ onMounted(async () => {
   try {
     const cfg = await api.employeeAiConfig()
     if (cfg?.nickname) aiNickname.value = cfg.nickname
-    if (cfg?.aiAvatar && cfg.aiAvatar.startsWith('http')) aiAvatar.value = cfg.aiAvatar
+    if (cfg?.aiAvatar) aiAvatar.value = cfg.aiAvatar
     if (cfg?.voiceEnabled !== undefined) voiceEnabled.value = cfg.voiceEnabled
     if (cfg?.quickQuestions) quickQuestions.value = cfg.quickQuestions
   } catch (_) {}
