@@ -45,8 +45,8 @@ public class BusinessDataImportHandler implements ImportHandler {
     private volatile Set<String> categoryNameCache;
     private static final Set<String> DEFAULT_CATEGORIES = Set.of(
             "燃气灶", "抽油烟机", "热水器", "壁挂炉",
-            "壁挂炉以旧换新销售", "户内美装开发", "定尺波纹管",
-            "户内美装工程", "户内美装运维"
+            "壁挂炉以旧换新销售", "户内美装销售", "定尺波纹管",
+            "户内美装工程", "户内美装运维", "保险"
     );
 
     public BusinessDataImportHandler(OpsBusinessDataMapper mapper,
@@ -293,10 +293,12 @@ public class BusinessDataImportHandler implements ImportHandler {
     }
 
     private String mapCategoryKey(String catCn) {
-        Map<String, String> cn2key = Map.of(
-                "燃气灶", "1", "抽油烟机", "2", "热水器", "3", "壁挂炉", "4",
-                "壁挂炉以旧换新销售", "5", "户内美装开发", "6", "定尺波纹管", "7",
-                "户内美装工程", "8", "户内美装运维", "9"
+        Map<String, String> cn2key = Map.ofEntries(
+                Map.entry("燃气灶", "1"), Map.entry("抽油烟机", "2"),
+                Map.entry("热水器", "3"), Map.entry("壁挂炉", "4"),
+                Map.entry("壁挂炉以旧换新销售", "5"), Map.entry("户内美装销售", "6"),
+                Map.entry("定尺波纹管", "7"), Map.entry("户内美装工程", "8"),
+                Map.entry("户内美装运维", "9"), Map.entry("保险", "10")
         );
         return cn2key.getOrDefault(catCn, catCn);
     }
