@@ -372,8 +372,9 @@ public class BusinessDataImportHandler implements ImportHandler {
     // ═══════ Receipt group validation ═══════
 
     /**
-     * Validate that rows sharing the same receipt number have consistent
-     * customer, category, brand, model, and sale price.
+     * Validate only customer name consistency within the same receipt number.
+     * Multiple products of different categories/brands/models/prices on one
+     * receipt is normal business practice.
      */
     private void validateReceiptGroups(List<ParsedRow> rows, List<String> errors) {
         // Build index: receiptNo → list of (rowIndex)
@@ -402,22 +403,6 @@ public class BusinessDataImportHandler implements ImportHandler {
                 if (!Objects.equals(base.customer, comp.customer)) {
                     errors.add("收据号" + receiptNo + "：第" + baseRowNum
                             + "行与第" + compRowNum + "行的客户名称不一致");
-                }
-                if (!Objects.equals(base.catCn, comp.catCn)) {
-                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
-                            + "行与第" + compRowNum + "行的品类不一致");
-                }
-                if (!Objects.equals(base.brand, comp.brand)) {
-                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
-                            + "行与第" + compRowNum + "行的品牌不一致");
-                }
-                if (!Objects.equals(base.model, comp.model)) {
-                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
-                            + "行与第" + compRowNum + "行的型号不一致");
-                }
-                if (compareBigDecimal(base.salePrice, comp.salePrice) != 0) {
-                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
-                            + "行与第" + compRowNum + "行的销售价不一致");
                 }
             }
         }
