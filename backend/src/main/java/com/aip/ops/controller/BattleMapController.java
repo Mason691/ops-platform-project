@@ -31,7 +31,7 @@ public class BattleMapController {
     private String cacheKey(Long corpId, String suffix) { return "ops_dashboard_data:" + (corpId != null ? corpId : 0) + ":" + suffix; }
 
     @SuppressWarnings("unchecked")
-    private <T> T cacheGet(String key) { CacheEntry e = cache.get(key); if (e != null && (System.currentTimeMillis() - e.ts) < CACHE_TTL_MS) return (T) e.data; return null; }
+    private <T> T cacheGet(String key) { CacheEntry e = cache.get(key); if (e != null && (System.currentTimeMillis() - e.ts) < CACHE_TTL_MS) return (T) e.data; if (e != null) cache.remove(key); return null; }
     private void cacheSet(String key, Object value) { cache.put(key, new CacheEntry(value)); }
     private void clearCache(Long corpId) {
         String prefix = "ops_dashboard_data:" + (corpId != null ? corpId : 0) + ":";
