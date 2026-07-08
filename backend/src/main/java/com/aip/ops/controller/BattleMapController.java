@@ -70,6 +70,22 @@ public class BattleMapController {
         return R.ok(Map.of("refreshed", true, "timestamp", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME), "corpId", corpId));
     }
 
+    /** Category sales aggregation — from ops_member_ledger (GROUP BY category) */
+    @GetMapping("/category-sales")
+    public R<?> categorySales(@RequestParam(required = false, defaultValue = "10") Long corpId) {
+        String cacheK = ck(corpId, "category-sales");
+        List<Map<String, Object>> cached = cacheGet(cacheK);
+        if (cached != null) return R.ok(Map.of("records", cached, "cached", true));
+        try {
+            List<Map<String, Object>> list = jdbcTemplate.queryForList(
+                "SELECT category, COUNT(*) as cnt, COALESCE(SUM(sales_price),0) as total " +
+                "FROM ops_member_ledger WHERE corp_id = ? AND delete_flag = 0 AND category IS NOT NULL " +
+                "GROUP BY category ORDER BY total DESC", corpId);
+            cacheSet(cacheK, list);
+            return R.ok(Map.of("records", list, "cached", false));
+        } catch (Exception e) { return R.ok(Map.of("records", List.of())); }
+    }
+
     /** Community distribution — from ETL table (fast, pre-computed) */
     @GetMapping("/community-stats")
     public R<?> communityStats(@RequestParam(required = false) Long corpId,
