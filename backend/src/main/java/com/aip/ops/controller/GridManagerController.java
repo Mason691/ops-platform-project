@@ -122,23 +122,25 @@ public class GridManagerController {
         return R.ok();
     }
 
-    /** Search employees from ai_platform.sys_user for dropdown selection. */
+    /** Search employees from ai_platform.sys_user — scoped to visible organizations only. */
     @GetMapping("/employees")
-    public R<?> employees(@RequestParam(required = false) String keyword,
-                          @RequestParam(required = false) Long corpId) {
+    public R<?> employees(@RequestParam(required = false) String keyword) {
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
         List<Map<String, Object>> list = new ArrayList<>();
         try {
             StringBuilder sql = new StringBuilder(
                     "SELECT id, real_name, phone, corp_id FROM ai_platform.sys_user WHERE status=1 AND delete_flag=0");
             List<Object> params = new ArrayList<>();
+            // Scope to visible orgs (null = super admin = all)
+            if (visibleCorpIds != null) {
+                sql.append(" AND corp_id IN (");
+                sql.append(visibleCorpIds.stream().map(String::valueOf).collect(Collectors.joining(",")));
+                sql.append(")");
+            }
             if (keyword != null && !keyword.isBlank()) {
                 sql.append(" AND (real_name LIKE ? OR phone LIKE ?)");
                 String k = "%" + keyword + "%";
                 params.add(k); params.add(k);
-            }
-            if (corpId != null) {
-                sql.append(" AND corp_id = ?");
-                params.add(corpId);
             }
             sql.append(" ORDER BY real_name LIMIT 50");
             jdbcTemplate.query(sql.toString(), ps -> {
@@ -159,9 +161,13 @@ public class GridManagerController {
         return R.ok(list);
     }
 
-    /** Get communities NOT currently assigned to any active grid manager. */
+    /**
+     * Get communities NOT currently assigned to any active grid manager.
+     * Scoped to communities with gas users in visible organizations.
+     */
     @GetMapping("/available-communities")
     public R<?> availableCommunities(@RequestParam(required = false) Long excludeManagerId) {
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
         List<Map<String, Object>> list = new ArrayList<>();
         try {
             // Find community IDs currently occupied by active (non-expired) grid managers
@@ -180,16 +186,24 @@ public class GridManagerController {
                 while (rs.next()) occupied.add(rs.getLong("community_id"));
             });
 
-            // Return all communities not in occupied set
-            jdbcTemplate.query(
-                    "SELECT id, community_name FROM ai_platform.sys_community WHERE delete_flag=0 ORDER BY community_name",
-                    rs -> {
-                        while (rs.next()) {
-                            long cid = rs.getLong("id");
-                            list.add(Map.of("id", cid, "name", rs.getString("community_name"),
-                                    "occupied", occupied.contains(cid)));
-                        }
-                    });
+            // Return only communities that have gas users in visible orgs, excluding occupied
+            StringBuilder communitySql = new StringBuilder(
+                    "SELECT DISTINCT sc.id, sc.community_name FROM ai_platform.sys_community sc " +
+                    "JOIN ops_gas_user gu ON gu.community_id = sc.id " +
+                    "WHERE sc.delete_flag = 0");
+            if (visibleCorpIds != null) {
+                communitySql.append(" AND gu.corp_id IN (")
+                    .append(visibleCorpIds.stream().map(String::valueOf).collect(Collectors.joining(",")))
+                    .append(")");
+            }
+            communitySql.append(" ORDER BY sc.community_name");
+            jdbcTemplate.query(communitySql.toString(), rs -> {
+                while (rs.next()) {
+                    long cid = rs.getLong("id");
+                    list.add(Map.of("id", cid, "name", rs.getString("community_name"),
+                            "occupied", occupied.contains(cid)));
+                }
+            });
         } catch (Exception e) {
             log.warn("Failed to load available communities: {}", e.getMessage());
         }
