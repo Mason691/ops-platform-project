@@ -1,0 +1,38 @@
+package com.aip.ops.entity;
+
+import com.aip.sdk.entity.BaseEntity;
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
+import java.time.LocalDate;
+
+@Data
+@EqualsAndHashCode(callSuper = true)
+@TableName("ops_member_ledger")
+public class OpsMemberLedger extends BaseEntity {
+
+    @TableId(type = IdType.AUTO)
+    private Long id;
+
+    private Long corpId;
+    private Long memberId;
+    private Long communityId;
+    private String category;
+    private LocalDate usageDate;
+    private String productName;
+    private String brand;
+    private String model;
+    private String remark;
+
+    /** Transient: resolved names for display */
+    @TableField(exist = false)
+    private String memberName;
+    @TableField(exist = false)
+    private String communityName;
+    @TableField(exist = false)
+    private String gridManagerName;
+}
