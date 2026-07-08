@@ -112,7 +112,6 @@ public class MemberLedgerController {
     /** Search members from ai_platform.sys_member for dropdown. */
     @GetMapping("/members")
     public R<?> members(@RequestParam(required = false) String keyword) {
-        List<Map<String, Object>> list = new ArrayList<>();
         try {
             String sql = "SELECT id, phone, nickname FROM ai_platform.sys_member WHERE status=1 AND delete_flag=0";
             if (keyword != null && !keyword.isBlank()) {
@@ -120,30 +119,20 @@ public class MemberLedgerController {
                 sql += " AND (phone LIKE '%" + k + "%' OR nickname LIKE '%" + k + "%')";
             }
             sql += " ORDER BY nickname, phone LIMIT 50";
-            jdbcTemplate.query(sql, (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-                while (rs.next()) {
-                    Map<String, Object> r = new LinkedHashMap<>();
-                    r.put("id", rs.getLong("id"));
-                    r.put("phone", rs.getString("phone"));
-                    r.put("nickname", rs.getString("nickname"));
-                    list.add(r);
-                }
-            });
+            List<Map<String, Object>> list = jdbcTemplate.queryForList(sql);
+            return R.ok(list);
         } catch (Exception e) { log.warn("members search failed: {}", e.getMessage()); }
-        return R.ok(list);
+        return R.ok(List.of());
     }
 
     @GetMapping("/communities")
     public R<?> communities() {
-        List<Map<String, Object>> list = new ArrayList<>();
         try {
-            jdbcTemplate.query(
-                "SELECT id, community_name FROM ai_platform.sys_community WHERE delete_flag=0 ORDER BY community_name",
-                (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-                    while (rs.next()) list.add(Map.of("id", rs.getLong("id"), "name", rs.getString("community_name")));
-                });
+            List<Map<String, Object>> list = jdbcTemplate.queryForList(
+                "SELECT id, community_name AS name FROM ai_platform.sys_community WHERE delete_flag=0 ORDER BY community_name");
+            return R.ok(list);
         } catch (Exception e) { log.warn("communities failed: {}", e.getMessage()); }
-        return R.ok(list);
+        return R.ok(List.of());
     }
 
     // ── Private helpers ──
@@ -159,11 +148,9 @@ public class MemberLedgerController {
         Map<Long, String> map = new LinkedHashMap<>();
         try {
             String in = ids.stream().map(String::valueOf).collect(Collectors.joining(","));
-            jdbcTemplate.query(
-                "SELECT id, COALESCE(NULLIF(nickname,''), phone) AS name FROM ai_platform.sys_member WHERE id IN (" + in + ")",
-                (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-                    while (rs.next()) map.put(rs.getLong("id"), rs.getString("name"));
-                });
+            jdbcTemplate.queryForList(
+                "SELECT id, COALESCE(NULLIF(nickname,''), phone) AS name FROM ai_platform.sys_member WHERE id IN (" + in + ")")
+                .forEach(row -> map.put(((Number)row.get("id")).longValue(), (String)row.get("name")));
         } catch (Exception e) { log.warn("memberNames failed: {}", e.getMessage()); }
         return map;
     }
@@ -173,11 +160,9 @@ public class MemberLedgerController {
         Map<Long, String> map = new LinkedHashMap<>();
         try {
             String in = ids.stream().map(String::valueOf).collect(Collectors.joining(","));
-            jdbcTemplate.query(
-                "SELECT id, community_name FROM ai_platform.sys_community WHERE id IN (" + in + ")",
-                (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-                    while (rs.next()) map.put(rs.getLong("id"), rs.getString("community_name"));
-                });
+            jdbcTemplate.queryForList(
+                "SELECT id, community_name FROM ai_platform.sys_community WHERE id IN (" + in + ")")
+                .forEach(row -> map.put(((Number)row.get("id")).longValue(), (String)row.get("community_name")));
         } catch (Exception e) { log.warn("communityNames failed: {}", e.getMessage()); }
         return map;
     }
@@ -187,14 +172,12 @@ public class MemberLedgerController {
         Map<Long, String> map = new LinkedHashMap<>();
         try {
             String in = communityIds.stream().map(String::valueOf).collect(Collectors.joining(","));
-            jdbcTemplate.query(
+            jdbcTemplate.queryForList(
                 "SELECT mgc.community_id, mg.real_name FROM ops_grid_manager_community mgc " +
                 "JOIN ops_grid_manager mg ON mg.id = mgc.grid_manager_id AND mg.delete_flag=0 " +
                 "AND (mg.end_time IS NULL OR mg.end_time >= CURDATE()) " +
-                "WHERE mgc.community_id IN (" + in + ")",
-                (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-                    while (rs.next()) map.put(rs.getLong("community_id"), rs.getString("real_name"));
-                });
+                "WHERE mgc.community_id IN (" + in + ")")
+                .forEach(row -> map.put(((Number)row.get("community_id")).longValue(), (String)row.get("real_name")));
         } catch (Exception e) { log.warn("gridManagerNames failed: {}", e.getMessage()); }
         return map;
     }
