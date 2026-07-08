@@ -24,6 +24,7 @@ public class OpsActivityReview extends BaseEntity {
     private String summary;
     private String remark;
     private String attachment;
+    private String participantIds;
     private Integer reviewStatus;
     private String reviewComment;
     private Long reviewBy;

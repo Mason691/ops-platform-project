@@ -162,6 +162,19 @@ public class ActivityReviewController {
         return R.ok(list);
     }
 
+    /** Get employees (sys_user) of the current org for participant/agent selection. */
+    @GetMapping("/employees")
+    public R<?> employees() {
+        Long corpId = SecurityUtils.getCurrentCorpIdOrNull();
+        if (corpId == null) return R.ok(List.of());
+        try {
+            List<Map<String, Object>> list = jdbcTemplate.queryForList(
+                "SELECT id, real_name, phone FROM ai_platform.sys_user WHERE status=1 AND delete_flag=0 AND corp_id=" + corpId + " ORDER BY real_name");
+            return R.ok(list);
+        } catch (Exception e) { log.warn("employees failed: {}", e.getMessage()); }
+        return R.ok(List.of());
+    }
+
     // helpers
     private Long currentCorpId() {
         Set<Long> ids = dataScopeService.getVisibleCorpIds();

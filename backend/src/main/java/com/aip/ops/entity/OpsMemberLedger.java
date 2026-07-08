@@ -31,6 +31,7 @@ public class OpsMemberLedger extends BaseEntity {
     private java.math.BigDecimal salesPrice;
     private String receiptNo;
     private LocalDate receiptDate;
+    private String agent;
     private String remark;
 
     /** Transient: resolved names for display */
@@ -40,4 +41,6 @@ public class OpsMemberLedger extends BaseEntity {
     private String communityName;
     @TableField(exist = false)
     private String gridManagerName;
+    @TableField(exist = false)
+    private String activityTitle;
 }

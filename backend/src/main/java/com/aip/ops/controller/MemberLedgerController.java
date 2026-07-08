@@ -34,29 +34,37 @@ public class MemberLedgerController {
                      @RequestParam(required = false) String communityName,
                      @RequestParam(required = false) String gridManagerName,
                      @RequestParam(required = false) String category,
+                     @RequestParam(required = false) Long activityId,
                      @RequestParam(required = false) String usageDateStart,
-                     @RequestParam(required = false) String usageDateEnd) {
+                     @RequestParam(required = false) String usageDateEnd,
+                     @RequestParam(required = false) String receiptDateStart,
+                     @RequestParam(required = false) String receiptDateEnd) {
 
         Set<Long> visible = dataScopeService.getVisibleCorpIds();
 
         LambdaQueryWrapper<OpsMemberLedger> qw = new LambdaQueryWrapper<>();
         if (visible != null) qw.in(OpsMemberLedger::getCorpId, visible);
         if (category != null && !category.isBlank()) qw.eq(OpsMemberLedger::getCategory, category);
+        if (activityId != null) qw.eq(OpsMemberLedger::getActivityId, activityId);
         if (usageDateStart != null && !usageDateStart.isBlank()) qw.ge(OpsMemberLedger::getUsageDate, LocalDate.parse(usageDateStart));
         if (usageDateEnd != null && !usageDateEnd.isBlank()) qw.le(OpsMemberLedger::getUsageDate, LocalDate.parse(usageDateEnd));
+        if (receiptDateStart != null && !receiptDateStart.isBlank()) qw.ge(OpsMemberLedger::getReceiptDate, LocalDate.parse(receiptDateStart));
+        if (receiptDateEnd != null && !receiptDateEnd.isBlank()) qw.le(OpsMemberLedger::getReceiptDate, LocalDate.parse(receiptDateEnd));
         qw.orderByDesc(OpsMemberLedger::getCreateTime);
 
         Page<OpsMemberLedger> result = mapper.selectPage(new Page<>(pageNum, pageSize), qw);
 
         // Resolve display names
-        Set<Long> memberIds = new HashSet<>(), communityIds = new HashSet<>();
+        Set<Long> memberIds = new HashSet<>(), communityIds = new HashSet<>(), activityIds = new HashSet<>();
         for (OpsMemberLedger r : result.getRecords()) {
             memberIds.add(r.getMemberId());
             if (r.getCommunityId() != null) communityIds.add(r.getCommunityId());
+            if (r.getActivityId() != null) activityIds.add(r.getActivityId());
         }
         Map<Long, String> memberNames = resolveMemberNames(memberIds, memberPhone);
         Map<Long, String> commNames = resolveCommunityNames(communityIds);
         Map<Long, String> gridNames = resolveGridManagerNames(communityIds);
+        Map<Long, String> activityNames = resolveActivityNames(activityIds);
 
         // Filter by resolved names and apply name filters
         List<OpsMemberLedger> filtered = new ArrayList<>();
@@ -73,6 +81,7 @@ public class MemberLedgerController {
             r.setMemberName(mn);
             r.setCommunityName(cn);
             r.setGridManagerName(gn);
+            r.setActivityTitle(r.getActivityId() != null ? activityNames.getOrDefault(r.getActivityId(), "-") : null);
             filtered.add(r);
         }
 
@@ -179,6 +188,17 @@ public class MemberLedgerController {
                 "WHERE mgc.community_id IN (" + in + ")")
                 .forEach(row -> map.put(((Number)row.get("community_id")).longValue(), (String)row.get("real_name")));
         } catch (Exception e) { log.warn("gridManagerNames failed: {}", e.getMessage()); }
+        return map;
+    }
+
+    private Map<Long, String> resolveActivityNames(Set<Long> ids) {
+        if (ids.isEmpty()) return Map.of();
+        Map<Long, String> map = new LinkedHashMap<>();
+        try {
+            String in = ids.stream().map(String::valueOf).collect(Collectors.joining(","));
+            jdbcTemplate.queryForList("SELECT id, title FROM ops_activity WHERE id IN (" + in + ")")
+                .forEach(row -> map.put(((Number)row.get("id")).longValue(), (String)row.get("title")));
+        } catch (Exception e) { log.warn("activityNames failed: {}", e.getMessage()); }
         return map;
     }
 }
