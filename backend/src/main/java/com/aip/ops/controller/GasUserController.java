@@ -2,6 +2,7 @@ package com.aip.ops.controller;
 
 import com.aip.ops.entity.OpsGasUser;
 import com.aip.ops.mapper.OpsGasUserMapper;
+import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.OrgRoleService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
@@ -22,6 +23,7 @@ public class GasUserController {
 
     private final OpsGasUserMapper mapper;
     private final OrgRoleService orgRoleService;
+    private final DataScopeService dataScopeService;
     private final JdbcTemplate jdbcTemplate;
 
     /** Paginated list with optional community filter and keyword search. */
@@ -33,7 +35,13 @@ public class GasUserController {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
             return R.fail(403, "仅运营商管理员可查看");
         }
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
+
         LambdaQueryWrapper<OpsGasUser> qw = new LambdaQueryWrapper<>();
+        // null = super admin → no corp_id filter (see all)
+        if (visibleCorpIds != null) {
+            qw.in(OpsGasUser::getCorpId, visibleCorpIds);
+        }
         qw.eq(communityId != null, OpsGasUser::getCommunityId, communityId);
         if (keyword != null && !keyword.isBlank()) {
             qw.and(w -> w
