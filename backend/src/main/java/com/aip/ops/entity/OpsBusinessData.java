@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 /**
  * 业务数据 — 从 Excel 导入的销售记录，支持提成计算与导出。
@@ -78,7 +79,7 @@ public class OpsBusinessData extends BaseEntity {
     private String calcStatus;
 
     @TableField("usage_date")
-    private java.time.LocalDate usageDate;
+    private LocalDate usageDate;
 
     /**
      * @deprecated 使用 {@link #corpId} 替代；保留字段仅用于向后兼容

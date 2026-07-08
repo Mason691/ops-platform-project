@@ -117,47 +117,35 @@ public class GasUserController {
                 .toList());
     }
 
-    // ── Member conversion ──
-
-    /** Batch convert gas users to platform members by phone matching. */
-    @PostMapping("/convert-batch")
-    public R<?> convertBatch() {
-        List<OpsGasUser> users = mapper.selectList(new LambdaQueryWrapper<OpsGasUser>()
-                .isNull(OpsGasUser::getPlatformMemberId)
-                .isNotNull(OpsGasUser::getPhone)
-                .ne(OpsGasUser::getPhone, ""));
-
-        int matched = 0, unmatched = 0;
-        for (OpsGasUser u : users) {
-            try {
-                Long memberId = jdbcTemplate.query(
-                        "SELECT id FROM ai_platform.sys_member WHERE phone = ? AND delete_flag = 0 ORDER BY create_time ASC LIMIT 1",
-                        ps -> ps.setString(1, u.getPhone()),
-                        rs -> rs.next() ? rs.getLong("id") : null);
-                if (memberId != null) {
-                    u.setPlatformMemberId(memberId);
-                    mapper.updateById(u);
-                    matched++;
-                } else {
-                    unmatched++;
-                }
-            } catch (Exception e) {
-                unmatched++;
-                log.warn("Convert failed for gasUser {} phone {}: {}", u.getId(), u.getPhone(), e.getMessage());
-            }
+    /** Bulk convert: match gas users to platform members by phone, update platform_member_id. */
+    @PostMapping("/convert-all")
+    public R<?> convertAll() {
+        int updated;
+        try {
+            updated = jdbcTemplate.update(
+                "UPDATE ops_gas_user gu " +
+                "JOIN (SELECT phone, MIN(id) AS mid FROM ai_platform.sys_member WHERE phone IS NOT NULL GROUP BY phone) sm " +
+                "ON gu.phone = sm.phone " +
+                "SET gu.platform_member_id = sm.mid " +
+                "WHERE gu.platform_member_id IS NULL");
+        } catch (Exception e) {
+            return R.fail("批量转化失败: " + e.getMessage());
         }
-        return R.ok(Map.of("total", users.size(), "matched", matched, "unmatched", unmatched));
+        // Count unscanned (still NULL after update = no matching sys_member)
+        Integer unmatched = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM ops_gas_user WHERE platform_member_id IS NULL", Integer.class);
+        return R.ok(Map.of("updated", updated, "unmatched", unmatched != null ? unmatched : 0));
     }
 
-    /** Single conversion: manually link a gas user to a specific sys_member. */
+    /** Single manual conversion: force associate a gas user with a specific platform member. */
     @PostMapping("/{id}/convert")
-    public R<?> convertSingle(@PathVariable Long id, @RequestBody Map<String, Long> body) {
-        OpsGasUser user = mapper.selectById(id);
-        if (user == null) return R.fail("燃气用户不存在");
-        Long memberId = body.get("memberId");
-        if (memberId == null) return R.fail("请指定会员ID");
-        user.setPlatformMemberId(memberId);
-        mapper.updateById(user);
-        return R.ok(Map.of("id", id, "platformMemberId", memberId));
+    public R<?> convertOne(@PathVariable Long id, @RequestBody Map<String, Long> body) {
+        Long memberId = body.get("platformMemberId");
+        if (memberId == null) return R.fail("platformMemberId 不能为空");
+        OpsGasUser gu = mapper.selectById(id);
+        if (gu == null) return R.fail("燃气用户不存在");
+        gu.setPlatformMemberId(memberId);
+        mapper.updateById(gu);
+        return R.ok();
     }
 }

@@ -32,8 +32,6 @@ public class OpsGasUser extends BaseEntity {
     private BigDecimal balance;
     private BigDecimal arrears;
     private LocalDateTime openTime;
-
-    /** 关联底座平台 sys_member.id，标识燃气用户已转为线上会员 */
     private Long platformMemberId;
 
     /** Transient: resolved community name from ai_platform.sys_community */
