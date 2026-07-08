@@ -3,9 +3,7 @@ package com.aip.ops.controller;
 import com.aip.ops.entity.OpsGasUser;
 import com.aip.ops.mapper.OpsGasUserMapper;
 import com.aip.ops.service.DataScopeService;
-import com.aip.ops.service.OrgRoleService;
 import com.aip.sdk.result.R;
-import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +20,6 @@ import java.util.*;
 public class GasUserController {
 
     private final OpsGasUserMapper mapper;
-    private final OrgRoleService orgRoleService;
     private final DataScopeService dataScopeService;
     private final JdbcTemplate jdbcTemplate;
 
@@ -32,9 +29,7 @@ public class GasUserController {
                      @RequestParam(defaultValue = "10") int pageSize,
                      @RequestParam(required = false) Long communityId,
                      @RequestParam(required = false) String keyword) {
-        if (!orgRoleService.isOperatorOrSuperAdmin()) {
-            return R.fail(403, "仅运营商管理员可查看");
-        }
+        // Data scope isolation: operator sees self+children, city partner sees self only, super admin sees all
         Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
 
         LambdaQueryWrapper<OpsGasUser> qw = new LambdaQueryWrapper<>();
