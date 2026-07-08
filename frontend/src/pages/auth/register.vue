@@ -226,6 +226,12 @@ async function doWechatLogin() {
       nickname: '燃气用户',
     }
     const r = await api.wechatLogin(payload)
+    // Clear stale employee tokens and activate member session
+    uni.removeStorageSync('ops_employee_token')
+    uni.removeStorageSync('ops_employee_info')
+    uni.removeStorageSync('ops_employee_companies')
+    uni.removeStorageSync('ops_employee_active_company')
+    uni.setStorageSync('token_type', 'member')
     uni.setStorageSync('ops_token', r.token)
     uni.setStorageSync('corp_id', String(r.corpId))
     uni.setStorageSync('ops_member', JSON.stringify(r))
@@ -310,6 +316,12 @@ async function doRegister() {
 
     // register 现已返回 token，无需额外 login 调用
     const r = await api.register(payload)
+    // Clear stale employee tokens and activate member session
+    uni.removeStorageSync('ops_employee_token')
+    uni.removeStorageSync('ops_employee_info')
+    uni.removeStorageSync('ops_employee_companies')
+    uni.removeStorageSync('ops_employee_active_company')
+    uni.setStorageSync('token_type', 'member')
     uni.setStorageSync('ops_token', r.token)
     uni.setStorageSync('corp_id', String(r.corpId))
     uni.setStorageSync('ops_member', JSON.stringify(r))

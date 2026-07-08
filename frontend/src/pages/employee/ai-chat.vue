@@ -13,7 +13,11 @@
         <text class="wc-title">{{ aiNickname }}</text>
         <text class="wc-desc">企业AI助手 · 知识库 · 数据分析 · 技能报告</text>
         <view class="wc-company" v-if="empCorpName">
-          <text>{{ empCorpName }} · {{ empRoleName || '员工' }}</text>
+          <text>{{ employeeName }}</text>
+          <text class="wc-dot">·</text>
+          <text>{{ empCorpName }}</text>
+          <text class="wc-dot">·</text>
+          <text>{{ empRoleName || '员工' }}</text>
         </view>
         <view class="wc-features">
           <view class="wc-feat"><text>📊</text><text>业绩查询</text></view>
@@ -121,31 +125,9 @@
       </view>
     </view>
 
-    <!-- Employee bottom bar (no tab bar since this is a navigateTo page) -->
-    <view class="bottom-bar">
-      <view class="bar-item" @click="goBusinessData">
-        <text class="bar-icon">📊</text>
-        <text class="bar-label">业务数据</text>
-      </view>
-      <view class="bar-item active">
-        <text class="bar-icon">🤖</text>
-        <text class="bar-label">AI助手</text>
-      </view>
-      <view class="bar-item" @click="goProfile">
-        <text class="bar-icon">👤</text>
-        <text class="bar-label">我的</text>
-      </view>
-    </view>
+    <EmployeeTabBar active-key="ai" @switch="onTabSwitch" />
 
-    <!-- No-company fallback -->
-    <view class="no-company-overlay" v-if="!hasCompany && !checking">
-      <view class="nc-card">
-        <text class="nc-icon">🏢</text>
-        <text class="nc-title">未关联公司</text>
-        <text class="nc-desc">请先选择关联的公司</text>
-        <view class="nc-btn" @click="goCompanySelect">去选择公司</view>
-      </view>
-    </view>
+    <!-- 已移除公司选择覆盖层 — 登录后自动绑定公司，无需手动选择 -->
   </view>
 </template>
 
@@ -153,11 +135,21 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index.js'
+import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
 import { isWechat, isWxRecordAvailable, wxStartRecord, wxStopRecordAndUpload } from '@/utils/jssdk.js'
+
+/** Resolve active token strictly by token_type — member and employee tokens are NEVER mixed. */
+function resolveToken() {
+  const tt = uni.getStorageSync('token_type') || ''
+  if (tt === 'employee') return uni.getStorageSync('ops_employee_token') || ''
+  if (tt === 'member')   return uni.getStorageSync('ops_token') || ''
+  return uni.getStorageSync('ops_employee_token') || uni.getStorageSync('ops_token') || ''
+}
 
 const aiNickname    = ref('小金')
 const aiAvatar      = ref('/static/ai-avatar.png')
 const userAvatar    = ref('/static/default-avatar.png')
+const employeeName  = ref('')
 const avatarIsEmoji = computed(() => {
   const v = aiAvatar.value
   return v && !v.startsWith('http') && !v.startsWith('/') && !v.startsWith('data:')
@@ -186,8 +178,6 @@ const empCorpId   = ref(null)
 const empCorpName = ref('')
 const empRoleName = ref('')
 const empRoleType = ref('')
-const hasCompany  = ref(false)
-const checking    = ref(true)
 
 let conversationId = null
 let holdTimer = null
@@ -198,18 +188,14 @@ let audioChunks = []
 let currentAudio = null
 
 onShow(async () => {
-  // Load user avatar — 优先员工头像 (sys_user.avatar)
+  // Load user avatar & name from employee info (sys_user.avatar + real_name via login)
   const empInfo = uni.getStorageSync('ops_employee_info')
   if (empInfo) {
-    try { const ei = JSON.parse(empInfo); if (ei?.avatar) userAvatar.value = ei.avatar } catch (_) {}
-  }
-  const savedUser = uni.getStorageSync('ops_member') || uni.getStorageSync('ops_user')
-  if (savedUser) {
-    try { const su = JSON.parse(savedUser); if (su?.avatar) userAvatar.value = su.avatar } catch (_) {}
-  }
-  const token = uni.getStorageSync('ops_token') || uni.getStorageSync('ops_employee_token')
-  if (token) {
-    try { const me = await api.getMe(); if (me?.avatar) userAvatar.value = me.avatar } catch (_) {}
+    try {
+      const ei = JSON.parse(empInfo)
+      if (ei?.avatar) userAvatar.value = ei.avatar
+      if (ei?.name) employeeName.value = ei.name
+    } catch (_) {}
   }
 })
 
@@ -220,11 +206,20 @@ onMounted(async () => {
     uni.redirectTo({ url: '/pages/employee/login' })
     return
   }
+  // Load employee identity (avatar + name from sys_user)
+  const empInfo = uni.getStorageSync('ops_employee_info')
+  if (empInfo) {
+    try {
+      const ei = JSON.parse(empInfo)
+      if (ei?.avatar) userAvatar.value = ei.avatar
+      if (ei?.name) employeeName.value = ei.name
+    } catch (_) {}
+  }
   // Load employee company info
   loadEmployeeContext()
 
-  const token = uni.getStorageSync('ops_token') || uni.getStorageSync('ops_employee_token')
-  if (!token) { checking.value = false; return }
+  const token = resolveToken()
+  if (!token) { return }
 
   // Fetch employee AI config
   try {
@@ -249,13 +244,6 @@ onMounted(async () => {
     if (r?.corpName) empCorpName.value = r.corpName
     if (r?.roleName) empRoleName.value = r.roleName
   } catch (_) {}
-
-  // Refresh user avatar — 优先员工头像
-  try {
-    const empInfo = uni.getStorageSync('ops_employee_info')
-    if (empInfo) { const ei = JSON.parse(empInfo); if (ei?.avatar) userAvatar.value = ei.avatar }
-    if (token) { const me = await api.getMe(); if (me?.avatar) userAvatar.value = me.avatar }
-  } catch (_) {}
 })
 
 function loadEmployeeContext() {
@@ -267,21 +255,13 @@ function loadEmployeeContext() {
       empCorpName.value = c.corpName || ''
       empRoleName.value = c.roleName || ''
       empRoleType.value = c.roleType || ''
-      hasCompany.value = !!c.corpId
-    } catch (e) {
-      hasCompany.value = false
-    }
+    } catch (e) { /* ignore corrupt data */ }
   }
-  checking.value = false
 }
 
 async function sendMsg() {
   const text = inputText.value.trim()
   if (!text || loading.value) return
-  if (!hasCompany.value) {
-    uni.showToast({ title: '请先选择关联公司', icon: 'none' })
-    return
-  }
 
   // 技能前缀（与 Web 端一致）
   const skill = selectedSkillIdx.value >= 0 ? installedSkills.value[selectedSkillIdx.value] : null
@@ -352,7 +332,7 @@ async function sendSyncEmployee(text, empCtx) {
 async function listenForResultEmployee(taskId) {
   try {
     const sseUrl = api.employeeAiChatSseUrl(taskId)
-    const token = uni.getStorageSync('ops_employee_token') || uni.getStorageSync('ops_token') || ''
+    const token = resolveToken()
     const response = await fetch(sseUrl, {
       headers: token ? { Authorization: 'Bearer ' + token } : {}
     })
@@ -456,7 +436,7 @@ async function downloadReport(token) {
   if (!token) return
   const url = api.employeeAiReportDownloadUrl(token)
   // #ifdef H5
-  const authToken = uni.getStorageSync('ops_employee_token') || uni.getStorageSync('ops_token') || ''
+  const authToken = resolveToken()
   try {
     const resp = await fetch(url, {
       headers: authToken ? { Authorization: 'Bearer ' + authToken } : {}
@@ -798,16 +778,17 @@ function scrollToBottom() {
 function goBusinessData() {
   uni.navigateTo({ url: '/pages/employee/business-data' })
 }
-function goProfile() { uni.navigateTo({ url: '/pages/employee/profile' }) }
-function goCompanySelect() {
-  uni.navigateTo({ url: '/pages/employee/company-select' })
+function onTabSwitch(key) {
+  const routes = { ai: '', home: '/pages/employee/dashboard', profile: '/pages/employee/profile' }
+  if (routes[key]) uni.redirectTo({ url: routes[key] })
 }
 </script>
 
 <style scoped>
-/* ── Root — full screen, no tab bar ── */
+/* ── Root — full screen, tab-bar-aware ── */
 .ai-chat-page{
-  position:fixed; top:0; right:0; bottom:0; left:0;
+  position:fixed; top:0; right:0; left:0;
+  bottom: 110rpx; /* leave room for EmployeeTabBar */
   display:flex; flex-direction:column;
   background:#f0f2f5;
 }
@@ -823,12 +804,13 @@ function goCompanySelect() {
 .wc-avatar-emoji{font-size:100rpx;line-height:120rpx}
 .wc-title{font-size:38rpx;color:#333;font-weight:700;margin-bottom:8rpx}
 .wc-desc{font-size:26rpx;color:#999;margin-bottom:8rpx}
-.wc-company{font-size:24rpx;color:#FF6B35;background:#FFF3EE;padding:6rpx 20rpx;border-radius:12rpx;margin-bottom:20rpx}
+.wc-company{font-size:24rpx;color:#FF6B35;background:#FFF3EE;padding:6rpx 20rpx;border-radius:12rpx;margin-bottom:20rpx;display:flex;gap:6rpx;align-items:center}
 .wc-company text{color:#FF6B35}
+.wc-dot{color:rgba(255,107,53,.4)}
 .wc-features{display:flex;flex-wrap:wrap;gap:12rpx;justify-content:center}
 .wc-feat{display:flex;align-items:center;gap:6rpx;padding:10rpx 20rpx;background:#FFF3EE;border-radius:12rpx;font-size:24rpx;color:#FF6B35}
 
-/* chat area — leave room for input bar + bottom bar */
+/* chat area — leave room for input bar */
 .chat-body{flex:1;height:0;padding:16rpx 24rpx 16rpx;overflow-y:auto}
 .msg-item{display:flex;align-items:flex-start;margin-bottom:24rpx}
 .msg-left{flex-direction:row}.msg-right{flex-direction:row-reverse}
@@ -911,33 +893,5 @@ function goCompanySelect() {
 .send-main-btn.disabled{background:#e0e0e0}
 .send-arrow{color:#fff;font-size:44rpx;font-weight:bold}
 
-/* Employee bottom bar */
-.bottom-bar{
-  flex-shrink:0; height:110rpx; background:#fff;
-  display:flex; align-items:center; justify-content:space-around;
-  border-top:1rpx solid #f0f0f0;
-}
-.bar-item{display:flex;flex-direction:column;align-items:center;gap:4rpx;padding:8rpx 24rpx}
-.bar-icon{font-size:40rpx}
-.bar-label{font-size:22rpx;color:#999}
-.bar-item.active .bar-label{color:#FF6B35;font-weight:600}
-
 /* No-company fallback overlay */
-.no-company-overlay{
-  position:fixed; top:0; left:0; right:0; bottom:0;
-  background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center;
-  z-index:200;
-}
-.nc-card{
-  background:#fff; border-radius:24rpx; padding:64rpx 48rpx;
-  display:flex; flex-direction:column; align-items:center; gap:16rpx;
-  margin:48rpx; width:520rpx; max-width:100%;
-}
-.nc-icon{font-size:80rpx}
-.nc-title{font-size:34rpx;color:#333;font-weight:700}
-.nc-desc{font-size:28rpx;color:#999}
-.nc-btn{
-  margin-top:16rpx; padding:20rpx 64rpx; background:linear-gradient(135deg,#FF6B35,#FF8C5A);
-  color:#fff; border-radius:40rpx; font-size:30rpx; font-weight:600;
-}
 </style>

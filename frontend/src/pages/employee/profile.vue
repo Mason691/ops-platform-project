@@ -32,10 +32,6 @@
 
     <!-- Menu -->
     <view class="section">
-      <view class="menu-item" @click="switchCompany">
-        <text class="menu-label">🔄 切换组织</text>
-        <text class="menu-arrow">›</text>
-      </view>
       <view class="menu-item" @click="showPwdModal = true">
         <text class="menu-label">🔒 修改密码</text>
         <text class="menu-arrow">›</text>
@@ -74,12 +70,15 @@
         </view>
       </view>
     </view>
+
+    <EmployeeTabBar active-key="profile" @switch="onTabSwitch" />
   </view>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { api } from '@/api/index.js'
+import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
 
 const info = ref({})
 const activeCompany = ref({})
@@ -170,10 +169,10 @@ async function changePassword() {
   }
 }
 
-function switchCompany() {
-  uni.navigateTo({ url: '/pages/employee/company-select' })
+function onTabSwitch(key) {
+  const routes = { ai: '/pages/employee/ai-chat', home: '/pages/employee/dashboard', profile: '' }
+  if (routes[key]) uni.redirectTo({ url: routes[key] })
 }
-
 function doLogout() {
   uni.showModal({
     title: '确认退出',
@@ -184,6 +183,11 @@ function doLogout() {
         uni.removeStorageSync('ops_employee_info')
         uni.removeStorageSync('ops_employee_companies')
         uni.removeStorageSync('ops_employee_active_company')
+        uni.removeStorageSync('token_type')
+        // Also clear member tokens to prevent stale token from being used after re-login
+        uni.removeStorageSync('ops_token')
+        uni.removeStorageSync('ops_member')
+        uni.removeStorageSync('corp_id')
         uni.redirectTo({ url: '/pages/employee/login' })
       }
     }
@@ -192,7 +196,7 @@ function doLogout() {
 </script>
 
 <style scoped>
-.page { min-height: 100vh; background: #f5f5f5; }
+.page { min-height: 100vh; background: #f5f5f5; padding-bottom: 130rpx; }
 .header { background: linear-gradient(135deg, #FF6B35, #FF8C5A); padding: 60rpx 32rpx 48rpx; text-align: center; }
 .avatar { width: 120rpx; height: 120rpx; border-radius: 50%; border: 4rpx solid rgba(255,255,255,.4); }
 .name { display: block; font-size: 36rpx; color: #fff; font-weight: 700; margin-top: 20rpx; }

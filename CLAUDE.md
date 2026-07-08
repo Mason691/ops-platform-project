@@ -375,10 +375,12 @@ cd frontend && npm run build:h5
 | **CaptchaService 单实例** | 验证码存储在内存 `ConcurrentHashMap` 中，仅适用于单实例部署。多实例需替换为 Redis |
 | **双 Token 隔离** | 会员 token（`ops_token`）和员工 token（`ops_employee_token`）是独立的存储 key。`request.js` 按优先级发送（会员优先），但两个 token 不能混用——员工 token 不能访问会员接口，反之亦然 |
 | **ops-platform vs 平台主站** | `boss.jdzn99.com` 有两套前端：平台主站（`~/ai-native-platform/frontend`）和 ops H5（本项目）。`/ops/xxx` 路由在主站中通过 `componentMap` 直接加载 Vue 组件，不是微前端。改 ops H5 页面不影响主站 |
+| **Kafka 消费者组冲突** | 同一 consumer group 内分区独占。多容器共享 `ai-platform-group` 时，旧容器（如 `determined_lehmann`）抢到 `async-export-task` 分区但连错数据库 → 任务僵死 PENDING → 新容器永远收不到消息。**部署新容器前必须 `docker stop/rm` 旧容器**，部署后 `docker ps` 确认无僵尸容器残留。参见 `[[kafka-consumer-group-conflict]]` |
+| **旧容器/代码不留存** | **铁律**：新容器部署后旧容器必须立即清理（`docker stop + rm`）。旧代码、旧容器、旧配置不留存——git history 可随时恢复。参见 `[[no-legacy-code-retention]]`、`[[kafka-consumer-group-conflict]]` |
 
 ---
 
-最后更新：2026-07-05 | 负责人：架构师（员工认证已重构为委托平台 sys_user）
+最后更新：2026-07-07 | 负责人：架构师（员工认证已重构为委托平台 sys_user）
 
 ### 自定义 Claude 命令
 

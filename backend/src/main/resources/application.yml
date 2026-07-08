@@ -1,5 +1,10 @@
 server:
   port: 8084
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
 
 spring:
   application:
@@ -9,7 +14,7 @@ spring:
       max-file-size: 50MB
       max-request-size: 50MB
   datasource:
-    url: jdbc:mysql://104.238.165.57:3306/mall_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&sslMode=DISABLED
+    url: jdbc:mysql://104.238.165.57:3306/mall_db?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&sslMode=DISABLED
     username: root
     password: aB740602
     driver-class-name: com.mysql.cj.jdbc.Driver

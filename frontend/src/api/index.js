@@ -1,5 +1,13 @@
 import { request } from '@/utils/request'
 
+/** Strict token resolution — member and employee tokens are NEVER mixed. */
+function resolveToken() {
+  const tt = uni.getStorageSync('token_type') || ''
+  if (tt === 'employee') return uni.getStorageSync('ops_employee_token') || ''
+  if (tt === 'member')   return uni.getStorageSync('ops_token') || ''
+  return uni.getStorageSync('ops_employee_token') || uni.getStorageSync('ops_token') || ''
+}
+
 export const api = {
   // 登录 & 注册
   login: (phone, password) => request({url:'/api/ops/auth/login',method:'POST',data:{phone,password}}),
@@ -108,7 +116,7 @@ export const api = {
     // Upload audio blob as multipart/form-data via XMLHttpRequest
     // (uni.uploadFile requires filePath, not blob; XHR works in H5)
     return new Promise((resolve, reject) => {
-      const token = uni.getStorageSync('ops_token') || uni.getStorageSync('ops_employee_token') || ''
+      const token = resolveToken()
       const formData = new FormData()
       formData.append('audio', blob, 'recording.webm')
       const xhr = new XMLHttpRequest()
@@ -216,7 +224,7 @@ export const api = {
   employeeRefreshToken: () => request({url:'/api/ops/auth/employee/refresh-token',method:'POST'}),
   employeeChangePassword: (data) => request({url:'/api/ops/employee/change-password',method:'POST',data}),
   employeeUploadAvatar: (filePath) => new Promise((resolve, reject) => {
-    const token = uni.getStorageSync('ops_token') || uni.getStorageSync('ops_employee_token') || ''
+    const token = resolveToken()
     uni.uploadFile({
       url: import.meta.env.VITE_OPS_ENTRY + '/api/ops/employee/avatar' || '/api/ops/employee/avatar',
       filePath,

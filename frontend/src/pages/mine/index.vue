@@ -119,7 +119,7 @@ function goEmployee(){
     uni.setStorageSync('ops_employee_active_company', JSON.stringify(companies[0]))
     uni.navigateTo({ url: '/pages/employee/dashboard' })
   } else {
-    uni.navigateTo({ url: '/pages/employee/company-select' })
+    uni.navigateTo({ url: '/pages/employee/dashboard' })
   }
 }
 function goLogin(){uni.navigateTo({url:'/pages/auth/login'})}

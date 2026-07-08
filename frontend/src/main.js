@@ -26,7 +26,6 @@ const PAGE_TITLE_MAP = {
   'pages/station/apply': '站长申请',
   'pages/station/center': '站长中心',
   'pages/employee/dashboard': '员工工作台',
-  'pages/employee/company-select': '选择公司',
   'pages/employee/business-data': '业务数据',
   'pages/employee/ai-chat': 'AI助手',
 }

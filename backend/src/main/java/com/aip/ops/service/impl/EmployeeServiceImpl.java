@@ -180,13 +180,19 @@ public class EmployeeServiceImpl implements EmployeeService {
         return member;
     }
 
-    /** Resolve the current member's phone number. */
+    /** Resolve the current member's phone number. Fall back to JWT username (phone) for employees without ops_member record. */
     private String resolvePhone() {
         OpsMember member = resolveMember();
-        if (member == null) {
-            throw BusinessException.of("会员信息不存在");
+        if (member != null) {
+            return member.getPhone();
         }
-        return member.getPhone();
+        // Fallback for employees authenticated via sys_user but lacking ops_member:
+        // the JWT username for employee accounts is sys_user.username which is the phone number.
+        String phone = SecurityUtils.getCurrentUser().getUsername();
+        if (phone != null && phone.matches("^1[3-9]\\d{9}$")) {
+            return phone;
+        }
+        throw BusinessException.of("会员信息不存在");
     }
 
     private static BigDecimal toBigDecimal(Object val) {

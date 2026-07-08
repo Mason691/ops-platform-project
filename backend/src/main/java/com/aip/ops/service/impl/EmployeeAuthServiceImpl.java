@@ -247,6 +247,7 @@ public class EmployeeAuthServiceImpl implements EmployeeAuthService {
         result.put("phone", phone);                                // from request
         result.put("role", extractRole(data));                     // first role name
         result.put("corpId", data.get("corpId"));
+        result.put("corpName", data.getOrDefault("corpName", ""));       // 组织名称
         result.put("expiresIn", data.getOrDefault("expiresIn", jwtExpiration));
         result.put("companies", data.getOrDefault("companies", List.of())); // 多组织列表
         result.put("avatar", data.getOrDefault("avatar", ""));             // sys_user头像

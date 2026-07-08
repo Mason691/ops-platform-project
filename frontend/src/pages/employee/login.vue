@@ -156,6 +156,10 @@ async function doLogin() {
       captchaId: captchaId.value,
       captchaCode: captchaCode.value
     })
+    // Clear stale member tokens and activate employee session
+    uni.removeStorageSync('ops_token')
+    uni.removeStorageSync('ops_member')
+    uni.setStorageSync('token_type', 'employee')
     // Store employee token under separate key (isolated from member token)
     uni.setStorageSync('ops_employee_token', r.token)
     uni.setStorageSync('corp_id', String(r.corpId))
@@ -167,12 +171,14 @@ async function doLogin() {
       corpId: r.corpId,
       avatar: r.avatar || ''
     }))
-    // 存储组织列表，默认选中第一个组织，直接进业务主页（在主页再切换公司）
+    // 默认公司直接用登录返回的 corpId/corpName（不依赖可选的 companies 列表）
+    uni.setStorageSync('ops_employee_active_company', JSON.stringify({
+      corpId: r.corpId,
+      corpName: r.corpName || '',
+      roleName: r.role || '员工'
+    }))
     const companies = Array.isArray(r.companies) ? r.companies : []
     uni.setStorageSync('ops_employee_companies', JSON.stringify(companies))
-    if (companies.length > 0) {
-      uni.setStorageSync('ops_employee_active_company', JSON.stringify(companies[0]))
-    }
     uni.showToast({ title: '登录成功', icon: 'success' })
     setTimeout(() => {
       uni.redirectTo({ url: '/pages/employee/dashboard' })
