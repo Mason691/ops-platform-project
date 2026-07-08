@@ -130,7 +130,6 @@ public class GridManagerController {
         try {
             StringBuilder sql = new StringBuilder(
                     "SELECT id, real_name, phone, corp_id FROM ai_platform.sys_user WHERE status=1 AND delete_flag=0");
-            List<Object> params = new ArrayList<>();
             // Scope to visible orgs (null = super admin = all)
             if (visibleCorpIds != null) {
                 sql.append(" AND corp_id IN (");
@@ -138,23 +137,20 @@ public class GridManagerController {
                 sql.append(")");
             }
             if (keyword != null && !keyword.isBlank()) {
-                sql.append(" AND (real_name LIKE ? OR phone LIKE ?)");
-                String k = "%" + keyword + "%";
-                params.add(k); params.add(k);
+                sql.append(" AND (real_name LIKE '%").append(keyword.replace("'", "''"))
+                   .append("%' OR phone LIKE '%").append(keyword.replace("'", "''")).append("%')");
             }
             sql.append(" ORDER BY real_name LIMIT 50");
-            jdbcTemplate.query(sql.toString(), ps -> {
-                for (int i = 0; i < params.size(); i++) ps.setObject(i + 1, params.get(i));
-            }, rs -> {
-                while (rs.next()) {
-                    Map<String, Object> row = new LinkedHashMap<>();
-                    row.put("id", rs.getLong("id"));
-                    row.put("realName", rs.getString("real_name"));
-                    row.put("phone", rs.getString("phone"));
-                    row.put("corpId", rs.getLong("corp_id"));
-                    list.add(row);
-                }
-            });
+            String finalSql = sql.toString();
+            jdbcTemplate.query(finalSql,
+                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("id", rs.getLong("id"));
+                        row.put("realName", rs.getString("real_name"));
+                        row.put("phone", rs.getString("phone"));
+                        row.put("corpId", rs.getLong("corp_id"));
+                        list.add(row);
+                    });
         } catch (Exception e) {
             log.warn("Failed to search employees: {}", e.getMessage());
         }
@@ -182,9 +178,10 @@ public class GridManagerController {
                 occupiedSql += " AND mg.id != " + excludeManagerId;
             }
             Set<Long> occupied = new HashSet<>();
-            jdbcTemplate.query(occupiedSql, rs -> {
-                while (rs.next()) occupied.add(rs.getLong("community_id"));
-            });
+            jdbcTemplate.query(occupiedSql,
+                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                        while (rs.next()) occupied.add(rs.getLong("community_id"));
+                    });
 
             // Return only communities that have gas users in visible orgs, excluding occupied
             StringBuilder communitySql = new StringBuilder(
@@ -197,13 +194,14 @@ public class GridManagerController {
                     .append(")");
             }
             communitySql.append(" ORDER BY sc.community_name");
-            jdbcTemplate.query(communitySql.toString(), rs -> {
-                while (rs.next()) {
-                    long cid = rs.getLong("id");
-                    list.add(Map.of("id", cid, "name", rs.getString("community_name"),
-                            "occupied", occupied.contains(cid)));
-                }
-            });
+            jdbcTemplate.query(communitySql.toString(),
+                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                        while (rs.next()) {
+                            long cid = rs.getLong("id");
+                            list.add(Map.of("id", cid, "name", rs.getString("community_name"),
+                                    "occupied", occupied.contains(cid)));
+                        }
+                    });
         } catch (Exception e) {
             log.warn("Failed to load available communities: {}", e.getMessage());
         }
@@ -225,7 +223,7 @@ public class GridManagerController {
                 String inClause = cids.stream().map(String::valueOf).collect(Collectors.joining(","));
                 jdbcTemplate.query(
                         "SELECT id, community_name FROM ai_platform.sys_community WHERE id IN (" + inClause + ") ORDER BY community_name",
-                        rs -> {
+                        (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
                             while (rs.next()) list.add(Map.of("id", rs.getLong("id"), "name", rs.getString("community_name")));
                         });
             } catch (Exception e) {

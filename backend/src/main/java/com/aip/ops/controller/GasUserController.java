@@ -91,10 +91,12 @@ public class GasUserController {
     private Set<Long> resolveCommunityIdsByKeyword(String keyword) {
         Set<Long> ids = new LinkedHashSet<>();
         try {
+            String likeKw = keyword.replace("'", "''");
             jdbcTemplate.query(
-                    "SELECT id FROM ai_platform.sys_community WHERE community_name LIKE ?",
-                    ps -> ps.setString(1, "%" + keyword + "%"),
-                    rs -> { while (rs.next()) ids.add(rs.getLong("id")); });
+                    "SELECT id FROM ai_platform.sys_community WHERE community_name LIKE '%" + likeKw + "%'",
+                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                        while (rs.next()) ids.add(rs.getLong("id"));
+                    });
         } catch (Exception e) {
             log.warn("Failed to resolve community IDs by keyword: {}", e.getMessage());
         }
