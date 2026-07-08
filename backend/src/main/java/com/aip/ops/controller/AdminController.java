@@ -716,7 +716,7 @@ public class AdminController {
         if (body.get("isOperatorInitiated") != null)
             a.setIsOperatorInitiated(Integer.valueOf(body.get("isOperatorInitiated").toString()));
         if (body.get("partnerCorpIds") != null)
-            a.setPartnerCorpIds((String) body.get("partnerCorpIds"));
+            a.setPartnerCorpIds(String.valueOf(body.get("partnerCorpIds")));
         return a;
     }
 
