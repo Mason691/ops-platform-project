@@ -712,6 +712,11 @@ public class AdminController {
             a.setStartTime(parseActivityDateTime(body.get("startTime").toString()));
         if (body.get("endTime") != null)
             a.setEndTime(parseActivityDateTime(body.get("endTime").toString()));
+        // Visibility fields
+        if (body.get("isOperatorInitiated") != null)
+            a.setIsOperatorInitiated(Integer.valueOf(body.get("isOperatorInitiated").toString()));
+        if (body.get("partnerCorpIds") != null)
+            a.setPartnerCorpIds((String) body.get("partnerCorpIds"));
         return a;
     }
 

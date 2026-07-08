@@ -318,10 +318,13 @@ public class PlatformController {
             @RequestParam(required=false) String category,
             @RequestParam(required=false) String type,
             @RequestParam(required=false) Integer status) {
+        Long corpId = SecurityUtils.getCurrentCorpIdOrNull();
         int offset = (pageNum - 1) * pageSize;
-        List<OpsActivity> records = activityMapper.selectActivityPage(
-                offset, pageSize, type, category, status);
-        long total = activityMapper.countActivityPage(type, category, status);
+        // Visibility: operator sees all under them, partner sees own + operator-assigned
+        String corpIdStr = corpId != null ? String.valueOf(corpId) : "";
+        List<OpsActivity> records = activityMapper.selectActivityPageVisible(
+                offset, pageSize, type, category, status, corpIdStr);
+        long total = activityMapper.countActivityPageVisible(type, category, status, corpIdStr);
 
         // 规范化图片 URL：补全 coverUrl → 相对路径统一处理
         for (OpsActivity a : records) {

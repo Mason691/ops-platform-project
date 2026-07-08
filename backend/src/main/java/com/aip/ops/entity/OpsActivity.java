@@ -11,6 +11,8 @@ import java.time.LocalDateTime;
 public class OpsActivity extends BaseEntity {
     @TableId(type = IdType.AUTO) private Long id;
     @TableField("corp_id") private Long corpId;
+    @TableField("partner_corp_ids") private String partnerCorpIds;
+    @TableField("is_operator_initiated") private Integer isOperatorInitiated;
     @TableField("title") private String title;
     @TableField("cover_image") private String coverImage;
     @TableField("cover_url") private String coverUrl;
