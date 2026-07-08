@@ -32,4 +32,8 @@ public class OpsGasUser extends BaseEntity {
     private BigDecimal balance;
     private BigDecimal arrears;
     private LocalDateTime openTime;
+
+    /** Transient: resolved community name from ai_platform.sys_community */
+    @TableField(exist = false)
+    private String communityName;
 }
