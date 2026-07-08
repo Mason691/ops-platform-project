@@ -6,10 +6,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.*;
 
 /**
@@ -102,6 +107,55 @@ public class PartnerController {
         } catch (Exception e) {
             log.error("切换合伙人状态失败: corpId={}", corpId, e);
             return R.fail("操作失败: " + e.getMessage());
+        }
+    }
+
+    /** 文件上传代理 — 转发到平台内部接口（X-Internal-Token 认证） */
+    @PostMapping("/upload")
+    @SuppressWarnings("unchecked")
+    public R<?> upload(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("type") String type) {
+        try {
+            String url = platformBaseUrl + "/api/internal/corp/partner/upload";
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Internal-Token", internalToken);
+            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+            ByteArrayResource fileResource = new ByteArrayResource(file.getBytes()) {
+                @Override
+                public String getFilename() { return file.getOriginalFilename(); }
+            };
+            body.add("file", fileResource);
+            body.add("type", type);
+
+            HttpEntity<MultiValueMap<String, Object>> entity = new HttpEntity<>(body, headers);
+            ResponseEntity<Map<String, Object>> resp = restTemplate.exchange(
+                    url, HttpMethod.POST, entity, new ParameterizedTypeReference<>() {});
+            return R.ok(resp.getBody() != null ? resp.getBody().get("data") : null);
+        } catch (IOException e) {
+            log.error("读取上传文件失败", e);
+            return R.fail("读取上传文件失败");
+        } catch (Exception e) {
+            log.error("上传代理失败", e);
+            return R.fail("上传失败: " + e.getMessage());
+        }
+    }
+
+    /** 地址地理编码代理 — 转发到平台内部接口 */
+    @PostMapping("/geocode")
+    @SuppressWarnings("unchecked")
+    public R<?> geocode(@RequestBody Map<String, String> body) {
+        try {
+            String url = platformBaseUrl + "/api/internal/corp/partner/geocode";
+            HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, internalHeaders());
+            ResponseEntity<Map<String, Object>> resp = restTemplate.exchange(
+                    url, HttpMethod.POST, entity, new ParameterizedTypeReference<>() {});
+            return R.ok(resp.getBody() != null ? resp.getBody().get("data") : null);
+        } catch (Exception e) {
+            log.error("地理编码代理失败", e);
+            return R.fail("地理编码失败: " + e.getMessage());
         }
     }
 
