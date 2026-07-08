@@ -85,6 +85,12 @@ public class BattleMapController {
 
         try {
             Map<String, Object> stats = new LinkedHashMap<>();
+            // Org region name for map centering
+            try {
+                Map<String, Object> corpInfo = jdbcTemplate.queryForMap(
+                    "SELECT region_name as regionName FROM ai_platform.sys_corp WHERE id=" + (corpId != null ? corpId : 4));
+                stats.put("regionName", corpInfo != null ? corpInfo.get("regionName") : null);
+            } catch (Exception e) { stats.put("regionName", null); }
             // Gas users
             stats.put("totalUsers", jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM ops_gas_user WHERE 1=1" + corpFilter, Long.class));
