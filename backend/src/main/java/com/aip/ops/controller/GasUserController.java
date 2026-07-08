@@ -116,4 +116,48 @@ public class GasUserController {
                 .map(e -> Map.of("id", e.getKey(), "name", e.getValue()))
                 .toList());
     }
+
+    // ── Member conversion ──
+
+    /** Batch convert gas users to platform members by phone matching. */
+    @PostMapping("/convert-batch")
+    public R<?> convertBatch() {
+        List<OpsGasUser> users = mapper.selectList(new LambdaQueryWrapper<OpsGasUser>()
+                .isNull(OpsGasUser::getPlatformMemberId)
+                .isNotNull(OpsGasUser::getPhone)
+                .ne(OpsGasUser::getPhone, ""));
+
+        int matched = 0, unmatched = 0;
+        for (OpsGasUser u : users) {
+            try {
+                Long memberId = jdbcTemplate.query(
+                        "SELECT id FROM ai_platform.sys_member WHERE phone = ? AND delete_flag = 0 ORDER BY create_time ASC LIMIT 1",
+                        ps -> ps.setString(1, u.getPhone()),
+                        rs -> rs.next() ? rs.getLong("id") : null);
+                if (memberId != null) {
+                    u.setPlatformMemberId(memberId);
+                    mapper.updateById(u);
+                    matched++;
+                } else {
+                    unmatched++;
+                }
+            } catch (Exception e) {
+                unmatched++;
+                log.warn("Convert failed for gasUser {} phone {}: {}", u.getId(), u.getPhone(), e.getMessage());
+            }
+        }
+        return R.ok(Map.of("total", users.size(), "matched", matched, "unmatched", unmatched));
+    }
+
+    /** Single conversion: manually link a gas user to a specific sys_member. */
+    @PostMapping("/{id}/convert")
+    public R<?> convertSingle(@PathVariable Long id, @RequestBody Map<String, Long> body) {
+        OpsGasUser user = mapper.selectById(id);
+        if (user == null) return R.fail("燃气用户不存在");
+        Long memberId = body.get("memberId");
+        if (memberId == null) return R.fail("请指定会员ID");
+        user.setPlatformMemberId(memberId);
+        mapper.updateById(user);
+        return R.ok(Map.of("id", id, "platformMemberId", memberId));
+    }
 }

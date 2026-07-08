@@ -77,6 +77,9 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("calc_status")
     private String calcStatus;
 
+    @TableField("usage_date")
+    private java.time.LocalDate usageDate;
+
     /**
      * @deprecated 使用 {@link #corpId} 替代；保留字段仅用于向后兼容
      */
