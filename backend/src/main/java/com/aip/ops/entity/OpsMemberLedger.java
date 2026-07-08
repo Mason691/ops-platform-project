@@ -26,6 +26,7 @@ public class OpsMemberLedger extends BaseEntity {
     private String productName;
     private String brand;
     private String model;
+    private String grade;
     private String remark;
 
     /** Transient: resolved names for display */
