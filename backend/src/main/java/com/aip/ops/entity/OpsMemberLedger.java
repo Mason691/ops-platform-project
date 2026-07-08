@@ -20,6 +20,7 @@ public class OpsMemberLedger extends BaseEntity {
 
     private Long corpId;
     private Long memberId;
+    private Long activityId;
     private Long communityId;
     private String category;
     private LocalDate usageDate;
@@ -27,6 +28,9 @@ public class OpsMemberLedger extends BaseEntity {
     private String brand;
     private String model;
     private String grade;
+    private java.math.BigDecimal salesPrice;
+    private String receiptNo;
+    private LocalDate receiptDate;
     private String remark;
 
     /** Transient: resolved names for display */
