@@ -28,16 +28,25 @@ public class GasUserController {
     public R<?> list(@RequestParam(defaultValue = "1") int pageNum,
                      @RequestParam(defaultValue = "10") int pageSize,
                      @RequestParam(required = false) Long communityId,
+                     @RequestParam(required = false) String communityKeyword,
                      @RequestParam(required = false) String keyword) {
-        // Data scope isolation: operator sees self+children, city partner sees self only, super admin sees all
+        // Data scope isolation
         Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
 
         LambdaQueryWrapper<OpsGasUser> qw = new LambdaQueryWrapper<>();
-        // null = super admin → no corp_id filter (see all)
         if (visibleCorpIds != null) {
             qw.in(OpsGasUser::getCorpId, visibleCorpIds);
         }
         qw.eq(communityId != null, OpsGasUser::getCommunityId, communityId);
+        // Fuzzy match community name: resolve matching IDs from sys_community
+        if (communityKeyword != null && !communityKeyword.isBlank()) {
+            Set<Long> matchedIds = resolveCommunityIdsByKeyword(communityKeyword);
+            if (matchedIds.isEmpty()) {
+                qw.eq(OpsGasUser::getCommunityId, -1L); // force empty result
+            } else {
+                qw.in(OpsGasUser::getCommunityId, matchedIds);
+            }
+        }
         if (keyword != null && !keyword.isBlank()) {
             qw.and(w -> w
                 .like(OpsGasUser::getUserNo, keyword)
@@ -71,12 +80,40 @@ public class GasUserController {
             String inClause = ids.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse("");
             jdbcTemplate.query(
                     "SELECT id, community_name FROM ai_platform.sys_community WHERE id IN (" + inClause + ")",
-                    rs -> {
-                        map.put(rs.getLong("id"), rs.getString("community_name"));
-                    });
+                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> map.put(rs.getLong("id"), rs.getString("community_name")));
         } catch (Exception e) {
             log.warn("Failed to resolve community names: {}", e.getMessage());
         }
         return map;
+    }
+
+    /** Resolve community IDs whose name matches the keyword (LIKE). */
+    private Set<Long> resolveCommunityIdsByKeyword(String keyword) {
+        Set<Long> ids = new LinkedHashSet<>();
+        try {
+            jdbcTemplate.query(
+                    "SELECT id FROM ai_platform.sys_community WHERE community_name LIKE ?",
+                    ps -> ps.setString(1, "%" + keyword + "%"),
+                    rs -> { while (rs.next()) ids.add(rs.getLong("id")); });
+        } catch (Exception e) {
+            log.warn("Failed to resolve community IDs by keyword: {}", e.getMessage());
+        }
+        return ids;
+    }
+
+    /** Get all community id->name pairs for the community selector dropdown. */
+    @GetMapping("/communities")
+    public R<?> communities() {
+        Map<Long, String> map = new LinkedHashMap<>();
+        try {
+            jdbcTemplate.query(
+                    "SELECT id, community_name FROM ai_platform.sys_community WHERE delete_flag=0 ORDER BY community_name",
+                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> { while (rs.next()) map.put(rs.getLong("id"), rs.getString("community_name")); });
+        } catch (Exception e) {
+            log.warn("Failed to load communities: {}", e.getMessage());
+        }
+        return R.ok(map.entrySet().stream()
+                .map(e -> Map.of("id", e.getKey(), "name", e.getValue()))
+                .toList());
     }
 }
