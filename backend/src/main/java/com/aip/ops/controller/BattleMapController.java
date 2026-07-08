@@ -87,9 +87,19 @@ public class BattleMapController {
             Map<String, Object> stats = new LinkedHashMap<>();
             // Org region name for map centering
             try {
-                Map<String, Object> corpInfo = jdbcTemplate.queryForMap(
+                List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                     "SELECT region_name as regionName FROM ai_platform.sys_corp WHERE id=" + (corpId != null ? corpId : 4));
-                stats.put("regionName", corpInfo != null ? corpInfo.get("regionName") : null);
+                if (rows != null && !rows.isEmpty()) {
+                    String rawName = (String) rows.get(0).get("regionName");
+                    stats.put("regionName", rawName);
+                    if (rawName != null && rawName.contains("/")) {
+                        String[] parts = rawName.split("/");
+                        String last = parts[parts.length - 1];
+                        stats.put("cityName", last.isEmpty() ? rawName : last);
+                    } else if (rawName != null) {
+                        stats.put("cityName", rawName);
+                    }
+                }
             } catch (Exception e) { stats.put("regionName", null); }
             // Gas users
             stats.put("totalUsers", jdbcTemplate.queryForObject(
