@@ -70,7 +70,11 @@ public class BattleMapController {
         String k = ck(corpId,"sum"); Map<String,Object> c = cacheGet(k); if (c != null) { c.put("cached",true); return R.ok(c); }
         try {
             Map<String,Object> s = new LinkedHashMap<>();
-            try { List<Map<String,Object>> r = jdbcTemplate.queryForList("SELECT region_name rn FROM ai_platform.sys_corp WHERE id=?", corpId); if (!r.isEmpty()) { String rn = (String)r.get(0).get("rn"); s.put("regionName",rn); if (rn!=null&&rn.contains("/")) s.put("cityName", rn.substring(rn.lastIndexOf('/')+1)); } } catch (Exception e) {}
+            try { List<Map<String,Object>> r = jdbcTemplate.queryForList("SELECT region_name rn FROM ai_platform.sys_corp WHERE region_name IS NOT NULL AND id=?", corpId != null ? corpId : 10); if (!r.isEmpty()) { String rn = (String)r.get(0).get("rn"); s.put("regionName",rn); if (rn!=null&&rn.contains("/")) s.put("cityName", rn.substring(rn.lastIndexOf('/')+1)); } } catch (Exception e) {}
+        // Fallback: resolve region from parent org if current org has no region_name
+        if (!s.containsKey("regionName")) {
+          try { List<Map<String,Object>> r = jdbcTemplate.queryForList("SELECT pc.region_name rn FROM ai_platform.sys_corp c JOIN ai_platform.sys_corp pc ON pc.id=c.parent_corp_id WHERE c.id=? AND pc.region_name IS NOT NULL", corpId != null ? corpId : 10); if (!r.isEmpty()) { String rn = (String)r.get(0).get("rn"); s.put("regionName",rn); if (rn.contains("/")) s.put("cityName", rn.substring(rn.lastIndexOf('/')+1)); } } catch (Exception e2) {}
+        }
             try { Map<String,Object> os = jdbcTemplate.queryForMap("SELECT * FROM ops_map_org_summary WHERE org_id=?", corpId); s.put("totalUsers", jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ops_gas_user WHERE corp_id=?", Long.class, corpId)); s.putAll(os); } catch (Exception e) {}
             Long rt = ((Number)s.getOrDefault("total_activities",0)).longValue();
             Long ra = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ops_activity_review WHERE corp_id=? AND review_status=1", Long.class, corpId);
