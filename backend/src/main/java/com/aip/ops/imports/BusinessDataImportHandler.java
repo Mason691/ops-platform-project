@@ -43,10 +43,12 @@ public class BusinessDataImportHandler implements ImportHandler {
             Set.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
 
     private volatile Set<String> categoryNameCache;
+    private volatile Map<String, String> categoryNameToKeyCache;
     private static final Set<String> DEFAULT_CATEGORIES = Set.of(
             "燃气灶", "抽油烟机", "热水器", "壁挂炉",
             "壁挂炉以旧换新销售", "户内美装销售", "定尺波纹管",
-            "户内美装工程", "户内美装运维", "保险"
+            "户内美装工程", "户内美装运维", "保险",
+            "美装管道整改", "美装安全评估"
     );
 
     public BusinessDataImportHandler(OpsBusinessDataMapper mapper,
@@ -272,14 +274,20 @@ public class BusinessDataImportHandler implements ImportHandler {
                 Object data = resp.get("data");
                 if (data instanceof List) {
                     Set<String> set = new HashSet<>();
+                    Map<String, String> nameToKey = new HashMap<>();
                     for (Object item : (List<?>) data) {
                         if (item instanceof Map) {
                             Object val = ((Map<?, ?>) item).get("itemValue");
-                            if (val != null) set.add(val.toString());
+                            Object key = ((Map<?, ?>) item).get("itemKey");
+                            if (val != null) {
+                                set.add(val.toString());
+                                if (key != null) nameToKey.put(val.toString(), key.toString());
+                            }
                         }
                     }
                     if (!set.isEmpty()) {
                         categoryNameCache = set;
+                        categoryNameToKeyCache = nameToKey;
                         log.info("Loaded {} categories from dict", set.size());
                         return set;
                     }
@@ -292,15 +300,24 @@ public class BusinessDataImportHandler implements ImportHandler {
         }
     }
 
-    private String mapCategoryKey(String catCn) {
-        Map<String, String> cn2key = Map.ofEntries(
+    /** Get dynamic category name→key mapping, loading from dict if needed. */
+    private Map<String, String> getCategoryNameToKey() {
+        loadValidCategories(); // ensure cache is populated
+        if (categoryNameToKeyCache != null) return categoryNameToKeyCache;
+        // Fallback when dict API is down: same as old hardcoded map
+        return Map.ofEntries(
                 Map.entry("燃气灶", "1"), Map.entry("抽油烟机", "2"),
                 Map.entry("热水器", "3"), Map.entry("壁挂炉", "4"),
                 Map.entry("壁挂炉以旧换新销售", "5"), Map.entry("户内美装销售", "6"),
                 Map.entry("定尺波纹管", "7"), Map.entry("户内美装工程", "8"),
-                Map.entry("户内美装运维", "9"), Map.entry("保险", "10")
+                Map.entry("户内美装运维", "9"), Map.entry("保险", "10"),
+                Map.entry("美装管道整改", "11"), Map.entry("美装安全评估", "12")
         );
-        return cn2key.getOrDefault(catCn, catCn);
+    }
+
+    /** Resolve Chinese category name → dict key dynamically from platform dict. */
+    private String mapCategoryKey(String catCn) {
+        return getCategoryNameToKey().getOrDefault(catCn, catCn);
     }
 
     // ═══════ Validation ═══════

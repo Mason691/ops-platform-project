@@ -30,7 +30,7 @@ public class CommissionRuleServiceImpl implements CommissionRuleService {
 
     /** 默认品类（字典接口不可用时的兜底，含全部 dict item_key） */
     private static final Set<String> DEFAULT_CATEGORIES =
-            Set.of("1", "2", "3", "4", "5", "6", "7", "8", "9");
+            Set.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12");
 
     /**
      * 从平台数据字典加载有效品类列表，结果缓存到内存。
@@ -186,5 +186,32 @@ public class CommissionRuleServiceImpl implements CommissionRuleService {
     public void companyDelete(Long id) {
         companyGetById(id);
         companyMapper.deleteById(id);
+    }
+
+    // ─── 品类字典 ───
+
+    @Override
+    public List<Map<String, String>> getCategories() {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = platformInternalClient.get(
+                    "/api/dict/data?typeCode=PRODUCT_CATEGORY", null);
+            Object data = resp.get("data");
+            if (data instanceof List) {
+                List<Map<String, String>> result = new ArrayList<>();
+                for (Object item : (List<?>) data) {
+                    if (item instanceof Map) {
+                        Map<String, String> entry = new LinkedHashMap<>();
+                        entry.put("itemKey", String.valueOf(((Map<?, ?>) item).get("itemKey")));
+                        entry.put("itemValue", String.valueOf(((Map<?, ?>) item).get("itemValue")));
+                        result.add(entry);
+                    }
+                }
+                return result;
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load PRODUCT_CATEGORY dict for categories endpoint", e);
+        }
+        return List.of();
     }
 }

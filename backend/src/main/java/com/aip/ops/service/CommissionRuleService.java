@@ -30,4 +30,9 @@ public interface CommissionRuleService {
     void companyUpdate(Long id, OpsCompanyCommissionRule rule);
 
     void companyDelete(Long id);
+
+    // ─── 品类字典（供前端下拉框使用） ───
+
+    /** 从平台数据字典加载 PRODUCT_CATEGORY 品类列表（itemKey + itemValue）。 */
+    java.util.List<java.util.Map<String, String>> getCategories();
 }

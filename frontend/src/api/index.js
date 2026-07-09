@@ -235,4 +235,19 @@ export const api = {
     })
   }),
   employeeUpdateProfile: (data) => request({url:'/api/ops/employee/profile',method:'PUT',data}),
+
+  // 提成规则 — 个人
+  commissionPersonalList: (params) => request({url:'/api/ops/admin/commission/personal',data:params}),
+  commissionPersonalDetail: (id) => request({url:'/api/ops/admin/commission/personal/'+id}),
+  commissionPersonalCreate: (data) => request({url:'/api/ops/admin/commission/personal',method:'POST',data}),
+  commissionPersonalUpdate: (id, data) => request({url:'/api/ops/admin/commission/personal/'+id,method:'PUT',data}),
+  commissionPersonalDelete: (id) => request({url:'/api/ops/admin/commission/personal/'+id,method:'DELETE'}),
+  // 提成规则 — 公司
+  commissionCompanyList: (params) => request({url:'/api/ops/admin/commission/company',data:params}),
+  commissionCompanyDetail: (id) => request({url:'/api/ops/admin/commission/company/'+id}),
+  commissionCompanyCreate: (data) => request({url:'/api/ops/admin/commission/company',method:'POST',data}),
+  commissionCompanyUpdate: (id, data) => request({url:'/api/ops/admin/commission/company/'+id,method:'PUT',data}),
+  commissionCompanyDelete: (id) => request({url:'/api/ops/admin/commission/company/'+id,method:'DELETE'}),
+  // 品类字典（提成规则下拉框用）
+  commissionCategories: () => request({url:'/api/ops/admin/commission/categories'}),
 }

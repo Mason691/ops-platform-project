@@ -117,4 +117,11 @@ public class CommissionRuleController {
         service.companyDelete(id);
         return R.ok("删除成功");
     }
+
+    // ═══ 品类字典（供前端下拉框） ═══
+
+    @GetMapping("/categories")
+    public R<?> categories() {
+        return R.ok(service.getCategories());
+    }
 }

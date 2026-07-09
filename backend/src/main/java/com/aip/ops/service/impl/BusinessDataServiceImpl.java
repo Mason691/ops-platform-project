@@ -55,29 +55,32 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     private static final Set<String> VALID_COMPANIES = Set.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
 
-    private static final Map<String, String> CN_TO_KEY = Map.ofEntries(
-            Map.entry("燃气灶", "1"), Map.entry("抽油烟机", "2"),
-            Map.entry("热水器", "3"), Map.entry("壁挂炉", "4"),
-            Map.entry("壁挂炉以旧换新销售", "5"), Map.entry("户内美装销售", "6"),
-            Map.entry("定尺波纹管", "7"), Map.entry("户内美装工程", "8"),
-            Map.entry("户内美装运维", "9"), Map.entry("保险", "10")
-    );
+    /** Dynamic category maps loaded from platform dict at first access. */
+    private static volatile Map<String, String> CN_TO_KEY = null;
+    public static volatile Map<String, String> KEY_TO_CN = null;
 
-    /** Reverse map: dict key (1,2,3...) → Chinese display name (燃气灶,抽油烟机...) */
-    public static final Map<String, String> KEY_TO_CN = Map.ofEntries(
-            Map.entry("1", "燃气灶"), Map.entry("2", "抽油烟机"),
-            Map.entry("3", "热水器"), Map.entry("4", "壁挂炉"),
-            Map.entry("5", "壁挂炉以旧换新销售"), Map.entry("6", "户内美装销售"),
-            Map.entry("7", "定尺波纹管"), Map.entry("8", "户内美装工程"),
-            Map.entry("9", "户内美装运维"), Map.entry("10", "保险")
-    );
+    static {
+        // Init with hardcoded fallback maps (used when dict API is unreachable)
+        Map<String, String> cn2key = new HashMap<>();
+        cn2key.put("燃气灶", "1"); cn2key.put("抽油烟机", "2");
+        cn2key.put("热水器", "3"); cn2key.put("壁挂炉", "4");
+        cn2key.put("壁挂炉以旧换新销售", "5"); cn2key.put("户内美装销售", "6");
+        cn2key.put("定尺波纹管", "7"); cn2key.put("户内美装工程", "8");
+        cn2key.put("户内美装运维", "9"); cn2key.put("保险", "10");
+        cn2key.put("美装管道整改", "11"); cn2key.put("美装安全评估", "12");
+        CN_TO_KEY = Collections.unmodifiableMap(cn2key);
+        Map<String, String> key2cn = new HashMap<>();
+        cn2key.forEach((cn, k) -> key2cn.put(k, cn));
+        KEY_TO_CN = Collections.unmodifiableMap(key2cn);
+    }
 
     /** Category name cache from platform dict (volatile for DCL) */
     private volatile Set<String> categoryNameCache;
     private static final Set<String> DEFAULT_CATEGORIES = Set.of(
             "燃气灶", "抽油烟机", "热水器", "壁挂炉",
             "壁挂炉以旧换新销售", "户内美装销售", "定尺波纹管",
-            "户内美装工程", "户内美装运维", "保险"
+            "户内美装工程", "户内美装运维", "保险",
+            "美装管道整改", "美装安全评估"
     );
 
     public BusinessDataServiceImpl(
@@ -324,7 +327,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         }
     }
 
-    /** Load valid category names from platform dict. Falls back to defaults on failure. */
+    /** Load valid category names + name↔key maps from platform dict. Falls back to defaults on failure. */
     private Set<String> loadValidCategories() {
         if (categoryNameCache != null) return categoryNameCache;
         synchronized (this) {
@@ -336,14 +339,27 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 Object data = resp.get("data");
                 if (data instanceof List) {
                     Set<String> set = new HashSet<>();
+                    Map<String, String> cn2key = new HashMap<>();
+                    Map<String, String> key2cn = new HashMap<>();
                     for (Object item : (List<?>) data) {
                         if (item instanceof Map) {
                             Object val = ((Map<?, ?>) item).get("itemValue");
-                            if (val != null) set.add(val.toString());
+                            Object key = ((Map<?, ?>) item).get("itemKey");
+                            if (val != null) {
+                                String cn = val.toString();
+                                set.add(cn);
+                                if (key != null) {
+                                    String k = key.toString();
+                                    cn2key.put(cn, k);
+                                    key2cn.put(k, cn);
+                                }
+                            }
                         }
                     }
                     if (!set.isEmpty()) {
                         categoryNameCache = set;
+                        CN_TO_KEY = Collections.unmodifiableMap(cn2key);
+                        KEY_TO_CN = Collections.unmodifiableMap(key2cn);
                         log.info("Loaded {} categories from platform dict", set.size());
                         return set;
                     }
@@ -359,11 +375,22 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     @Override
     @Transactional
     public Map<String, Object> calcCommission() {
-        // Load rules (unchanged)
-        List<OpsPersonalCommissionRule> rules = ruleMapper.selectList(
-                new LambdaQueryWrapper<OpsPersonalCommissionRule>().eq(OpsPersonalCommissionRule::getStatus, 1));
-        Map<String, OpsPersonalCommissionRule> ruleMap = new HashMap<>();
-        for (OpsPersonalCommissionRule r : rules) ruleMap.putIfAbsent(r.getCategory(), r);
+        // Load rules filtered by visible corp scope (prevents cross-tenant rule pollution)
+        Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        LambdaQueryWrapper<OpsPersonalCommissionRule> ruleQw =
+                new LambdaQueryWrapper<OpsPersonalCommissionRule>()
+                        .eq(OpsPersonalCommissionRule::getStatus, 1);
+        if (visibleIds != null && !visibleIds.isEmpty()) {
+            ruleQw.in(OpsPersonalCommissionRule::getCorpId, visibleIds);
+        }
+        List<OpsPersonalCommissionRule> rules = ruleMapper.selectList(ruleQw);
+        // Group rules by (corpId, category) for per-tenant matching
+        Map<Long, Map<String, OpsPersonalCommissionRule>> ruleMapByCorp = new HashMap<>();
+        for (OpsPersonalCommissionRule r : rules) {
+            Long cid = r.getCorpId() != null ? r.getCorpId() : 0L;
+            ruleMapByCorp.computeIfAbsent(cid, k -> new HashMap<>())
+                    .putIfAbsent(r.getCategory(), r);
+        }
 
         LambdaQueryWrapper<OpsBusinessData> uncalcQw = new LambdaQueryWrapper<OpsBusinessData>()
                 .eq(OpsBusinessData::getCalcStatus, "未计算");
@@ -374,10 +401,13 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             return Map.of("total", 0, "commissioned", 0, "zero", 0, "splitGroups", 0);
         }
 
-        // ── Phase 1: Compute per-row commission (in-memory) ──
+        // ── Phase 1: Compute per-row commission (in-memory, per-corp rule matching) ──
         Map<Long, BigDecimal[]> results = new LinkedHashMap<>();
         for (OpsBusinessData d : uncalcs) {
-            OpsPersonalCommissionRule rule = ruleMap.get(d.getCategory());
+            Long dCorpId = d.getCorpId() != null ? d.getCorpId() : 0L;
+            Map<String, OpsPersonalCommissionRule> corpRuleMap = ruleMapByCorp.getOrDefault(dCorpId,
+                    ruleMapByCorp.getOrDefault(0L, Collections.emptyMap()));
+            OpsPersonalCommissionRule rule = corpRuleMap.get(d.getCategory());
             BigDecimal[] cr = calcCommissionAmount(d.getSalePrice(),
                     d.getRetailFloorPrice(), d.getGroupLowestPrice(), rule);
             results.put(d.getId(), new BigDecimal[]{cr[0], cr[1]});
