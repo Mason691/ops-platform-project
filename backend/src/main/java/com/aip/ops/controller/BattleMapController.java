@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -185,23 +186,57 @@ public class BattleMapController {
     private String now() { return LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME); }
 
     /**
-     * 作战地图边界以「组织的业务地区」为准。sys_corp 无 region_id 列，故从该组织名下
-     * 小区（ai_platform.sys_community.region_id）出现最多的地区推导业务区域，向上归一到
-     * 区县级后取高德 adcode（sys_region.region_code）供前端定位边界。无小区时不填 region，
-     * 前端降级为全国视图。
+     * 近 6 个月活动次数 + 销售额趋势（底部迷你图数据源）。
+     * 活动次数取 ops_activity.create_time，销售额取台账 usage_date；缺月补 0，保证连续 6 个桶。
+     */
+    @GetMapping("/trend")
+    public R<?> trend(@RequestParam(defaultValue = "10") Long corpId) {
+        if (!canView(corpId)) return R.ok(Map.of("records", List.of()));
+        String k = cache.key(corpId, "trend");
+        List<Map<String, Object>> cached = cache.get(k);
+        if (cached != null) return R.ok(Map.of("records", cached, "cached", true));
+        try {
+            DateTimeFormatter ym = DateTimeFormatter.ofPattern("yyyy-MM");
+            LocalDate first = LocalDate.now().withDayOfMonth(1).minusMonths(5);
+            Map<String, Map<String, Object>> buckets = new LinkedHashMap<>();
+            for (int i = 0; i < 6; i++) {
+                String m = first.plusMonths(i).format(ym);
+                Map<String, Object> r = new LinkedHashMap<>();
+                r.put("month", m); r.put("activityCount", 0); r.put("salesAmount", 0);
+                buckets.put(m, r);
+            }
+            String since = first.format(ym) + "-01";
+            jdbcTemplate.queryForList("SELECT DATE_FORMAT(create_time,'%Y-%m') ym, COUNT(*) cnt FROM ops_activity " +
+                "WHERE corp_id=? AND delete_flag=0 AND create_time>=? GROUP BY ym", corpId, since)
+                .forEach(row -> { Map<String, Object> r = buckets.get((String) row.get("ym")); if (r != null) r.put("activityCount", row.get("cnt")); });
+            jdbcTemplate.queryForList("SELECT DATE_FORMAT(usage_date,'%Y-%m') ym, COALESCE(SUM(sales_price),0) total FROM ops_member_ledger " +
+                "WHERE corp_id=? AND delete_flag=0 AND usage_date>=? GROUP BY ym", corpId, since)
+                .forEach(row -> { Map<String, Object> r = buckets.get((String) row.get("ym")); if (r != null) r.put("salesAmount", row.get("total")); });
+            List<Map<String, Object>> records = new ArrayList<>(buckets.values());
+            cache.set(k, records);
+            return R.ok(Map.of("records", records, "cached", false));
+        } catch (Exception e) { return R.ok(Map.of("records", List.of())); }
+    }
+
+    /**
+     * 组织业务地区直接取自 ai_platform.sys_corp（region_id / region_name，组织自身声明的业务区域）。
+     * region_id 存在时经 sys_region 归一到区县级取高德 adcode（region_code）供地图边界兜底；
+     * region_id 为空（如仅填了 region_name 的组织）则只保留 region_name，前端按小区坐标定位。
      */
     private void resolveOrgRegion(Long corpId, Map<String, Object> s) {
         try {
-            List<Map<String, Object>> top = jdbcTemplate.queryForList(
-                "SELECT region_id FROM ai_platform.sys_community WHERE corp_id=? AND delete_flag=0 AND region_id IS NOT NULL GROUP BY region_id ORDER BY COUNT(*) DESC LIMIT 1", corpId);
-            if (top.isEmpty()) return;
-            Long regionId = ((Number) top.get(0).get("region_id")).longValue();
-            Map<String, Object> region = climbToCounty(regionId);
-            if (region == null) return;
-            String name = (String) region.get("region_name");
-            String code = (String) region.get("region_code");
-            if (name != null) { s.put("regionName", name); s.put("cityName", name); }
-            if (code != null && !code.isBlank()) s.put("adcode", code);
+            Map<String, Object> corp = jdbcTemplate.queryForMap(
+                "SELECT region_id, region_name FROM ai_platform.sys_corp WHERE id=?", corpId);
+            Object rn = corp.get("region_name");
+            if (rn != null && !rn.toString().isBlank()) { s.put("regionName", rn.toString()); s.put("cityName", rn.toString()); }
+            Object rid = corp.get("region_id");
+            if (rid != null) {
+                Map<String, Object> region = climbToCounty(((Number) rid).longValue());
+                if (region != null) {
+                    String code = (String) region.get("region_code");
+                    if (code != null && !code.isBlank()) s.put("adcode", code);
+                }
+            }
         } catch (Exception e) { log.warn("resolveOrgRegion({}) failed: {}", corpId, e.getMessage()); }
     }
 
