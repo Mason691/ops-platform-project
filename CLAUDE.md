@@ -87,24 +87,25 @@ ops-platform-project/
 │   ├── src/main/java/com/aip/ops/
 │   │   ├── OpsApplication.java
 │   │   ├── config/          # SecurityConfig, AuthConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig, JacksonConfig
-│   │   ├── controller/      # 21 controllers（见下方）
-│   │   ├── entity/          # 26 entities（全部继承 SDK BaseEntity，SysImportTask 例外）
-│   │   ├── mapper/          # 27 MyBatis-Plus mappers
-│   │   ├── service/         # 22 service interfaces + 16 impls
+│   │   ├── controller/      # 26 controllers（见下方）
+│   │   ├── entity/          # 32 entities（全部继承 SDK BaseEntity，SysImportTask 例外）
+│   │   ├── mapper/          # 33 MyBatis-Plus mappers
+│   │   ├── service/         # 24 service interfaces + 16 impls
 │   │   ├── client/          # 子系统间 HTTP 客户端（MemberSyncClient, ProductBatchClient）
 │   │   ├── agent/           # AI DomainAgent（OpsAgent.java）
 │   │   ├── tool/            # MCP 工具（OpsOrderQueryTool, OpsEmployeeBusinessDataTool）
 │   │   ├── export/          # 通用异步导出策略（ExportHandler 接口 + 策略模式）
 │   │   ├── imports/         # 通用异步导入策略（ImportHandler 接口 + 策略模式）
 │   │   ├── kafka/           # Kafka — 3 consumers, 1 producer, 3 message DTOs（条件加载）
+│   │   ├── scheduler/        # 定时任务（BattleMapEtlBootstrap, BattleMapEtlScheduler）
 │   │   ├── dto/             # 数据传输对象
 │   │   └── util/            # 工具类（ImageUrlUtil 等）
 │   └── pom.xml
 ├── frontend/
 │   ├── src/main.js          # uni-app 入口
 │   ├── src/manifest.json    # uni-app 配置（H5 base 路径等）
-│   ├── src/pages/           # uni-app 页面（30 files，16 个目录）
-│   ├── src/components/      # 跨页面复用组件（ImageCropperModal, LiveStatusCard）
+│   ├── src/pages/           # uni-app 页面（34 files，16 个目录）
+│   ├── src/components/      # 跨页面复用组件（ImageCropperModal, LiveStatusCard, EmployeeTabBar）
 │   ├── src/api/index.js     # 集中 API 注册（66+ 个方法）
 │   ├── src/utils/           # request.js, image.js, config.js, jssdk.js, auth-bridge.js
 │   ├── src/config.js        # BASE_URL + DEFAULT_CORP_ID
@@ -120,31 +121,41 @@ ops-platform-project/
 └── uploads/                 # 文件上传输出目录
 ```
 
-### Controllers（21 个）
+### Controllers（26 个）
 
 | Controller | 端点前缀 | 说明 |
 |---|---|---|
+| **C 端接口** | | |
 | `PlatformController` | `/api/ops/product`, `/api/ops/activity`, `/api/ops/order`, `/api/ops/points`, `/api/ops/coupon`, `/api/ops/live-rooms`, `/api/ops/user` | 核心 C 端接口 |
-| `AdminController` | `/api/ops/admin` | 管理后台：活动/商品/直播室 CRUD、预约查询、首页统计、商家绑定 |
 | `AuthController` | `/api/ops/auth` | 会员登录/注册 |
-| `EmployeeAuthController` | `/api/ops/auth/employee` | **员工** 登录（手机号+密码+验证码），独立于会员认证 |
-| `AiChatProxyController` | `/api/ops/ai` | **会员** AI 客服代理（chat + voice + config + profile） |
-| `EmployeeAiController` | `/api/ops/ai/employee` | **员工** AI 助手代理（chat + async + SSE stream + config + profile） |
-| `EmployeeController` | `/api/ops/employee` | 员工身份校验 + 个人业务数据查询 |
-| `MemberProfileProxyController` | `/api/ops/member` | 会员信息代理到底座 |
 | `HomeController` | `/api/ops/home-data` | 公开首页数据（banner/视频/推荐） |
-| `HomeConfigController` | `/api/ops/admin/home-configs` | 首页配置 CRUD + 批量排序 |
-| `FileUploadController` | `/api/ops/files` | 图片/视频上传 |
 | `PublicAccountController` | `/api/public-account` | 公众号配置查询 + JSSDK 签名 |
-| `PartnerController` | `/api/ops/partner` | 城市合伙人管理（代理底座 internal API） |
 | `StationController` | `/api/ops/station` | H5 端站长申请/状态/信息 |
-| `AdminStationController` | `/api/ops/admin/station` | 管理后台站长审批/列表/统计 |
+| **管理后台** | | |
+| `AdminController` | `/api/ops/admin` | 活动/商品/直播室 CRUD、预约查询、首页统计、商家绑定 |
+| `AdminStationController` | `/api/ops/admin/station` | 站长审批/列表/统计 |
 | `BusinessDataController` | `/api/ops/admin/business-data` | 增值业务：Excel 导入/提成计算/异步导出/模板下载 |
-| `CommissionRuleController` | `/api/ops/admin/commission` | 个人/公司提成规则 CRUD |
+| `CommissionRuleController` | `/api/ops/admin/commission` | 个人/公司提成规则 CRUD（支持组织层级继承） |
 | `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD |
 | `MemberController` | `/api/ops/admin/members` | 会员管理：分页查询/详情/启用禁用 |
 | `ExportTaskController` | `/api/ops/admin/export` | 通用异步导出：提交/状态轮询/下载/历史 |
 | `PermissionController` | `/api/ops/admin/permission` | 权限概要查询 |
+| `HomeConfigController` | `/api/ops/admin/home-configs` | 首页配置 CRUD + 批量排序 |
+| `BattleMapController` | `/api/ops/admin/battle-map` | **作战地图看板**：ETL 触发/员工绩效/小区统计/summary/趋势/下钻详情 |
+| `ActivityReviewController` | `/api/ops/admin/activity-review` | **活动复盘**：复盘 CRUD + 审核 + 费用台账 + 参与员工 |
+| `GasUserController` | `/api/ops/admin/gas-user` | **燃气用户**：分页查询/批量导入/小区关联 |
+| `GridManagerController` | `/api/ops/admin/grid-manager` | **网格员管理**：CRUD + 小区分配 |
+| `MemberLedgerController` | `/api/ops/admin/member-ledger` | **会员台账**：分页查询/按小区+品类+经办人筛选/批量导入 |
+| **员工通道** | | |
+| `EmployeeAuthController` | `/api/ops/auth/employee` | **员工** 登录（手机号+密码+验证码），独立于会员认证 |
+| `EmployeeController` | `/api/ops/employee` | 员工身份校验 + 个人业务数据查询 + 头像上传 |
+| `EmployeeAiController` | `/api/ops/ai/employee` | **员工** AI 助手（chat + async + SSE stream + config + profile） |
+| **会员通道** | | |
+| `AiChatProxyController` | `/api/ops/ai` | **会员** AI 客服代理（chat + voice + config + profile） |
+| `MemberProfileProxyController` | `/api/ops/member` | 会员信息代理到底座 |
+| **内部/代理** | | |
+| `FileUploadController` | `/api/ops/files` | 图片/视频上传 |
+| `PartnerController` | `/api/ops/admin/partners` | 城市合伙人管理（代理底座 internal API） |
 
 ---
 
@@ -221,6 +232,88 @@ ops-platform-project/
 - `OpsEmployeeBusinessDataTool`：`@McpTool`，工具名 `ops_query_employee_business_data`，查询员工增值业务数据（月份/品类/提成），限定当前员工手机号
 - `OpsAgent`：`@AgentComponent`，名称 `"OPS"`，处理业务综合问答（订单/商品统计）
 
+### 作战地图看板（Battle Map Dashboard）
+
+ETL 预计算 + 缓存架构，将原始业务数据聚合为只读看板，按组织维度隔离。
+
+**数据流**：`ops_member_ledger` / `ops_activity` / `ops_activity_review` → `BattleMapEtlService` → 4 张预计算表（`ops_map_*`）→ `BattleMapController` 只读查询
+
+**4 张 ETL 表**：
+| 表 | 说明 |
+|---|---|
+| `ops_map_employee_performance` | 经办人业绩排行（rank_order） |
+| `ops_map_community` | 小区销售分布（total_sales） |
+| `ops_map_org_summary` | 组织汇总（总销售额/活动数/员工数/小区数） |
+| `ops_map_category_sales` | 品类销售统计 |
+
+**核心服务**：
+- `BattleMapEtlService` — ETL 重算引擎：`refreshOrg(corpId)` 单组织全量重算，`refreshAllOrgs()` 全量重算所有活跃组织。每张表按 org_id 物理删除后重写。组织+下级聚合：运营商看板数据 = 自身 + 旗下所有合伙人数据。
+- `BattleMapCache` — 二级缓存：内存 `ConcurrentHashMap`（30min TTL）+ 前端 `localStorage`。
+
+**配置**（`application.yml`）：
+```yaml
+battle-map:
+  etl:
+    auto-refresh: true
+    init-on-startup: true        # 启动时全量初始化
+    cron: "0 */30 * * * *"      # 每 30 分钟增量刷新
+```
+
+**API 端点**：
+- `POST /refresh-cache` — 单组织 ETL 刷新
+- `POST /refresh-all` — 全量重算
+- `GET /summary` — 组织汇总（含 region 定位、short_name 标题）
+- `GET /employee-performance` — 经办人 TOP10
+- `GET /community-stats` — 小区销售分布
+- `GET /community/{id}/detail` — 小区下钻（经办人 + 台账明细 + 品类分布）
+- `GET /employee/detail` — 经办人下钻（负责小区 + 参与活动）
+- `GET /trend` — 近 6 月趋势（活动次数 + 销售额，缺月补 0）
+
+**组织边界定位**：`summary` 接口直读 `ai_platform.sys_corp.region_id/region_name`，沿 region 树向上归一到区县级（region_level≤3），取高德 `adcode` 用于地图边界。
+
+### 活动复盘（Activity Review）
+
+城市合伙人提交活动复盘，运营商审批。含费用台账和销售台账。
+
+**实体**：`OpsActivityReview`（复盘主表）+ `OpsActivityReviewCost`（费用明细）
+
+**流程**：合伙人提交复盘（reviewStatus=0 待审核）→ 运营商审批（reviewStatus=1 通过 / 2 驳回）→ 驳回后可编辑重提。通过后锁定不可编辑/删除。
+
+**API**：`ActivityReviewController` `/api/ops/admin/activity-review`
+- `GET /` — 分页列表（支持活动标题/状态/日期筛选，组织数据隔离）
+- `GET /{id}` — 复盘详情 + 费用明细 + 活动销售台账
+- `POST /` — 创建复盘
+- `PUT /{id}` — 编辑（仅待审核/驳回状态）
+- `DELETE /{id}` — 删除（仅待审核/驳回状态）
+- `PUT /{id}/approve` — 审批（通过/驳回 + 审批意见）
+- `GET /available-activities` — 可选活动列表
+- `GET /employees` — 本组织员工列表（供参与人选择）
+
+### 提成规则（Commission Rules）
+
+个人提成（`OpsPersonalCommissionRule`）和公司提成（`OpsCompanyCommissionRule`），支持**组织层级继承**：子组织自动继承上级规则。
+
+**提成类型**：按比例（percentage）或固定金额（fixed_amount），按品类（category）配置。
+
+**品类字典**：提成规则品类下拉框从平台数据字典 `PRODUCT_CATEGORY` 动态加载（`CommissionRuleService.getCategories()`），不再硬编码。
+
+**API**：`CommissionRuleController` `/api/ops/admin/commission`
+- 个人规则 CRUD：`GET/POST/PUT/DELETE /personal`
+- 公司规则 CRUD：`GET/POST/PUT/DELETE /company`
+- `GET /categories` — 品类字典
+
+### 燃气用户 / 网格员 / 会员台账
+
+三个管理后台模块，均为标准 CRUD + 分页查询 + 组织数据隔离：
+
+- **燃气用户**（`GasUserController` `/api/ops/admin/gas-user`）：`ops_gas_user` 表，按小区筛选 + 关键字搜索
+- **网格员管理**（`GridManagerController` `/api/ops/admin/grid-manager`）：`ops_grid_manager` + `ops_grid_manager_community` 关联表，网格员可分配多个小区
+- **会员台账**（`MemberLedgerController` `/api/ops/admin/member-ledger`）：`ops_member_ledger` 表，增值业务销售记录，按小区/品类/经办人多维筛选，是作战地图和提成计算的数据源
+
+### 微信手机号授权（WechatPhoneService）
+
+`WechatPhoneService` 通过微信 code + session_key 解密获取用户手机号，用于小程序端静默授权。只在微信小程序环境生效。
+
 ### 异步导出/导入（Kafka + 策略模式）
 
 导出采用 `ExportHandler` 接口 + 策略模式，导入对称使用 `ImportHandler`：
@@ -263,7 +356,7 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 - **双 Token 体系**：`request.js` 优先使用 `ops_token`（会员），fallback 使用 `ops_employee_token`（员工）。401 时清除两者
 - **iframe SSO**：`auth-bridge.js` 监听 `postMessage`（`AIP_AUTH` / `AIP_NAVIGATE`），信任同源和 `boss.jdzn99.com`
 - **公众号深链**：`App.vue` 支持 `?route=pages/employee/login` 和 `?from=employee` 查询参数跳转（公众号自定义菜单不支持 hash fragment）
-- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（66+ 方法），统一使用 `request` 实例
+- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（124+ 方法），统一使用 `request` 实例
 - **H5 hash 路由**：实际 base 由构建时 `VITE_BASE` 环境变量控制
 
 ### 前端页面路由（pages.json）
@@ -278,9 +371,9 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 | 活动 | `pages/activity/index`, `pages/activity/detail`, `pages/live/index` | 活动 + 直播广场 |
 | 我的 | `pages/mine/index`, `pages/order/*`, `pages/address/*`, `pages/points/log`, `pages/coupon/list`, `pages/auth/*`, `pages/booking/list` | 用户中心 |
 
-管理页面（不在 Tab 中）：`pages/admin/activity-form`, `pages/admin/home-config`, `pages/admin/live-room-manage`  
+管理页面（不在 Tab 中）：`pages/admin/activity-form`, `pages/admin/home-config`, `pages/admin/live-room-manage`, `pages/admin/business-data`, `pages/admin/commission-rules`, `pages/admin/members`  
 站长页面：`pages/station/apply`, `pages/station/center`  
-员工页面：`pages/employee/login`（员工登录）、`pages/employee/ai-chat`（员工 AI 助手 H5）、`pages/employee/dashboard`、`pages/employee/company-select`、`pages/employee/business-data`
+员工页面：`pages/employee/login`（员工登录）、`pages/employee/ai-chat`（员工 AI 助手 H5）、`pages/employee/dashboard`、`pages/employee/company-select`、`pages/employee/business-data`、`pages/employee/profile`
 
 ---
 
@@ -303,6 +396,13 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 | `app.upload.base-dir` | 上传根目录 | `/app/uploads`（Docker） |
 | `app.resource.base-url` | 静态资源域名 | `https://boss.jdzn99.com` |
 | `spring.kafka.enabled` | Kafka 开关 | `true`（生产）/ `false`（测试） |
+| `battle-map.etl.auto-refresh` | 作战地图定时 ETL | `true` |
+| `battle-map.etl.init-on-startup` | 启动时全量 ETL | `true` |
+| `battle-map.etl.cron` | ETL 刷新间隔 | `0 */30 * * * *`（每 30 分钟） |
+| `ops.remind.hours-before` | 活动提醒提前小时数 | `24,1` |
+| `platform.sdk-permit-paths` | SDK 安全过滤器放行路径 | 9 个路径（含 `/api/ops/coupon/list`、`/api/ops/live-rooms/**` 等） |
+
+**生产 Kafka 配置**：使用 SASL_PLAINTEXT 认证（`admin/admin123.`），bootstrap-server `113.250.60.41:9092`。测试环境 Kafka 禁用。
 
 ### RestTemplate Beans
 
@@ -334,6 +434,7 @@ cd backend && JAVA_HOME=/home/jason/jdk17/jdk-17.0.9+9 mvn clean package -DskipT
 # JAR → /data2/boss-platform/ops-backend/app.jar
 # docker build -t boss-platform/ops:latest ./ops-backend/
 # docker compose up -d ops-backend
+# Dockerfile 包含 HEALTHCHECK（30s 间隔，GET /actuator/health），Python3 + openpyxl 用于 TSV→XLSX 转换
 
 # 前端
 cd frontend && npm run build:h5
@@ -377,6 +478,9 @@ cd frontend && npm run build:h5
 | **ops-platform vs 平台主站** | `boss.jdzn99.com` 有两套前端：平台主站（`~/ai-native-platform/frontend`）和 ops H5（本项目）。`/ops/xxx` 路由在主站中通过 `componentMap` 直接加载 Vue 组件，不是微前端。改 ops H5 页面不影响主站 |
 | **Kafka 消费者组冲突** | 同一 consumer group 内分区独占。多容器共享 `ai-platform-group` 时，旧容器（如 `determined_lehmann`）抢到 `async-export-task` 分区但连错数据库 → 任务僵死 PENDING → 新容器永远收不到消息。**部署新容器前必须 `docker stop/rm` 旧容器**，部署后 `docker ps` 确认无僵尸容器残留。参见 `[[kafka-consumer-group-conflict]]` |
 | **旧容器/代码不留存** | **铁律**：新容器部署后旧容器必须立即清理（`docker stop + rm`）。旧代码、旧容器、旧配置不留存——git history 可随时恢复。参见 `[[no-legacy-code-retention]]`、`[[kafka-consumer-group-conflict]]` |
+| **作战地图跨库查询** | `BattleMapController.summary()` 和 `region` 解析方法直读 `ai_platform.sys_corp` 和 `ai_platform.sys_region`（跨库）。这是仅有的例外——组织区域信息无法通过 API 获取。维护时注意表结构变更 |
+| **作战地图数据源仅生产** | 作战地图源表（`ops_gas_user`/`ops_member_ledger`/`ops_grid_manager`）仅在**生产库**有数据。测试 `mall_db` 无这些表的记录，ETL 只能在生产环境跑。参见 `[[battle-map-data-only-on-prod]]` |
+| **ops_activity_review_cost 无 delete_flag** | 此表缺少逻辑删除字段，`costMapper.delete()` 走物理删除。重构时需注意 |
 
 ### UI/UX 质量规范（强制）
 
@@ -392,7 +496,7 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-07-07 | 负责人：架构师（员工认证已重构为委托平台 sys_user）
+最后更新：2026-07-09 | 负责人：架构师（新增作战地图、活动复盘、提成规则等 5 个模块文档）
 
 ### 自定义 Claude 命令
 

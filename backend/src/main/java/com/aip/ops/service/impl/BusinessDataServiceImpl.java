@@ -375,17 +375,51 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     @Override
     @Transactional
     public Map<String, Object> calcCommission() {
-        // Load rules filtered by visible corp scope + platform-level (corpId=0) rules
-        // Platform-level rules (corpId=0) are inherited by all corps as fallback.
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+
+        // ── Build parent chain BEFORE querying rules ──
+        // We need the full ancestor set so the rule query can fetch parent/ancestor
+        // rules alongside the currently-visible corps' rules. Without this,
+        // cascadeParentRules() would find parentMap entries but no parent rule data
+        // in ruleMapByCorp, silently yielding zero commission for city partners.
+        Map<Long, Long> parentMap = new HashMap<>();
+        Set<Long> ruleCorpIds = new HashSet<>();
+        if (visibleIds != null && !visibleIds.isEmpty()) {
+            parentMap = buildParentChainMap(visibleIds);
+            ruleCorpIds.addAll(visibleIds);
+            // Walk the parent chain to collect ALL ancestor corp IDs
+            for (Long child : visibleIds) {
+                Long p = parentMap.get(child);
+                while (p != null && p != 0L) {
+                    ruleCorpIds.add(p);
+                    // resolve next ancestor if known; stop at root
+                    Long next = parentMap.get(p);
+                    if (next == null && p != 0L) {
+                        // parent-of-parent not in map yet — resolve it now
+                        Long gp = resolveParentId(p);
+                        if (gp != null) parentMap.put(p, gp);
+                        next = gp;
+                    }
+                    p = next;
+                }
+            }
+        }
+        // Always include platform-level (corpId=0) as fallback
+        ruleCorpIds.add(0L);
+
+        // Load active rules filtered by the expanded corp ID set (visible + ancestors + platform)
         LambdaQueryWrapper<OpsPersonalCommissionRule> ruleQw =
                 new LambdaQueryWrapper<OpsPersonalCommissionRule>()
                         .eq(OpsPersonalCommissionRule::getStatus, 1);
-        if (visibleIds != null && !visibleIds.isEmpty()) {
-            ruleQw.and(w -> w.in(OpsPersonalCommissionRule::getCorpId, visibleIds)
-                    .or().eq(OpsPersonalCommissionRule::getCorpId, 0L));
+        if (visibleIds != null) {
+            ruleQw.in(OpsPersonalCommissionRule::getCorpId, ruleCorpIds);
         }
+        // (super-admin: visibleIds=null → no corp filter → all rules)
         List<OpsPersonalCommissionRule> rules = ruleMapper.selectList(ruleQw);
+        if (rules.isEmpty()) {
+            log.warn("No active personal commission rules found for corp scope. "
+                    + "All commission will be zero.");
+        }
         // Group rules by (corpId, category) for per-tenant matching
         Map<Long, Map<String, OpsPersonalCommissionRule>> ruleMapByCorp = new HashMap<>();
         for (OpsPersonalCommissionRule r : rules) {
@@ -397,7 +431,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         // ── Cascade parent rules to child corps (org hierarchy inheritance) ──
         // Child corps inherit parent operator's rules; child's own rules take priority.
         if (visibleIds != null && !visibleIds.isEmpty()) {
-            Map<Long, Long> parentMap = buildParentChainMap(visibleIds);
             cascadeParentRules(ruleMapByCorp, parentMap);
         }
 
@@ -700,6 +733,26 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             }
         }
         return parentMap;
+    }
+
+    /**
+     * Resolve the parent corp ID for a single corp.
+     * Calls platform internal API; returns null on failure — safe fallback.
+     */
+    private Long resolveParentId(Long corpId) {
+        if (corpId == null || corpId == 0L) return null;
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = platformInternalClient.get(
+                    "/api/internal/corp/" + corpId, null);
+            Map<String, Object> data = (Map<String, Object>) resp.get("data");
+            if (data != null && data.get("parentCorpId") instanceof Number) {
+                return ((Number) data.get("parentCorpId")).longValue();
+            }
+        } catch (Exception e) {
+            log.debug("Failed to resolve parent for corpId={}: {}", corpId, e.getMessage());
+        }
+        return null;
     }
 
     /**
