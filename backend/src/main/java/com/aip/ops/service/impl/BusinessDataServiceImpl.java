@@ -375,13 +375,15 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     @Override
     @Transactional
     public Map<String, Object> calcCommission() {
-        // Load rules filtered by visible corp scope (prevents cross-tenant rule pollution)
+        // Load rules filtered by visible corp scope + platform-level (corpId=0) rules
+        // Platform-level rules (corpId=0) are inherited by all corps as fallback.
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
         LambdaQueryWrapper<OpsPersonalCommissionRule> ruleQw =
                 new LambdaQueryWrapper<OpsPersonalCommissionRule>()
                         .eq(OpsPersonalCommissionRule::getStatus, 1);
         if (visibleIds != null && !visibleIds.isEmpty()) {
-            ruleQw.in(OpsPersonalCommissionRule::getCorpId, visibleIds);
+            ruleQw.and(w -> w.in(OpsPersonalCommissionRule::getCorpId, visibleIds)
+                    .or().eq(OpsPersonalCommissionRule::getCorpId, 0L));
         }
         List<OpsPersonalCommissionRule> rules = ruleMapper.selectList(ruleQw);
         // Group rules by (corpId, category) for per-tenant matching
@@ -390,6 +392,13 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             Long cid = r.getCorpId() != null ? r.getCorpId() : 0L;
             ruleMapByCorp.computeIfAbsent(cid, k -> new HashMap<>())
                     .putIfAbsent(r.getCategory(), r);
+        }
+
+        // ── Cascade parent rules to child corps (org hierarchy inheritance) ──
+        // Child corps inherit parent operator's rules; child's own rules take priority.
+        if (visibleIds != null && !visibleIds.isEmpty()) {
+            Map<Long, Long> parentMap = buildParentChainMap(visibleIds);
+            cascadeParentRules(ruleMapByCorp, parentMap);
         }
 
         LambdaQueryWrapper<OpsBusinessData> uncalcQw = new LambdaQueryWrapper<OpsBusinessData>()
@@ -665,6 +674,91 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         if (visibleIds != null && !visibleIds.isEmpty()) {
             qw.in(OpsBusinessData::getCorpId, visibleIds);
         }
+    }
+
+    // ── Org hierarchy rule inheritance ──
+
+    /**
+     * Build a corp→parentCorpId map for all corps in the given set.
+     * Queries platform internal API; failures are logged and result in empty parent
+     * (no inheritance) — safe fallback.
+     */
+    private Map<Long, Long> buildParentChainMap(Set<Long> corpIds) {
+        Map<Long, Long> parentMap = new HashMap<>();
+        for (Long id : corpIds) {
+            if (id == 0L) continue;
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> resp = platformInternalClient.get(
+                        "/api/internal/corp/" + id, null);
+                Map<String, Object> data = (Map<String, Object>) resp.get("data");
+                if (data != null && data.get("parentCorpId") instanceof Number) {
+                    parentMap.put(id, ((Number) data.get("parentCorpId")).longValue());
+                }
+            } catch (Exception e) {
+                log.debug("Failed to resolve parent for corpId={}, using self-only rules: {}", id, e.getMessage());
+            }
+        }
+        return parentMap;
+    }
+
+    /**
+     * Cascade parent rules down to child corps, plus platform-level rules (corpId=0)
+     * to every corp. Uses putIfAbsent throughout — corp-specific rules always
+     * take priority over inherited ones.
+     * <p>Priority chain: own corp → parent → grandparent → corpId=0 (platform fallback)
+     */
+    private void cascadeParentRules(
+            Map<Long, Map<String, OpsPersonalCommissionRule>> ruleMapByCorp,
+            Map<Long, Long> parentMap) {
+        // Collect all corp IDs that need rules (ensure entries exist for children
+        // that have no rules of their own)
+        Set<Long> allCorpIds = new HashSet<>(ruleMapByCorp.keySet());
+        for (Long child : parentMap.keySet()) {
+            allCorpIds.add(child);
+        }
+        for (Long corpId : allCorpIds) {
+            ruleMapByCorp.computeIfAbsent(corpId, k -> new HashMap<>());
+        }
+
+        // Step 1: Cascade parent rules down the org hierarchy
+        for (Map.Entry<Long, Map<String, OpsPersonalCommissionRule>> entry : ruleMapByCorp.entrySet()) {
+            Long corpId = entry.getKey();
+            Map<String, OpsPersonalCommissionRule> childRules = entry.getValue();
+
+            // Walk up the parent chain
+            Long parentId = parentMap.get(corpId);
+            while (parentId != null && parentId != 0L) {
+                Map<String, OpsPersonalCommissionRule> parentRules = ruleMapByCorp.get(parentId);
+                if (parentRules != null) {
+                    for (Map.Entry<String, OpsPersonalCommissionRule> pr : parentRules.entrySet()) {
+                        childRules.putIfAbsent(pr.getKey(), pr.getValue());
+                    }
+                }
+                parentId = parentMap.get(parentId); // walk up further
+            }
+        }
+
+        // Step 2: Cascade platform-level rules (corpId=0) to ALL corps as last-resort fallback
+        Map<String, OpsPersonalCommissionRule> platformRules = ruleMapByCorp.get(0L);
+        if (platformRules != null && !platformRules.isEmpty()) {
+            for (Map.Entry<Long, Map<String, OpsPersonalCommissionRule>> entry : ruleMapByCorp.entrySet()) {
+                if (entry.getKey() == 0L) continue;
+                for (Map.Entry<String, OpsPersonalCommissionRule> pr : platformRules.entrySet()) {
+                    entry.getValue().putIfAbsent(pr.getKey(), pr.getValue());
+                }
+            }
+            log.info("Platform-level rules (corpId=0) cascaded to {} corps as fallback",
+                    ruleMapByCorp.size() - 1);
+        }
+
+        int inherited = 0;
+        for (Map.Entry<Long, Map<String, OpsPersonalCommissionRule>> entry : ruleMapByCorp.entrySet()) {
+            if (parentMap.containsKey(entry.getKey()) && !entry.getValue().isEmpty()) {
+                inherited++;
+            }
+        }
+        log.info("Rule inheritance cascaded: {} child corps received parent rules", inherited);
     }
 
     /**
