@@ -70,11 +70,7 @@ public class BattleMapController {
         String k = ck(corpId,"sum"); Map<String,Object> c = cacheGet(k); if (c != null) { c.put("cached",true); return R.ok(c); }
         try {
             Map<String,Object> s = new LinkedHashMap<>();
-            try { List<Map<String,Object>> r = jdbcTemplate.queryForList("SELECT region_name rn FROM ai_platform.sys_corp WHERE region_name IS NOT NULL AND id=?", corpId != null ? corpId : 10); if (!r.isEmpty()) { String rn = (String)r.get(0).get("rn"); s.put("regionName",rn); if (rn!=null&&rn.contains("/")) s.put("cityName", rn.substring(rn.lastIndexOf('/')+1)); } } catch (Exception e) {}
-        // Fallback: resolve region from parent org if current org has no region_name
-        if (!s.containsKey("regionName")) {
-          try { List<Map<String,Object>> r = jdbcTemplate.queryForList("SELECT pc.region_name rn FROM ai_platform.sys_corp c JOIN ai_platform.sys_corp pc ON pc.id=c.parent_corp_id WHERE c.id=? AND pc.region_name IS NOT NULL", corpId != null ? corpId : 10); if (!r.isEmpty()) { String rn = (String)r.get(0).get("rn"); s.put("regionName",rn); if (rn.contains("/")) s.put("cityName", rn.substring(rn.lastIndexOf('/')+1)); } } catch (Exception e2) {}
-        }
+            resolveOrgRegion(corpId != null ? corpId : 10L, s);
             try { Map<String,Object> os = jdbcTemplate.queryForMap("SELECT * FROM ops_map_org_summary WHERE org_id=?", corpId); s.put("totalUsers", jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ops_gas_user WHERE corp_id=?", Long.class, corpId)); s.putAll(os); } catch (Exception e) {}
             Long rt = ((Number)s.getOrDefault("total_activities",0)).longValue();
             Long ra = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ops_activity_review WHERE corp_id=? AND review_status=1", Long.class, corpId);
@@ -97,5 +93,43 @@ public class BattleMapController {
             d.put("activityReviews", jdbcTemplate.queryForList("SELECT ar.id,a.title,ar.review_status,ar.create_time FROM ops_activity_review ar JOIN ops_activity a ON a.id=ar.activity_id WHERE ar.activity_id IN (SELECT DISTINCT activity_id FROM ops_member_ledger WHERE community_id=? AND activity_id IS NOT NULL AND delete_flag=0)", id));
             return R.ok(d);
         } catch (Exception e) { return R.fail("获取详情失败"); }
+    }
+
+    /**
+     * 作战地图边界以「组织的业务地区」为准。sys_corp 无 region_id 列，故从该组织名下
+     * 小区（ai_platform.sys_community.region_id）出现最多的地区推导业务区域，向上归一到
+     * 区县级后取高德 adcode（sys_region.region_code）供前端定位边界。无小区时不填 region，
+     * 前端降级为全国视图。
+     */
+    private void resolveOrgRegion(Long corpId, Map<String,Object> s) {
+        try {
+            List<Map<String,Object>> top = jdbcTemplate.queryForList(
+                "SELECT region_id FROM ai_platform.sys_community WHERE corp_id=? AND delete_flag=0 AND region_id IS NOT NULL GROUP BY region_id ORDER BY COUNT(*) DESC LIMIT 1", corpId);
+            if (top.isEmpty()) return;
+            Long regionId = ((Number) top.get(0).get("region_id")).longValue();
+            Map<String,Object> region = climbToCounty(regionId);
+            if (region == null) return;
+            String name = (String) region.get("region_name");
+            String code = (String) region.get("region_code");
+            if (name != null) { s.put("regionName", name); s.put("cityName", name); }
+            if (code != null && !code.isBlank()) s.put("adcode", code);
+        } catch (Exception e) { log.warn("resolveOrgRegion({}) failed: {}", corpId, e.getMessage()); }
+    }
+
+    /** 从任意层级地区沿 parent_id 向上归一到区县级（region_level<=3），用于县域边界最大化展示。 */
+    private Map<String,Object> climbToCounty(Long regionId) {
+        Long id = regionId;
+        for (int i = 0; i < 6 && id != null; i++) {
+            List<Map<String,Object>> r = jdbcTemplate.queryForList(
+                "SELECT id,parent_id,region_name,region_level,region_code FROM ai_platform.sys_region WHERE id=?", id);
+            if (r.isEmpty()) return null;
+            Map<String,Object> row = r.get(0);
+            Object lv = row.get("region_level");
+            int level = lv == null ? 3 : ((Number) lv).intValue();
+            if (level <= 3) return row;
+            Object pid = row.get("parent_id");
+            id = pid == null ? null : ((Number) pid).longValue();
+        }
+        return null;
     }
 }
