@@ -120,7 +120,7 @@ public class BattleMapEtlService {
                 "total_cost,community_count,community_names,sales_amount) " +
                 "SELECT ?,a.id,a.title,COALESCE(NULLIF(a.type,''),a.category)," +
                 "(SELECT COUNT(*) FROM ops_activity_booking b WHERE b.activity_id=a.id AND b.delete_flag=0)," +
-                "(SELECT COALESCE(SUM(c.amount),0) FROM ops_activity_review r JOIN ops_activity_review_cost c ON c.review_id=r.id AND c.delete_flag=0 WHERE r.activity_id=a.id AND r.delete_flag=0)," +
+                "(SELECT COALESCE(SUM(c.amount),0) FROM ops_activity_review r JOIN ops_activity_review_cost c ON c.review_id=r.id WHERE r.activity_id=a.id AND r.delete_flag=0)," +
                 "(SELECT COUNT(DISTINCT community_id) FROM ops_member_ledger WHERE activity_id=a.id AND corp_id=? AND delete_flag=0)," +
                 "(SELECT GROUP_CONCAT(DISTINCT sc.community_name) FROM ops_member_ledger ml JOIN ai_platform.sys_community sc ON sc.id=ml.community_id WHERE ml.activity_id=a.id AND ml.corp_id=? AND ml.delete_flag=0)," +
                 "(SELECT COALESCE(SUM(sales_price),0) FROM ops_member_ledger WHERE activity_id=a.id AND corp_id=? AND delete_flag=0) " +
