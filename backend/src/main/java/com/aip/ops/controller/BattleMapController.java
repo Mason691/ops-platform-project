@@ -102,6 +102,12 @@ public class BattleMapController {
         try {
             Map<String, Object> s = new LinkedHashMap<>();
             resolveOrgRegion(corpId, s);
+            // 标题以组织简称(sys_corp.short_name)为准，而非地区名(region_name 末级=区县"广河县")
+            try {
+                Map<String, Object> corp = jdbcTemplate.queryForMap("SELECT short_name, name FROM ai_platform.sys_corp WHERE id=?", corpId);
+                Object sn = corp.get("short_name");
+                s.put("shortName", (sn != null && !sn.toString().isBlank()) ? sn : corp.get("name"));
+            } catch (Exception ignore) { /* 组织不存在时不填 shortName */ }
             try {
                 Map<String, Object> os = jdbcTemplate.queryForMap("SELECT * FROM ops_map_org_summary WHERE org_id=?", corpId);
                 s.putAll(os);
