@@ -548,6 +548,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             }
             return new BigDecimal[]{zero, zero};
         }
+        // 固定金额：提成直接取规则的 commission_amount，不按销售额计算（rate 记 0）
+        if ("固定金额".equals(rule.getCommissionType())) {
+            BigDecimal fixed = rule.getCommissionAmount() != null ? rule.getCommissionAmount() : zero;
+            return new BigDecimal[]{zero, fixed};
+        }
         BigDecimal amt = salePrice.multiply(rate).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
         return new BigDecimal[]{rate, amt};
     }

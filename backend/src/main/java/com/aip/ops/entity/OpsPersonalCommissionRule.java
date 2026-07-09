@@ -8,7 +8,7 @@ import lombok.EqualsAndHashCode;
 import java.math.BigDecimal;
 
 /**
- * 个人提成规则 — 按品类匹配，支持固定/阶梯两种提成类型。
+ * 个人提成规则 — 按品类匹配，支持 阶梯 / 固定 / 固定金额 三种提成类型。
  *
  * <p>status 字段取值映射系统字典 ENABLE_DISABLE：1=启用 0=禁用</p>
  */
@@ -35,6 +35,10 @@ public class OpsPersonalCommissionRule extends BaseEntity {
     /** 提成比例(%) */
     @TableField("commission_rate")
     private BigDecimal commissionRate;
+
+    /** 提成金额（当提成类型为“固定金额”时使用，直接作为提成，不按销售额计算） */
+    @TableField("commission_amount")
+    private BigDecimal commissionAmount;
 
     /** 阶梯规则描述 */
     @TableField("rule_desc")

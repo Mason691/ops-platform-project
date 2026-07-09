@@ -70,6 +70,14 @@ public class CommissionRuleServiceImpl implements CommissionRuleService {
         }
     }
 
+    /** 固定金额类型必须填写提成金额（>0）。 */
+    private void validatePersonalCommission(OpsPersonalCommissionRule rule) {
+        if ("固定金额".equals(rule.getCommissionType())
+                && (rule.getCommissionAmount() == null || rule.getCommissionAmount().signum() <= 0)) {
+            throw new BusinessException("提成类型为固定金额时，提成金额必须大于0");
+        }
+    }
+
     // ─── 个人提成规则 ───
 
     @Override
@@ -102,6 +110,7 @@ public class CommissionRuleServiceImpl implements CommissionRuleService {
         if (rule.getCommissionType() == null || rule.getCommissionType().isEmpty()) {
             rule.setCommissionType("固定");
         }
+        validatePersonalCommission(rule);
         if (rule.getStatus() == null) {
             rule.setStatus(1);
         }
@@ -113,6 +122,7 @@ public class CommissionRuleServiceImpl implements CommissionRuleService {
     public void personalUpdate(Long id, OpsPersonalCommissionRule rule) {
         OpsPersonalCommissionRule existing = personalGetById(id);
         validateCategory(rule.getCategory());
+        validatePersonalCommission(rule);
         rule.setId(id);
         personalMapper.updateById(rule);
     }
