@@ -41,6 +41,12 @@ public class BattleMapController {
         } catch (Exception e) { return true; }
     }
 
+    /**
+     * 数据聚合范围：选中组织「自身 + 所有下级组织」的 corp_id 内联 IN 列表。
+     * 叶子组织（城市合伙人）返回自身；运营商返回自身 + 旗下合伙人。用于直查台账/活动的 corp 过滤。
+     */
+    private String scope(Long corpId) { return dataScope.getVisibleCorpIdCsv(corpId); }
+
     // ── ETL 触发 ───────────────────────────────────────────────────────────────
     @PostMapping("/refresh-cache")
     public R<?> refreshCache(@RequestParam(defaultValue = "10") Long corpId) {
@@ -63,20 +69,6 @@ public class BattleMapController {
         try {
             return R.ok(Map.of("records", jdbcTemplate.queryForList(
                 "SELECT * FROM ops_map_employee_performance WHERE org_id=? ORDER BY rank_order", corpId)));
-        } catch (Exception e) { return R.ok(Map.of("records", List.of())); }
-    }
-
-    @GetMapping("/category-sales")
-    public R<?> categorySales(@RequestParam(defaultValue = "10") Long corpId) {
-        if (!canView(corpId)) return R.ok(Map.of("records", List.of()));
-        String k = cache.key(corpId, "cat");
-        List<Map<String, Object>> c = cache.get(k);
-        if (c != null) return R.ok(Map.of("records", c, "cached", true));
-        try {
-            c = jdbcTemplate.queryForList("SELECT category,COUNT(*) cnt,COALESCE(SUM(sales_price),0) total " +
-                "FROM ops_member_ledger WHERE corp_id=? AND delete_flag=0 AND category IS NOT NULL GROUP BY category ORDER BY total DESC", corpId);
-            cache.set(k, c);
-            return R.ok(Map.of("records", c, "cached", false));
         } catch (Exception e) { return R.ok(Map.of("records", List.of())); }
     }
 
@@ -113,11 +105,6 @@ public class BattleMapController {
                 Map<String, Object> os = jdbcTemplate.queryForMap("SELECT * FROM ops_map_org_summary WHERE org_id=?", corpId);
                 s.putAll(os);
             } catch (Exception ignore) { /* 尚未 ETL 的组织无汇总行 */ }
-            Long rt = ((Number) s.getOrDefault("total_activities", 0)).longValue();
-            Long ra = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ops_activity_review WHERE corp_id=? AND review_status=1", Long.class, corpId);
-            s.put("reviewApproved", ra != null ? ra : 0);
-            s.put("reviewPending", jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ops_activity_review WHERE corp_id=? AND review_status=0", Long.class, corpId));
-            s.put("reviewRate", rt > 0 ? Math.round(100.0 * (ra != null ? ra : 0) / rt) + "%" : "-");
             cache.set(k, s);
             Map<String, Object> out = new LinkedHashMap<>(s); out.put("cached", false); return R.ok(out);
         } catch (Exception e) { return R.ok(Map.of("cached", false)); }
@@ -131,6 +118,7 @@ public class BattleMapController {
     public R<?> communityDetail(@PathVariable Long id, @RequestParam(defaultValue = "10") Long corpId) {
         Map<String, Object> d = new LinkedHashMap<>();
         if (!canView(corpId)) { d.put("community", null); d.put("agents", List.of()); return R.ok(d); }
+        String sc = scope(corpId);
         try {
             List<Map<String, Object>> comm = jdbcTemplate.queryForList(
                 "SELECT * FROM ops_map_community WHERE community_id=? AND org_id=? LIMIT 1", id, corpId);
@@ -139,14 +127,14 @@ public class BattleMapController {
                 "SELECT ml.agent AS agent_key," +
                 "COALESCE((SELECT real_name FROM ai_platform.sys_user su WHERE CONCAT(',',su.phone,',') LIKE CONCAT('%,',ml.agent,',%') OR su.phone=ml.agent LIMIT 1),SUBSTRING_INDEX(ml.agent,',',1)) AS employee_name," +
                 "COUNT(*) AS sales_count,COALESCE(SUM(ml.sales_price),0) AS total_sales " +
-                "FROM ops_member_ledger ml WHERE ml.community_id=? AND ml.corp_id=? AND ml.delete_flag=0 AND ml.agent IS NOT NULL AND ml.agent<>'' " +
-                "GROUP BY ml.agent ORDER BY total_sales DESC", id, corpId));
+                "FROM ops_member_ledger ml WHERE ml.community_id=? AND ml.corp_id IN (" + sc + ") AND ml.delete_flag=0 AND ml.agent IS NOT NULL AND ml.agent<>'' " +
+                "GROUP BY ml.agent ORDER BY total_sales DESC", id));
             d.put("recentLedger", jdbcTemplate.queryForList(
                 "SELECT id,category,brand,model,sales_price,usage_date,agent FROM ops_member_ledger " +
-                "WHERE community_id=? AND corp_id=? AND delete_flag=0 ORDER BY create_time DESC LIMIT 10", id, corpId));
+                "WHERE community_id=? AND corp_id IN (" + sc + ") AND delete_flag=0 ORDER BY create_time DESC LIMIT 10", id));
             d.put("salesByCategory", jdbcTemplate.queryForList(
                 "SELECT category,COUNT(*) cnt,COALESCE(SUM(sales_price),0) total FROM ops_member_ledger " +
-                "WHERE community_id=? AND corp_id=? AND delete_flag=0 GROUP BY category", id, corpId));
+                "WHERE community_id=? AND corp_id IN (" + sc + ") AND delete_flag=0 GROUP BY category", id));
             return R.ok(d);
         } catch (Exception e) {
             log.warn("communityDetail id={} corp={} failed: {}", id, corpId, e.getMessage());
@@ -164,18 +152,19 @@ public class BattleMapController {
     public R<?> employeeDetail(@RequestParam(defaultValue = "10") Long corpId, @RequestParam String agentKey) {
         Map<String, Object> d = new LinkedHashMap<>();
         if (!canView(corpId)) { d.put("communities", List.of()); d.put("activities", List.of()); return R.ok(d); }
+        String sc = scope(corpId);
         try {
             d.put("communities", jdbcTemplate.queryForList(
                 "SELECT sc.community_name,COUNT(*) sales_count,COALESCE(SUM(ml.sales_price),0) total_sales " +
                 "FROM ops_member_ledger ml JOIN ai_platform.sys_community sc ON sc.id=ml.community_id " +
-                "WHERE ml.agent=? AND ml.corp_id=? AND ml.delete_flag=0 GROUP BY ml.community_id ORDER BY total_sales DESC", agentKey, corpId));
+                "WHERE ml.agent=? AND ml.corp_id IN (" + sc + ") AND ml.delete_flag=0 GROUP BY ml.community_id ORDER BY total_sales DESC", agentKey));
             d.put("activities", jdbcTemplate.queryForList(
                 "SELECT a.title,COUNT(*) sales_count,COALESCE(SUM(ml.sales_price),0) total_sales " +
                 "FROM ops_member_ledger ml JOIN ops_activity a ON a.id=ml.activity_id " +
-                "WHERE ml.agent=? AND ml.corp_id=? AND ml.activity_id IS NOT NULL AND ml.delete_flag=0 GROUP BY ml.activity_id ORDER BY total_sales DESC", agentKey, corpId));
+                "WHERE ml.agent=? AND ml.corp_id IN (" + sc + ") AND ml.activity_id IS NOT NULL AND ml.delete_flag=0 GROUP BY ml.activity_id ORDER BY total_sales DESC", agentKey));
             d.put("summary", jdbcTemplate.queryForMap(
                 "SELECT COUNT(*) sales_count,COALESCE(SUM(sales_price),0) total_sales,COUNT(DISTINCT community_id) covered " +
-                "FROM ops_member_ledger WHERE agent=? AND corp_id=? AND delete_flag=0", agentKey, corpId));
+                "FROM ops_member_ledger WHERE agent=? AND corp_id IN (" + sc + ") AND delete_flag=0", agentKey));
             return R.ok(d);
         } catch (Exception e) {
             log.warn("employeeDetail agent={} corp={} failed: {}", agentKey, corpId, e.getMessage());
@@ -206,11 +195,12 @@ public class BattleMapController {
                 buckets.put(m, r);
             }
             String since = first.format(ym) + "-01";
+            String sc = scope(corpId);
             jdbcTemplate.queryForList("SELECT DATE_FORMAT(create_time,'%Y-%m') ym, COUNT(*) cnt FROM ops_activity " +
-                "WHERE corp_id=? AND delete_flag=0 AND create_time>=? GROUP BY ym", corpId, since)
+                "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND create_time>=? GROUP BY ym", since)
                 .forEach(row -> { Map<String, Object> r = buckets.get((String) row.get("ym")); if (r != null) r.put("activityCount", row.get("cnt")); });
             jdbcTemplate.queryForList("SELECT DATE_FORMAT(usage_date,'%Y-%m') ym, COALESCE(SUM(sales_price),0) total FROM ops_member_ledger " +
-                "WHERE corp_id=? AND delete_flag=0 AND usage_date>=? GROUP BY ym", corpId, since)
+                "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND usage_date>=? GROUP BY ym", since)
                 .forEach(row -> { Map<String, Object> r = buckets.get((String) row.get("ym")); if (r != null) r.put("salesAmount", row.get("total")); });
             List<Map<String, Object>> records = new ArrayList<>(buckets.values());
             cache.set(k, records);

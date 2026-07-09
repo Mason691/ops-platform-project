@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * 数据权限范围服务 — 根据当前用户的组织角色计算可见的 corpId 列表。
@@ -46,6 +47,17 @@ public class DataScopeService {
             return Collections.emptySet();
         }
         return getVisibleCorpIdsForCorp(corpId);
+    }
+
+    /**
+     * 指定组织「自身 + 所有下级」的 corp_id 逗号分隔串，供 SQL {@code corp_id IN (...)} 内联。
+     * 值均为平台返回的 Long（非用户输入），可安全内联。超管/解析为空时回退为传入 corpId 自身，
+     * 保证至少按单组织隔离、不越权。
+     */
+    public String getVisibleCorpIdCsv(Long corpId) {
+        Set<Long> ids = getVisibleCorpIdsForCorp(corpId);
+        if (ids == null || ids.isEmpty()) return String.valueOf(corpId == null ? 0 : corpId);
+        return ids.stream().map(String::valueOf).collect(Collectors.joining(","));
     }
 
     /**
