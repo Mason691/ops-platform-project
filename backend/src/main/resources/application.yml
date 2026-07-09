@@ -84,6 +84,13 @@ ops:
   remind:
     hours-before: 24,1
 
+# 作战地图 ETL（单实例部署）：启动全量初始化 + 定时增量刷新
+battle-map:
+  etl:
+    auto-refresh: true
+    init-on-startup: true
+    cron: "0 */30 * * * *"
+
 management:
   endpoints:
     web:
