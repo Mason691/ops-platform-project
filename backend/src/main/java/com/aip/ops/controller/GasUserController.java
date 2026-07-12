@@ -5,6 +5,7 @@ import com.aip.ops.mapper.OpsGasUserMapper;
 import com.aip.ops.service.DataScopeService;
 import com.aip.sdk.result.R;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -220,5 +221,112 @@ public class GasUserController {
         gu.setPlatformMemberId(memberId);
         mapper.updateById(gu);
         return R.ok();
+    }
+
+    /** Get single gas user detail with community name resolved. */
+    @GetMapping("/{id}")
+    public R<?> detail(@PathVariable Long id) {
+        OpsGasUser user = mapper.selectById(id);
+        if (user == null) return R.fail("燃气用户不存在");
+        // Data scope check
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
+        if (visibleCorpIds != null && !visibleCorpIds.contains(user.getCorpId())) {
+            return R.fail("无权限查看该用户");
+        }
+        // Resolve community name
+        if (user.getCommunityId() != null) {
+            user.setCommunityName(resolveSingleCommunityName(user.getCommunityId()));
+        }
+        return R.ok(user);
+    }
+
+    /** Update a single gas user (editable: communityId). */
+    @PutMapping("/{id}")
+    public R<?> update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        OpsGasUser user = mapper.selectById(id);
+        if (user == null) return R.fail("燃气用户不存在");
+        // Data scope check
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
+        if (visibleCorpIds != null && !visibleCorpIds.contains(user.getCorpId())) {
+            return R.fail("无权限修改该用户");
+        }
+        // Only update communityId
+        if (body.containsKey("communityId")) {
+            Long communityId = body.get("communityId") != null
+                    ? ((Number) body.get("communityId")).longValue() : null;
+            LambdaUpdateWrapper<OpsGasUser> uw = new LambdaUpdateWrapper<>();
+            uw.eq(OpsGasUser::getId, id).set(OpsGasUser::getCommunityId, communityId);
+            mapper.update(null, uw);
+        }
+        return R.ok();
+    }
+
+    /** Search gas users by area keyword (fuzzy match), with pagination and community names. */
+    @GetMapping("/search-by-area")
+    public R<?> searchByArea(@RequestParam(defaultValue = "1") int pageNum,
+                             @RequestParam(defaultValue = "10") int pageSize,
+                             @RequestParam String keyword) {
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
+
+        LambdaQueryWrapper<OpsGasUser> qw = new LambdaQueryWrapper<>();
+        if (visibleCorpIds != null) {
+            qw.in(OpsGasUser::getCorpId, visibleCorpIds);
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            qw.like(OpsGasUser::getArea, keyword);
+        }
+        qw.orderByAsc(OpsGasUser::getUserNo);
+        Page<OpsGasUser> result = mapper.selectPage(new Page<>(pageNum, pageSize), qw);
+
+        // Resolve community names
+        Map<Long, String> nameMap = resolveCommunityNames(result.getRecords());
+        for (OpsGasUser u : result.getRecords()) {
+            if (u.getCommunityId() != null) u.setCommunityName(nameMap.get(u.getCommunityId()));
+        }
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("records", result.getRecords());
+        data.put("total", result.getTotal());
+        return R.ok(data);
+    }
+
+    /** Batch assign community to selected gas users. */
+    @PutMapping("/batch-assign-community")
+    public R<?> batchAssignCommunity(@RequestBody Map<String, Object> body) {
+        // Validate communityId
+        Object cidObj = body.get("communityId");
+        if (cidObj == null) return R.fail("目标小区不能为空");
+        Long communityId = ((Number) cidObj).longValue();
+
+        // Validate userIds
+        @SuppressWarnings("unchecked")
+        List<Integer> userIdsRaw = (List<Integer>) body.get("userIds");
+        if (userIdsRaw == null || userIdsRaw.isEmpty()) return R.fail("请至少选择一个用户");
+
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
+
+        // Build IN clause for update
+        String inClause = userIdsRaw.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse("");
+        StringBuilder sql = new StringBuilder("UPDATE ops_gas_user SET community_id = ? WHERE id IN (").append(inClause).append(")");
+        if (visibleCorpIds != null && !visibleCorpIds.isEmpty()) {
+            String corpIn = visibleCorpIds.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse("");
+            sql.append(" AND corp_id IN (").append(corpIn).append(")");
+        }
+        int updated = jdbcTemplate.update(sql.toString(), communityId);
+
+        return R.ok(Map.of("updated", updated));
+    }
+
+    /** Resolve a single community name by ID. */
+    private String resolveSingleCommunityName(Long communityId) {
+        if (communityId == null) return null;
+        try {
+            return jdbcTemplate.queryForObject(
+                    "SELECT community_name FROM ai_platform.sys_community WHERE id = ?",
+                    String.class, communityId);
+        } catch (Exception e) {
+            log.warn("Failed to resolve community name for id={}: {}", communityId, e.getMessage());
+            return null;
+        }
     }
 }

@@ -210,6 +210,14 @@ export const api = {
   adminMemberStatus: (id, status) => request({url:'/api/ops/admin/members/'+id+'/status',method:'PUT',data:{status}}),
   permissionProfile: () => request({url:'/api/ops/admin/permission/profile'}),
 
+  // 燃气用户管理
+  gasUserList: (params) => request({url:'/api/ops/admin/gas-user',data:params}),
+  gasUserDetail: (id) => request({url:'/api/ops/admin/gas-user/'+id}),
+  gasUserUpdate: (id, data) => request({url:'/api/ops/admin/gas-user/'+id,method:'PUT',data}),
+  gasUserSearchByArea: (params) => request({url:'/api/ops/admin/gas-user/search-by-area',data:params}),
+  gasUserBatchAssignCommunity: (data) => request({url:'/api/ops/admin/gas-user/batch-assign-community',method:'PUT',data}),
+  gasUserCommunities: () => request({url:'/api/ops/admin/gas-user/communities'}),
+
   // 员工身份 & 业务数据
   employeeIdentity: () => request({url:'/api/ops/employee/identity'}),
   employeeMonths: () => request({url:'/api/ops/employee/business-data/months'}),
