@@ -130,7 +130,7 @@ public class BattleMapController {
                 "FROM ops_member_ledger ml WHERE ml.community_id=? AND ml.corp_id IN (" + sc + ") AND ml.delete_flag=0 AND ml.agent IS NOT NULL AND ml.agent<>'' " +
                 "GROUP BY ml.agent ORDER BY total_sales DESC", id));
             d.put("recentLedger", jdbcTemplate.queryForList(
-                "SELECT id,category,brand,model,sales_price,usage_date,agent FROM ops_member_ledger " +
+                "SELECT id,category,brand,model,usage_date,agent FROM ops_member_ledger " +
                 "WHERE community_id=? AND corp_id IN (" + sc + ") AND delete_flag=0 ORDER BY create_time DESC LIMIT 10", id));
             d.put("salesByCategory", jdbcTemplate.queryForList(
                 "SELECT category,COUNT(*) cnt,COALESCE(SUM(sales_price),0) total FROM ops_member_ledger " +
