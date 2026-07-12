@@ -129,9 +129,9 @@ public class BattleMapController {
         Map<String, Object> cached = cache.get(k);
         if (cached != null) { Map<String, Object> hit = new LinkedHashMap<>(cached); hit.put("cached", true); return R.ok(hit); }
         try {
+            String sc = scope(corpId);
             Map<String, Object> s = new LinkedHashMap<>();
             resolveOrgRegion(corpId, s);
-            // 标题以组织简称(sys_corp.short_name)为准，而非地区名(region_name 末级=区县"广河县")
             try {
                 Map<String, Object> corp = jdbcTemplate.queryForMap("SELECT short_name, name FROM ai_platform.sys_corp WHERE id=?", corpId);
                 Object sn = corp.get("short_name");
@@ -141,6 +141,19 @@ public class BattleMapController {
                 Map<String, Object> os = jdbcTemplate.queryForMap("SELECT * FROM ops_map_org_summary WHERE org_id=?", corpId);
                 s.putAll(os);
             } catch (Exception ignore) { /* 尚未 ETL 的组织无汇总行 */ }
+            // YTD total: ops_business_data (已计算) + ops_member_ledger (本年)
+            try {
+                String year = Integer.toString(LocalDate.now().getYear());
+                Double bd = jdbcTemplate.queryForObject(
+                    "SELECT COALESCE(SUM(sale_price),0) FROM ops_business_data " +
+                    "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status='已计算' AND sale_date>=?",
+                    Double.class, year + "-01-01");
+                Double ml = jdbcTemplate.queryForObject(
+                    "SELECT COALESCE(SUM(sales_price),0) FROM ops_member_ledger " +
+                    "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND usage_date>=?",
+                    Double.class, year + "-01-01");
+                s.put("ytdAmount", (bd != null ? bd : 0d) + (ml != null ? ml : 0d));
+            } catch (Exception ignore) { s.put("ytdAmount", 0); }
             cache.set(k, s);
             Map<String, Object> out = new LinkedHashMap<>(s); out.put("cached", false); return R.ok(out);
         } catch (Exception e) { return R.ok(Map.of("cached", false)); }
