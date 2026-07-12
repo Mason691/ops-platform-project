@@ -30,7 +30,8 @@ public class GasUserController {
                      @RequestParam(defaultValue = "10") int pageSize,
                      @RequestParam(required = false) Long communityId,
                      @RequestParam(required = false) String communityKeyword,
-                     @RequestParam(required = false) String keyword) {
+                     @RequestParam(required = false) String keyword,
+                     @RequestParam(defaultValue = "false") boolean unassigned) {
         // Data scope isolation
         Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
 
@@ -38,7 +39,11 @@ public class GasUserController {
         if (visibleCorpIds != null) {
             qw.in(OpsGasUser::getCorpId, visibleCorpIds);
         }
-        qw.eq(communityId != null, OpsGasUser::getCommunityId, communityId);
+        if (unassigned) {
+            qw.isNull(OpsGasUser::getCommunityId);
+        } else {
+            qw.eq(communityId != null, OpsGasUser::getCommunityId, communityId);
+        }
         // Fuzzy match community name: resolve matching IDs from sys_community
         if (communityKeyword != null && !communityKeyword.isBlank()) {
             Set<Long> matchedIds = resolveCommunityIdsByKeyword(communityKeyword);

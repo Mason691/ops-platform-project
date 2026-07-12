@@ -17,6 +17,7 @@
         <view class="gu-btn gu-btn--search" @click="search">搜索</view>
       </view>
       <view class="gu-actions">
+        <view class="gu-btn" :class="filterUnassigned ? 'gu-btn--unassigned-active' : 'gu-btn--unassigned'" @click="toggleUnassigned">🔍 未指定小区</view>
         <view class="gu-btn gu-btn--assign" @click="openBatchAssign">📋 批量指定小区</view>
       </view>
     </view>
@@ -186,6 +187,7 @@ const selected = ref([])
 // Filters
 const filterKeyword = ref('')
 const filterCommunityId = ref('')
+const filterUnassigned = ref(false)
 const communityOptions = ref([])       // raw [{id, name}] from API
 
 // Community picker: prepend "全部小区" option
@@ -242,7 +244,8 @@ async function loadData() {
   try {
     const params = { pageNum: pageNum.value, pageSize: pageSize.value }
     if (filterKeyword.value) params.keyword = filterKeyword.value
-    if (filterCommunityId.value) params.communityId = Number(filterCommunityId.value)
+    if (filterUnassigned.value) params.unassigned = true
+    else if (filterCommunityId.value) params.communityId = Number(filterCommunityId.value)
     const data = await api.gasUserList(params)
     records.value = data.records || []
     total.value = data.total || 0
@@ -254,10 +257,17 @@ async function loadData() {
 }
 
 function search() { pageNum.value = 1; loadData() }
+function toggleUnassigned() {
+  filterUnassigned.value = !filterUnassigned.value
+  if (filterUnassigned.value) filterCommunityId.value = ''
+  pageNum.value = 1
+  loadData()
+}
 
 function onCommunityFilterChange(e) {
   const idx = Number(e.detail.value)
   filterCommunityId.value = idx <= 0 ? '' : String(communityPickerRange.value[idx]?.id || '')
+  if (filterCommunityId.value) filterUnassigned.value = false
 }
 
 // ── Selection ──
@@ -413,6 +423,8 @@ async function doSingleEdit() {
 .gu-btn { height: 64rpx; line-height: 64rpx; padding: 0 24rpx; border-radius: 12rpx; font-size: 26rpx; text-align: center; cursor: pointer }
 .gu-btn--search { background: #FF6B35; color: #fff; flex-shrink: 0 }
 .gu-btn--assign { background: #07C160; color: #fff }
+.gu-btn--unassigned { background: #fff; color: #FF6B35; border: 1rpx solid #FF6B35 }
+.gu-btn--unassigned-active { background: #FF6B35; color: #fff }
 .gu-btn--sm { height: 48rpx; line-height: 48rpx; padding: 0 16rpx; font-size: 22rpx; background: #FF6B35; color: #fff }
 .gu-btn--xs { height: 48rpx; line-height: 48rpx; padding: 0 16rpx; font-size: 22rpx; background: #fff; border: 1rpx solid #ddd; color: #333 }
 .gu-btn--page { background: #fff; border: 1rpx solid #ddd; color: #333 }
