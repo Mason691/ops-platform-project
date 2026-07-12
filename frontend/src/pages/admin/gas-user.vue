@@ -18,7 +18,7 @@
       </view>
       <view class="gu-actions">
         <view class="gu-btn" :class="filterUnassigned ? 'gu-btn--unassigned-active' : 'gu-btn--unassigned'" @click="toggleUnassigned">🔍 未指定小区</view>
-        <view class="gu-btn gu-btn--assign" @click="openBatchAssign">📋 批量指定小区</view>
+        <view class="gu-btn gu-btn--assign" :class="{ disabled: !selected.length }" @click="openBatchAssign">📋 批量指定小区</view>
       </view>
     </view>
 
@@ -62,56 +62,16 @@
 
     <!-- ═══ Batch Assign Modal ═══ -->
     <view v-if="showBatchAssign" class="gu-overlay" @click.self="closeBatchAssign">
-      <view class="gu-modal">
+      <view class="gu-modal gu-modal--sm">
         <view class="gu-modal-header">
           <text class="gu-modal-title">批量指定小区</text>
           <text class="gu-modal-close" @click="closeBatchAssign">✕</text>
         </view>
         <view class="gu-modal-body">
-          <!-- Area search -->
           <view class="gu-field">
-            <text class="gu-field-label">按区域搜索用户</text>
-            <view class="gu-search-row">
-              <input class="gu-field-input" v-model="assignAreaKeyword" placeholder="输入区域关键字（小区名/街道名）" confirm-type="search" @confirm="searchAssignUsers" />
-              <view class="gu-btn gu-btn--sm gu-btn--search" @click="searchAssignUsers">搜索</view>
-            </view>
+            <text class="gu-field-label">已选用户</text>
+            <text class="gu-field-static"><text class="gu-highlight">{{ selected.length }}</text> 个用户</text>
           </view>
-
-          <!-- Area search results -->
-          <view v-if="assignUsers.length > 0" class="gu-assign-list">
-            <view class="gu-assign-summary">
-              <text>搜索结果共 <text class="gu-highlight">{{ assignTotal }}</text> 条</text>
-            </view>
-            <scroll-view scroll-y class="gu-assign-scroll">
-              <view class="gu-tr gu-th">
-                <view class="gu-td" style="width:60rpx">
-                  <input type="checkbox" :checked="allAssignChecked" @click="toggleAllAssign" />
-                </view>
-                <view class="gu-td" style="width:140rpx">用户号</view>
-                <view class="gu-td" style="width:140rpx">姓名</view>
-                <view class="gu-td" style="width:180rpx">区域</view>
-                <view class="gu-td" style="width:180rpx">当前小区</view>
-              </view>
-              <view v-for="u in assignUsers" :key="u.id" class="gu-tr" :class="{ 'gu-tr--bound': u.communityName }">
-                <view class="gu-td" style="width:60rpx">
-                  <input type="checkbox" :checked="assignSelected.includes(u.id)" @click="toggleOneAssign(u.id)" />
-                </view>
-                <view class="gu-td" style="width:140rpx">{{ u.userNo }}</view>
-                <view class="gu-td" style="width:140rpx">{{ u.userName || '-' }}</view>
-                <view class="gu-td" style="width:180rpx">{{ u.area || '-' }}</view>
-                <view class="gu-td" style="width:180rpx">
-                  <text v-if="u.communityName" class="gu-bound-tag">{{ u.communityName }}</text>
-                  <text v-else class="gu-unbound-text">未指定</text>
-                </view>
-              </view>
-            </scroll-view>
-            <Pager v-model:pageNum="assignPageNum" v-model:pageSize="assignPageSize" :total="assignTotal" @change="loadAssignUsers" />
-          </view>
-
-          <!-- No search results -->
-          <view v-if="assignSearched && assignUsers.length === 0" class="gu-empty-sm">未找到匹配的用户</view>
-
-          <!-- Target community selector -->
           <view class="gu-field">
             <text class="gu-field-label">目标小区 <text class="gu-required">*</text></text>
             <picker :range="communityPickerRange" range-key="name" :value="assignCommunityIdx" @change="onAssignCommunityChange">
@@ -119,11 +79,6 @@
                 {{ assignCommunityIdx >= 0 ? communityPickerRange[assignCommunityIdx].name : '请选择目标小区' }}
               </view>
             </picker>
-          </view>
-
-          <!-- Selected count summary -->
-          <view class="gu-assign-footer-summary">
-            <text>已选择 <text class="gu-highlight">{{ assignSelected.length }}</text> 个用户</text>
           </view>
         </view>
         <view class="gu-modal-footer">
@@ -172,7 +127,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '@/api/index'
 import Pager from '@/components/Pager.vue'
 
@@ -203,15 +158,8 @@ const filterCommunityLabel = computed(() => {
 
 // ── Batch assign state ──
 const showBatchAssign = ref(false)
-const assignAreaKeyword = ref('')
-const assignUsers = ref([])
-const assignTotal = ref(0)
-const assignPageNum = ref(1)
-const assignPageSize = ref(10)
-const assignSelected = ref([])
 const assignCommunityIdx = ref(-1)
 const assigning = ref(false)
-const assignSearched = ref(false)
 
 // ── Single edit state ──
 const showSingleEdit = ref(false)
@@ -221,7 +169,6 @@ const savingSingle = ref(false)
 
 // ── Computed ──
 const allChecked = computed(() => records.value.length > 0 && records.value.every(d => selected.value.includes(d.id)))
-const allAssignChecked = computed(() => assignUsers.value.length > 0 && assignUsers.value.every(u => assignSelected.value.includes(u.id)))
 
 // ── Lifecycle ──
 onMounted(async () => {
@@ -283,12 +230,10 @@ function toggleAll() {
 
 // ── Batch assign dialog ──
 function openBatchAssign() {
-  assignAreaKeyword.value = ''
-  assignUsers.value = []
-  assignTotal.value = 0
-  assignPageNum.value = 1
-  assignSearched.value = false
-  assignSelected.value = []
+  if (!selected.value.length) {
+    uni.showToast({ title: '请先在列表中勾选用户', icon: 'none' })
+    return
+  }
   assignCommunityIdx.value = -1
   showBatchAssign.value = true
 }
@@ -296,41 +241,6 @@ function openBatchAssign() {
 function closeBatchAssign() {
   showBatchAssign.value = false
   assigning.value = false
-}
-
-async function searchAssignUsers() {
-  if (!assignAreaKeyword.value || !assignAreaKeyword.value.trim()) {
-    uni.showToast({ title: '请输入区域关键字', icon: 'none' })
-    return
-  }
-  assignPageNum.value = 1
-  assignSearched.value = true
-  await loadAssignUsers()
-}
-
-async function loadAssignUsers() {
-  try {
-    const data = await api.gasUserSearchByArea({
-      pageNum: assignPageNum.value,
-      pageSize: assignPageSize.value,
-      keyword: assignAreaKeyword.value,
-    })
-    assignUsers.value = data.records || []
-    assignTotal.value = data.total || 0
-  } catch (e) {
-    uni.showToast({ title: e?.msg || '搜索失败', icon: 'none' })
-  }
-}
-
-
-function toggleOneAssign(id) {
-  const idx = assignSelected.value.indexOf(id)
-  if (idx >= 0) assignSelected.value.splice(idx, 1)
-  else assignSelected.value.push(id)
-}
-function toggleAllAssign() {
-  if (allAssignChecked.value) assignSelected.value = []
-  else assignSelected.value = assignUsers.value.map(u => u.id)
 }
 
 function onAssignCommunityChange(e) {
@@ -343,17 +253,13 @@ async function doBatchAssign() {
     uni.showToast({ title: '请选择目标小区', icon: 'none' })
     return
   }
-  if (!assignSelected.value.length) {
-    uni.showToast({ title: '请选择要绑定的用户', icon: 'none' })
-    return
-  }
   assigning.value = true
   try {
     const result = await api.gasUserBatchAssignCommunity({
-      userIds: assignSelected.value,
+      userIds: selected.value,
       communityId: communityId,
     })
-    uni.showToast({ title: `成功为 ${result.updated || assignSelected.value.length} 个用户指定小区`, icon: 'success' })
+    uni.showToast({ title: `成功为 ${result.updated || selected.value.length} 个用户指定小区`, icon: 'success' })
     closeBatchAssign()
     selected.value = []
     loadData()
@@ -467,20 +373,6 @@ async function doSingleEdit() {
 .gu-field-input.placeholder { color: #999 }
 .gu-field-static { display: block; font-size: 28rpx; color: #333; padding: 12rpx 0 }
 .gu-current-community { color: #FF6B35; font-weight: 500 }
-.gu-search-row { display: flex; gap: 12rpx }
-.gu-search-row .gu-field-input { flex: 1 }
 .gu-required { color: #e53935 }
-
-/* Batch assign list */
-.gu-assign-list { margin-bottom: 24rpx }
-.gu-assign-summary { padding: 12rpx 0; font-size: 24rpx; color: #666 }
-.gu-assign-scroll { max-height: 360rpx; border: 1rpx solid #f0f0f0; border-radius: 12rpx }
 .gu-highlight { color: #FF6B35; font-weight: 600 }
-.gu-tr--bound { background: #fffbf0 }
-.gu-bound-tag { display: inline-block; padding: 2rpx 12rpx; background: #fff3e0; color: #e67e00; border-radius: 6rpx; font-size: 22rpx }
-.gu-unbound-text { color: #999 }
-.gu-assign-pager { display: flex; align-items: center; justify-content: center; gap: 16rpx; padding: 16rpx 0 }
-.gu-page-info-sm { font-size: 22rpx; color: #999 }
-.gu-empty-sm { text-align: center; padding: 40rpx 0; color: #999; font-size: 26rpx }
-.gu-assign-footer-summary { padding: 8rpx 0; font-size: 26rpx; color: #666; text-align: right }
 </style>
