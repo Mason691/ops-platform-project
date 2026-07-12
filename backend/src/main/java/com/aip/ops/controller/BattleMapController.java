@@ -215,8 +215,9 @@ public class BattleMapController {
     private String now() { return LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME); }
 
     /**
-     * 近 6 个月销售趋势。销售额取自 ops_business_data (仅 calc_status='已计算')，
-     * 按月汇总 sale_price；缺月补 0，保证连续 6 个桶。
+     * 近 6 个月销售趋势：优先 ops_business_data (calc_status='已计算') 按月汇总 sale_price，
+     * 月内无数据或为零时从 ops_member_ledger 取 sales_price 补充；仍无数据补 0。
+     * 保证连续 6 个桶不缺月。
      */
     @GetMapping("/trend")
     public R<?> trend(@RequestParam(defaultValue = "10") Long corpId) {
@@ -231,15 +232,41 @@ public class BattleMapController {
             for (int i = 0; i < 6; i++) {
                 String m = first.plusMonths(i).format(ym);
                 Map<String, Object> r = new LinkedHashMap<>();
-                r.put("month", m); r.put("salesAmount", 0);
+                r.put("month", m); r.put("salesAmount", 0); r.put("source", "none");
                 buckets.put(m, r);
             }
             String since = first.format(ym) + "-01";
             String sc = scope(corpId);
+
+            // 1) 主数据源：ops_business_data (仅已计算)
             jdbcTemplate.queryForList(
                 "SELECT DATE_FORMAT(sale_date,'%Y-%m') ym, COALESCE(SUM(sale_price),0) total " +
                 "FROM ops_business_data WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status='已计算' AND sale_date>=? GROUP BY ym", since)
-                .forEach(row -> { Map<String, Object> r = buckets.get((String) row.get("ym")); if (r != null) r.put("salesAmount", row.get("total")); });
+                .forEach(row -> {
+                    Map<String, Object> r = buckets.get((String) row.get("ym"));
+                    if (r != null) {
+                        Object v = row.get("total");
+                        double val = v == null ? 0 : ((Number) v).doubleValue();
+                        if (val > 0) { r.put("salesAmount", val); r.put("source", "business"); }
+                    }
+                });
+
+            // 2) 补齐：对 business_data 为 0 的月份，从 ops_member_ledger 取
+            buckets.forEach((month, r) -> {
+                double current = ((Number) r.get("salesAmount")).doubleValue();
+                if (current > 0) return;
+                try {
+                    Map<String, Object> fallback = jdbcTemplate.queryForMap(
+                        "SELECT COALESCE(SUM(sales_price),0) total FROM ops_member_ledger " +
+                        "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND DATE_FORMAT(usage_date,'%Y-%m')=?",
+                        month);
+                    if (fallback != null && fallback.get("total") != null) {
+                        double val = ((Number) fallback.get("total")).doubleValue();
+                        if (val > 0) { r.put("salesAmount", val); r.put("source", "ledger"); }
+                    }
+                } catch (Exception ignored) { /* 无数据则保持 0 */ }
+            });
+
             List<Map<String, Object>> records = new ArrayList<>(buckets.values());
             cache.set(k, records);
             return R.ok(Map.of("records", records, "cached", false));
