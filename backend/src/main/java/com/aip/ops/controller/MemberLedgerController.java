@@ -209,17 +209,13 @@ public class MemberLedgerController {
             }
             smSql.append(") LIMIT 1000");
             jdbcTemplate.query(smSql.toString(),
-                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-                        while (rs.next()) ids.add(rs.getLong("id"));
-                    });
+                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> ids.add(rs.getLong("id")));
 
             // Step 2: Fallback — direct gas_user search
             jdbcTemplate.query(
                 "SELECT id FROM ops_gas_user WHERE delete_flag=0 AND " +
                 "(user_name LIKE '%" + k + "%' OR phone LIKE '%" + k + "%') LIMIT 500",
-                (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-                    while (rs.next()) ids.add(rs.getLong("id"));
-                });
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> ids.add(rs.getLong("id")));
         } catch (Exception e) { log.warn("gasUser search failed: {}", e.getMessage()); }
         return ids;
     }

@@ -100,9 +100,7 @@ public class GasUserController {
             String likeKw = keyword.replace("'", "''");
             jdbcTemplate.query(
                     "SELECT id FROM ai_platform.sys_community WHERE community_name LIKE '%" + likeKw + "%'",
-                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-                        while (rs.next()) ids.add(rs.getLong("id"));
-                    });
+                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> ids.add(rs.getLong("id")));
         } catch (Exception e) {
             log.warn("Failed to resolve community IDs by keyword: {}", e.getMessage());
         }
@@ -116,7 +114,7 @@ public class GasUserController {
         try {
             jdbcTemplate.query(
                     "SELECT id, community_name FROM ai_platform.sys_community WHERE delete_flag=0 ORDER BY community_name",
-                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> { while (rs.next()) map.put(rs.getLong("id"), rs.getString("community_name")); });
+                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> map.put(rs.getLong("id"), rs.getString("community_name")));
         } catch (Exception e) {
             log.warn("Failed to load communities: {}", e.getMessage());
         }
@@ -144,11 +142,9 @@ public class GasUserController {
                 "SELECT gu.id, gu.phone, gu.user_name FROM ops_gas_user gu " +
                 "WHERE gu.platform_member_id IS NULL AND gu.phone IS NOT NULL AND gu.phone REGEXP '^[0-9]{11}$' LIMIT 5000",
                 (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-                    while (rs.next()) {
-                        Map<String, Object> r = new java.util.LinkedHashMap<>();
-                        r.put("id", rs.getLong("id")); r.put("phone", rs.getString("phone"));
-                        r.put("name", rs.getString("user_name")); unmatched.add(r);
-                    }
+                    Map<String, Object> r = new java.util.LinkedHashMap<>();
+                    r.put("id", rs.getLong("id")); r.put("phone", rs.getString("phone"));
+                    r.put("name", rs.getString("user_name")); unmatched.add(r);
                 });
 
             int seq = 0;
