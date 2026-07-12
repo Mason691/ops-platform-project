@@ -228,8 +228,37 @@ public class GasUserController {
         return R.ok();
     }
 
+    /** Search gas users by area keyword (fuzzy match), with pagination and community names. */
+    @GetMapping("/search-by-area")
+    public R<?> searchByArea(@RequestParam(defaultValue = "1") int pageNum,
+                             @RequestParam(defaultValue = "10") int pageSize,
+                             @RequestParam String keyword) {
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
+
+        LambdaQueryWrapper<OpsGasUser> qw = new LambdaQueryWrapper<>();
+        if (visibleCorpIds != null) {
+            qw.in(OpsGasUser::getCorpId, visibleCorpIds);
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            qw.like(OpsGasUser::getArea, keyword);
+        }
+        qw.orderByAsc(OpsGasUser::getUserNo);
+        Page<OpsGasUser> result = mapper.selectPage(new Page<>(pageNum, pageSize), qw);
+
+        // Resolve community names
+        Map<Long, String> nameMap = resolveCommunityNames(result.getRecords());
+        for (OpsGasUser u : result.getRecords()) {
+            if (u.getCommunityId() != null) u.setCommunityName(nameMap.get(u.getCommunityId()));
+        }
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("records", result.getRecords());
+        data.put("total", result.getTotal());
+        return R.ok(data);
+    }
+
     /** Get single gas user detail with community name resolved. */
-    @GetMapping("/{id}")
+    @GetMapping("/{id:\\d+}")
     public R<?> detail(@PathVariable Long id) {
         OpsGasUser user = mapper.selectById(id);
         if (user == null) return R.fail("燃气用户不存在");
@@ -264,35 +293,6 @@ public class GasUserController {
             mapper.update(null, uw);
         }
         return R.ok();
-    }
-
-    /** Search gas users by area keyword (fuzzy match), with pagination and community names. */
-    @GetMapping("/search-by-area")
-    public R<?> searchByArea(@RequestParam(defaultValue = "1") int pageNum,
-                             @RequestParam(defaultValue = "10") int pageSize,
-                             @RequestParam String keyword) {
-        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
-
-        LambdaQueryWrapper<OpsGasUser> qw = new LambdaQueryWrapper<>();
-        if (visibleCorpIds != null) {
-            qw.in(OpsGasUser::getCorpId, visibleCorpIds);
-        }
-        if (keyword != null && !keyword.isBlank()) {
-            qw.like(OpsGasUser::getArea, keyword);
-        }
-        qw.orderByAsc(OpsGasUser::getUserNo);
-        Page<OpsGasUser> result = mapper.selectPage(new Page<>(pageNum, pageSize), qw);
-
-        // Resolve community names
-        Map<Long, String> nameMap = resolveCommunityNames(result.getRecords());
-        for (OpsGasUser u : result.getRecords()) {
-            if (u.getCommunityId() != null) u.setCommunityName(nameMap.get(u.getCommunityId()));
-        }
-
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("records", result.getRecords());
-        data.put("total", result.getTotal());
-        return R.ok(data);
     }
 
     /** Batch assign community to selected gas users. */
