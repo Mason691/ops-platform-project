@@ -84,7 +84,7 @@ public class GridManagerController {
         mapper.insert(gm);
 
         if (gm.getCommunityIds() != null && !gm.getCommunityIds().isEmpty()) {
-            validateNoCommunityConflict(gm.getCommunityIds(), gm.getStartTime(), gm.getEndTime(), null);
+            validateNoCommunityConflict(gm.getCommunityIds(), gm.getStartTime(), gm.getEndTime(), null, gm.getCorpId());
             saveCommunities(gm.getId(), gm.getCommunityIds());
         }
         return R.ok(Map.of("id", gm.getId()));
@@ -106,7 +106,7 @@ public class GridManagerController {
                 .eq(OpsGridManagerCommunity::getGridManagerId, id));
 
         if (gm.getCommunityIds() != null && !gm.getCommunityIds().isEmpty()) {
-            validateNoCommunityConflict(gm.getCommunityIds(), gm.getStartTime(), gm.getEndTime(), id);
+            validateNoCommunityConflict(gm.getCommunityIds(), gm.getStartTime(), gm.getEndTime(), id, existing.getCorpId());
             saveCommunities(id, gm.getCommunityIds());
         }
         return R.ok();
@@ -158,43 +158,37 @@ public class GridManagerController {
     }
 
     /**
-     * Get communities NOT currently assigned to any active grid manager.
-     * Scoped to communities with gas users in visible organizations.
+     * Get communities with occupation status.
+     * A community is "occupied" only if already assigned to a grid manager
+     * within the current user's visible organizations.
      */
     @GetMapping("/available-communities")
     public R<?> availableCommunities(@RequestParam(required = false) Long excludeManagerId) {
         Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
         List<Map<String, Object>> list = new ArrayList<>();
         try {
-            // Find community IDs currently occupied by active (non-expired) grid managers
-            String occupiedSql = """
-                    SELECT DISTINCT mgc.community_id
-                    FROM ops_grid_manager_community mgc
-                    JOIN ops_grid_manager mg ON mg.id = mgc.grid_manager_id
-                    WHERE mg.delete_flag = 0
-                      AND (mg.end_time IS NULL OR mg.end_time >= CURDATE())
-                    """;
+            // Find community IDs currently occupied by active grid managers in visible orgs
+            StringBuilder occupiedSql = new StringBuilder(
+                    "SELECT DISTINCT mgc.community_id FROM ops_grid_manager_community mgc " +
+                    "JOIN ops_grid_manager mg ON mg.id = mgc.grid_manager_id " +
+                    "WHERE mg.delete_flag = 0 AND (mg.end_time IS NULL OR mg.end_time >= CURDATE())");
             if (excludeManagerId != null) {
-                occupiedSql += " AND mg.id != " + excludeManagerId;
+                occupiedSql.append(" AND mg.id != ").append(excludeManagerId);
+            }
+            if (visibleCorpIds != null && !visibleCorpIds.isEmpty()) {
+                occupiedSql.append(" AND mg.corp_id IN (")
+                    .append(visibleCorpIds.stream().map(String::valueOf).collect(Collectors.joining(",")))
+                    .append(")");
             }
             Set<Long> occupied = new HashSet<>();
-            jdbcTemplate.query(occupiedSql,
+            jdbcTemplate.query(occupiedSql.toString(),
                     (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
                         while (rs.next()) occupied.add(rs.getLong("community_id"));
                     });
 
-            // Return only communities that have gas users in visible orgs, excluding occupied
-            StringBuilder communitySql = new StringBuilder(
-                    "SELECT DISTINCT sc.id, sc.community_name FROM ai_platform.sys_community sc " +
-                    "JOIN ops_gas_user gu ON gu.community_id = sc.id " +
-                    "WHERE sc.delete_flag = 0");
-            if (visibleCorpIds != null) {
-                communitySql.append(" AND gu.corp_id IN (")
-                    .append(visibleCorpIds.stream().map(String::valueOf).collect(Collectors.joining(",")))
-                    .append(")");
-            }
-            communitySql.append(" ORDER BY sc.community_name");
-            jdbcTemplate.query(communitySql.toString(),
+            // Return all communities (not filtered by gas users)
+            String communitySql = "SELECT id, community_name FROM ai_platform.sys_community WHERE delete_flag=0 ORDER BY community_name";
+            jdbcTemplate.query(communitySql,
                     (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
                         while (rs.next()) {
                             long cid = rs.getLong("id");
@@ -241,10 +235,12 @@ public class GridManagerController {
         return ids.iterator().next();
     }
 
-    private void validateNoCommunityConflict(List<Long> communityIds, LocalDate start, LocalDate end, Long excludeManagerId) {
+    private void validateNoCommunityConflict(List<Long> communityIds, LocalDate start, LocalDate end,
+                                              Long excludeManagerId, Long corpId) {
         if (start == null) return;
         String endCondition = end != null ? "'" + end + "'" : "'9999-12-31'";
         String excludeCondition = excludeManagerId != null ? " AND mg.id != " + excludeManagerId : "";
+        String corpCondition = corpId != null ? " AND mg.corp_id = " + corpId : "";
 
         for (Long cid : communityIds) {
             try {
@@ -252,7 +248,8 @@ public class GridManagerController {
                         "JOIN ops_grid_manager mg ON mg.id = mgc.grid_manager_id " +
                         "WHERE mgc.community_id = " + cid + " AND mg.delete_flag = 0 " +
                         "AND mg.start_time < " + endCondition +
-                        " AND (mg.end_time IS NULL OR mg.end_time > '" + start + "')" + excludeCondition;
+                        " AND (mg.end_time IS NULL OR mg.end_time > '" + start + "')" +
+                        excludeCondition + corpCondition;
                 Integer count = jdbcTemplate.queryForObject(sql, Integer.class);
                 if (count != null && count > 0) {
                     // Resolve community name for error message
