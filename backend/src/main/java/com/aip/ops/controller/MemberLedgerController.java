@@ -30,7 +30,7 @@ public class MemberLedgerController {
     @GetMapping
     public R<?> list(@RequestParam(defaultValue = "1") int pageNum,
                      @RequestParam(defaultValue = "20") int pageSize,
-                     @RequestParam(required = false) String memberPhone,
+                     @RequestParam(required = false) String memberKeyword,
                      @RequestParam(required = false) String communityName,
                      @RequestParam(required = false) String gridManagerName,
                      @RequestParam(required = false) String category,
@@ -42,10 +42,20 @@ public class MemberLedgerController {
 
         Set<Long> visible = dataScopeService.getVisibleCorpIds();
 
+        // Pre-filter by member keyword: resolve matching gas_user IDs
+        Set<Long> matchedMemberIds = null;
+        if (memberKeyword != null && !memberKeyword.isBlank()) {
+            matchedMemberIds = resolveGasUserIdsByKeyword(memberKeyword);
+            if (matchedMemberIds.isEmpty()) {
+                return R.ok(Map.of("records", List.of(), "total", 0));
+            }
+        }
+
         LambdaQueryWrapper<OpsMemberLedger> qw = new LambdaQueryWrapper<>();
         if (visible != null) qw.in(OpsMemberLedger::getCorpId, visible);
         if (category != null && !category.isBlank()) qw.eq(OpsMemberLedger::getCategory, category);
         if (activityId != null) qw.eq(OpsMemberLedger::getActivityId, activityId);
+        if (matchedMemberIds != null) qw.in(OpsMemberLedger::getMemberId, matchedMemberIds);
         if (usageDateStart != null && !usageDateStart.isBlank()) qw.ge(OpsMemberLedger::getUsageDate, LocalDate.parse(usageDateStart));
         if (usageDateEnd != null && !usageDateEnd.isBlank()) qw.le(OpsMemberLedger::getUsageDate, LocalDate.parse(usageDateEnd));
         if (receiptDateStart != null && !receiptDateStart.isBlank()) qw.ge(OpsMemberLedger::getReceiptDate, LocalDate.parse(receiptDateStart));
@@ -61,20 +71,18 @@ public class MemberLedgerController {
             if (r.getCommunityId() != null) communityIds.add(r.getCommunityId());
             if (r.getActivityId() != null) activityIds.add(r.getActivityId());
         }
-        Map<Long, String> memberNames = resolveMemberNames(memberIds, memberPhone);
+        Map<Long, String> memberNames = resolveMemberNames(memberIds);
         Map<Long, String> commNames = resolveCommunityNames(communityIds);
         Map<Long, String> gridNames = resolveGridManagerNames(communityIds);
         Map<Long, String> activityNames = resolveActivityNames(activityIds);
 
-        // Filter by resolved names and apply name filters
+        // Apply text filters on resolved names
         List<OpsMemberLedger> filtered = new ArrayList<>();
         for (OpsMemberLedger r : result.getRecords()) {
             String mn = memberNames.getOrDefault(r.getMemberId(), "#" + r.getMemberId());
             String cn = r.getCommunityId() != null ? commNames.getOrDefault(r.getCommunityId(), "-") : "-";
             String gn = r.getCommunityId() != null ? gridNames.getOrDefault(r.getCommunityId(), "-") : "-";
 
-            // Apply text filters
-            if (memberPhone != null && !memberPhone.isBlank() && !mn.contains(memberPhone)) continue;
             if (communityName != null && !communityName.isBlank() && !cn.contains(communityName)) continue;
             if (gridManagerName != null && !gridManagerName.isBlank() && !gn.contains(gridManagerName)) continue;
 
@@ -87,7 +95,7 @@ public class MemberLedgerController {
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("records", filtered);
-        data.put("total", filtered.size());
+        data.put("total", result.getTotal()); // use DB total when no post-filter applies
         return R.ok(data);
     }
 
@@ -152,16 +160,35 @@ public class MemberLedgerController {
         return ids.iterator().next();
     }
 
-    private Map<Long, String> resolveMemberNames(Set<Long> ids, String phoneFilter) {
-        if (ids.isEmpty()) return Map.of();
+    private Map<Long, String> resolveMemberNames(Set<Long> gasUserIds) {
+        if (gasUserIds.isEmpty()) return Map.of();
         Map<Long, String> map = new LinkedHashMap<>();
         try {
-            String in = ids.stream().map(String::valueOf).collect(Collectors.joining(","));
+            String in = gasUserIds.stream().map(String::valueOf).collect(Collectors.joining(","));
+            // member_id = ops_gas_user.id; resolve via gas_user → sys_member chain
             jdbcTemplate.queryForList(
-                "SELECT id, COALESCE(NULLIF(nickname,''), phone) AS name FROM ai_platform.sys_member WHERE id IN (" + in + ")")
-                .forEach(row -> map.put(((Number)row.get("id")).longValue(), (String)row.get("name")));
+                "SELECT gu.id, COALESCE(NULLIF(sm.nickname,''), NULLIF(gu.user_name,''), gu.phone) AS name " +
+                "FROM ops_gas_user gu LEFT JOIN ai_platform.sys_member sm ON sm.phone = gu.phone AND sm.delete_flag=0 " +
+                "WHERE gu.id IN (" + in + ")")
+                .forEach(row -> map.put(((Number)row.get("id")).longValue(),
+                    row.get("name") != null ? (String)row.get("name") : "#" + row.get("id")));
         } catch (Exception e) { log.warn("memberNames failed: {}", e.getMessage()); }
         return map;
+    }
+
+    /** Resolve gas_user IDs whose user_name or phone matches the keyword. */
+    private Set<Long> resolveGasUserIdsByKeyword(String keyword) {
+        Set<Long> ids = new LinkedHashSet<>();
+        try {
+            String k = keyword.replace("'", "''");
+            jdbcTemplate.query(
+                "SELECT id FROM ops_gas_user WHERE delete_flag=0 AND " +
+                "(user_name LIKE '%" + k + "%' OR phone LIKE '%" + k + "%') LIMIT 500",
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                    while (rs.next()) ids.add(rs.getLong("id"));
+                });
+        } catch (Exception e) { log.warn("gasUser search failed: {}", e.getMessage()); }
+        return ids;
     }
 
     private Map<Long, String> resolveCommunityNames(Set<Long> ids) {
