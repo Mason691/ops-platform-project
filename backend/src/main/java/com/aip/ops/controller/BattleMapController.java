@@ -68,7 +68,43 @@ public class BattleMapController {
         if (!canView(corpId)) return R.ok(Map.of("records", List.of()));
         try {
             return R.ok(Map.of("records", jdbcTemplate.queryForList(
-                "SELECT * FROM ops_map_employee_performance WHERE org_id=? ORDER BY rank_order", corpId)));
+                "SELECT * FROM ops_map_employee_performance WHERE org_id=? ORDER BY rank_order LIMIT 5", corpId)));
+        } catch (Exception e) { return R.ok(Map.of("records", List.of())); }
+    }
+
+    /** 网格员业绩 TOP5：按负责小区的台账销售额汇总排名。 */
+    @GetMapping("/grid-performance")
+    public R<?> gridPerformance(@RequestParam(defaultValue = "10") Long corpId) {
+        if (!canView(corpId)) return R.ok(Map.of("records", List.of()));
+        try {
+            return R.ok(Map.of("records", jdbcTemplate.queryForList(
+                "SELECT * FROM ops_map_grid_performance WHERE org_id=? ORDER BY rank_order", corpId)));
+        } catch (Exception e) { return R.ok(Map.of("records", List.of())); }
+    }
+
+    /** 品类销售额 TOP5：按台账品类分组汇总排名，品类名已从字典转为中文。 */
+    @GetMapping("/category-sales")
+    public R<?> categorySales(@RequestParam(defaultValue = "10") Long corpId) {
+        if (!canView(corpId)) return R.ok(Map.of("records", List.of()));
+        try {
+            return R.ok(Map.of("records", jdbcTemplate.queryForList(
+                "SELECT * FROM ops_map_category_sales WHERE org_id=? ORDER BY rank_order", corpId)));
+        } catch (Exception e) { return R.ok(Map.of("records", List.of())); }
+    }
+
+    /** 小区业绩 TOP5：取小区分布表中销售额最高的 5 个小区。 */
+    @GetMapping("/community-top5")
+    public R<?> communityTop5(@RequestParam(defaultValue = "10") Long corpId) {
+        if (!canView(corpId)) return R.ok(Map.of("records", List.of()));
+        String k = cache.key(corpId, "comm_top5");
+        List<Map<String, Object>> c = cache.get(k);
+        if (c != null) return R.ok(Map.of("records", c, "cached", true));
+        try {
+            c = jdbcTemplate.queryForList(
+                "SELECT community_id,community_name,total_sales,grid_manager_names " +
+                "FROM ops_map_community WHERE org_id=? ORDER BY total_sales DESC LIMIT 5", corpId);
+            cache.set(k, c);
+            return R.ok(Map.of("records", c, "cached", false));
         } catch (Exception e) { return R.ok(Map.of("records", List.of())); }
     }
 

@@ -41,6 +41,8 @@ public class BattleMapEtlService {
         refreshEmployeePerformance(corpId, scope);
         refreshActivity(corpId, scope);
         refreshOrgSummary(corpId, scope);
+        refreshGridPerformance(corpId, scope);
+        refreshCategorySales(corpId, scope);
         cache.clearOrg(corpId);
         log.info("battle-map ETL refreshed org={} scope=({})", corpId, scope);
     }
@@ -85,7 +87,7 @@ public class BattleMapEtlService {
                 "SELECT ml.agent AS agent_key,COALESCE(SUM(ml.sales_price),0) AS total_sales,COUNT(*) AS sales_count," +
                 "COUNT(DISTINCT ml.community_id) AS covered,COUNT(DISTINCT ml.activity_id) AS act " +
                 "FROM ops_member_ledger ml WHERE ml.corp_id IN (" + scope + ") AND ml.delete_flag=0 AND ml.agent IS NOT NULL AND ml.agent<>'' " +
-                "GROUP BY ml.agent ORDER BY total_sales DESC LIMIT 10");
+                "GROUP BY ml.agent ORDER BY total_sales DESC LIMIT 5");
             int rank = 0;
             for (Map<String, Object> t : tops) {
                 rank++;
@@ -103,15 +105,25 @@ public class BattleMapEtlService {
             if (rn != null && !rn.toString().isBlank()) name = rn.toString();
             if (ph != null) phone = ph.toString();
         }
+        // 解析部门：从当前组织名称获取
+        String department = null;
+        try {
+            List<Map<String, Object>> deptRows = jdbc.queryForList(
+                "SELECT short_name FROM ai_platform.sys_corp WHERE id=? LIMIT 1", corpId);
+            if (!deptRows.isEmpty()) {
+                Object dsn = deptRows.get(0).get("short_name");
+                if (dsn != null && !dsn.toString().isBlank()) department = dsn.toString();
+            }
+        } catch (Exception ignored) { /* 跨库查询失败不影响主流程 */ }
         List<Map<String, Object>> pc = jdbc.queryForList(
             "SELECT sc.community_name cn FROM ops_member_ledger ml JOIN ai_platform.sys_community sc ON sc.id=ml.community_id " +
             "WHERE ml.agent=? AND ml.corp_id IN (" + scope + ") AND ml.delete_flag=0 GROUP BY ml.community_id ORDER BY SUM(ml.sales_price) DESC LIMIT 1",
             agentKey);
         String primaryCommunity = pc.isEmpty() ? null : (String) pc.get(0).get("cn");
         jdbc.update(
-            "INSERT INTO ops_map_employee_performance (org_id,agent_key,employee_name,employee_phone,primary_community," +
-            "activity_count,covered_communities,total_sales,sales_count,rank_order) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            corpId, agentKey, name, phone, primaryCommunity,
+            "INSERT INTO ops_map_employee_performance (org_id,agent_key,employee_name,employee_phone,department,primary_community," +
+            "activity_count,covered_communities,total_sales,sales_count,rank_order) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            corpId, agentKey, name, phone, department, primaryCommunity,
             t.get("act"), t.get("covered"), t.get("total_sales"), t.get("sales_count"), rank);
     }
 
@@ -150,5 +162,79 @@ public class BattleMapEtlService {
                 "(SELECT COUNT(*) FROM ops_gas_user WHERE corp_id IN (" + scope + "))",
                 corpId);
         } catch (Exception e) { log.warn("ETL summary org={} failed: {}", corpId, e.getMessage()); }
+    }
+
+    // ── 网格员业绩表（TOP5）─────────────────────────────────────────────────────
+    private void refreshGridPerformance(Long corpId, String scope) {
+        try {
+            jdbc.update("DELETE FROM ops_map_grid_performance WHERE org_id=?", corpId);
+            // 从 ops_grid_manager + ops_grid_manager_community 关联台账汇总
+            // 网格员业绩 = 其所有服务小区在台账中已计算状态的销售额之和
+            List<Map<String, Object>> tops = jdbc.queryForList(
+                "SELECT gm.id AS grid_manager_id,gm.real_name,gm.user_id," +
+                "COUNT(DISTINCT gmc.community_id) AS community_count," +
+                "COALESCE(SUM(ml.sales_price),0) AS total_sales " +
+                "FROM ops_grid_manager gm " +
+                "JOIN ops_grid_manager_community gmc ON gmc.grid_manager_id=gm.id " +
+                "LEFT JOIN ops_member_ledger ml ON ml.community_id=gmc.community_id AND ml.corp_id IN (" + scope + ") AND ml.delete_flag=0 " +
+                "WHERE gm.corp_id IN (" + scope + ") AND gm.delete_flag=0 " +
+                "AND (gm.end_time IS NULL OR gm.end_time>=CURDATE()) " +
+                "GROUP BY gm.id,gm.real_name,gm.user_id " +
+                "ORDER BY total_sales DESC LIMIT 5");
+            int rank = 0;
+            for (Map<String, Object> t : tops) {
+                rank++;
+                Long gridManagerId = ((Number) t.get("grid_manager_id")).longValue();
+                String realName = (String) t.get("real_name");
+                // 通过 user_id 查 sys_user 获取姓名（real_name），优先用网格员表已冗余的姓名
+                String employeeName = (realName != null && !realName.isBlank()) ? realName : null;
+                Long userId = t.get("user_id") != null ? ((Number) t.get("user_id")).longValue() : null;
+                if (employeeName == null && userId != null) {
+                    try {
+                        List<Map<String, Object>> userRows = jdbc.queryForList(
+                            "SELECT real_name FROM ai_platform.sys_user WHERE id=? LIMIT 1", userId);
+                        if (!userRows.isEmpty()) {
+                            Object rn = userRows.get(0).get("real_name");
+                            if (rn != null && !rn.toString().isBlank()) employeeName = rn.toString();
+                        }
+                    } catch (Exception ignored) { /* 跨库查询失败 */ }
+                }
+                if (employeeName == null) employeeName = "网格员#" + gridManagerId;
+                // 部门：取网格员所属组织名称
+                String department = null;
+                try {
+                    List<Map<String, Object>> deptRows = jdbc.queryForList(
+                        "SELECT short_name FROM ai_platform.sys_corp WHERE id=? LIMIT 1", corpId);
+                    if (!deptRows.isEmpty()) {
+                        Object dsn = deptRows.get(0).get("short_name");
+                        if (dsn != null && !dsn.toString().isBlank()) department = dsn.toString();
+                    }
+                } catch (Exception ignored) { /* 跨库查询失败 */ }
+                jdbc.update(
+                    "INSERT INTO ops_map_grid_performance (org_id,grid_manager_id,employee_name,department," +
+                    "total_sales,community_count,rank_order) VALUES (?,?,?,?,?,?,?)",
+                    corpId, gridManagerId, employeeName, department,
+                    t.get("total_sales"), t.get("community_count"), rank);
+            }
+        } catch (Exception e) { log.warn("ETL grid performance org={} failed: {}", corpId, e.getMessage()); }
+    }
+
+    // ── 品类销售额表（TOP5）─────────────────────────────────────────────────────
+    private void refreshCategorySales(Long corpId, String scope) {
+        try {
+            jdbc.update("DELETE FROM ops_map_category_sales WHERE org_id=?", corpId);
+            // 品类中文名优先从数据字典转换，降级用原始 category 值
+            jdbc.update(
+                "INSERT INTO ops_map_category_sales (org_id,category_key,category_name,total_sales," +
+                "sales_count,rank_order) " +
+                "SELECT ?,ml.category AS category_key," +
+                "COALESCE((SELECT item_value FROM ai_platform.sys_dict_item WHERE type_id=9 AND item_key=ml.category AND delete_flag=0 LIMIT 1),ml.category) AS category_name," +
+                "COALESCE(SUM(ml.sales_price),0),COUNT(*)," +
+                "ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(ml.sales_price),0) DESC) " +
+                "FROM ops_member_ledger ml " +
+                "WHERE ml.corp_id IN (" + scope + ") AND ml.delete_flag=0 AND ml.category IS NOT NULL AND ml.category<>'' " +
+                "GROUP BY ml.category ORDER BY total_sales DESC LIMIT 5",
+                corpId);
+        } catch (Exception e) { log.warn("ETL category sales org={} failed: {}", corpId, e.getMessage()); }
     }
 }
