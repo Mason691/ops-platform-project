@@ -215,8 +215,8 @@ public class BattleMapController {
     private String now() { return LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME); }
 
     /**
-     * 近 6 个月活动次数 + 销售额趋势（底部迷你图数据源）。
-     * 活动次数取 ops_activity.create_time，销售额取台账 usage_date；缺月补 0，保证连续 6 个桶。
+     * 近 6 个月销售趋势。销售额取自 ops_business_data (仅 calc_status='已计算')，
+     * 按月汇总 sale_price；缺月补 0，保证连续 6 个桶。
      */
     @GetMapping("/trend")
     public R<?> trend(@RequestParam(defaultValue = "10") Long corpId) {
@@ -231,16 +231,14 @@ public class BattleMapController {
             for (int i = 0; i < 6; i++) {
                 String m = first.plusMonths(i).format(ym);
                 Map<String, Object> r = new LinkedHashMap<>();
-                r.put("month", m); r.put("activityCount", 0); r.put("salesAmount", 0);
+                r.put("month", m); r.put("salesAmount", 0);
                 buckets.put(m, r);
             }
             String since = first.format(ym) + "-01";
             String sc = scope(corpId);
-            jdbcTemplate.queryForList("SELECT DATE_FORMAT(create_time,'%Y-%m') ym, COUNT(*) cnt FROM ops_activity " +
-                "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND create_time>=? GROUP BY ym", since)
-                .forEach(row -> { Map<String, Object> r = buckets.get((String) row.get("ym")); if (r != null) r.put("activityCount", row.get("cnt")); });
-            jdbcTemplate.queryForList("SELECT DATE_FORMAT(usage_date,'%Y-%m') ym, COALESCE(SUM(sales_price),0) total FROM ops_member_ledger " +
-                "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND usage_date>=? GROUP BY ym", since)
+            jdbcTemplate.queryForList(
+                "SELECT DATE_FORMAT(sale_date,'%Y-%m') ym, COALESCE(SUM(sale_price),0) total " +
+                "FROM ops_business_data WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status='已计算' AND sale_date>=? GROUP BY ym", since)
                 .forEach(row -> { Map<String, Object> r = buckets.get((String) row.get("ym")); if (r != null) r.put("salesAmount", row.get("total")); });
             List<Map<String, Object>> records = new ArrayList<>(buckets.values());
             cache.set(k, records);
