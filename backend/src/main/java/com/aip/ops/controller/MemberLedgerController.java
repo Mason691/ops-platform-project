@@ -142,6 +142,19 @@ public class MemberLedgerController {
         return R.ok(List.of());
     }
 
+    /** Get product categories from platform dictionary. */
+    @GetMapping("/categories")
+    public R<?> categories() {
+        try {
+            List<Map<String, Object>> list = jdbcTemplate.queryForList(
+                "SELECT item_key AS 'key', item_value AS label FROM ai_platform.sys_dict_item " +
+                "WHERE type_id = 9 AND delete_flag = 0 AND item_key != 'category_template' " +
+                "ORDER BY CAST(item_key AS UNSIGNED)");
+            return R.ok(list);
+        } catch (Exception e) { log.warn("categories failed: {}", e.getMessage()); }
+        return R.ok(List.of());
+    }
+
     @GetMapping("/communities")
     public R<?> communities() {
         try {
@@ -176,11 +189,31 @@ public class MemberLedgerController {
         return map;
     }
 
-    /** Resolve gas_user IDs whose user_name or phone matches the keyword. */
+    /** Resolve gas_user IDs by searching sys_member first, then gas_user as fallback. */
     private Set<Long> resolveGasUserIdsByKeyword(String keyword) {
         Set<Long> ids = new LinkedHashSet<>();
         try {
             String k = keyword.replace("'", "''");
+            boolean isPhoneLike = k.matches("\\d+");
+
+            // Step 1: Search sys_member (phone/nickname) → match gas_user by phone
+            StringBuilder smSql = new StringBuilder(
+                "SELECT DISTINCT gu.id FROM ops_gas_user gu " +
+                "JOIN ai_platform.sys_member sm ON sm.phone = gu.phone AND sm.delete_flag=0 " +
+                "WHERE gu.delete_flag=0 AND (");
+            if (isPhoneLike) {
+                smSql.append("sm.phone = '").append(k).append("'");
+            } else {
+                smSql.append("sm.nickname LIKE '%").append(k).append("%'")
+                     .append(" OR sm.phone LIKE '%").append(k).append("%'");
+            }
+            smSql.append(") LIMIT 1000");
+            jdbcTemplate.query(smSql.toString(),
+                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                        while (rs.next()) ids.add(rs.getLong("id"));
+                    });
+
+            // Step 2: Fallback — direct gas_user search
             jdbcTemplate.query(
                 "SELECT id FROM ops_gas_user WHERE delete_flag=0 AND " +
                 "(user_name LIKE '%" + k + "%' OR phone LIKE '%" + k + "%') LIMIT 500",
