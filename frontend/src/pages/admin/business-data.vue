@@ -77,12 +77,7 @@
       </view>
     </view>
 
-    <!-- ═══ Pagination ═══ -->
-    <view v-if="total > pageSize" class="bd-pager">
-      <view class="bd-btn bd-btn--page" :class="{ disabled: pageNum <= 1 }" @click="goPage(pageNum - 1)">上一页</view>
-      <text class="bd-page-info">{{ pageNum }} / {{ totalPages }}</text>
-      <view class="bd-btn bd-btn--page" :class="{ disabled: pageNum >= totalPages }" @click="goPage(pageNum + 1)">下一页</view>
-    </view>
+    <Pager v-model:pageNum="pageNum" v-model:pageSize="pageSize" :total="total" @change="loadData" />
 
     <!-- ═══ Import Modal ═══ -->
     <view v-if="showImport" class="bd-overlay" :class="{ locked: importState === 'processing' }" @click.self="importState !== 'processing' && closeImport()">
@@ -202,6 +197,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { api } from '@/api/index'
+import Pager from '@/components/Pager.vue'
 
 // ── State ──
 const records = ref([])
@@ -232,7 +228,6 @@ let elapsedTimer = null
 const fileInput = ref(null)
 
 // ── Computed ──
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const allChecked = computed(() => records.value.length > 0 && records.value.every(d => selected.value.includes(d.id)))
 
 // ── Init ──
@@ -283,7 +278,6 @@ async function loadData() {
 
 // ── Pagination & filters ──
 function search() { pageNum.value = 1; loadData() }
-function goPage(n) { if (n < 1 || n > totalPages.value) return; pageNum.value = n; loadData() }
 
 // ── Selection ──
 function toggleOne(id) {

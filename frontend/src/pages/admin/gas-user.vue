@@ -57,12 +57,7 @@
       </scroll-view>
     </view>
 
-    <!-- ═══ Pagination ═══ -->
-    <view v-if="total > pageSize" class="gu-pager">
-      <view class="gu-btn gu-btn--page" :class="{ disabled: pageNum <= 1 }" @click="goPage(pageNum - 1)">上一页</view>
-      <text class="gu-page-info">{{ pageNum }} / {{ totalPages }}</text>
-      <view class="gu-btn gu-btn--page" :class="{ disabled: pageNum >= totalPages }" @click="goPage(pageNum + 1)">下一页</view>
-    </view>
+    <Pager v-model:pageNum="pageNum" v-model:pageSize="pageSize" :total="total" @change="loadData" />
 
     <!-- ═══ Batch Assign Modal ═══ -->
     <view v-if="showBatchAssign" class="gu-overlay" @click.self="closeBatchAssign">
@@ -109,12 +104,7 @@
                 </view>
               </view>
             </scroll-view>
-            <!-- Search results pagination -->
-            <view v-if="assignTotal > assignPageSize" class="gu-assign-pager">
-              <view class="gu-btn gu-btn--xs" :class="{ disabled: assignPageNum <= 1 }" @click="goAssignPage(assignPageNum - 1)">上一页</view>
-              <text class="gu-page-info-sm">{{ assignPageNum }}/{{ assignTotalPages }}</text>
-              <view class="gu-btn gu-btn--xs" :class="{ disabled: assignPageNum >= assignTotalPages }" @click="goAssignPage(assignPageNum + 1)">下一页</view>
-            </view>
+            <Pager v-model:pageNum="assignPageNum" v-model:pageSize="assignPageSize" :total="assignTotal" @change="loadAssignUsers" />
           </view>
 
           <!-- No search results -->
@@ -183,6 +173,7 @@
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { api } from '@/api/index'
+import Pager from '@/components/Pager.vue'
 
 // ── Main list state ──
 const records = ref([])
@@ -214,7 +205,7 @@ const assignAreaKeyword = ref('')
 const assignUsers = ref([])
 const assignTotal = ref(0)
 const assignPageNum = ref(1)
-const assignPageSize = ref(5)
+const assignPageSize = ref(10)
 const assignSelected = ref([])
 const assignCommunityIdx = ref(-1)
 const assigning = ref(false)
@@ -227,9 +218,7 @@ const singleEditCommunityIdx = ref(-1)
 const savingSingle = ref(false)
 
 // ── Computed ──
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const allChecked = computed(() => records.value.length > 0 && records.value.every(d => selected.value.includes(d.id)))
-const assignTotalPages = computed(() => Math.max(1, Math.ceil(assignTotal.value / assignPageSize.value)))
 const allAssignChecked = computed(() => assignUsers.value.length > 0 && assignUsers.value.every(u => assignSelected.value.includes(u.id)))
 
 // ── Lifecycle ──
@@ -265,7 +254,6 @@ async function loadData() {
 }
 
 function search() { pageNum.value = 1; loadData() }
-function goPage(n) { if (n < 1 || n > totalPages.value) return; pageNum.value = n; loadData() }
 
 function onCommunityFilterChange(e) {
   const idx = Number(e.detail.value)
@@ -324,11 +312,6 @@ async function loadAssignUsers() {
   }
 }
 
-function goAssignPage(n) {
-  if (n < 1 || n > assignTotalPages.value) return
-  assignPageNum.value = n
-  loadAssignUsers()
-}
 
 function toggleOneAssign(id) {
   const idx = assignSelected.value.indexOf(id)

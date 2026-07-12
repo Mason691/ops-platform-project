@@ -66,12 +66,7 @@
       </view>
     </view>
 
-    <!-- ═══ Pagination ═══ -->
-    <view v-if="total > pageSize" class="bd-pager">
-      <view class="bd-btn bd-btn--page" :class="{ disabled: pageNum <= 1 }" @click="goPage(pageNum - 1)">上一页</view>
-      <text class="bd-page-info">{{ pageNum }} / {{ totalPages }}</text>
-      <view class="bd-btn bd-btn--page" :class="{ disabled: pageNum >= totalPages }" @click="goPage(pageNum + 1)">下一页</view>
-    </view>
+    <Pager v-model:pageNum="pageNum" v-model:pageSize="pageSize" :total="total" @change="loadData" />
 
     <!-- ═══ Detail Modal ═══ -->
     <view v-if="showDetail && detail" class="bd-overlay" @click.self="showDetail = false">
@@ -109,6 +104,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { api } from '@/api/index'
+import Pager from '@/components/Pager.vue'
 
 const records = ref([])
 const total = ref(0)
@@ -126,7 +122,6 @@ const statusOptions = [{ label: '全部', value: '' }, { label: '正常', value:
 const showDetail = ref(false)
 const detail = ref(null)
 
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const canToggleStatus = computed(() => orgRoleType.value !== 'partner')
 const statusLabel = computed(() => {
   const opt = statusOptions.find(o => o.value === filterStatus.value)
@@ -183,11 +178,6 @@ function search() {
   loadData()
 }
 
-function goPage(n) {
-  if (n < 1 || n > totalPages.value) return
-  pageNum.value = n
-  loadData()
-}
 
 function onStatusChange(e) {
   const idx = Number(e.detail.value)

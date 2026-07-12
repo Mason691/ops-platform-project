@@ -50,12 +50,7 @@
       </view>
     </view>
 
-    <!-- ═══ Pagination ═══ -->
-    <view v-if="total > pageSize" class="cr-pager">
-      <view class="cr-btn cr-btn--page" :class="{ disabled: pageNum <= 1 }" @click="goPage(pageNum - 1)">上一页</view>
-      <text class="cr-page-info">{{ pageNum }} / {{ totalPages }}</text>
-      <view class="cr-btn cr-btn--page" :class="{ disabled: pageNum >= totalPages }" @click="goPage(pageNum + 1)">下一页</view>
-    </view>
+    <Pager v-model:pageNum="pageNum" v-model:pageSize="pageSize" :total="total" @change="loadData" />
 
     <!-- ═══ Form Modal ═══ -->
     <view v-if="showForm" class="cr-overlay" @click.self="closeForm">
@@ -127,6 +122,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { api } from '@/api/index'
+import Pager from '@/components/Pager.vue'
 
 // ── State ──
 const rules = ref([])
@@ -180,7 +176,6 @@ const statusLabel = computed(() => {
   return found?.label || ''
 })
 
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
 // ── Display helpers ──
 function catLabel(key) {
@@ -228,8 +223,6 @@ async function loadData() {
 function onFilterCategory(e) { filterCategory.value = filterCategoryOptions.value[e.detail.value]?.key || ''; pageNum.value = 1; loadData() }
 function onFilterStatus(e) { filterStatus.value = statusOptions[e.detail.value]?.value ?? null; pageNum.value = 1; loadData() }
 
-// ── Pagination ──
-function goPage(n) { if (n < 1 || n > totalPages.value) return; pageNum.value = n; loadData() }
 
 // ── Form ──
 function openCreate() {
