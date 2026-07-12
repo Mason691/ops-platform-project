@@ -233,7 +233,7 @@ public class BattleMapEtlService {
                 "ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(ml.sales_price),0) DESC) " +
                 "FROM ops_member_ledger ml " +
                 "WHERE ml.corp_id IN (" + scope + ") AND ml.delete_flag=0 AND ml.category IS NOT NULL AND ml.category<>'' " +
-                "GROUP BY ml.category ORDER BY total_sales DESC LIMIT 5",
+                "GROUP BY ml.category ORDER BY COALESCE(SUM(ml.sales_price),0) DESC LIMIT 5",
                 corpId);
         } catch (Exception e) { log.warn("ETL category sales org={} failed: {}", corpId, e.getMessage()); }
     }
