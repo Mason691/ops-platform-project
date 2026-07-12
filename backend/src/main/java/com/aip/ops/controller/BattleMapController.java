@@ -161,7 +161,11 @@ public class BattleMapController {
             d.put("community", comm.isEmpty() ? null : comm.get(0));
             d.put("agents", jdbcTemplate.queryForList(
                 "SELECT ml.agent AS agent_key," +
-                "COALESCE((SELECT real_name FROM ai_platform.sys_user su WHERE CONCAT(',',su.phone,',') LIKE CONCAT('%,',ml.agent,',%') OR su.phone=ml.agent LIMIT 1),SUBSTRING_INDEX(ml.agent,',',1)) AS employee_name," +
+                "COALESCE(" +
+                "(SELECT bd.agent FROM ops_business_data bd WHERE bd.agent_phone COLLATE utf8mb4_0900_ai_ci=ml.agent AND bd.delete_flag=0 LIMIT 1)," +
+                "(SELECT real_name FROM ai_platform.sys_user su WHERE CONCAT(',',su.phone,',') LIKE CONCAT('%,',ml.agent,',%') OR su.phone=ml.agent LIMIT 1)," +
+                "ml.agent" +
+                ") AS employee_name," +
                 "COUNT(*) AS sales_count,COALESCE(SUM(ml.sales_price),0) AS total_sales " +
                 "FROM ops_member_ledger ml WHERE ml.community_id=? AND ml.corp_id IN (" + sc + ") AND ml.delete_flag=0 AND ml.agent IS NOT NULL AND ml.agent<>'' " +
                 "GROUP BY ml.agent ORDER BY total_sales DESC", id));
