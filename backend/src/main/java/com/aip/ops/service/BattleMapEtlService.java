@@ -98,12 +98,37 @@ public class BattleMapEtlService {
 
     private void insertEmployeeRow(Long corpId, String scope, String agentKey, Map<String, Object> t, int rank) {
         String name = agentKey, phone = "";
+        // 1) 优先从 sys_user 匹配（agent_key = phone）
         List<Map<String, Object>> u = jdbc.queryForList(
             "SELECT real_name,phone FROM ai_platform.sys_user WHERE " + USER_MATCH + " LIMIT 1", agentKey, agentKey);
         if (!u.isEmpty()) {
             Object rn = u.get(0).get("real_name"), ph = u.get(0).get("phone");
             if (rn != null && !rn.toString().isBlank()) name = rn.toString();
             if (ph != null) phone = ph.toString();
+        }
+        // 2) 降级：从 ops_business_data 取 agent 姓名（agent_phone 匹配，需处理 collation 差异）
+        if (name.equals(agentKey)) {
+            try {
+                List<Map<String, Object>> bdRows = jdbc.queryForList(
+                    "SELECT agent FROM ops_business_data WHERE agent_phone=? AND delete_flag=0 AND agent IS NOT NULL AND agent<>'' LIMIT 1",
+                    agentKey);
+                if (!bdRows.isEmpty()) {
+                    Object agentName = bdRows.get(0).get("agent");
+                    if (agentName != null && !agentName.toString().isBlank()) name = agentName.toString();
+                }
+            } catch (Exception ignored) { /* collation 差异等异常不阻塞主流程 */ }
+        }
+        // 3) 降级：从 ops_grid_manager 取 real_name（phone 匹配）
+        if (name.equals(agentKey)) {
+            try {
+                List<Map<String, Object>> gmRows = jdbc.queryForList(
+                    "SELECT real_name FROM ops_grid_manager WHERE phone=? AND delete_flag=0 AND real_name IS NOT NULL AND real_name<>'' LIMIT 1",
+                    agentKey);
+                if (!gmRows.isEmpty()) {
+                    Object rn = gmRows.get(0).get("real_name");
+                    if (rn != null && !rn.toString().isBlank()) name = rn.toString();
+                }
+            } catch (Exception ignored) { /* 跨表查询异常不阻塞 */ }
         }
         // 解析部门：从当前组织名称获取
         String department = null;
