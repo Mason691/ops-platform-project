@@ -258,4 +258,32 @@ export const api = {
   commissionCompanyDelete: (id) => request({url:'/api/ops/admin/commission/company/'+id,method:'DELETE'}),
   // 品类字典（提成规则下拉框用）
   commissionCategories: () => request({url:'/api/ops/admin/commission/categories'}),
+
+  // 年度任务计划
+  annualPlanList: (params) => request({url:'/api/ops/admin/annual-plans',data:params}),
+  annualPlanDetail: (id) => request({url:'/api/ops/admin/annual-plans/'+id}),
+  annualPlanCreate: (data) => request({url:'/api/ops/admin/annual-plans',method:'POST',data}),
+  annualPlanUpdate: (id, data) => request({url:'/api/ops/admin/annual-plans/'+id,method:'PUT',data}),
+  annualPlanDelete: (id) => request({url:'/api/ops/admin/annual-plans/'+id,method:'DELETE'}),
+  annualPlanApprove: (id) => request({url:'/api/ops/admin/annual-plans/'+id+'/approve',method:'PUT'}),
+  annualPlanSummary: (params) => request({url:'/api/ops/admin/annual-plans/summary',data:params||{}}),
+  annualPlanSummaryByCategory: (params) => request({url:'/api/ops/admin/annual-plans/summary-by-category',data:params||{}}),
+  annualPlanOrgDetail: (params) => request({url:'/api/ops/admin/annual-plans/org-detail',data:params||{}}),
+  annualPlanImport: (file) => {
+    return new Promise((resolve, reject) => {
+      const token = uni.getStorageSync('ops_employee_token') || uni.getStorageSync('ops_token') || ''
+      const formData = new FormData()
+      formData.append('file', file)
+      const xhr = new XMLHttpRequest()
+      const baseUrl = (import.meta.env.VITE_OPS_ENTRY) || ''
+      xhr.open('POST', baseUrl + '/api/ops/admin/annual-plans/import')
+      if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token)
+      xhr.onload = () => {
+        try { const d = JSON.parse(xhr.responseText); if (d.code === 200 && d.data) resolve(d.data); else reject(d) }
+        catch(e) { reject(xhr) }
+      }
+      xhr.onerror = () => reject(new Error('网络错误'))
+      xhr.send(formData)
+    })
+  },
 }

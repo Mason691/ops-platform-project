@@ -67,6 +67,7 @@
               <view class="detail-money">
                 <text class="detail-sale">{{ formatMoney(d.salePrice) }}</text>
                 <text class="detail-commission">提成 {{ formatMoney(d.commissionAmount) }}</text>
+                <text v-if="d.commissionRate != null && d.commissionRate !== ''" class="detail-rate">比例 {{ formatRate(d.commissionRate) }}</text>
               </view>
             </view>
           </view>
@@ -136,6 +137,13 @@ function formatMoney(val) {
   return '¥' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
+function formatRate(val) {
+  const n = Number(val)
+  if (isNaN(n)) return '-'
+  // Strip trailing zeros: 12.50% → 12.5%, 12.00% → 12%
+  return (n % 1 === 0 ? n.toFixed(0) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')) + '%'
+}
+
 function goAiChat() { uni.navigateTo({ url: '/pages/employee/ai-chat' }) }
 function goProfile() { uni.navigateTo({ url: '/pages/employee/profile' }) }
 </script>
@@ -201,6 +209,7 @@ function goProfile() { uni.navigateTo({ url: '/pages/employee/profile' }) }
 .detail-money { display: flex; flex-direction: column; align-items: flex-end; gap: 4rpx; }
 .detail-sale { font-size: 28rpx; color: #FF6B35; font-weight: 600; }
 .detail-commission { font-size: 22rpx; color: #4caf50; }
+.detail-rate { font-size: 20rpx; color: #2196F3; }
 
 /* Bottom Bar */
 .bottom-bar {
