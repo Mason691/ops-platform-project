@@ -216,9 +216,21 @@ public class GridManagerController {
             try {
                 String inClause = cids.stream().map(String::valueOf).collect(Collectors.joining(","));
                 jdbcTemplate.query(
-                        "SELECT id, community_name FROM ai_platform.sys_community WHERE id IN (" + inClause + ") ORDER BY community_name",
+                        "SELECT id, community_name, longitude, latitude, address FROM ai_platform.sys_community WHERE id IN (" + inClause + ") ORDER BY community_name",
                         (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-                            while (rs.next()) list.add(Map.of("id", rs.getLong("id"), "name", rs.getString("community_name")));
+                            while (rs.next()) {
+                                list.add(new LinkedHashMap<>() {{
+                                    put("id", rs.getLong("id"));
+                                    put("name", rs.getString("community_name"));
+                                    double lon = rs.getDouble("longitude");
+                                    if (rs.wasNull()) put("longitude", null);
+                                    else put("longitude", lon);
+                                    double lat = rs.getDouble("latitude");
+                                    if (rs.wasNull()) put("latitude", null);
+                                    else put("latitude", lat);
+                                    put("address", rs.getString("address"));
+                                }});
+                            }
                         });
             } catch (Exception e) {
                 log.warn("Failed to resolve community names: {}", e.getMessage());

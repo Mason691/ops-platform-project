@@ -153,7 +153,19 @@ public class BattleMapController {
                     "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND usage_date>=?",
                     Double.class, year + "-01-01");
                 s.put("ytdAmount", (bd != null ? bd : 0d) + (ml != null ? ml : 0d));
-            } catch (Exception ignore) { s.put("ytdAmount", 0); }
+                // 销售金额：仅 ops_business_data（已计算），用于指标卡片
+                s.put("salesAmount", bd != null ? bd : 0d);
+            } catch (Exception ignore) { s.put("ytdAmount", 0); s.put("salesAmount", 0); }
+
+            // 年度任务计划总金额 (ops_annual_plan, 已审核)
+            try {
+                String year = Integer.toString(LocalDate.now().getYear());
+                Double ap = jdbcTemplate.queryForObject(
+                    "SELECT COALESCE(SUM(plan_amount),0) FROM ops_annual_plan " +
+                    "WHERE org_id IN (" + sc + ") AND delete_flag=0 AND year=? AND status=1",
+                    Double.class, year);
+                s.put("annualPlanAmount", ap != null ? ap : 0d);
+            } catch (Exception ignore) { s.put("annualPlanAmount", 0); }
             cache.set(k, s);
             Map<String, Object> out = new LinkedHashMap<>(s); out.put("cached", false); return R.ok(out);
         } catch (Exception e) { return R.ok(Map.of("cached", false)); }
