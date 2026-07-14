@@ -38,6 +38,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
     /** Individual records for a given month + category. */
     @Select("<script>"
             + "SELECT brand, model, sale_price as salePrice, commission_amount as commissionAmount, "
+            + "commission_rate as commissionRate, "
             + "sale_date as saleDate, customer "
             + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
@@ -60,6 +61,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
 
     /** All records for this employee (for grouping/overview in Java). */
     @Select("SELECT brand, model, sale_price as salePrice, commission_amount as commissionAmount, "
+            + "commission_rate as commissionRate, "
             + "sale_date as saleDate, customer, category "
             + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "

@@ -104,7 +104,12 @@ public class EmployeeServiceImpl implements EmployeeService {
     @Override
     public List<Map<String, Object>> getDetailRecords(String month, String category) {
         String phone = resolvePhone();
-        return employeeMapper.selectDetailRecords(phone, month, category);
+        List<Map<String, Object>> rows = employeeMapper.selectDetailRecords(phone, month, category);
+        for (Map<String, Object> row : rows) {
+            row.put("brand", normalizeSentinel(row.get("brand")));
+            row.put("model", normalizeSentinel(row.get("model")));
+        }
+        return rows;
     }
 
     @Override
@@ -195,6 +200,14 @@ public class EmployeeServiceImpl implements EmployeeService {
         throw BusinessException.of("会员信息不存在");
     }
 
+    /** Normalize sentinel values (e.g. "-1") to null so the frontend displays "-". */
+    private static String normalizeSentinel(Object val) {
+        if (val == null) return null;
+        String s = val.toString().trim();
+        if (s.isEmpty() || "-1".equals(s)) return null;
+        return s;
+    }
+
     private static BigDecimal toBigDecimal(Object val) {
         if (val instanceof BigDecimal bd) return bd;
         if (val instanceof Number n) return BigDecimal.valueOf(n.doubleValue());
@@ -243,10 +256,11 @@ public class EmployeeServiceImpl implements EmployeeService {
             g.orderCount++;
 
             Map<String, Object> detail = new LinkedHashMap<>();
-            detail.put("brand", row.get("brand"));
-            detail.put("model", row.get("model"));
+            detail.put("brand", normalizeSentinel(row.get("brand")));
+            detail.put("model", normalizeSentinel(row.get("model")));
             detail.put("salePrice", sale);
             detail.put("commissionAmount", commission);
+            detail.put("commissionRate", toBigDecimal(row.get("commissionRate")));
             detail.put("saleDate", saleDate);
             detail.put("customer", row.get("customer"));
             detail.put("category", row.get("category"));
