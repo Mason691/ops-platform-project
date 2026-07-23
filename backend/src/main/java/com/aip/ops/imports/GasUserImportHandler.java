@@ -75,7 +75,7 @@ public class GasUserImportHandler implements ImportHandler {
         // Read company name from task.remark (set by controller from user input)
         String company = task.getRemark();
         if (company == null || company.isBlank()) company = companyFilter;
-        String sql = "SELECT * FROM sb_gas_user WHERE gas_company_name LIKE CONCAT(?, '%')";
+        String sql = "SELECT * FROM sb_gas_user WHERE area_name LIKE CONCAT(?, '%')";
         log.info("GasUserImport: executing SQL=[{}] with company=[{}]", sql, company);
         List<Map<String, Object>> srcRows;
         try {

@@ -366,7 +366,7 @@ public class GasUserController {
         }
         try {
             Integer totalCount = gasJdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM sb_gas_user WHERE gas_company_name LIKE CONCAT(?, '%')",
+                    "SELECT COUNT(*) FROM sb_gas_user WHERE area_name LIKE CONCAT(?, '%')",
                     Integer.class, companyName);
             if (totalCount == null) totalCount = 0;
 
@@ -393,7 +393,7 @@ public class GasUserController {
             // Count external rows whose phone already exists in ops_gas_user
             Integer cnt = gasJdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM sb_gas_user e " +
-                    "WHERE e.gas_company_name LIKE CONCAT(?, '%') " +
+                    "WHERE e.area_name LIKE CONCAT(?, '%') " +
                     "AND EXISTS (SELECT 1 FROM ops_gas_user g WHERE g.phone = e.phone " +
                     "AND g.gas_supply_certificate_number = e.gas_supply_certificate_number)",
                     Integer.class, companyName);
