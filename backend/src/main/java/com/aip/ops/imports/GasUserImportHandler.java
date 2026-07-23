@@ -307,9 +307,11 @@ public class GasUserImportHandler implements ImportHandler {
         return "INSERT INTO ops_gas_user " +
                "(corp_id, community_id, batch_no, user_no, meter_no, full_name, " +
                " phone, gas_supply_certificate_number, gas_company_name, area_name, detailed_address, " +
-               " status, gas_balance, arrears, account_opening_time, create_user, modify_user, " +
+               " status, gas_balance, arrears, account_opening_time, " +
+               " accumulated_gas_purchase_volume, accumulated_gas_purchase_money, " +
+               " document_type, document_number, create_user, modify_user, " +
                " create_user_name, modify_user_name, create_time, modify_time) " +
-               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,'','',NOW(),NOW())";
+               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,'','',NOW(),NOW())";
     }
 
     private void bindInsertParams(PreparedStatement ps, Map<String, Object> row,
@@ -345,6 +347,11 @@ public class GasUserImportHandler implements ImportHandler {
             }
         }
         ps.setObject(i++, openTimeVal);
+        // sb_gas_user 额外字段（列名一致，直接映射）
+        ps.setBigDecimal(i++, toBigDecimal(row, "accumulated_gas_purchase_volume"));
+        ps.setBigDecimal(i++, toBigDecimal(row, "accumulated_gas_purchase_money"));
+        ps.setString(i++, strVal(row, "document_type"));
+        ps.setString(i++, strVal(row, "document_number"));
     }
 
     // ── 结果构建 ──
