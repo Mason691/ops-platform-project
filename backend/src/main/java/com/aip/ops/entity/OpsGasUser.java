@@ -42,4 +42,14 @@ public class OpsGasUser extends BaseEntity {
     /** Transient: resolved community name from ai_platform.sys_community */
     @TableField(exist = false)
     private String communityName;
+
+    // ── 计算字段（Transient）──
+    @TableField(exist = false)
+    private Integer age;                // 年龄（根据 birth_date 计算）
+    @TableField(exist = false)
+    private Integer accountYears;       // 开户年数
+    @TableField(exist = false)
+    private Boolean isMember;           // 是否会员
+    @TableField(exist = false)
+    private String maskedPhone;         // 脱敏手机号
 }

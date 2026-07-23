@@ -55,31 +55,50 @@ public class GasUserController {
                      @RequestParam(required = false) Long communityId,
                      @RequestParam(required = false) String communityKeyword,
                      @RequestParam(required = false) String keyword,
-                     @RequestParam(defaultValue = "false") boolean unassigned) {
-        // Data scope isolation
+                     @RequestParam(defaultValue = "false") boolean unassigned,
+                     @RequestParam(required = false) String gender,
+                     @RequestParam(required = false) Integer ageMin,
+                     @RequestParam(required = false) String phone,
+                     @RequestParam(required = false) String openStart,
+                     @RequestParam(required = false) String openEnd,
+                     @RequestParam(required = false) Integer accountYearsMin,
+                     @RequestParam(required = false) Boolean isMember) {
         Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
 
         LambdaQueryWrapper<OpsGasUser> qw = new LambdaQueryWrapper<>();
-        if (visibleCorpIds != null) {
-            qw.in(OpsGasUser::getCorpId, visibleCorpIds);
-        }
-        if (unassigned) {
-            qw.isNull(OpsGasUser::getCommunityId);
-        } else {
-            qw.eq(communityId != null, OpsGasUser::getCommunityId, communityId);
-        }
-        // Fuzzy match community name: resolve matching IDs from sys_community
+        if (visibleCorpIds != null) qw.in(OpsGasUser::getCorpId, visibleCorpIds);
+        if (unassigned) qw.isNull(OpsGasUser::getCommunityId);
+        else if (communityId != null) qw.eq(OpsGasUser::getCommunityId, communityId);
+
+        // Community keyword → resolve IDs
         if (communityKeyword != null && !communityKeyword.isBlank()) {
-            Set<Long> matchedIds = resolveCommunityIdsByKeyword(communityKeyword);
-            if (matchedIds.isEmpty()) {
-                qw.eq(OpsGasUser::getCommunityId, -1L); // force empty result
-            } else {
-                qw.in(OpsGasUser::getCommunityId, matchedIds);
-            }
+            Set<Long> ids = resolveCommunityIdsByKeyword(communityKeyword);
+            qw.in(ids.isEmpty() ? OpsGasUser::getCommunityId : OpsGasUser::getCommunityId,
+                    ids.isEmpty() ? List.of(-1L) : new ArrayList<>(ids));
         }
+        // Gender filter
+        if (gender != null && !gender.isBlank()) qw.eq(OpsGasUser::getGender, gender);
+        // Age filter: birth_date <= DATE_SUB(CURDATE(), INTERVAL ageMin YEAR)
+        if (ageMin != null && ageMin > 0)
+            qw.le(OpsGasUser::getBirthDate, java.time.LocalDate.now().minusYears(ageMin));
+        // Phone fuzzy search
+        if (phone != null && !phone.isBlank()) qw.like(OpsGasUser::getPhone, phone);
+        // Account open time range
+        if (openStart != null && !openStart.isBlank())
+            qw.ge(OpsGasUser::getAccountOpeningTime, java.time.LocalDate.parse(openStart).atStartOfDay());
+        if (openEnd != null && !openEnd.isBlank())
+            qw.le(OpsGasUser::getAccountOpeningTime, java.time.LocalDate.parse(openEnd).atTime(23,59,59));
+        // Account years filter
+        if (accountYearsMin != null && accountYearsMin > 0)
+            qw.le(OpsGasUser::getAccountOpeningTime, java.time.LocalDateTime.now().minusYears(accountYearsMin));
+        // Member filter
+        if (isMember != null) {
+            if (isMember) qw.isNotNull(OpsGasUser::getPlatformMemberId);
+            else qw.isNull(OpsGasUser::getPlatformMemberId);
+        }
+        // General keyword
         if (keyword != null && !keyword.isBlank()) {
-            qw.and(w -> w
-                .like(OpsGasUser::getUserNo, keyword)
+            qw.and(w -> w.like(OpsGasUser::getUserNo, keyword)
                 .or().like(OpsGasUser::getFullName, keyword)
                 .or().like(OpsGasUser::getPhone, keyword)
                 .or().like(OpsGasUser::getDetailedAddress, keyword)
@@ -88,10 +107,21 @@ public class GasUserController {
         qw.orderByAsc(OpsGasUser::getUserNo);
         Page<OpsGasUser> result = mapper.selectPage(new Page<>(pageNum, pageSize), qw);
 
-        // Resolve community names via ai_platform.sys_community (same MySQL, cross-db)
+        // Community names
         Map<Long, String> nameMap = resolveCommunityNames(result.getRecords());
+        java.time.LocalDate today = java.time.LocalDate.now();
         for (OpsGasUser u : result.getRecords()) {
             if (u.getCommunityId() != null) u.setCommunityName(nameMap.get(u.getCommunityId()));
+            // Computed fields
+            u.setIsMember(u.getPlatformMemberId() != null);
+            if (u.getBirthDate() != null)
+                u.setAge(java.time.Period.between(u.getBirthDate(), today).getYears());
+            if (u.getAccountOpeningTime() != null)
+                u.setAccountYears(java.time.Period.between(u.getAccountOpeningTime().toLocalDate(), today).getYears());
+            // Phone masking: 138****5678
+            if (u.getPhone() != null && u.getPhone().length() == 11)
+                u.setMaskedPhone(u.getPhone().substring(0, 3) + "****" + u.getPhone().substring(7));
+            else u.setMaskedPhone(u.getPhone());
         }
 
         Map<String, Object> data = new LinkedHashMap<>();
