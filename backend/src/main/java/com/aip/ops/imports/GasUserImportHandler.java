@@ -71,8 +71,6 @@ public class GasUserImportHandler implements ImportHandler {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ImportResult execute(SysImportTask task) throws Exception {
-        // Force stderr output — guaranteed to show in docker logs
-        System.err.println(">>> GAS_IMPORT_HANDLER_START taskId=" + task.getId());
         Long corpId = task.getCorpId();
         String batchNo = IMPORT_BATCH_PREFIX + task.getId();
 
@@ -126,19 +124,19 @@ public class GasUserImportHandler implements ImportHandler {
             String communityName = strVal(row, "village_name");
 
             // DEBUG: skip validation, import everything
-            if (false && (phone == null || phone.isBlank())) {
+            if (phone == null || phone.isBlank())) {
                 log.warn("GasUserImport: skipping row — phone is empty, id={}", row.get("id"));
                 skippedCount++;
                 if (skippedReasons.size() < 20) skippedReasons.add("手机号为空 (id=" + row.get("id") + ")");
                 continue;
             }
-            if (false && (cert == null || cert.isBlank())) {
+            if (cert == null || cert.isBlank())) {
                 log.warn("GasUserImport: skipping row — certificate is empty, phone={}", phone);
                 skippedCount++;
                 if (skippedReasons.size() < 20) skippedReasons.add("供气证号为空 (phone=" + phone + ")");
                 continue;
             }
-            if (false && (communityName == null || communityName.isBlank())) {
+            if (communityName == null || communityName.isBlank())) {
                 log.warn("GasUserImport: skipping row — community_name is empty, phone={}", phone);
                 skippedCount++;
                 if (skippedReasons.size() < 20) skippedReasons.add("小区名为空 (phone=" + phone + ")");
@@ -158,10 +156,8 @@ public class GasUserImportHandler implements ImportHandler {
                 company, srcRows.size(), skippedCount, existingCount, toImport.size());
 
         if (toImport.isEmpty()) {
-            System.err.println(">>> GAS_IMPORT ALL_FILTERED total=" + srcRows.size() + " skipped=" + skippedCount + " existing=" + existingCount + " reasons=" + skippedReasons);
             return buildResult(srcRows.size(), 0, existingCount, skippedCount);
         }
-        System.err.println(">>> GAS_IMPORT toImport=" + toImport.size());
 
         // Community name → ID cache (avoids N+1 cross-db queries for same community)
         Map<String, Long> communityCache = new HashMap<>();
@@ -199,7 +195,6 @@ public class GasUserImportHandler implements ImportHandler {
             ps.executeBatch();
         }
 
-        System.err.println(">>> GAS_IMPORT DONE imported=" + imported);
         return buildResult(srcRows.size(), imported, existingCount, skippedCount);
     }
 
@@ -365,20 +360,22 @@ public class GasUserImportHandler implements ImportHandler {
         ps.setString(i++, "active");
         ps.setBigDecimal(i++, toBigDecimal(row, "gas_balance")); // balance
         ps.setBigDecimal(i++, BigDecimal.ZERO);                  // arrears (not in Polardb)
+        // openTime — parse once, then set at current index
+        Object openTimeVal = null;
         String openTimeStr = strVal(row, "account_opening_time");
         if (openTimeStr != null && !openTimeStr.isBlank()) {
             try {
-                ps.setObject(i++, LocalDateTime.parse(openTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-            } catch (Exception e) {
+                openTimeVal = LocalDateTime.parse(openTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            } catch (Exception e1) {
                 try {
-                    ps.setObject(i++, LocalDateTime.parse(openTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd")));
+                    openTimeVal = LocalDateTime.parse(openTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd"));
                 } catch (Exception e2) {
-                    ps.setObject(i++, null);
+                    try { openTimeVal = LocalDateTime.parse(openTimeStr, DateTimeFormatter.ISO_LOCAL_DATE_TIME); }
+                    catch (Exception e3) { /* leave as null */ }
                 }
             }
-        } else {
-            ps.setObject(i++, null);
         }
+        ps.setObject(i++, openTimeVal);
     }
 
     // ── 结果构建 ──
