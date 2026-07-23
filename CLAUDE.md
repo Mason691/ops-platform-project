@@ -10,6 +10,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 快速命令
 
 ```bash
+# restart.sh — 本地开发一键操作（推荐）
+./restart.sh backend     # 仅重启后端（stop + start，JAR 不存在时自动编译）
+./restart.sh frontend    # 仅重启前端 Vite dev server（stop + start，端口 3035）
+./restart.sh all         # 后端编译 + 重启（不含前端）
+./restart.sh rebuild     # 强制重编译后端 + 重启
+./restart.sh dev         # 后端编译 + 启动后端 + 启动前端 dev server
+./restart.sh stop        # 停止所有服务
+./restart.sh build       # 构建前端 H5 生产包 + 后端 JAR
+
 # 后端编译（离线模式，本地 JDK 17）
 JAVA_HOME=/home/jason/jdk17/jdk-17.0.9+9 mvn -f backend/pom.xml clean package -DskipTests -o
 
@@ -87,16 +96,16 @@ ops-platform-project/
 │   ├── src/main/java/com/aip/ops/
 │   │   ├── OpsApplication.java
 │   │   ├── config/          # SecurityConfig, AuthConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig, JacksonConfig
-│   │   ├── controller/      # 26 controllers（见下方）
-│   │   ├── entity/          # 32 entities（全部继承 SDK BaseEntity，SysImportTask 例外）
-│   │   ├── mapper/          # 33 MyBatis-Plus mappers
-│   │   ├── service/         # 24 service interfaces + 16 impls
+│   │   ├── controller/      # 27 controllers（见下方）
+│   │   ├── entity/          # 33 entities（全部继承 SDK BaseEntity，SysImportTask 例外）
+│   │   ├── mapper/          # 34 MyBatis-Plus mappers
+│   │   ├── service/         # 17 service interfaces + 8 standalone services + 17 impls
 │   │   ├── client/          # 子系统间 HTTP 客户端（MemberSyncClient, ProductBatchClient）
 │   │   ├── agent/           # AI DomainAgent（OpsAgent.java）
 │   │   ├── tool/            # MCP 工具（OpsOrderQueryTool, OpsEmployeeBusinessDataTool）
 │   │   ├── export/          # 通用异步导出策略（ExportHandler 接口 + 策略模式）
 │   │   ├── imports/         # 通用异步导入策略（ImportHandler 接口 + 策略模式）
-│   │   ├── kafka/           # Kafka — 3 consumers, 1 producer, 3 message DTOs（条件加载）
+│   │   ├── kafka/           # Kafka — 4 consumers, 1 producer, 3 message DTOs（条件加载）
 │   │   ├── scheduler/        # 定时任务（BattleMapEtlBootstrap, BattleMapEtlScheduler）
 │   │   ├── dto/             # 数据传输对象
 │   │   └── util/            # 工具类（ImageUrlUtil 等）
@@ -104,9 +113,9 @@ ops-platform-project/
 ├── frontend/
 │   ├── src/main.js          # uni-app 入口
 │   ├── src/manifest.json    # uni-app 配置（H5 base 路径等）
-│   ├── src/pages/           # uni-app 页面（34 files，16 个目录）
-│   ├── src/components/      # 跨页面复用组件（ImageCropperModal, LiveStatusCard, EmployeeTabBar）
-│   ├── src/api/index.js     # 集中 API 注册（66+ 个方法）
+│   ├── src/pages/           # uni-app 页面（28 个路由，含 Tab/C 端/员工/管理）
+│   ├── src/components/      # 跨页面复用组件（ImageCropperModal, LiveStatusCard, EmployeeTabBar, Pager）
+│   ├── src/api/index.js     # 集中 API 注册（137 个方法）
 │   ├── src/utils/           # request.js, image.js, config.js, jssdk.js, auth-bridge.js
 │   ├── src/config.js        # BASE_URL + DEFAULT_CORP_ID
 │   ├── src/static/          # 静态资源（jweixin-1.6.0.js 等）
@@ -114,14 +123,18 @@ ops-platform-project/
 │   ├── vite.config.js       # base 由 VITE_BASE 控制 (prod: /ops/), proxy /api → 8084
 │   └── package.json
 ├── sql/                     # init.sql + 迁移脚本
-├── Specs/                   # 功能规格文档
+├── Specs/                   # 功能规格文档（中文）
+├── specs/                   # 功能规格文档（英文，如 annual-plan-spec.md）
+├── docs/                    # 附加文档（testing.md 手动测试指南）
+├── restart.sh               # 本地开发一键重启脚本（支持 backend/frontend/all/rebuild/dev/stop/build）
+├── Dockerfile               # 生产 Docker 镜像
 ├── MEMORY.md                # 编码规范（强制）+ ADR
 ├── soul.md                  # 产品理念与设计哲学
 ├── user.md                  # 用户画像
 └── uploads/                 # 文件上传输出目录
 ```
 
-### Controllers（26 个）
+### Controllers（27 个）
 
 | Controller | 端点前缀 | 说明 |
 |---|---|---|
@@ -143,15 +156,16 @@ ops-platform-project/
 | `HomeConfigController` | `/api/ops/admin/home-configs` | 首页配置 CRUD + 批量排序 |
 | `BattleMapController` | `/api/ops/admin/battle-map` | **作战地图看板**：ETL 触发/员工绩效/小区统计/summary/趋势/下钻详情 |
 | `ActivityReviewController` | `/api/ops/admin/activity-review` | **活动复盘**：复盘 CRUD + 审核 + 费用台账 + 参与员工 |
+| `AnnualPlanController` | `/api/ops/admin/annual-plans` | **年度任务**：子公司年度计划 CRUD + 审核 + 汇总 + Excel 导入 |
 | `GasUserController` | `/api/ops/admin/gas-user` | **燃气用户**：分页查询/批量导入/小区关联 |
 | `GridManagerController` | `/api/ops/admin/grid-manager` | **网格员管理**：CRUD + 小区分配 |
 | `MemberLedgerController` | `/api/ops/admin/member-ledger` | **会员台账**：分页查询/按小区+品类+经办人筛选/批量导入 |
 | **员工通道** | | |
 | `EmployeeAuthController` | `/api/ops/auth/employee` | **员工** 登录（手机号+密码+验证码），独立于会员认证 |
 | `EmployeeController` | `/api/ops/employee` | 员工身份校验 + 个人业务数据查询 + 头像上传 |
-| `EmployeeAiController` | `/api/ops/ai/employee` | **员工** AI 助手（chat + async + SSE stream + config + profile） |
+| `EmployeeAiController` | `/api/ops/ai/employee` | **员工** AI 助手（chat + async + SSE stream + config + profile + report） |
 | **会员通道** | | |
-| `AiChatProxyController` | `/api/ops/ai` | **会员** AI 客服代理（chat + voice + config + profile） |
+| `AiChatProxyController` | `/api/ops/ai` | **会员** AI 客服代理（chat + voice + config + profile + member personalization + skills） |
 | `MemberProfileProxyController` | `/api/ops/member` | 会员信息代理到底座 |
 | **内部/代理** | | |
 | `FileUploadController` | `/api/ops/files` | 图片/视频上传 |
@@ -216,11 +230,11 @@ ops-platform-project/
 - `GET /config` / `GET /profile` — 员工 AI 配置与个性化问候
 - 员工上下文通过 `employeeContext` 参数注入底座 Agent，底座据此激活员工专用工具（`ops_query_employee_business_data`）
 
-**Async AI Chat 基础设施**（`kafka/AiChatTaskProducer`, `kafka/AiChatTaskConsumer`, `service/AiChatTaskService`, `service/SseEmitterManager`）：
+**Async AI Chat 基础设施**（`kafka/AiChatTaskProducer`, `kafka/AiChatResultConsumer`, `kafka/AiChatStatusConsumer`, `service/AiChatTaskService`, `service/SseEmitterManager`）：
 ```
 前端 POST /api/ops/ai/employee/chat/async
   → AiChatTaskProducer.publishTask() → Kafka topic "ai-chat-task"
-  → AiChatTaskConsumer → 调用底座 AI → 更新 ai_chat_task 表
+  → AiChatResultConsumer / AiChatStatusConsumer → 调用底座 AI → 更新 ai_chat_task 表
   → 前端 SSE GET /chat/{taskId}/stream → SseEmitterManager 推送结果
 ```
 - Kafka 不可用时自动降级为同步调用
@@ -302,6 +316,26 @@ battle-map:
 - 公司规则 CRUD：`GET/POST/PUT/DELETE /company`
 - `GET /categories` — 品类字典
 
+### 年度任务计划（Annual Plan）
+
+运营商为各子公司设定年度品类任务金额，支持 Excel 批量导入和汇总分析。
+
+**实体**：`OpsAnnualPlan`（`ops_annual_plan` 表）— 年度 `year` + 组织 `orgId` + 品类 `category` + 年度目标金额 `annualAmount`
+
+**权限**：运营商/超管可增删改审；城市合伙人仅可查看。写操作由 `OrgRoleService.isOperatorOrSuperAdmin()` 守卫。
+
+**API**：`AnnualPlanController` `/api/ops/admin/annual-plans`
+- `GET /` — 分页列表（按年度/组织/品类/审核状态筛选，组织数据隔离）
+- `GET /{id}` — 详情（含数据 scope 校验）
+- `POST /` — 创建（仅运营商）
+- `PUT /{id}` — 编辑（仅运营商）
+- `DELETE /{id}` — 删除（仅运营商）
+- `PUT /{id}/approve` — 审核通过
+- `GET /summary` — 集团年度总金额汇总
+- `GET /summary-by-category` — 集团各品类汇总
+- `GET /org-detail` — 子公司各品类明细
+- `POST /import` — Excel 批量导入（仅运营商）
+
 ### 燃气用户 / 网格员 / 会员台账
 
 三个管理后台模块，均为标准 CRUD + 分页查询 + 组织数据隔离：
@@ -356,7 +390,7 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 - **双 Token 体系**：`request.js` 优先使用 `ops_token`（会员），fallback 使用 `ops_employee_token`（员工）。401 时清除两者
 - **iframe SSO**：`auth-bridge.js` 监听 `postMessage`（`AIP_AUTH` / `AIP_NAVIGATE`），信任同源和 `boss.jdzn99.com`
 - **公众号深链**：`App.vue` 支持 `?route=pages/employee/login` 和 `?from=employee` 查询参数跳转（公众号自定义菜单不支持 hash fragment）
-- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（124+ 方法），统一使用 `request` 实例
+- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（137 个方法），统一使用 `request` 实例
 - **H5 hash 路由**：实际 base 由构建时 `VITE_BASE` 环境变量控制
 
 ### 前端页面路由（pages.json）
@@ -371,9 +405,11 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 | 活动 | `pages/activity/index`, `pages/activity/detail`, `pages/live/index` | 活动 + 直播广场 |
 | 我的 | `pages/mine/index`, `pages/order/*`, `pages/address/*`, `pages/points/log`, `pages/coupon/list`, `pages/auth/*`, `pages/booking/list` | 用户中心 |
 
-管理页面（不在 Tab 中）：`pages/admin/activity-form`, `pages/admin/home-config`, `pages/admin/live-room-manage`, `pages/admin/business-data`, `pages/admin/commission-rules`, `pages/admin/members`  
+管理页面（已注册，不在 Tab 中）：`pages/admin/commission-rules`, `pages/admin/gas-user`, `pages/admin/annual-plan`  
+管理页面（文件存在，未注册到 pages.json，由平台主站 componentMap 加载）：`pages/admin/activity-form`, `pages/admin/home-config`, `pages/admin/live-room-manage`, `pages/admin/business-data`, `pages/admin/members`  
 站长页面：`pages/station/apply`, `pages/station/center`  
-员工页面：`pages/employee/login`（员工登录）、`pages/employee/ai-chat`（员工 AI 助手 H5）、`pages/employee/dashboard`、`pages/employee/company-select`、`pages/employee/business-data`、`pages/employee/profile`
+员工页面（已注册）：`pages/employee/login`（员工登录）、`pages/employee/ai-chat`（员工 AI 助手 H5）、`pages/employee/dashboard`、`pages/employee/business-data`、`pages/employee/profile`  
+员工页面（未注册）：`pages/employee/company-select`（文件存在但未在 pages.json 注册）
 
 ---
 
@@ -400,7 +436,10 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 | `battle-map.etl.init-on-startup` | 启动时全量 ETL | `true` |
 | `battle-map.etl.cron` | ETL 刷新间隔 | `0 */30 * * * *`（每 30 分钟） |
 | `ops.remind.hours-before` | 活动提醒提前小时数 | `24,1` |
-| `platform.sdk-permit-paths` | SDK 安全过滤器放行路径 | 9 个路径（含 `/api/ops/coupon/list`、`/api/ops/live-rooms/**` 等） |
+| `platform.merchant-role-name` | 商家角色名称 | `销售商` |
+| `logging.level.com.aip.ops` | 应用日志级别 | `DEBUG` |
+| `management.endpoints.web.exposure.include` | Actuator 暴露端点 | `health,info` |
+| `platform.sdk-permit-paths` | SDK 安全过滤器放行路径 | 6 个路径（`/actuator/**`, `/uploads/**` 等）。SecurityConfig 另有 5 个公开端点（`/api/ops/home-data`, `/api/ops/coupon/list`, `/api/ops/ai/config`, `/api/ops/live-rooms/**`, `/api/ops/admin/business-data/template`），合计 11 个免认证路径 |
 
 **生产 Kafka 配置**：使用 SASL_PLAINTEXT 认证（`admin/admin123.`），bootstrap-server `113.250.60.41:9092`。测试环境 Kafka 禁用。
 
@@ -455,8 +494,8 @@ cd frontend && npm run build:h5
 
 | 陷阱 | 说明 |
 |------|------|
-| **服务器 JDK** | 测试服务器默认 JDK 8，运行 JAR 必须用 `/home/jason/jdk17/bin/java`；生产 Docker 用 `eclipse-temurin:17-jre` |
-| **Maven offline** | 必须 `-o`（离线模式），本地仓库 `/home/jason/m2_local` |
+| **服务器 JDK** | 测试服务器默认 JDK 8，运行 JAR 必须用绝对路径；本地 `restart.sh` 用 `/home/jason/.local/jdk17`，手动编译用 `/home/jason/jdk17/jdk-17.0.9+9`（两个路径不同，但等效） |
+| **Maven offline** | 手动编译必须 `-o`（离线模式），本地仓库 `/home/jason/m2_local`。`restart.sh` 不使用离线模式 |
 | **生产 base 路径** | 生产 base 是 `/ops/`（`.env.production` `VITE_BASE=/ops/`），manifest.json 已同步为 `/ops/` |
 | **H5 图片 URL** | uni-app `<image>` 渲染为 CSS `background-image`，根相对路径被解析到 `/ops/` → 必须用完整 HTTPS 路径 |
 | **文件上传目录** | `app.upload.base-dir` 用绝对路径配置，不是 `user.dir`，否则 JAR 从不同目录启动时文件错位 |
@@ -481,6 +520,7 @@ cd frontend && npm run build:h5
 | **作战地图跨库查询** | `BattleMapController.summary()` 和 `region` 解析方法直读 `ai_platform.sys_corp` 和 `ai_platform.sys_region`（跨库）。这是仅有的例外——组织区域信息无法通过 API 获取。维护时注意表结构变更 |
 | **作战地图数据源仅生产** | 作战地图源表（`ops_gas_user`/`ops_member_ledger`/`ops_grid_manager`）仅在**生产库**有数据。测试 `mall_db` 无这些表的记录，ETL 只能在生产环境跑。参见 `[[battle-map-data-only-on-prod]]` |
 | **ops_activity_review_cost 无 delete_flag** | 此表缺少逻辑删除字段，`costMapper.delete()` 走物理删除。重构时需注意 |
+| **company-select 未注册路由** | `frontend/src/pages/employee/company-select.vue` 文件存在但**未在 pages.json 中注册路由**。该页面通过其他方式引用（如 `uni.navigateTo` 直接跳转），不要误删 |
 
 ### UI/UX 质量规范（强制）
 
@@ -496,7 +536,7 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-07-09 | 负责人：架构师（新增作战地图、活动复盘、提成规则等 5 个模块文档）
+最后更新：2026-07-20 | 负责人：架构师（新增年度任务管理、作战地图看板重构、活动复盘、提成规则等模块文档）
 
 ### 自定义 Claude 命令
 
