@@ -2,7 +2,6 @@ package com.aip.ops.config;
 
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.annotation.PreDestroy;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,11 +9,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * 外部燃气平台数据源（jinyuan_info.sb_gas_user）。
- * 使用 HikariCP 手动配置，initializationFailTimeout=-1 避免连接失败阻塞启动。
  *
- * 关键：只暴露 DataSource Bean，不暴露 JdbcTemplate Bean。
- * 否则 Spring Boot JdbcTemplateAutoConfiguration 会因 @ConditionalOnMissingBean 退出，
- * 导致整个应用的 JdbcTemplate 都变成 gas 数据源。
+ * 关键：不注册任何 DataSource 或 JdbcTemplate 类型的 Bean！
+ * 否则会触发 Spring Boot DataSourceAutoConfiguration / JdbcTemplateAutoConfiguration
+ * 的 @ConditionalOnMissingBean 条件退出，导致主数据源消失，MyBatis 全部连到 Polardb。
+ *
+ * 使用方式：注入 GasDataSourceConfig，调用 getJdbcTemplate() 获取局部 JdbcTemplate。
  */
 @Configuration
 public class GasDataSourceConfig {
@@ -36,23 +36,34 @@ public class GasDataSourceConfig {
 
     private HikariDataSource hikariDataSource;
 
-    @Bean("gasDataSource")
-    public HikariDataSource gasDataSource() {
-        this.hikariDataSource = new HikariDataSource();
-        hikariDataSource.setJdbcUrl(jdbcUrl);
-        hikariDataSource.setUsername(username);
-        hikariDataSource.setPassword(password);
-        hikariDataSource.setDriverClassName(driverClassName);
-        hikariDataSource.setMaximumPoolSize(3);
-        hikariDataSource.setMinimumIdle(1);
-        hikariDataSource.setConnectionTimeout(10000);
-        hikariDataSource.setInitializationFailTimeout(-1);
-        return hikariDataSource;
-    }
-
     @Bean("gasCompanyFilter")
     public String gasCompanyFilter() {
         return companyFilter;
+    }
+
+    /** 获取外部燃气数据库的 JdbcTemplate（每次调用创建新实例，线程安全）。 */
+    public JdbcTemplate getJdbcTemplate() {
+        return new JdbcTemplate(getDataSource());
+    }
+
+    private HikariDataSource getDataSource() {
+        if (this.hikariDataSource == null || this.hikariDataSource.isClosed()) {
+            synchronized (this) {
+                if (this.hikariDataSource == null || this.hikariDataSource.isClosed()) {
+                    HikariDataSource ds = new HikariDataSource();
+                    ds.setJdbcUrl(jdbcUrl);
+                    ds.setUsername(username);
+                    ds.setPassword(password);
+                    ds.setDriverClassName(driverClassName);
+                    ds.setMaximumPoolSize(3);
+                    ds.setMinimumIdle(1);
+                    ds.setConnectionTimeout(10000);
+                    ds.setInitializationFailTimeout(-1);
+                    this.hikariDataSource = ds;
+                }
+            }
+        }
+        return this.hikariDataSource;
     }
 
     @PreDestroy

@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.ops.config.GasDataSourceConfig;
 import com.aip.ops.entity.OpsGasUser;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.mapper.OpsGasUserMapper;
@@ -11,7 +12,6 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -29,7 +29,7 @@ public class GasUserController {
     private final ImportTaskService importTaskService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
-    private final javax.sql.DataSource gasDataSource;
+    private final GasDataSourceConfig gasDataSourceConfig;
 
     public GasUserController(
             OpsGasUserMapper mapper,
@@ -38,14 +38,14 @@ public class GasUserController {
             ImportTaskService importTaskService,
             KafkaTemplate<String, String> kafkaTemplate,
             ObjectMapper objectMapper,
-            @Qualifier("gasDataSource") javax.sql.DataSource gasDataSource) {
+            GasDataSourceConfig gasDataSourceConfig) {
         this.mapper = mapper;
         this.dataScopeService = dataScopeService;
         this.jdbcTemplate = jdbcTemplate;
         this.importTaskService = importTaskService;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
-        this.gasDataSource = gasDataSource;
+        this.gasDataSourceConfig = gasDataSourceConfig;
     }
 
     /** Paginated list with optional community filter and keyword search. */
@@ -365,7 +365,7 @@ public class GasUserController {
             return R.fail("请输入燃气公司名称");
         }
         try {
-            JdbcTemplate gasJdbc = new JdbcTemplate(gasDataSource);
+            JdbcTemplate gasJdbc = gasDataSourceConfig.getJdbcTemplate();
             Integer totalCount = gasJdbc.queryForObject(
                     "SELECT COUNT(*) FROM sb_gas_user WHERE area_name LIKE CONCAT(?, '%')",
                     Integer.class, companyName);
@@ -392,7 +392,7 @@ public class GasUserController {
     private int estimateExistingCount(String companyName) {
         try {
             // Count external rows whose phone already exists in ops_gas_user
-            JdbcTemplate gasJdbc = new JdbcTemplate(gasDataSource);
+            JdbcTemplate gasJdbc = gasDataSourceConfig.getJdbcTemplate();
             Integer cnt = gasJdbc.queryForObject(
                     "SELECT COUNT(*) FROM sb_gas_user e " +
                     "WHERE e.area_name LIKE CONCAT(?, '%') " +

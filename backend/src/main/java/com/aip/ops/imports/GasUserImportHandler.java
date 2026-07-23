@@ -1,5 +1,6 @@
 package com.aip.ops.imports;
 
+import com.aip.ops.config.GasDataSourceConfig;
 import com.aip.ops.entity.OpsGasUser;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.mapper.OpsGasUserMapper;
@@ -33,7 +34,7 @@ public class GasUserImportHandler implements ImportHandler {
 
     private final OpsGasUserMapper gasUserMapper;
     private final JdbcTemplate localJdbcTemplate; // 本地 mall_db（含 ai_platform 跨库）
-    private final javax.sql.DataSource gasDataSource; // 外部 jinyuan_info
+    private final GasDataSourceConfig gasDataSourceConfig; // 外部 jinyuan_info
     private final DataSource dataSource;
     private final AmapGeocodeUtil amapGeocodeUtil;
     private final ImportTaskService taskService;
@@ -44,14 +45,14 @@ public class GasUserImportHandler implements ImportHandler {
     public GasUserImportHandler(
             OpsGasUserMapper gasUserMapper,
             JdbcTemplate localJdbcTemplate,
-            @Qualifier("gasDataSource") javax.sql.DataSource gasDataSource,
+            GasDataSourceConfig gasDataSourceConfig,
             DataSource dataSource,
             AmapGeocodeUtil amapGeocodeUtil,
             ImportTaskService taskService,
             @Qualifier("gasCompanyFilter") String companyFilter) {
         this.gasUserMapper = gasUserMapper;
         this.localJdbcTemplate = localJdbcTemplate;
-        this.gasDataSource = gasDataSource;
+        this.gasDataSourceConfig = gasDataSourceConfig;
         this.dataSource = dataSource;
         this.amapGeocodeUtil = amapGeocodeUtil;
         this.taskService = taskService;
@@ -77,7 +78,7 @@ public class GasUserImportHandler implements ImportHandler {
         if (company == null || company.isBlank()) company = companyFilter;
         String sql = "SELECT * FROM sb_gas_user WHERE area_name LIKE CONCAT(?, '%')";
         log.info("GasUserImport: executing SQL=[{}] with company=[{}]", sql, company);
-        JdbcTemplate gasJdbc = new JdbcTemplate(gasDataSource);
+        JdbcTemplate gasJdbc = gasDataSourceConfig.getJdbcTemplate();
         List<Map<String, Object>> srcRows;
         try {
             srcRows = gasJdbc.queryForList(sql, company);
