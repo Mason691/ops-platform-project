@@ -72,11 +72,14 @@ public class GasUserImportHandler implements ImportHandler {
         // ── Phase 1: 从外部 DB 读取源数据 ──
         taskService.updateStatus(task.getId(), "PROCESSING", "READ_EXTERNAL",
                 "正在从外部燃气系统读取数据...");
+        // Read company name from task.remark (set by controller from user input)
+        String company = task.getRemark();
+        if (company == null || company.isBlank()) company = companyFilter;
+        String sql = "SELECT * FROM sb_gas_user WHERE gas_company_name LIKE CONCAT(?, '%')";
+        log.info("GasUserImport: executing SQL=[{}] with company=[{}]", sql, company);
         List<Map<String, Object>> srcRows;
         try {
-            srcRows = gasJdbcTemplate.queryForList(
-                    "SELECT * FROM sb_gas_user WHERE gas_company_name LIKE ?",
-                    companyFilter + "%");
+            srcRows = gasJdbcTemplate.queryForList(sql, company);
         } catch (Exception e) {
             return ImportResult.fail("READ_EXTERNAL",
                     List.of("无法连接外部燃气数据库: " + e.getMessage()), 0);
@@ -85,7 +88,7 @@ public class GasUserImportHandler implements ImportHandler {
             return ImportResult.fail("READ_EXTERNAL",
                     List.of("外部燃气系统中未找到符合条件的用户数据"), 0);
         }
-        log.info("GasUserImport: read {} rows from external DB", srcRows.size());
+        log.info("GasUserImport: company=[{}] SQL totalRows={}", company, srcRows.size());
 
         // ── Phase 2: 查询现有去重集合 ──
         taskService.updateStatus(task.getId(), "PROCESSING", "DEDUP",
@@ -135,8 +138,8 @@ public class GasUserImportHandler implements ImportHandler {
 
             toImport.add(row);
         }
-        log.info("GasUserImport: skipped={} existing={} toImport={}",
-                skippedCount, existingCount, toImport.size());
+        log.info("GasUserImport: company=[{}] rawTotal={} skipped={} existing={} toImport={}",
+                company, srcRows.size(), skippedCount, existingCount, toImport.size());
 
         if (toImport.isEmpty()) {
             return buildResult(srcRows.size(), 0, existingCount, skippedCount);
@@ -366,7 +369,7 @@ public class GasUserImportHandler implements ImportHandler {
         ImportResult r = ImportResult.success(imported, totalSrc);
         r.setExistingCount(existing);
         r.setFailRows(skipped);
-        r.setMessage("已有用户 " + existing + "，增量导入 " + imported);
+        r.setMessage("外部共 " + totalSrc + " 条，已有用户 " + existing + "，增量导入 " + imported);
         return r;
     }
 

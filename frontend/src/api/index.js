@@ -218,8 +218,9 @@ export const api = {
   gasUserBatchAssignCommunity: (data) => request({url:'/api/ops/admin/gas-user/batch-assign-community',method:'PUT',data}),
   gasUserCommunities: () => request({url:'/api/ops/admin/gas-user/communities'}),
   // 燃气用户 — 从外部燃气平台导入
-  gasUserImportSubmit: () => request({url:'/api/ops/admin/gas-user/import-from-gas-platform',method:'POST'}),
+  gasUserImportSubmit: (companyName) => request({url:'/api/ops/admin/gas-user/import-from-gas-platform',method:'POST',data:{companyName}}),
   gasUserImportStatus: (taskId) => request({url:'/api/ops/admin/gas-user/import/'+taskId+'/status'}),
+  gasUserPreviewFromPlatform: (companyName) => request({url:'/api/ops/admin/gas-user/preview-from-gas-platform',method:'POST',data:{companyName}}),
 
   // 员工身份 & 业务数据
   employeeIdentity: () => request({url:'/api/ops/employee/identity'}),

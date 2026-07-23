@@ -76,6 +76,34 @@ public class ImportTaskServiceImpl implements ImportTaskService {
     }
 
     @Override
+    @Transactional
+    public SysImportTask createTaskWithoutFile(String taskType, String description, String remark) {
+        SysImportTask task = new SysImportTask();
+        task.setTaskType(taskType);
+        task.setFileName(description);
+        task.setFilePath("");
+        task.setFileSize(0L);
+        task.setStatus("PENDING");
+        task.setRemark(remark);
+        task.setCreateTime(LocalDateTime.now());
+        task.setModifyTime(LocalDateTime.now());
+
+        try {
+            task.setCorpId(SecurityUtils.getCurrentCorpId());
+            task.setUserId(SecurityUtils.getCurrentUserId());
+            task.setUserName(SecurityUtils.getCurrentUser() != null
+                    ? SecurityUtils.getCurrentUser().getUsername() : "");
+        } catch (Exception ignored) {
+            task.setCorpId(0L);
+        }
+
+        mapper.insert(task);
+        log.info("Import task created (no file): id={} type={} desc={} remark={}",
+                task.getId(), taskType, description, remark);
+        return task;
+    }
+
+    @Override
     public SysImportTask getById(Long taskId) {
         return mapper.selectById(taskId);
     }

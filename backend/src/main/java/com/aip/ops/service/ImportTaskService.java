@@ -14,6 +14,9 @@ public interface ImportTaskService {
     /** 创建导入任务记录（无文件触发类，如外部 DB 导入） */
     SysImportTask createTaskWithoutFile(String taskType, String description);
 
+    /** 创建导入任务记录（无文件 + 备注） */
+    SysImportTask createTaskWithoutFile(String taskType, String description, String remark);
+
     /** 根据ID查询 */
     SysImportTask getById(Long taskId);
 

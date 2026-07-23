@@ -131,36 +131,43 @@
       <view class="gu-modal gu-modal--sm">
         <view class="gu-modal-header">
           <text class="gu-modal-title">从燃气平台导入</text>
-          <text v-if="importState === 'done' || importState === 'idle'" class="gu-modal-close" @click="closeImport">✕</text>
+          <text v-if="importState !== 'querying' && importState !== 'importing'" class="gu-modal-close" @click="closeImport">✕</text>
         </view>
-        <view class="gu-modal-body" style="text-align:center;padding:40rpx">
-          <!-- Idle: confirm prompt -->
-          <view v-if="importState === 'idle'">
-            <text style="font-size:48rpx;display:block;margin-bottom:16rpx">📡</text>
-            <text class="gu-import-desc">将从外部燃气系统导入用户数据</text>
-            <text class="gu-import-desc" style="color:#999;font-size:24rpx;margin-top:4rpx">筛选：德保燃气公司 · 去重：手机号+供气证号</text>
+        <view class="gu-modal-body" style="padding:36rpx">
+          <!-- Company input (shown in idle, preview) -->
+          <view v-if="importState === 'idle' || importState === 'preview'" class="gu-import-field">
+            <text class="gu-field-label">燃气公司名称</text>
+            <view style="display:flex;gap:16rpx">
+              <input class="gu-field-input" style="flex:1" v-model="importCompanyName" placeholder="如：武山、德保" confirm-type="search" @confirm="doPreview" />
+              <view class="gu-btn gu-btn--search" @click="doPreview" :class="{ loading: importState === 'querying' }">
+                {{ importState === 'querying' ? '查询中...' : '查询' }}
+              </view>
+            </view>
           </view>
-          <!-- Processing: spinner -->
-          <view v-if="importState === 'processing'">
+          <!-- Query result preview -->
+          <view v-if="importState === 'preview' && importPreviewResult" style="margin-top:24rpx;text-align:center">
+            <view class="gu-preview-card">
+              <view class="gu-preview-row"><text class="gu-preview-label">外部数据库</text><text class="gu-preview-val">{{ importPreviewResult.totalCount }} 条</text></view>
+              <view class="gu-preview-row"><text class="gu-preview-label">已有用户</text><text class="gu-preview-val gu-preview-existing">{{ importPreviewResult.existingCount }} 条</text></view>
+              <view class="gu-preview-row" style="border-top:1rpx solid #f0f0f0;padding-top:12rpx"><text class="gu-preview-label" style="font-weight:600">预计新增</text><text class="gu-preview-val" style="font-weight:600;color:#FF6B35">{{ importPreviewResult.newCount }} 条</text></view>
+            </view>
+          </view>
+          <!-- Importing: spinner -->
+          <view v-if="importState === 'importing'" style="text-align:center;padding:20rpx 0">
             <text style="font-size:48rpx;display:block;margin-bottom:16rpx">⏳</text>
-            <text class="gu-import-desc">{{ importMsg || '正在处理...' }}</text>
+            <text class="gu-import-desc">{{ importMsg || '正在导入...' }}</text>
           </view>
           <!-- Done: result -->
-          <view v-if="importState === 'done' && importResult?.status === 'success'">
-            <text style="font-size:60rpx;display:block">✅</text>
-            <text class="gu-import-result">{{ importMsg }}</text>
-          </view>
-          <!-- Failed: error -->
-          <view v-if="importState === 'done' && importResult?.status === 'fail'">
-            <text style="font-size:60rpx;display:block">❌</text>
-            <text class="gu-import-error-title">导入失败</text>
-            <text class="gu-import-error">{{ importMsg }}</text>
+          <view v-if="importState === 'done'" style="text-align:center;padding:20rpx 0">
+            <text v-if="importResult?.status === 'success'" style="font-size:60rpx;display:block">✅</text>
+            <text v-else style="font-size:60rpx;display:block">❌</text>
+            <text :class="importResult?.status === 'success' ? 'gu-import-result' : 'gu-import-error-title'">{{ importMsg }}</text>
           </view>
         </view>
         <view class="gu-modal-footer">
-          <view v-if="importState === 'idle'" class="gu-btn gu-btn--confirm" @click="doImport">开始导入</view>
+          <view v-if="importState === 'preview'" class="gu-btn gu-btn--confirm" @click="doImport">确认导入</view>
           <view v-if="importState === 'done'" class="gu-btn gu-btn--confirm" @click="onImportDone">完成，刷新列表</view>
-          <view v-if="importState === 'idle' || importState === 'done'" class="gu-btn gu-btn--cancel" @click="closeImport">取消</view>
+          <view v-if="importState === 'idle' || importState === 'preview' || importState === 'done'" class="gu-btn gu-btn--cancel" @click="closeImport">取消</view>
         </view>
       </view>
     </view>
@@ -209,9 +216,11 @@ const savingSingle = ref(false)
 
 // ── Import state ──
 const showImport = ref(false)
-const importState = ref('idle')       // idle | processing | done
+const importState = ref('idle')       // idle | querying | preview | importing | done
 const importMsg = ref('')
 const importResult = ref(null)
+const importCompanyName = ref('')
+const importPreviewResult = ref(null)
 let pollTimer = null
 const importTaskId = ref(null)
 
@@ -361,22 +370,40 @@ function openImport() {
   importState.value = 'idle'
   importMsg.value = ''
   importResult.value = null
+  importPreviewResult.value = null
   importTaskId.value = null
+  importCompanyName.value = ''
   showImport.value = true
 }
 function closeImport() {
-  if (importState.value === 'processing') {
+  if (importState.value === 'importing' || importState.value === 'querying') {
     uni.showToast({ title: '任务执行中，请等待完成', icon: 'none' })
     return
   }
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   showImport.value = false
 }
+async function doPreview() {
+  const name = importCompanyName.value?.trim()
+  if (!name) { uni.showToast({ title: '请输入燃气公司名称', icon: 'none' }); return }
+  importState.value = 'querying'
+  try {
+    const result = await api.gasUserPreviewFromPlatform(name)
+    importPreviewResult.value = result
+    importState.value = 'preview'
+    importMsg.value = ''
+  } catch (e) {
+    importState.value = 'idle'
+    uni.showToast({ title: e?.msg || '查询失败，请检查公司名称', icon: 'none' })
+  }
+}
 async function doImport() {
-  importState.value = 'processing'
+  const name = importCompanyName.value?.trim()
+  if (!name) { uni.showToast({ title: '请输入燃气公司名称', icon: 'none' }); return }
+  importState.value = 'importing'
   importMsg.value = '正在提交导入任务...'
   try {
-    const result = await api.gasUserImportSubmit()
+    const result = await api.gasUserImportSubmit(name)
     importTaskId.value = result.taskId
     importMsg.value = result.message || '导入任务已提交，正在后台处理...'
     startImportPolling()
@@ -512,4 +539,12 @@ function onImportDone() {
 .gu-import-result { font-size: 30rpx; color: #333; font-weight: 600; display: block; margin-top: 12rpx }
 .gu-import-error-title { font-size: 30rpx; color: #e53935; font-weight: 600; display: block; margin-top: 8rpx; margin-bottom: 8rpx }
 .gu-import-error { font-size: 26rpx; color: #999; display: block; word-break: break-all }
+.gu-import-field { margin-bottom: 24rpx }
+
+/* Preview card */
+.gu-preview-card { background: #f9fafb; border-radius: 16rpx; padding: 24rpx; margin: 8rpx 0 }
+.gu-preview-row { display: flex; justify-content: space-between; align-items: center; padding: 8rpx 0 }
+.gu-preview-label { font-size: 26rpx; color: #666 }
+.gu-preview-val { font-size: 28rpx; color: #333; font-weight: 500 }
+.gu-preview-existing { color: #999 }
 </style>
