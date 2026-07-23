@@ -29,7 +29,7 @@ public class GasUserController {
     private final ImportTaskService importTaskService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
-    private final JdbcTemplate gasJdbcTemplate;
+    private final javax.sql.DataSource gasDataSource;
 
     public GasUserController(
             OpsGasUserMapper mapper,
@@ -38,14 +38,14 @@ public class GasUserController {
             ImportTaskService importTaskService,
             KafkaTemplate<String, String> kafkaTemplate,
             ObjectMapper objectMapper,
-            @Qualifier("gasJdbcTemplate") JdbcTemplate gasJdbcTemplate) {
+            @Qualifier("gasDataSource") javax.sql.DataSource gasDataSource) {
         this.mapper = mapper;
         this.dataScopeService = dataScopeService;
         this.jdbcTemplate = jdbcTemplate;
         this.importTaskService = importTaskService;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
-        this.gasJdbcTemplate = gasJdbcTemplate;
+        this.gasDataSource = gasDataSource;
     }
 
     /** Paginated list with optional community filter and keyword search. */
@@ -365,7 +365,8 @@ public class GasUserController {
             return R.fail("请输入燃气公司名称");
         }
         try {
-            Integer totalCount = gasJdbcTemplate.queryForObject(
+            JdbcTemplate gasJdbc = new JdbcTemplate(gasDataSource);
+            Integer totalCount = gasJdbc.queryForObject(
                     "SELECT COUNT(*) FROM sb_gas_user WHERE area_name LIKE CONCAT(?, '%')",
                     Integer.class, companyName);
             if (totalCount == null) totalCount = 0;
@@ -391,7 +392,8 @@ public class GasUserController {
     private int estimateExistingCount(String companyName) {
         try {
             // Count external rows whose phone already exists in ops_gas_user
-            Integer cnt = gasJdbcTemplate.queryForObject(
+            JdbcTemplate gasJdbc = new JdbcTemplate(gasDataSource);
+            Integer cnt = gasJdbc.queryForObject(
                     "SELECT COUNT(*) FROM sb_gas_user e " +
                     "WHERE e.area_name LIKE CONCAT(?, '%') " +
                     "AND EXISTS (SELECT 1 FROM ops_gas_user g WHERE g.phone = e.phone " +

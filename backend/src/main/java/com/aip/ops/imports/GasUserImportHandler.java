@@ -32,8 +32,8 @@ import java.util.*;
 public class GasUserImportHandler implements ImportHandler {
 
     private final OpsGasUserMapper gasUserMapper;
-    private final JdbcTemplate gasJdbcTemplate;   // 外部 jinyuan_info
     private final JdbcTemplate localJdbcTemplate; // 本地 mall_db（含 ai_platform 跨库）
+    private final javax.sql.DataSource gasDataSource; // 外部 jinyuan_info
     private final DataSource dataSource;
     private final AmapGeocodeUtil amapGeocodeUtil;
     private final ImportTaskService taskService;
@@ -43,15 +43,15 @@ public class GasUserImportHandler implements ImportHandler {
 
     public GasUserImportHandler(
             OpsGasUserMapper gasUserMapper,
-            @Qualifier("gasJdbcTemplate") JdbcTemplate gasJdbcTemplate,
             JdbcTemplate localJdbcTemplate,
+            @Qualifier("gasDataSource") javax.sql.DataSource gasDataSource,
             DataSource dataSource,
             AmapGeocodeUtil amapGeocodeUtil,
             ImportTaskService taskService,
             @Qualifier("gasCompanyFilter") String companyFilter) {
         this.gasUserMapper = gasUserMapper;
-        this.gasJdbcTemplate = gasJdbcTemplate;
         this.localJdbcTemplate = localJdbcTemplate;
+        this.gasDataSource = gasDataSource;
         this.dataSource = dataSource;
         this.amapGeocodeUtil = amapGeocodeUtil;
         this.taskService = taskService;
@@ -77,9 +77,10 @@ public class GasUserImportHandler implements ImportHandler {
         if (company == null || company.isBlank()) company = companyFilter;
         String sql = "SELECT * FROM sb_gas_user WHERE area_name LIKE CONCAT(?, '%')";
         log.info("GasUserImport: executing SQL=[{}] with company=[{}]", sql, company);
+        JdbcTemplate gasJdbc = new JdbcTemplate(gasDataSource);
         List<Map<String, Object>> srcRows;
         try {
-            srcRows = gasJdbcTemplate.queryForList(sql, company);
+            srcRows = gasJdbc.queryForList(sql, company);
         } catch (Exception e) {
             return ImportResult.fail("READ_EXTERNAL",
                     List.of("无法连接外部燃气数据库: " + e.getMessage()), 0);
