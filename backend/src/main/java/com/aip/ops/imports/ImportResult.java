@@ -60,6 +60,8 @@ public class ImportResult {
 
     public int getExistingCount() { return existingCount; }
     public void setExistingCount(int v) { existingCount = v; }
+    public String getMessage() { return message; }
+    public void setMessage(String v) { message = v; }
     public String getStatus() { return status; }
     public void setStatus(String v) { status = v; }
     public String getPhase() { return phase; }
