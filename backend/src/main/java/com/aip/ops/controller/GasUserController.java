@@ -10,7 +10,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,7 +21,6 @@ import java.util.*;
 @Slf4j
 @RestController
 @RequestMapping("/api/ops/admin/gas-user")
-@RequiredArgsConstructor
 public class GasUserController {
 
     private final OpsGasUserMapper mapper;
@@ -31,9 +29,24 @@ public class GasUserController {
     private final ImportTaskService importTaskService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
-
-    @Qualifier("gasJdbcTemplate")
     private final JdbcTemplate gasJdbcTemplate;
+
+    public GasUserController(
+            OpsGasUserMapper mapper,
+            DataScopeService dataScopeService,
+            JdbcTemplate jdbcTemplate,
+            ImportTaskService importTaskService,
+            KafkaTemplate<String, String> kafkaTemplate,
+            ObjectMapper objectMapper,
+            @Qualifier("gasJdbcTemplate") JdbcTemplate gasJdbcTemplate) {
+        this.mapper = mapper;
+        this.dataScopeService = dataScopeService;
+        this.jdbcTemplate = jdbcTemplate;
+        this.importTaskService = importTaskService;
+        this.kafkaTemplate = kafkaTemplate;
+        this.objectMapper = objectMapper;
+        this.gasJdbcTemplate = gasJdbcTemplate;
+    }
 
     /** Paginated list with optional community filter and keyword search. */
     @GetMapping
