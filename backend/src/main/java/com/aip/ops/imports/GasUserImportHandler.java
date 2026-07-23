@@ -118,40 +118,8 @@ public class GasUserImportHandler implements ImportHandler {
             try { java.nio.file.Files.writeString(java.nio.file.Path.of("/tmp/gas_row_dump.txt"), sb.toString()); } catch (Exception ign) {}
         }
 
-        for (var row : srcRows) {
-            String phone = strVal(row, "phone");
-            String cert = strVal(row, "gas_supply_certificate_number");
-            String communityName = strVal(row, "village_name");
-
-            // 必填校验
-            if (phone == null || phone.isBlank()) {
-                log.warn("GasUserImport: skipping row — phone is empty, id={}", row.get("id"));
-                skippedCount++;
-                if (skippedReasons.size() < 20) skippedReasons.add("手机号为空 (id=" + row.get("id") + ")");
-                continue;
-            }
-            if (cert == null || cert.isBlank()) {
-                log.warn("GasUserImport: skipping row — certificate is empty, phone={}", phone);
-                skippedCount++;
-                if (skippedReasons.size() < 20) skippedReasons.add("供气证号为空 (phone=" + phone + ")");
-                continue;
-            }
-            if (communityName == null || communityName.isBlank()) {
-                log.warn("GasUserImport: skipping row — community_name is empty, phone={}", phone);
-                skippedCount++;
-                if (skippedReasons.size() < 20) skippedReasons.add("小区名为空 (phone=" + phone + ")");
-                continue;
-            }
-
-            // 去重检查
-            String key = phone + "|" + cert;
-            if (existingKeys.contains(key)) {
-                existingCount++;
-                continue;
-            }
-
-            toImport.add(row);
-        }
+        // DEBUG: import everything without validation
+        toImport.addAll(srcRows);
         log.warn("GasUserImport: company=[{}] rawTotal={} skipped={} existing={} toImport={}",
                 company, srcRows.size(), skippedCount, existingCount, toImport.size());
 
