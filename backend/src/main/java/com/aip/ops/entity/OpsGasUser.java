@@ -24,16 +24,16 @@ public class OpsGasUser extends BaseEntity {
     private String batchNo;
     private String userNo;
     private String meterNo;
-    private String userName;
+    private String fullName;                        // sb_gas_user.full_name
     private String phone;
-    private String gasSupplyCertificateNumber;
-    private String gasCompanyName;
-    private String area;
-    private String address;
+    private String gasSupplyCertificateNumber;      // sb_gas_user.gas_supply_certificate_number
+    private String gasCompanyName;                  // sb_gas_user.gas_company_name
+    private String areaName;                        // sb_gas_user.area_name
+    private String detailedAddress;                 // sb_gas_user.detailed_address
     private String status;
-    private BigDecimal balance;
+    private BigDecimal gasBalance;                  // sb_gas_user.gas_balance
     private BigDecimal arrears;
-    private LocalDateTime openTime;
+    private LocalDateTime accountOpeningTime;       // sb_gas_user.account_opening_time
     private Long platformMemberId;
 
     /** Transient: resolved community name from ai_platform.sys_community */

@@ -319,16 +319,16 @@ public class GasUserImportHandler implements ImportHandler {
         ps.setLong(i++, communityId);
         ps.setString(i++, batchNo);
         ps.setString(i++, strVal(row, "id"));                   // user_no
-        ps.setString(i++, "");                                   // meter_no (not in Polardb)
-        ps.setString(i++, strVal(row, "full_name"));             // user_name
+        ps.setString(i++, "");                                   // meter_no
+        ps.setString(i++, strVal(row, "full_name"));             // full_name (matches ops_gas_user)
         ps.setString(i++, strVal(row, "phone"));
         ps.setString(i++, strVal(row, "gas_supply_certificate_number"));
         ps.setString(i++, strVal(row, "gas_company_name"));
-        ps.setString(i++, strVal(row, "area_name"));             // area
-        ps.setString(i++, strVal(row, "detailed_address"));      // address
+        ps.setString(i++, strVal(row, "area_name"));             // area_name (matches ops_gas_user)
+        ps.setString(i++, strVal(row, "detailed_address"));      // detailed_address (matches ops_gas_user)
         ps.setString(i++, "active");
-        ps.setBigDecimal(i++, toBigDecimal(row, "gas_balance")); // balance
-        ps.setBigDecimal(i++, BigDecimal.ZERO);                  // arrears (not in Polardb)
+        ps.setBigDecimal(i++, toBigDecimal(row, "gas_balance")); // gas_balance (matches ops_gas_user)
+        ps.setBigDecimal(i++, BigDecimal.ZERO);                  // arrears
         // openTime — parse once, then set at current index
         Object openTimeVal = null;
         String openTimeStr = strVal(row, "account_opening_time");

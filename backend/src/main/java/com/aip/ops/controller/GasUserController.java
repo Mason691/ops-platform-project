@@ -80,10 +80,10 @@ public class GasUserController {
         if (keyword != null && !keyword.isBlank()) {
             qw.and(w -> w
                 .like(OpsGasUser::getUserNo, keyword)
-                .or().like(OpsGasUser::getUserName, keyword)
+                .or().like(OpsGasUser::getFullName, keyword)
                 .or().like(OpsGasUser::getPhone, keyword)
-                .or().like(OpsGasUser::getAddress, keyword)
-                .or().like(OpsGasUser::getArea, keyword));
+                .or().like(OpsGasUser::getDetailedAddress, keyword)
+                .or().like(OpsGasUser::getAreaName, keyword));
         }
         qw.orderByAsc(OpsGasUser::getUserNo);
         Page<OpsGasUser> result = mapper.selectPage(new Page<>(pageNum, pageSize), qw);
@@ -260,7 +260,7 @@ public class GasUserController {
             qw.in(OpsGasUser::getCorpId, visibleCorpIds);
         }
         if (keyword != null && !keyword.isBlank()) {
-            qw.like(OpsGasUser::getArea, keyword);
+            qw.like(OpsGasUser::getAreaName, keyword);
         }
         qw.orderByAsc(OpsGasUser::getUserNo);
         Page<OpsGasUser> result = mapper.selectPage(new Page<>(pageNum, pageSize), qw);

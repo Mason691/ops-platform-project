@@ -45,9 +45,9 @@
               <input type="checkbox" :checked="selected.includes(d.id)" @click="toggleOne(d.id)" />
             </view>
             <view class="gu-td" style="width:140rpx">{{ d.userNo }}</view>
-            <view class="gu-td" style="width:140rpx">{{ d.userName || '-' }}</view>
+            <view class="gu-td" style="width:140rpx">{{ d.fullName || '-' }}</view>
             <view class="gu-td" style="width:200rpx">{{ d.phone || '-' }}</view>
-            <view class="gu-td" style="width:200rpx">{{ d.area || '-' }}</view>
+            <view class="gu-td" style="width:200rpx">{{ d.areaName || '-' }}</view>
             <view class="gu-td" style="width:200rpx">
               <text :class="{ 'gu-community-bound': d.communityName }">{{ d.communityName || '(未指定)' }}</text>
             </view>
@@ -101,7 +101,7 @@
         <view class="gu-modal-body">
           <view class="gu-field">
             <text class="gu-field-label">用户</text>
-            <text class="gu-field-static">{{ singleEditUser?.userName || '-' }}（{{ singleEditUser?.userNo }}）</text>
+            <text class="gu-field-static">{{ singleEditUser?.fullName || '-' }}（{{ singleEditUser?.userNo }}）</text>
           </view>
           <view v-if="singleEditUser?.communityName" class="gu-field">
             <text class="gu-field-label">当前小区</text>
