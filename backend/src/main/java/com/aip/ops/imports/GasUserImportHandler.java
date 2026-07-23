@@ -305,12 +305,13 @@ public class GasUserImportHandler implements ImportHandler {
     private String buildInsertSql() {
         return "INSERT INTO ops_gas_user " +
                "(corp_id, community_id, batch_no, user_no, meter_no, full_name, " +
+               " gender, birth_date, " +
                " phone, gas_supply_certificate_number, gas_company_name, area_name, detailed_address, " +
                " status, gas_balance, arrears, account_opening_time, " +
                " accumulated_gas_purchase_volume, accumulated_gas_purchase_money, " +
                " document_type, document_number, create_user, modify_user, " +
                " create_user_name, modify_user_name, create_time, modify_time) " +
-               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,'','',NOW(),NOW())";
+               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,'','',NOW(),NOW())";
     }
 
     private void bindInsertParams(PreparedStatement ps, Map<String, Object> row,
@@ -321,7 +322,11 @@ public class GasUserImportHandler implements ImportHandler {
         ps.setString(i++, batchNo);
         ps.setString(i++, strVal(row, "id"));                   // user_no
         ps.setString(i++, "");                                   // meter_no
-        ps.setString(i++, strVal(row, "full_name"));             // full_name (matches ops_gas_user)
+        ps.setString(i++, strVal(row, "full_name"));             // full_name
+        // 身份证解析：性别 + 出生日期
+        String[] idInfo = parseIdCard(strVal(row, "document_number"));
+        ps.setString(i++, idInfo[0]);  // gender
+        ps.setDate(i++, idInfo[1] != null ? java.sql.Date.valueOf(idInfo[1]) : null); // birth_date
         ps.setString(i++, strVal(row, "phone"));
         ps.setString(i++, strVal(row, "gas_supply_certificate_number"));
         ps.setString(i++, strVal(row, "gas_company_name"));
@@ -377,6 +382,29 @@ public class GasUserImportHandler implements ImportHandler {
             log.warn("GasUserImport: failed to get org amap key for corpId={}: {}", corpId, e.getMessage());
         }
         return null;
+    }
+
+    /** 从身份证号解析性别和出生日期。返回 [gender, birthDate] — gender: "M"/"F"/null, birthDate: "yyyy-MM-dd"/null */
+    private String[] parseIdCard(String idCard) {
+        String gender = null, birth = null;
+        if (idCard == null || idCard.isBlank()) return new String[]{null, null};
+        String s = idCard.trim();
+        try {
+            if (s.length() == 18) {
+                // 18位：7-14位=YYYYMMDD, 17位=性别(奇男偶女)
+                birth = s.substring(6, 10) + "-" + s.substring(10, 12) + "-" + s.substring(12, 14);
+                int g = Integer.parseInt(s.substring(16, 17));
+                gender = (g % 2 == 1) ? "M" : "F";
+            } else if (s.length() == 15) {
+                // 15位：7-12位=YYMMDD, 15位=性别
+                birth = "19" + s.substring(6, 8) + "-" + s.substring(8, 10) + "-" + s.substring(10, 12);
+                int g = Integer.parseInt(s.substring(14, 15));
+                gender = (g % 2 == 1) ? "M" : "F";
+            }
+        } catch (Exception e) {
+            // 解析失败，返回 null
+        }
+        return new String[]{gender, birth};
     }
 
     // ── 类型安全的辅助方法 ──

@@ -9,6 +9,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
@@ -25,6 +26,8 @@ public class OpsGasUser extends BaseEntity {
     private String userNo;
     private String meterNo;
     private String fullName;                        // sb_gas_user.full_name
+    private String gender;                           // 性别（身份证解析）
+    private LocalDate birthDate;                     // 出生日期（身份证解析）
     private String phone;
     private String gasSupplyCertificateNumber;      // sb_gas_user.gas_supply_certificate_number
     private String gasCompanyName;                  // sb_gas_user.gas_company_name
