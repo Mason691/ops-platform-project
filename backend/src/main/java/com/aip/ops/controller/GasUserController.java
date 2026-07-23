@@ -358,7 +358,8 @@ public class GasUserController {
     // ── 外部燃气平台导入 ──
 
     /** 预览：查询外部数据库匹配数量 + 预计去重后新增数量。 */
-    @PostMapping("/preview-from-gas-platform")
+    @PostMapping({"/preview-from-gas-platform", "/gas-import/query"})
+    public R<?> previewFromGasPlatform(@RequestBody Map<String, String> body) {
     public R<?> previewFromGasPlatform(@RequestBody Map<String, String> body) {
         String companyName = body.get("companyName");
         if (companyName == null || companyName.isBlank()) {
@@ -407,7 +408,7 @@ public class GasUserController {
     }
 
     /** 触发从外部燃气数据库导入。仅限管理员/运营角色操作。 */
-    @PostMapping("/import-from-gas-platform")
+    @PostMapping({"/import-from-gas-platform", "/gas-import/start"})
     public R<?> importFromGasPlatform(@RequestBody Map<String, String> body) {
         String companyName = body.get("companyName");
         if (companyName == null || companyName.isBlank()) {
