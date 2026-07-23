@@ -199,10 +199,9 @@ public class GasUserImportHandler implements ImportHandler {
             log.warn("GasUserImport: region match failed for community '{}'", communityName);
         }
 
-        // 高德地理编码（优先用组织配置的 key）
-        String amapKey = getOrgAmapKey(corpId);
+        // 地理编码：调用底座平台 API（使用组织配置的 AMap Key）
         String address = buildGeocodeAddress(row, communityName);
-        double[] coords = amapGeocodeUtil.geocode(address, amapKey);
+        double[] coords = geocodeViaPlatform(corpId, address);
         if (coords == null) {
             log.warn("GasUserImport: geocode failed for '{}', using (0,0)", address);
             coords = new double[]{0.0, 0.0};
@@ -373,26 +372,23 @@ public class GasUserImportHandler implements ImportHandler {
         return r;
     }
 
-    /** 从平台组织 AI 配置中获取高德服务端 Key（查询DB + AES解密）。 */
-    private String getOrgAmapKey(Long corpId) {
+    /** 调用底座平台地理编码 API（使用组织配置的 AMap Key）。返回 [lng, lat] 或 null。 */
+    private double[] geocodeViaPlatform(Long corpId, String address) {
         try {
-            String encKey = localJdbcTemplate.queryForObject(
-                    "SELECT amap_server_key_enc FROM ai_platform.sys_org_ai_config WHERE corp_id = ? AND delete_flag = 0",
-                    String.class, corpId);
-            if (encKey != null) {
-                String decrypted = AesUtils.decrypt(encKey);
-                if (decrypted != null && !decrypted.isBlank()) return decrypted;
+            String path = "/api/internal/user/geocode?corpId=" + corpId
+                    + "&address=" + java.net.URLEncoder.encode(address, "UTF-8");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = platformInternalClient.get(path, (String) null);
+            Map<String, Object> data = (Map<String, Object>) resp.get("data");
+            if (data != null && data.get("longitude") != null && data.get("latitude") != null) {
+                double lng = ((Number) data.get("longitude")).doubleValue();
+                double lat = ((Number) data.get("latitude")).doubleValue();
+                return new double[]{lng, lat};
             }
-            // Fallback: try corpId=0 (platform default)
-            encKey = localJdbcTemplate.queryForObject(
-                    "SELECT amap_server_key_enc FROM ai_platform.sys_org_ai_config WHERE corp_id = 0 AND delete_flag = 0",
-                    String.class);
-            if (encKey != null) {
-                String decrypted = AesUtils.decrypt(encKey);
-                if (decrypted != null && !decrypted.isBlank()) return decrypted;
-            }
+            log.warn("GasUserImport: platform geocode returned no coords for '{}': {}", address,
+                    data != null ? data.get("msg") : "null");
         } catch (Exception e) {
-            log.warn("GasUserImport: failed to get org amap key for corpId={}: {}", corpId, e.getMessage());
+            log.warn("GasUserImport: platform geocode failed for '{}': {}", address, e.getMessage());
         }
         return null;
     }
