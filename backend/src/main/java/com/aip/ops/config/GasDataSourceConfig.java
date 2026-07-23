@@ -1,6 +1,7 @@
 package com.aip.ops.config;
 
 import com.zaxxer.hikari.HikariDataSource;
+import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -26,17 +27,35 @@ public class GasDataSourceConfig {
     @Value("${gas.datasource.driver-class-name}")
     private String driverClassName;
 
+    /** 外部燃气公司筛选条件（默认德保），可通过配置覆盖 */
+    @Value("${gas.import.company-filter:德保}")
+    private String companyFilter;
+
+    private HikariDataSource hikariDataSource;
+
     @Bean("gasJdbcTemplate")
     public JdbcTemplate gasJdbcTemplate() {
-        HikariDataSource ds = new HikariDataSource();
-        ds.setJdbcUrl(jdbcUrl);
-        ds.setUsername(username);
-        ds.setPassword(password);
-        ds.setDriverClassName(driverClassName);
-        ds.setMaximumPoolSize(3);
-        ds.setMinimumIdle(1);
-        ds.setConnectionTimeout(10000);
-        ds.setInitializationFailTimeout(-1); // 启动时不验证连接
-        return new JdbcTemplate(ds);
+        this.hikariDataSource = new HikariDataSource();
+        hikariDataSource.setJdbcUrl(jdbcUrl);
+        hikariDataSource.setUsername(username);
+        hikariDataSource.setPassword(password);
+        hikariDataSource.setDriverClassName(driverClassName);
+        hikariDataSource.setMaximumPoolSize(3);
+        hikariDataSource.setMinimumIdle(1);
+        hikariDataSource.setConnectionTimeout(10000);
+        hikariDataSource.setInitializationFailTimeout(-1); // 启动时不验证连接
+        return new JdbcTemplate(hikariDataSource);
+    }
+
+    @Bean("gasCompanyFilter")
+    public String gasCompanyFilter() {
+        return companyFilter;
+    }
+
+    @PreDestroy
+    public void close() {
+        if (hikariDataSource != null && !hikariDataSource.isClosed()) {
+            hikariDataSource.close();
+        }
     }
 }

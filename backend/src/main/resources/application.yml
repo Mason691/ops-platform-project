@@ -102,6 +102,8 @@ gas:
       maximum-pool-size: 3
       minimum-idle: 1
       connection-timeout: 10000
+  import:
+    company-filter: 德保
 
 # 高德地图 API
 amap:

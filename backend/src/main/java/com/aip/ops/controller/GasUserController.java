@@ -352,6 +352,9 @@ public class GasUserController {
                     objectMapper.writeValueAsString(Map.of("taskId", task.getId())));
         } catch (Exception e) {
             log.error("Failed to send Kafka message for gas import task {}", task.getId(), e);
+            // Clean up the stale PENDING task so it doesn't block future imports
+            importTaskService.markFailed(task.getId(), "KAFKA",
+                    "消息队列不可用，请稍后重试", 0, 0);
             return R.fail("导入任务提交失败，请稍后重试");
         }
         Map<String, Object> data = new LinkedHashMap<>();
@@ -366,6 +369,13 @@ public class GasUserController {
     public R<?> importStatus(@PathVariable Long taskId) {
         SysImportTask task = importTaskService.getById(taskId);
         if (task == null) return R.fail("任务不存在");
+        // Data scope check: only return tasks belonging to the current org
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
+        if (task.getCorpId() != null && visibleCorpIds != null
+                && !visibleCorpIds.contains(task.getCorpId())
+                && !visibleCorpIds.contains(0L)) {
+            return R.fail("无权限查看该任务");
+        }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("taskId", task.getId());
         result.put("status", task.getStatus());

@@ -37,6 +37,7 @@ public class GasUserImportHandler implements ImportHandler {
     private final DataSource dataSource;
     private final AmapGeocodeUtil amapGeocodeUtil;
     private final ImportTaskService taskService;
+    private final String companyFilter;
 
     private static final String IMPORT_BATCH_PREFIX = "GAS_IMP_";
 
@@ -46,13 +47,15 @@ public class GasUserImportHandler implements ImportHandler {
             JdbcTemplate localJdbcTemplate,
             DataSource dataSource,
             AmapGeocodeUtil amapGeocodeUtil,
-            ImportTaskService taskService) {
+            ImportTaskService taskService,
+            @Qualifier("gasCompanyFilter") String companyFilter) {
         this.gasUserMapper = gasUserMapper;
         this.gasJdbcTemplate = gasJdbcTemplate;
         this.localJdbcTemplate = localJdbcTemplate;
         this.dataSource = dataSource;
         this.amapGeocodeUtil = amapGeocodeUtil;
         this.taskService = taskService;
+        this.companyFilter = companyFilter;
     }
 
     @Override
@@ -72,7 +75,8 @@ public class GasUserImportHandler implements ImportHandler {
         List<Map<String, Object>> srcRows;
         try {
             srcRows = gasJdbcTemplate.queryForList(
-                    "SELECT * FROM sb_gas_user WHERE gas_company_name LIKE '德保%'");
+                    "SELECT * FROM sb_gas_user WHERE gas_company_name LIKE ?",
+                    companyFilter + "%");
         } catch (Exception e) {
             return ImportResult.fail("READ_EXTERNAL",
                     List.of("无法连接外部燃气数据库: " + e.getMessage()), 0);
@@ -138,6 +142,9 @@ public class GasUserImportHandler implements ImportHandler {
             return buildResult(srcRows.size(), 0, existingCount, skippedCount);
         }
 
+        // Community name → ID cache (avoids N+1 cross-db queries for same community)
+        Map<String, Long> communityCache = new HashMap<>();
+
         // ── Phase 4: 逐条导入（查/建小区 → 插入用户） ──
         taskService.updateStatus(task.getId(), "PROCESSING", "INSERT",
                 "正在导入 " + toImport.size() + " 条新增用户...");
@@ -149,9 +156,15 @@ public class GasUserImportHandler implements ImportHandler {
                 .prepareStatement(insertSql)) {
 
             for (var row : toImport) {
-                // 4a. 查找或创建小区
+                // 4a. 查找或创建小区（带缓存）
                 String communityName = strVal(row, "community_name");
-                Long communityId = findOrCreateCommunity(row, corpId, communityName);
+                Long communityId = communityCache.get(communityName);
+                if (communityId == null) {
+                    communityId = findOrCreateCommunity(row, corpId, communityName);
+                    if (communityId != null) {
+                        communityCache.put(communityName, communityId);
+                    }
+                }
                 if (communityId == null) {
                     throw new RuntimeException("无法创建小区: " + communityName);
                 }
@@ -250,11 +263,9 @@ public class GasUserImportHandler implements ImportHandler {
 
     private Long findRegionByName(String name, int level) {
         try {
-            String safeName = name.replace("'", "''");
             return localJdbcTemplate.queryForObject(
-                    "SELECT id FROM ai_platform.sys_region WHERE region_name LIKE '%"
-                            + safeName + "%' AND region_level = " + level + " LIMIT 1",
-                    Long.class);
+                    "SELECT id FROM ai_platform.sys_region WHERE region_name LIKE CONCAT('%',?,'%') AND region_level = ? LIMIT 1",
+                    Long.class, name, level);
         } catch (Exception e) {
             return null;
         }
@@ -293,7 +304,15 @@ public class GasUserImportHandler implements ImportHandler {
     // ── 地址拼接 ──
 
     private String buildGeocodeAddress(Map<String, Object> row, String communityName) {
-        return strVal(row, "province") + strVal(row, "city") + strVal(row, "district") + communityName;
+        StringBuilder sb = new StringBuilder();
+        String p = strVal(row, "province");
+        String c = strVal(row, "city");
+        String d = strVal(row, "district");
+        if (!p.isEmpty()) sb.append(p);
+        if (!c.isEmpty()) sb.append(c);
+        if (!d.isEmpty()) sb.append(d);
+        sb.append(communityName);
+        return sb.toString();
     }
 
     // ── INSERT 构建 ──

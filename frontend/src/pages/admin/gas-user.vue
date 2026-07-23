@@ -389,6 +389,7 @@ async function doImport() {
 function startImportPolling() {
   if (pollTimer) clearInterval(pollTimer)
   let pollCount = 0
+  let consecutiveErrors = 0
   const MAX_POLLS = 120  // 6 min at 3s interval
   pollTimer = setInterval(async () => {
     pollCount++
@@ -402,6 +403,7 @@ function startImportPolling() {
     if (!importTaskId.value) return
     try {
       const status = await api.gasUserImportStatus(importTaskId.value)
+      consecutiveErrors = 0
       importMsg.value = status.progressMsg || status.message || ''
       if (status.status === 'DONE') {
         clearInterval(pollTimer); pollTimer = null
@@ -415,7 +417,13 @@ function startImportPolling() {
         importMsg.value = status.errorMsg || status.message || '导入失败'
       }
     } catch (e) {
-      /* silently retry on transient network errors */
+      consecutiveErrors++
+      if (consecutiveErrors >= 5) {
+        clearInterval(pollTimer); pollTimer = null
+        importState.value = 'done'
+        importResult.value = { status: 'fail' }
+        importMsg.value = '网络异常，无法获取导入状态，请稍后查看任务记录'
+      }
     }
   }, 3000)
 }
