@@ -42,7 +42,26 @@
 
 ---
 
-## 三、术语表
+## 三、环境数据库配置（ADR-006）
+
+**决策**：生产环境与测试环境数据库严格隔离，禁止交叉使用。
+
+| 环境 | 业务库 | 底座平台库 | 外部数据源 |
+|------|--------|-----------|-----------|
+| **生产** `113.250.60.41` | `mall_db` | `ai_platform` | `parking-db.mysql.polardb.rds.aliyuncs.com/jinyuan_info` |
+| **测试** `104.238.165.57` | `mall_db_test` | `ai_platform_test` | 同上（共享外部源） |
+
+**规则**：
+- 生产容器启动必须用 `SPRING_DATASOURCE_URL=.../mall_db`，禁用 `mall_db_test`
+- `.env` 中 `DB_NAME_MALL=mall_db`（生产），`mall_db_test`（测试）
+- 禁止在任何环境配置中交叉混用
+- 修改数据库配置需确认目标环境
+
+**原因**：2026-07-23 发现生产环境 `docker run` 命令错误使用了 `mall_db_test`，导致 17,745 条导入数据全部写入测试库，生产库为空。同一 MySQL 实例同时存在 `mall_db` 和 `mall_db_test` 两个库，极易混淆。
+
+---
+
+## 四、术语表
 
 | 术语 | 说明 |
 |---|---|
