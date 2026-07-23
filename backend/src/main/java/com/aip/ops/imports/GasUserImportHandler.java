@@ -286,11 +286,10 @@ public class GasUserImportHandler implements ImportHandler {
         try {
             localJdbcTemplate.update(
                     "INSERT INTO ai_platform.sys_community " +
-                    "(community_name, province, city, district, address, longitude, latitude, " +
-                    " region_id, corp_id, status, delete_flag, create_time, modify_time) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NOW(), NOW())",
-                    name, province, city, district, address, lng, lat,
-                    regionId, corpId);
+                    "(community_name, region_id, address, longitude, latitude, " +
+                    " corp_id, delete_flag, create_time, modify_time) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                    name, regionId, address, lng, lat, corpId);
 
             Map<String, Object> newCommunity = localJdbcTemplate.queryForMap(
                     "SELECT id FROM ai_platform.sys_community WHERE community_name = ? AND delete_flag = 0 ORDER BY id DESC LIMIT 1",
