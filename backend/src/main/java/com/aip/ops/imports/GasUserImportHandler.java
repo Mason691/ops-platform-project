@@ -109,7 +109,7 @@ public class GasUserImportHandler implements ImportHandler {
         for (var row : srcRows) {
             String phone = strVal(row, "phone");
             String cert = strVal(row, "gas_supply_certificate_number");
-            String communityName = strVal(row, "community_name");
+            String communityName = strVal(row, "village_name");
 
             // 必填校验
             if (phone == null || phone.isBlank()) {
@@ -162,7 +162,7 @@ public class GasUserImportHandler implements ImportHandler {
 
             for (var row : toImport) {
                 // 4a. 查找或创建小区（带缓存）
-                String communityName = strVal(row, "community_name");
+                String communityName = strVal(row, "village_name");
                 Long communityId = communityCache.get(communityName);
                 if (communityId == null) {
                     communityId = findOrCreateCommunity(row, corpId, communityName);
@@ -226,7 +226,7 @@ public class GasUserImportHandler implements ImportHandler {
 
         // 创建小区
         return createCommunity(communityName, regionId, lng, lat,
-                strVal(row, "province"), strVal(row, "city"), strVal(row, "district"), address, corpId);
+                strVal(row, "province_name"), strVal(row, "city_name"), strVal(row, "area_name"), address, corpId);
     }
 
     private Long findCommunityIdByName(String name) {
@@ -244,9 +244,9 @@ public class GasUserImportHandler implements ImportHandler {
      * 遵循 BattleMapController.climbToCounty() 的 sys_region 访问模式。
      */
     private Long matchRegion(Map<String, Object> row) {
-        String province = strVal(row, "province");
-        String city = strVal(row, "city");
-        String district = strVal(row, "district");
+        String province = strVal(row, "province_name");
+        String city = strVal(row, "city_name");
+        String district = strVal(row, "area_name");
 
         // Level 3: 区县
         if (district != null && !district.isBlank()) {
@@ -310,9 +310,9 @@ public class GasUserImportHandler implements ImportHandler {
 
     private String buildGeocodeAddress(Map<String, Object> row, String communityName) {
         StringBuilder sb = new StringBuilder();
-        String p = strVal(row, "province");
-        String c = strVal(row, "city");
-        String d = strVal(row, "district");
+        String p = strVal(row, "province_name");
+        String c = strVal(row, "city_name");
+        String d = strVal(row, "area_name");
         if (!p.isEmpty()) sb.append(p);
         if (!c.isEmpty()) sb.append(c);
         if (!d.isEmpty()) sb.append(d);
@@ -337,19 +337,18 @@ public class GasUserImportHandler implements ImportHandler {
         ps.setLong(i++, corpId);
         ps.setLong(i++, communityId);
         ps.setString(i++, batchNo);
-        ps.setString(i++, strVal(row, "user_no"));
-        ps.setString(i++, strVal(row, "meter_no"));
-        ps.setString(i++, strVal(row, "user_name"));
+        ps.setString(i++, strVal(row, "id"));                   // user_no
+        ps.setString(i++, "");                                   // meter_no (not in Polardb)
+        ps.setString(i++, strVal(row, "full_name"));             // user_name
         ps.setString(i++, strVal(row, "phone"));
         ps.setString(i++, strVal(row, "gas_supply_certificate_number"));
         ps.setString(i++, strVal(row, "gas_company_name"));
-        ps.setString(i++, strVal(row, "area"));
-        ps.setString(i++, strVal(row, "address"));
+        ps.setString(i++, strVal(row, "area_name"));             // area
+        ps.setString(i++, strVal(row, "detailed_address"));      // address
         ps.setString(i++, "active");
-        ps.setBigDecimal(i++, toBigDecimal(row, "balance"));
-        ps.setBigDecimal(i++, toBigDecimal(row, "arrears"));
-        // openTime: try to parse, else null
-        String openTimeStr = strVal(row, "open_time");
+        ps.setBigDecimal(i++, toBigDecimal(row, "gas_balance")); // balance
+        ps.setBigDecimal(i++, BigDecimal.ZERO);                  // arrears (not in Polardb)
+        String openTimeStr = strVal(row, "account_opening_time");
         if (openTimeStr != null && !openTimeStr.isBlank()) {
             try {
                 ps.setObject(i++, LocalDateTime.parse(openTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
