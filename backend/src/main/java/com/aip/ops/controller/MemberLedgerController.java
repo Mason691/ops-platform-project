@@ -180,7 +180,7 @@ public class MemberLedgerController {
             String in = gasUserIds.stream().map(String::valueOf).collect(Collectors.joining(","));
             // member_id = ops_gas_user.id; resolve via gas_user → sys_member chain
             jdbcTemplate.queryForList(
-                "SELECT gu.id, COALESCE(NULLIF(sm.nickname,''), NULLIF(gu.user_name,''), gu.phone) AS name " +
+                "SELECT gu.id, COALESCE(NULLIF(sm.nickname,''), NULLIF(gu.full_name,''), gu.phone) AS name " +
                 "FROM ops_gas_user gu LEFT JOIN ai_platform.sys_member sm ON sm.phone = gu.phone AND sm.delete_flag=0 " +
                 "WHERE gu.id IN (" + in + ")")
                 .forEach(row -> map.put(((Number)row.get("id")).longValue(),

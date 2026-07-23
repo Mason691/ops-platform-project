@@ -163,12 +163,12 @@ public class GasUserController {
             // Step 2: for unmatched users, create sys_member records
             List<Map<String, Object>> unmatched = new ArrayList<>();
             jdbcTemplate.query(
-                "SELECT gu.id, gu.phone, gu.user_name FROM ops_gas_user gu " +
+                "SELECT gu.id, gu.phone, gu.full_name FROM ops_gas_user gu " +
                 "WHERE gu.platform_member_id IS NULL AND gu.phone IS NOT NULL AND gu.phone REGEXP '^[0-9]{11}$' LIMIT 5000",
                 (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
                     Map<String, Object> r = new java.util.LinkedHashMap<>();
                     r.put("id", rs.getLong("id")); r.put("phone", rs.getString("phone"));
-                    r.put("name", rs.getString("user_name")); unmatched.add(r);
+                    r.put("name", rs.getString("full_name")); unmatched.add(r);
                 });
 
             int seq = 0;
