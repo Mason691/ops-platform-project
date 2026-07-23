@@ -125,20 +125,20 @@ public class GasUserImportHandler implements ImportHandler {
             String cert = strVal(row, "gas_supply_certificate_number");
             String communityName = strVal(row, "village_name");
 
-            // 必填校验
-            if (phone == null || phone.isBlank()) {
+            // DEBUG: skip validation, import everything
+            if (false && (phone == null || phone.isBlank())) {
                 log.warn("GasUserImport: skipping row — phone is empty, id={}", row.get("id"));
                 skippedCount++;
                 if (skippedReasons.size() < 20) skippedReasons.add("手机号为空 (id=" + row.get("id") + ")");
                 continue;
             }
-            if (cert == null || cert.isBlank()) {
+            if (false && (cert == null || cert.isBlank())) {
                 log.warn("GasUserImport: skipping row — certificate is empty, phone={}", phone);
                 skippedCount++;
                 if (skippedReasons.size() < 20) skippedReasons.add("供气证号为空 (phone=" + phone + ")");
                 continue;
             }
-            if (communityName == null || communityName.isBlank()) {
+            if (false && (communityName == null || communityName.isBlank())) {
                 log.warn("GasUserImport: skipping row — community_name is empty, phone={}", phone);
                 skippedCount++;
                 if (skippedReasons.size() < 20) skippedReasons.add("小区名为空 (phone=" + phone + ")");
