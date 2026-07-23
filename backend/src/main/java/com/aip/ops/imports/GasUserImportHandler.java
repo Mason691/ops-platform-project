@@ -110,15 +110,12 @@ public class GasUserImportHandler implements ImportHandler {
         int skippedCount = 0;
         List<String> skippedReasons = new ArrayList<>();
 
-        // Dump first row keys + values to task progress
+        // Dump first row keys + values to file
         if (!srcRows.isEmpty()) {
             var first = srcRows.get(0);
-            StringBuilder sb = new StringBuilder("ROW_KEYS: ");
-            for (String k : first.keySet()) sb.append(k).append(",");
-            sb.append(" | phone=").append(strVal(first, "phone"));
-            sb.append(" cert=").append(strVal(first, "gas_supply_certificate_number"));
-            sb.append(" village=").append(strVal(first, "village_name"));
-            taskService.updateStatus(task.getId(), "PROCESSING", "ROW_CHECK", sb.toString());
+            StringBuilder sb = new StringBuilder();
+            for (String k : first.keySet()) sb.append(k).append("=").append(first.get(k)).append("; ");
+            try { java.nio.file.Files.writeString(java.nio.file.Path.of("/tmp/gas_row_dump.txt"), sb.toString()); } catch (Exception ign) {}
         }
 
         for (var row : srcRows) {
