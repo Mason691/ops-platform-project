@@ -360,30 +360,30 @@ public class GasUserController {
     /** 预览：查询外部数据库匹配数量 + 预计去重后新增数量。 */
     @PostMapping({"/preview-from-gas-platform", "/gas-import/query"})
     public R<?> previewFromGasPlatform(@RequestBody Map<String, String> body) {
-        String companyName = body.get("companyName");
-        if (companyName == null || companyName.isBlank()) {
-            return R.fail("请输入燃气公司名称");
+        String areaName = body.getOrDefault("areaName", body.get("companyName"));
+        if (areaName == null || areaName.isBlank()) {
+            return R.fail("请输入地区名称");
         }
         try {
             JdbcTemplate gasJdbc = gasDataSourceConfig.getJdbcTemplate();
             Integer totalCount = gasJdbc.queryForObject(
                     "SELECT COUNT(*) FROM sb_gas_user WHERE area_name LIKE CONCAT(?, '%')",
-                    Integer.class, companyName);
+                    Integer.class, areaName);
             if (totalCount == null) totalCount = 0;
 
             // Estimate existing count
-            int existingCount = estimateExistingCount(companyName);
+            int existingCount = estimateExistingCount(areaName);
 
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("companyName", companyName);
+            data.put("areaName", areaName);
             data.put("totalCount", totalCount);
             data.put("existingCount", existingCount);
             data.put("newCount", Math.max(0, totalCount - existingCount));
-            log.info("GasUser preview: company={} total={} existing={} new={}",
-                    companyName, totalCount, existingCount, totalCount - existingCount);
+            log.info("GasUser preview: area={} total={} existing={} new={}",
+                    areaName, totalCount, existingCount, totalCount - existingCount);
             return R.ok(data);
         } catch (Exception e) {
-            log.error("GasUser preview failed for company={}: {}", companyName, e.getMessage());
+            log.error("GasUser preview failed for area={}: {}", areaName, e.getMessage());
             return R.fail("查询外部数据库失败：" + e.getMessage());
         }
     }
@@ -409,15 +409,15 @@ public class GasUserController {
     /** 触发从外部燃气数据库导入。仅限管理员/运营角色操作。 */
     @PostMapping({"/import-from-gas-platform", "/gas-import/start"})
     public R<?> importFromGasPlatform(@RequestBody Map<String, String> body) {
-        String companyName = body.get("companyName");
-        if (companyName == null || companyName.isBlank()) {
-            return R.fail("请输入燃气公司名称");
+        String areaName = body.getOrDefault("areaName", body.get("companyName"));
+        if (areaName == null || areaName.isBlank()) {
+            return R.fail("请输入地区名称");
         }
         if (importTaskService.hasPendingTask("gas_user")) {
             return R.fail("已有导入任务正在执行中，请等待完成后再试");
         }
         SysImportTask task = importTaskService.createTaskWithoutFile(
-                "gas_user", "从燃气平台导入", companyName);
+                "gas_user", "从燃气平台导入", areaName);
         try {
             kafkaTemplate.send("async-import-task",
                     objectMapper.writeValueAsString(Map.of("taskId", task.getId())));
@@ -430,7 +430,7 @@ public class GasUserController {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("taskId", task.getId());
         data.put("status", task.getStatus());
-        data.put("companyName", companyName);
+        data.put("areaName", areaName);
         data.put("message", "导入任务已提交，正在后台处理中...");
         return R.ok(data);
     }
