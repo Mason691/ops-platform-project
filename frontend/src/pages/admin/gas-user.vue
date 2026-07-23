@@ -19,6 +19,7 @@
       <view class="gu-actions">
         <view class="gu-btn" :class="filterUnassigned ? 'gu-btn--unassigned-active' : 'gu-btn--unassigned'" @click="toggleUnassigned">🔍 未指定小区</view>
         <view class="gu-btn gu-btn--assign" :class="{ disabled: !selected.length }" @click="openBatchAssign">📋 批量指定小区</view>
+        <view class="gu-btn gu-btn--import" @click="openImport">📥 从燃气平台导入</view>
       </view>
     </view>
 
@@ -124,10 +125,49 @@
       </view>
     </view>
   </view>
+
+    <!-- ═══ Import Modal ═══ -->
+    <view v-if="showImport" class="gu-overlay" @click.self="closeImport">
+      <view class="gu-modal gu-modal--sm">
+        <view class="gu-modal-header">
+          <text class="gu-modal-title">从燃气平台导入</text>
+          <text v-if="importState === 'done' || importState === 'idle'" class="gu-modal-close" @click="closeImport">✕</text>
+        </view>
+        <view class="gu-modal-body" style="text-align:center;padding:40rpx">
+          <!-- Idle: confirm prompt -->
+          <view v-if="importState === 'idle'">
+            <text style="font-size:48rpx;display:block;margin-bottom:16rpx">📡</text>
+            <text class="gu-import-desc">将从外部燃气系统导入用户数据</text>
+            <text class="gu-import-desc" style="color:#999;font-size:24rpx;margin-top:4rpx">筛选：德保燃气公司 · 去重：手机号+供气证号</text>
+          </view>
+          <!-- Processing: spinner -->
+          <view v-if="importState === 'processing'">
+            <text style="font-size:48rpx;display:block;margin-bottom:16rpx">⏳</text>
+            <text class="gu-import-desc">{{ importMsg || '正在处理...' }}</text>
+          </view>
+          <!-- Done: result -->
+          <view v-if="importState === 'done' && importResult?.status === 'success'">
+            <text style="font-size:60rpx;display:block">✅</text>
+            <text class="gu-import-result">{{ importMsg }}</text>
+          </view>
+          <!-- Failed: error -->
+          <view v-if="importState === 'done' && importResult?.status === 'fail'">
+            <text style="font-size:60rpx;display:block">❌</text>
+            <text class="gu-import-error-title">导入失败</text>
+            <text class="gu-import-error">{{ importMsg }}</text>
+          </view>
+        </view>
+        <view class="gu-modal-footer">
+          <view v-if="importState === 'idle'" class="gu-btn gu-btn--confirm" @click="doImport">开始导入</view>
+          <view v-if="importState === 'done'" class="gu-btn gu-btn--confirm" @click="onImportDone">完成，刷新列表</view>
+          <view v-if="importState === 'idle' || importState === 'done'" class="gu-btn gu-btn--cancel" @click="closeImport">取消</view>
+        </view>
+      </view>
+    </view>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { api } from '@/api/index'
 import Pager from '@/components/Pager.vue'
 
@@ -167,6 +207,14 @@ const singleEditUser = ref(null)
 const singleEditCommunityIdx = ref(-1)
 const savingSingle = ref(false)
 
+// ── Import state ──
+const showImport = ref(false)
+const importState = ref('idle')       // idle | processing | done
+const importMsg = ref('')
+const importResult = ref(null)
+let pollTimer = null
+const importTaskId = ref(null)
+
 // ── Computed ──
 const allChecked = computed(() => records.value.length > 0 && records.value.every(d => selected.value.includes(d.id)))
 
@@ -174,6 +222,9 @@ const allChecked = computed(() => records.value.length > 0 && records.value.ever
 onMounted(async () => {
   await loadCommunities()
   await loadData()
+})
+onBeforeUnmount(() => {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
 })
 
 // ── Data loading ──
@@ -304,6 +355,75 @@ async function doSingleEdit() {
     savingSingle.value = false
   }
 }
+
+// ── Import from gas platform ──
+function openImport() {
+  importState.value = 'idle'
+  importMsg.value = ''
+  importResult.value = null
+  importTaskId.value = null
+  showImport.value = true
+}
+function closeImport() {
+  if (importState.value === 'processing') {
+    uni.showToast({ title: '任务执行中，请等待完成', icon: 'none' })
+    return
+  }
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  showImport.value = false
+}
+async function doImport() {
+  importState.value = 'processing'
+  importMsg.value = '正在提交导入任务...'
+  try {
+    const result = await api.gasUserImportSubmit()
+    importTaskId.value = result.taskId
+    importMsg.value = result.message || '导入任务已提交，正在后台处理...'
+    startImportPolling()
+  } catch (e) {
+    importState.value = 'done'
+    importResult.value = { status: 'fail' }
+    importMsg.value = e?.msg || '提交导入任务失败，请稍后重试'
+  }
+}
+function startImportPolling() {
+  if (pollTimer) clearInterval(pollTimer)
+  let pollCount = 0
+  const MAX_POLLS = 120  // 6 min at 3s interval
+  pollTimer = setInterval(async () => {
+    pollCount++
+    if (pollCount > MAX_POLLS) {
+      clearInterval(pollTimer); pollTimer = null
+      importState.value = 'done'
+      importResult.value = { status: 'fail' }
+      importMsg.value = '导入任务超时，请稍后查看任务记录'
+      return
+    }
+    if (!importTaskId.value) return
+    try {
+      const status = await api.gasUserImportStatus(importTaskId.value)
+      importMsg.value = status.progressMsg || status.message || ''
+      if (status.status === 'DONE') {
+        clearInterval(pollTimer); pollTimer = null
+        importState.value = 'done'
+        importResult.value = { status: 'success' }
+        importMsg.value = status.message || '导入完成'
+      } else if (status.status === 'FAILED') {
+        clearInterval(pollTimer); pollTimer = null
+        importState.value = 'done'
+        importResult.value = { status: 'fail' }
+        importMsg.value = status.errorMsg || status.message || '导入失败'
+      }
+    } catch (e) {
+      /* silently retry on transient network errors */
+    }
+  }, 3000)
+}
+function onImportDone() {
+  closeImport()
+  pageNum.value = 1
+  loadData()
+}
 </script>
 
 <style scoped>
@@ -375,4 +495,13 @@ async function doSingleEdit() {
 .gu-current-community { color: #FF6B35; font-weight: 500 }
 .gu-required { color: #e53935 }
 .gu-highlight { color: #FF6B35; font-weight: 600 }
+
+/* Import button */
+.gu-btn--import { background: #1989FA; color: #fff }
+
+/* Import modal */
+.gu-import-desc { font-size: 28rpx; color: #333; display: block; margin-bottom: 8rpx }
+.gu-import-result { font-size: 30rpx; color: #333; font-weight: 600; display: block; margin-top: 12rpx }
+.gu-import-error-title { font-size: 30rpx; color: #e53935; font-weight: 600; display: block; margin-top: 8rpx; margin-bottom: 8rpx }
+.gu-import-error { font-size: 26rpx; color: #999; display: block; word-break: break-all }
 </style>
