@@ -376,6 +376,7 @@ public class GasUserController {
 
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("areaName", areaName);
+            data.put("count", totalCount);              // 主平台前端使用 count
             data.put("totalCount", totalCount);
             data.put("existingCount", existingCount);
             data.put("newCount", Math.max(0, totalCount - existingCount));
@@ -439,7 +440,7 @@ public class GasUserController {
     }
 
     /** 触发从外部燃气数据库导入。仅限管理员/运营角色操作。 */
-    @PostMapping({"/import-from-gas-platform", "/gas-import/start"})
+    @PostMapping({"/import-from-gas-platform", "/gas-import/start", "/gas-import/submit"})
     public R<?> importFromGasPlatform(@RequestBody Map<String, String> body) {
         String areaName = body.getOrDefault("areaName", body.get("companyName"));
         if (areaName == null || areaName.isBlank()) {
@@ -463,12 +464,13 @@ public class GasUserController {
         data.put("taskId", task.getId());
         data.put("status", task.getStatus());
         data.put("areaName", areaName);
+        data.put("async", true);              // 主平台前端据此判断是否轮询
         data.put("message", "导入任务已提交，正在后台处理中...");
         return R.ok(data);
     }
 
     /** 查询导入任务状态。 */
-    @GetMapping("/import/{taskId}/status")
+    @GetMapping({"/import/{taskId}/status", "/gas-import/{taskId}/status"})
     public R<?> importStatus(@PathVariable Long taskId) {
         SysImportTask task = importTaskService.getById(taskId);
         if (task == null) return R.fail("任务不存在");
