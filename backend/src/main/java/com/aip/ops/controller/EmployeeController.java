@@ -137,7 +137,7 @@ public class EmployeeController {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("userId", userId);
         body.put("avatar", avatarUrl);
-        platformInternalClient.put("/api/internal/user/profile", body);
+        platformInternalClient.post("/api/internal/user/profile", body);
 
         return R.ok(Map.of("avatar", avatarUrl));
     }
