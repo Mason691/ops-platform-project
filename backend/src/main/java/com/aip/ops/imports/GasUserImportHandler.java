@@ -81,7 +81,7 @@ public class GasUserImportHandler implements ImportHandler {
         String company = task.getRemark();
         if (company == null || company.isBlank()) company = companyFilter;
         String sql = "SELECT * FROM sb_gas_user WHERE area_name LIKE CONCAT(?, '%')";
-        log.info("GasUserImport: executing SQL=[{}] with company=[{}]", sql, company);
+        log.warn("GasUserImport: executing SQL=[{}] with company=[{}]", sql, company);
         JdbcTemplate gasJdbc = gasDataSourceConfig.getJdbcTemplate();
         List<Map<String, Object>> srcRows;
         try {
@@ -94,13 +94,13 @@ public class GasUserImportHandler implements ImportHandler {
             return ImportResult.fail("READ_EXTERNAL",
                     List.of("外部燃气系统中未找到符合条件的用户数据"), 0);
         }
-        log.info("GasUserImport: company=[{}] SQL totalRows={}", company, srcRows.size());
+        log.warn("GasUserImport: company=[{}] SQL totalRows={}", company, srcRows.size());
 
         // ── Phase 2: 查询现有去重集合 ──
         taskService.updateStatus(task.getId(), "PROCESSING", "DEDUP",
                 "正在查询已有用户，构建去重集合...");
         Set<String> existingKeys = loadExistingDedupKeys();
-        log.info("GasUserImport: {} existing dedup keys in ops_gas_user", existingKeys.size());
+        log.warn("GasUserImport: {} existing dedup keys in ops_gas_user", existingKeys.size());
 
         // ── Phase 3: 校验 + 分类 ──
         taskService.updateStatus(task.getId(), "PROCESSING", "ROW_CHECK",
@@ -113,7 +113,7 @@ public class GasUserImportHandler implements ImportHandler {
         // Sample first 3 rows for debugging
         for (int ri = 0; ri < Math.min(3, srcRows.size()); ri++) {
             var r = srcRows.get(ri);
-            log.info("GasUserImport row[{}]: phone={} cert={} village={} area={} gasCompany={}",
+            log.warn("GasUserImport row[{}]: phone={} cert={} village={} area={} gasCompany={}",
                     ri, strVal(r, "phone"), strVal(r, "gas_supply_certificate_number"),
                     strVal(r, "village_name"), strVal(r, "area_name"), strVal(r, "gas_company_name"));
         }
@@ -152,7 +152,7 @@ public class GasUserImportHandler implements ImportHandler {
 
             toImport.add(row);
         }
-        log.info("GasUserImport: company=[{}] rawTotal={} skipped={} existing={} toImport={}",
+        log.warn("GasUserImport: company=[{}] rawTotal={} skipped={} existing={} toImport={}",
                 company, srcRows.size(), skippedCount, existingCount, toImport.size());
 
         if (toImport.isEmpty()) {
@@ -310,7 +310,7 @@ public class GasUserImportHandler implements ImportHandler {
                     "SELECT id FROM ai_platform.sys_community WHERE community_name = ? AND delete_flag = 0 ORDER BY id DESC LIMIT 1",
                     name);
             Long newId = newCommunity != null ? ((Number) newCommunity.get("id")).longValue() : null;
-            log.info("GasUserImport: created community id={} name={} regionId={} lng={} lat={}",
+            log.warn("GasUserImport: created community id={} name={} regionId={} lng={} lat={}",
                     newId, name, regionId, lng, lat);
             return newId;
         } catch (Exception e) {
