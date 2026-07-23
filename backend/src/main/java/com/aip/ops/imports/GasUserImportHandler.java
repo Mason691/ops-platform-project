@@ -375,18 +375,22 @@ public class GasUserImportHandler implements ImportHandler {
     /** 调用底座平台地理编码 API（使用组织配置的 AMap Key）。返回 [lng, lat] 或 null。 */
     private double[] geocodeViaPlatform(Long corpId, String address) {
         try {
-            String path = "/api/internal/user/geocode?corpId=" + corpId
-                    + "&address=" + java.net.URLEncoder.encode(address, "UTF-8");
+            // Let RestTemplate handle URL encoding (PlatformInternalClient double-encodes)
+            String url = "http://localhost:8080/api/internal/user/geocode?corpId=" + corpId
+                    + "&address={address}";
             @SuppressWarnings("unchecked")
-            Map<String, Object> resp = platformInternalClient.get(path, (String) null);
-            Map<String, Object> data = (Map<String, Object>) resp.get("data");
-            if (data != null && data.get("longitude") != null && data.get("latitude") != null) {
-                double lng = ((Number) data.get("longitude")).doubleValue();
-                double lat = ((Number) data.get("latitude")).doubleValue();
-                return new double[]{lng, lat};
+            Map<String, Object> resp = new org.springframework.web.client.RestTemplate()
+                    .getForObject(url, Map.class, address);
+            if (resp != null && resp.get("data") instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> data = (Map<String, Object>) resp.get("data");
+                if (data.get("longitude") != null && data.get("latitude") != null) {
+                    double lng = ((Number) data.get("longitude")).doubleValue();
+                    double lat = ((Number) data.get("latitude")).doubleValue();
+                    return new double[]{lng, lat};
+                }
             }
-            log.warn("GasUserImport: platform geocode returned no coords for '{}': {}", address,
-                    data != null ? data.get("msg") : "null");
+            log.warn("GasUserImport: platform geocode returned no coords for '{}'", address);
         } catch (Exception e) {
             log.warn("GasUserImport: platform geocode failed for '{}': {}", address, e.getMessage());
         }
