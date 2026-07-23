@@ -10,6 +10,7 @@ import java.util.Map;
 /**
  * 高德地图地理编码工具。
  * 根据地址文本获取经纬度坐标。
+ * API Key 优先级：amap.key 配置 → 组织配置 sys_org_ai_config.amap_server_key
  */
 @Slf4j
 @Component
@@ -27,12 +28,20 @@ public class AmapGeocodeUtil {
         this.apiKey = apiKey;
     }
 
-    /**
-     * 根据地址获取经纬度。
-     * @param address 结构化地址（如 "广西百色市德保县幸福家园"）
-     * @return [lng, lat] 或 null（失败时）
-     */
+    /** 使用默认 key 进行地理编码。 */
     public double[] geocode(String address) {
+        return geocode(address, null);
+    }
+
+    /** 使用指定 key 进行地理编码。 */
+    public double[] geocode(String address, String keyOverride) {
+        String key = (keyOverride != null && !keyOverride.isBlank()
+                && !"YOUR_AMAP_KEY_HERE".equals(keyOverride))
+                ? keyOverride : apiKey;
+        return doGeocode(address, key);
+    }
+
+    private double[] doGeocode(String address, String key) {
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> resp = restTemplate.getForObject(

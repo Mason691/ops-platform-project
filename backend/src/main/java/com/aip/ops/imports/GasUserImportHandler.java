@@ -6,6 +6,7 @@ import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.mapper.OpsGasUserMapper;
 import com.aip.ops.service.ImportTaskService;
 import com.aip.ops.util.AmapGeocodeUtil;
+import com.aip.sdk.client.PlatformInternalClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -38,6 +39,7 @@ public class GasUserImportHandler implements ImportHandler {
     private final DataSource dataSource;
     private final AmapGeocodeUtil amapGeocodeUtil;
     private final ImportTaskService taskService;
+    private final PlatformInternalClient platformInternalClient;
     private final String companyFilter;
 
     private static final String IMPORT_BATCH_PREFIX = "GAS_IMP_";
@@ -49,6 +51,7 @@ public class GasUserImportHandler implements ImportHandler {
             DataSource dataSource,
             AmapGeocodeUtil amapGeocodeUtil,
             ImportTaskService taskService,
+            PlatformInternalClient platformInternalClient,
             @Qualifier("gasCompanyFilter") String companyFilter) {
         this.gasUserMapper = gasUserMapper;
         this.localJdbcTemplate = localJdbcTemplate;
@@ -56,6 +59,7 @@ public class GasUserImportHandler implements ImportHandler {
         this.dataSource = dataSource;
         this.amapGeocodeUtil = amapGeocodeUtil;
         this.taskService = taskService;
+        this.platformInternalClient = platformInternalClient;
         this.companyFilter = companyFilter;
     }
 
@@ -218,9 +222,10 @@ public class GasUserImportHandler implements ImportHandler {
             log.warn("GasUserImport: region match failed for community '{}'", communityName);
         }
 
-        // 高德地理编码
+        // 高德地理编码（优先用组织配置的 key）
+        String amapKey = getOrgAmapKey(corpId);
         String address = buildGeocodeAddress(row, communityName);
-        double[] coords = amapGeocodeUtil.geocode(address);
+        double[] coords = amapGeocodeUtil.geocode(address, amapKey);
         BigDecimal lng = coords != null ? BigDecimal.valueOf(coords[0]) : BigDecimal.ZERO;
         BigDecimal lat = coords != null ? BigDecimal.valueOf(coords[1]) : BigDecimal.ZERO;
 
@@ -371,6 +376,22 @@ public class GasUserImportHandler implements ImportHandler {
         r.setFailRows(skipped);
         r.setMessage("外部共 " + totalSrc + " 条，已有用户 " + existing + "，增量导入 " + imported);
         return r;
+    }
+
+    /** 从平台组织 AI 配置中获取高德服务端 Key（解密后的）。 */
+    private String getOrgAmapKey(Long corpId) {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = platformInternalClient.get(
+                    "/api/internal/user/org-ai-config?corpId=" + corpId, (String) null);
+            Map<String, Object> data = (Map<String, Object>) resp.get("data");
+            if (data != null && data.get("amapServerKey") != null) {
+                return data.get("amapServerKey").toString();
+            }
+        } catch (Exception e) {
+            log.warn("GasUserImport: failed to get org amap key for corpId={}: {}", corpId, e.getMessage());
+        }
+        return null;
     }
 
     // ── 类型安全的辅助方法 ──
