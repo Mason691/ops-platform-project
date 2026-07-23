@@ -110,16 +110,17 @@ public class GasUserImportHandler implements ImportHandler {
         int skippedCount = 0;
         List<String> skippedReasons = new ArrayList<>();
 
-        // Dump first row keys + values to file
-        if (!srcRows.isEmpty()) {
-            var first = srcRows.get(0);
-            StringBuilder sb = new StringBuilder();
-            for (String k : first.keySet()) sb.append(k).append("=").append(first.get(k)).append("; ");
-            try { java.nio.file.Files.writeString(java.nio.file.Path.of("/tmp/gas_row_dump.txt"), sb.toString()); } catch (Exception ign) {}
+        for (var row : srcRows) {
+            String phone = strVal(row, "phone");
+            String cert = strVal(row, "gas_supply_certificate_number");
+            String communityName = strVal(row, "village_name");
+            if (phone == null || phone.isBlank()) { skippedCount++; continue; }
+            if (cert == null || cert.isBlank()) { skippedCount++; continue; }
+            if (communityName == null || communityName.isBlank()) { skippedCount++; continue; }
+            String key = phone + "|" + cert;
+            if (existingKeys.contains(key)) { existingCount++; continue; }
+            toImport.add(row);
         }
-
-        // DEBUG: import everything without validation
-        toImport.addAll(srcRows);
         log.warn("GasUserImport: company=[{}] rawTotal={} skipped={} existing={} toImport={}",
                 company, srcRows.size(), skippedCount, existingCount, toImport.size());
 
