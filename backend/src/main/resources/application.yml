@@ -94,9 +94,9 @@ battle-map:
 # 外部燃气平台数据源（jinyuan_info）
 gas:
   datasource:
-    jdbc-url: jdbc:mysql://113.250.60.41:3306/jinyuan_info_local?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&sslMode=DISABLED
-    username: root
-    password: admin.2026
+    jdbc-url: jdbc:mysql://parking-db.mysql.polardb.rds.aliyuncs.com:3306/jinyuan_info?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&sslMode=DISABLED
+    username: jinyuan_kaifa_only
+    password: 3GB^N&4NNI76UwhdlOcpYdS#
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 3
