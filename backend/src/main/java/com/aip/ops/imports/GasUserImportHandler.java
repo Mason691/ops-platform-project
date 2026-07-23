@@ -110,12 +110,15 @@ public class GasUserImportHandler implements ImportHandler {
         int skippedCount = 0;
         List<String> skippedReasons = new ArrayList<>();
 
-        // Sample first 3 rows for debugging
-        for (int ri = 0; ri < Math.min(3, srcRows.size()); ri++) {
-            var r = srcRows.get(ri);
-            log.warn("GasUserImport row[{}]: phone={} cert={} village={} area={} gasCompany={}",
-                    ri, strVal(r, "phone"), strVal(r, "gas_supply_certificate_number"),
-                    strVal(r, "village_name"), strVal(r, "area_name"), strVal(r, "gas_company_name"));
+        // Dump first row keys + values to task progress
+        if (!srcRows.isEmpty()) {
+            var first = srcRows.get(0);
+            StringBuilder sb = new StringBuilder("ROW_KEYS: ");
+            for (String k : first.keySet()) sb.append(k).append(",");
+            sb.append(" | phone=").append(strVal(first, "phone"));
+            sb.append(" cert=").append(strVal(first, "gas_supply_certificate_number"));
+            sb.append(" village=").append(strVal(first, "village_name"));
+            taskService.updateStatus(task.getId(), "PROCESSING", "ROW_CHECK", sb.toString());
         }
 
         for (var row : srcRows) {
