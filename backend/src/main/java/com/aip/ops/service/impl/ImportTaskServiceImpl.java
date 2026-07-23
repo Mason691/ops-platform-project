@@ -50,6 +50,32 @@ public class ImportTaskServiceImpl implements ImportTaskService {
     }
 
     @Override
+    @Transactional
+    public SysImportTask createTaskWithoutFile(String taskType, String description) {
+        SysImportTask task = new SysImportTask();
+        task.setTaskType(taskType);
+        task.setFileName(description);
+        task.setFilePath("");  // no file for external DB imports
+        task.setFileSize(0L);
+        task.setStatus("PENDING");
+        task.setCreateTime(LocalDateTime.now());
+        task.setModifyTime(LocalDateTime.now());
+
+        try {
+            task.setCorpId(SecurityUtils.getCurrentCorpId());
+            task.setUserId(SecurityUtils.getCurrentUserId());
+            task.setUserName(SecurityUtils.getCurrentUser() != null
+                    ? SecurityUtils.getCurrentUser().getUsername() : "");
+        } catch (Exception ignored) {
+            task.setCorpId(0L);
+        }
+
+        mapper.insert(task);
+        log.info("Import task created (no file): id={} type={} desc={}", task.getId(), taskType, description);
+        return task;
+    }
+
+    @Override
     public SysImportTask getById(Long taskId) {
         return mapper.selectById(taskId);
     }
@@ -77,6 +103,21 @@ public class ImportTaskServiceImpl implements ImportTaskService {
                 .set(SysImportTask::getFinishTime, LocalDateTime.now())
                 .set(SysImportTask::getModifyTime, LocalDateTime.now()));
         log.info("Import task done: id={} rows={}", taskId, successRows);
+    }
+
+    @Override
+    @Transactional
+    public void markDone(Long taskId, int totalRows, int successRows, String progressMsg) {
+        mapper.update(null, Wrappers.<SysImportTask>lambdaUpdate()
+                .eq(SysImportTask::getId, taskId)
+                .set(SysImportTask::getStatus, "DONE")
+                .set(SysImportTask::getPhase, "INSERT")
+                .set(SysImportTask::getTotalRows, totalRows)
+                .set(SysImportTask::getSuccessRows, successRows)
+                .set(SysImportTask::getProgressMsg, progressMsg)
+                .set(SysImportTask::getFinishTime, LocalDateTime.now())
+                .set(SysImportTask::getModifyTime, LocalDateTime.now()));
+        log.info("Import task done: id={} rows={} msg={}", taskId, successRows, progressMsg);
     }
 
     @Override

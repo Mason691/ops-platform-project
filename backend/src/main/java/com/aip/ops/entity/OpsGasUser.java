@@ -26,6 +26,8 @@ public class OpsGasUser extends BaseEntity {
     private String meterNo;
     private String userName;
     private String phone;
+    private String gasSupplyCertificateNumber;
+    private String gasCompanyName;
     private String area;
     private String address;
     private String status;

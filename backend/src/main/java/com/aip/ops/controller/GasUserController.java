@@ -1,15 +1,19 @@
 package com.aip.ops.controller;
 
 import com.aip.ops.entity.OpsGasUser;
+import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.mapper.OpsGasUserMapper;
 import com.aip.ops.service.DataScopeService;
+import com.aip.ops.service.ImportTaskService;
 import com.aip.sdk.result.R;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -23,6 +27,9 @@ public class GasUserController {
     private final OpsGasUserMapper mapper;
     private final DataScopeService dataScopeService;
     private final JdbcTemplate jdbcTemplate;
+    private final ImportTaskService importTaskService;
+    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final ObjectMapper objectMapper;
 
     /** Paginated list with optional community filter and keyword search. */
     @GetMapping
@@ -329,5 +336,46 @@ public class GasUserController {
             log.warn("Failed to resolve community name for id={}: {}", communityId, e.getMessage());
             return null;
         }
+    }
+
+    // ── 外部燃气平台导入 ──
+
+    /** 触发从外部燃气数据库导入。仅限管理员/运营角色操作。 */
+    @PostMapping("/import-from-gas-platform")
+    public R<?> importFromGasPlatform() {
+        if (importTaskService.hasPendingTask("gas_user")) {
+            return R.fail("已有导入任务正在执行中，请等待完成后再试");
+        }
+        SysImportTask task = importTaskService.createTaskWithoutFile("gas_user", "从燃气平台导入");
+        try {
+            kafkaTemplate.send("async-import-task",
+                    objectMapper.writeValueAsString(Map.of("taskId", task.getId())));
+        } catch (Exception e) {
+            log.error("Failed to send Kafka message for gas import task {}", task.getId(), e);
+            return R.fail("导入任务提交失败，请稍后重试");
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("taskId", task.getId());
+        data.put("status", task.getStatus());
+        data.put("message", "导入任务已提交，正在后台处理中...");
+        return R.ok(data);
+    }
+
+    /** 查询导入任务状态。 */
+    @GetMapping("/import/{taskId}/status")
+    public R<?> importStatus(@PathVariable Long taskId) {
+        SysImportTask task = importTaskService.getById(taskId);
+        if (task == null) return R.fail("任务不存在");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("taskId", task.getId());
+        result.put("status", task.getStatus());
+        result.put("phase", task.getPhase());
+        result.put("totalRows", task.getTotalRows());
+        result.put("successRows", task.getSuccessRows());
+        result.put("failRows", task.getFailRows());
+        result.put("progressMsg", task.getProgressMsg());
+        result.put("errorMsg", task.getErrorMsg());
+        result.put("message", task.getProgressMsg());  // human-readable result
+        return R.ok(result);
     }
 }

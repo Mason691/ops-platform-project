@@ -8,8 +8,11 @@ import java.util.List;
  */
 public interface ImportTaskService {
 
-    /** 创建导入任务记录 */
+    /** 创建导入任务记录（文件上传类） */
     SysImportTask createTask(String taskType, String fileName, String filePath, Long fileSize);
+
+    /** 创建导入任务记录（无文件触发类，如外部 DB 导入） */
+    SysImportTask createTaskWithoutFile(String taskType, String description);
 
     /** 根据ID查询 */
     SysImportTask getById(Long taskId);
@@ -19,6 +22,9 @@ public interface ImportTaskService {
 
     /** 标记完成 */
     void markDone(Long taskId, int totalRows, int successRows);
+
+    /** 标记完成，带结果消息 */
+    void markDone(Long taskId, int totalRows, int successRows, String progressMsg);
 
     /** 标记失败 */
     void markFailed(Long taskId, String phase, String errorMsg, int totalRows, int failRows);

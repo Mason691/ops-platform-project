@@ -91,6 +91,22 @@ battle-map:
     init-on-startup: true
     cron: "0 */30 * * * *"
 
+# 外部燃气平台数据源（jinyuan_info）
+gas:
+  datasource:
+    jdbc-url: jdbc:mysql://113.250.60.41:3306/jinyuan_info?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&sslMode=DISABLED
+    username: root
+    password: admin.2026
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 3
+      minimum-idle: 1
+      connection-timeout: 10000
+
+# 高德地图 API
+amap:
+  key: YOUR_AMAP_KEY_HERE
+
 management:
   endpoints:
     web:

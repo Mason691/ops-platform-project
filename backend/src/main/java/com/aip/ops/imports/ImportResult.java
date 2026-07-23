@@ -16,8 +16,9 @@ public class ImportResult {
     private int totalRows;
     private int successRows;
     private int failRows;
+    private int existingCount; // 已有用户数量（用于增量导入场景）
     private List<String> errors = new ArrayList<>();
-    private String message;     // human-readable summary, e.g. "文件业务数据为291条，成功导入291条"
+    private String message;     // human-readable summary, e.g. "已有用户 XXX，增量导入 XXXX"
 
     public ImportResult() {}
 
@@ -51,11 +52,14 @@ public class ImportResult {
         m.put("totalRows", totalRows);
         m.put("successRows", successRows);
         m.put("failRows", failRows);
+        m.put("existingCount", existingCount);
         m.put("errors", errors);
         m.put("message", message);
         return m;
     }
 
+    public int getExistingCount() { return existingCount; }
+    public void setExistingCount(int v) { existingCount = v; }
     public String getStatus() { return status; }
     public void setStatus(String v) { status = v; }
     public String getPhase() { return phase; }

@@ -76,8 +76,10 @@ public class ImportTaskConsumer {
             ImportResult result = handler.execute(task);
 
             if ("success".equals(result.getStatus())) {
-                taskService.markDone(taskId, result.getTotalRows(), result.getCount());
-                sendResult(taskId, "DONE", result.getCount() + " 条导入成功");
+                String summary = result.getMessage() != null ? result.getMessage()
+                        : (result.getCount() + " 条导入成功");
+                taskService.markDone(taskId, result.getTotalRows(), result.getCount(), summary);
+                sendResult(taskId, "DONE", summary);
             } else {
                 // Serialize errors as error_msg
                 String errSummary = String.join("; ", result.getErrors());
