@@ -389,47 +389,24 @@ public class GasUserController {
         }
     }
 
-    /** 估算外部数据中在 ops_gas_user 已存在的数量。
-     *  跨库无法 JOIN，分别查询后取交集。 */
+    /** 估算外部数据中在 ops_gas_user 已存在的数量（按 user_no = sb_gas_user.id）。 */
     private int estimateExistingCount(String areaName) {
         try {
-            // 1. 从 Polardb 获取 phone+cert
+            // 1. 从 Polardb 获取所有 sb_gas_user.id
             JdbcTemplate gasJdbc = gasDataSourceConfig.getJdbcTemplate();
-            List<Map<String, Object>> externalRows = gasJdbc.queryForList(
-                    "SELECT phone, gas_supply_certificate_number FROM sb_gas_user WHERE area_name LIKE CONCAT(?, '%')",
-                    areaName);
-            if (externalRows.isEmpty()) return 0;
-            // 2. 从本地 MySQL 查询已存在的 keys
-            Set<String> existingKeys = new HashSet<>();
-            for (var row : externalRows) {
-                String phone = (String) row.get("phone");
-                String cert = (String) row.get("gas_supply_certificate_number");
-                if (phone != null && cert != null) {
-                    existingKeys.add(phone + "|" + cert);
-                }
-            }
-            if (existingKeys.isEmpty()) return 0;
-            // 3. 分批查询本地 ops_gas_user
-            List<String> keyList = new ArrayList<>(existingKeys);
+            List<String> externalIds = gasJdbc.queryForList(
+                    "SELECT id FROM sb_gas_user WHERE area_name LIKE CONCAT(?, '%')",
+                    String.class, areaName);
+            if (externalIds.isEmpty()) return 0;
+            // 2. 分批查询 ops_gas_user 中匹配的 user_no 数量
             int existing = 0;
-            for (int i = 0; i < keyList.size(); i += 500) {
-                int end = Math.min(i + 500, keyList.size());
-                List<String> batch = keyList.subList(i, end);
-                String placeholders = batch.stream().map(k -> "?").reduce((a, b) -> a + "," + b).orElse("");
-                List<Object[]> params = new ArrayList<>();
-                for (String k : batch) {
-                    String[] parts = k.split("\\|", 2);
-                    params.add(new Object[]{parts[0], parts.length > 1 ? parts[1] : ""});
-                }
-                StringBuilder sql = new StringBuilder(
-                        "SELECT COUNT(*) FROM ops_gas_user WHERE delete_flag=0 AND (");
-                for (int j = 0; j < batch.size(); j++) {
-                    if (j > 0) sql.append(" OR ");
-                    sql.append("(phone = ? AND gas_supply_certificate_number = ?)");
-                }
-                sql.append(")");
-                Integer cnt = jdbcTemplate.queryForObject(sql.toString(), Integer.class,
-                        params.stream().flatMap(Arrays::stream).toArray());
+            for (int i = 0; i < externalIds.size(); i += 500) {
+                int end = Math.min(i + 500, externalIds.size());
+                List<String> batch = externalIds.subList(i, end);
+                String placeholders = String.join(",", batch.stream().map(id -> "?").toList());
+                Integer cnt = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM ops_gas_user WHERE delete_flag=0 AND user_no IN (" + placeholders + ")",
+                        Integer.class, batch.toArray());
                 existing += (cnt != null ? cnt : 0);
             }
             return existing;

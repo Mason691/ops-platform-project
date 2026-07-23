@@ -25,7 +25,7 @@ import java.util.*;
 /**
  * 燃气平台用户异步导入处理器。
  * 从外部燃气数据库 jinyuan_info.sb_gas_user 读取数据，
- * 以 phone + gas_supply_certificate_number 联合去重后增量写入 ops_gas_user。
+ * 以 user_no（= sb_gas_user.id）去重后增量写入 ops_gas_user。
  * 自动创建缺失小区（含高德地理编码 + 地区匹配）。
  * 采用事务内 JDBC batch INSERT，任一步失败全部回滚。
  */
@@ -117,8 +117,8 @@ public class GasUserImportHandler implements ImportHandler {
             if (phone == null || phone.isBlank()) { skippedCount++; continue; }
             if (cert == null || cert.isBlank()) { skippedCount++; continue; }
             if (communityName == null || communityName.isBlank()) { skippedCount++; continue; }
-            String key = phone + "|" + cert;
-            if (existingKeys.contains(key)) { existingCount++; continue; }
+            // 去重：user_no = sb_gas_user.id
+            if (existingKeys.contains(strVal(row, "id"))) { existingCount++; continue; }
             toImport.add(row);
         }
         log.warn("GasUserImport: company=[{}] rawTotal={} skipped={} existing={} toImport={}",
@@ -167,17 +167,16 @@ public class GasUserImportHandler implements ImportHandler {
         return buildResult(srcRows.size(), imported, existingCount, skippedCount);
     }
 
-    // ── 去重集合 ──
+    // ── 去重集合（按 user_no = sb_gas_user.id） ──
 
     private Set<String> loadExistingDedupKeys() {
         Set<String> keys = new HashSet<>();
         List<OpsGasUser> existing = gasUserMapper.selectList(
                 new LambdaQueryWrapper<OpsGasUser>()
-                        .isNotNull(OpsGasUser::getPhone)
-                        .isNotNull(OpsGasUser::getGasSupplyCertificateNumber));
+                        .isNotNull(OpsGasUser::getUserNo));
         for (OpsGasUser u : existing) {
-            if (u.getPhone() != null && u.getGasSupplyCertificateNumber() != null) {
-                keys.add(u.getPhone().trim() + "|" + u.getGasSupplyCertificateNumber().trim());
+            if (u.getUserNo() != null) {
+                keys.add(u.getUserNo().trim());
             }
         }
         return keys;
