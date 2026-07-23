@@ -388,20 +388,52 @@ public class GasUserController {
         }
     }
 
-    /** 估算外部数据中在 ops_gas_user 已存在的数量（按 phone 匹配计数）。 */
-    private int estimateExistingCount(String companyName) {
+    /** 估算外部数据中在 ops_gas_user 已存在的数量。
+     *  跨库无法 JOIN，分别查询后取交集。 */
+    private int estimateExistingCount(String areaName) {
         try {
-            // Count external rows whose phone already exists in ops_gas_user
+            // 1. 从 Polardb 获取 phone+cert
             JdbcTemplate gasJdbc = gasDataSourceConfig.getJdbcTemplate();
-            Integer cnt = gasJdbc.queryForObject(
-                    "SELECT COUNT(*) FROM sb_gas_user e " +
-                    "WHERE e.area_name LIKE CONCAT(?, '%') " +
-                    "AND EXISTS (SELECT 1 FROM ops_gas_user g WHERE g.phone = e.phone " +
-                    "AND g.gas_supply_certificate_number = e.gas_supply_certificate_number)",
-                    Integer.class, companyName);
-            return cnt != null ? cnt : 0;
+            List<Map<String, Object>> externalRows = gasJdbc.queryForList(
+                    "SELECT phone, gas_supply_certificate_number FROM sb_gas_user WHERE area_name LIKE CONCAT(?, '%')",
+                    areaName);
+            if (externalRows.isEmpty()) return 0;
+            // 2. 从本地 MySQL 查询已存在的 keys
+            Set<String> existingKeys = new HashSet<>();
+            for (var row : externalRows) {
+                String phone = (String) row.get("phone");
+                String cert = (String) row.get("gas_supply_certificate_number");
+                if (phone != null && cert != null) {
+                    existingKeys.add(phone + "|" + cert);
+                }
+            }
+            if (existingKeys.isEmpty()) return 0;
+            // 3. 分批查询本地 ops_gas_user
+            List<String> keyList = new ArrayList<>(existingKeys);
+            int existing = 0;
+            for (int i = 0; i < keyList.size(); i += 500) {
+                int end = Math.min(i + 500, keyList.size());
+                List<String> batch = keyList.subList(i, end);
+                String placeholders = batch.stream().map(k -> "?").reduce((a, b) -> a + "," + b).orElse("");
+                List<Object[]> params = new ArrayList<>();
+                for (String k : batch) {
+                    String[] parts = k.split("\\|", 2);
+                    params.add(new Object[]{parts[0], parts.length > 1 ? parts[1] : ""});
+                }
+                StringBuilder sql = new StringBuilder(
+                        "SELECT COUNT(*) FROM ops_gas_user WHERE delete_flag=0 AND (");
+                for (int j = 0; j < batch.size(); j++) {
+                    if (j > 0) sql.append(" OR ");
+                    sql.append("(phone = ? AND gas_supply_certificate_number = ?)");
+                }
+                sql.append(")");
+                Integer cnt = jdbcTemplate.queryForObject(sql.toString(), Integer.class,
+                        params.stream().flatMap(Arrays::stream).toArray());
+                existing += (cnt != null ? cnt : 0);
+            }
+            return existing;
         } catch (Exception e) {
-            log.warn("Failed to estimate existing count for company={}: {}", companyName, e.getMessage());
+            log.warn("Failed to estimate existing count for area={}: {}", areaName, e.getMessage());
             return 0;
         }
     }
