@@ -326,7 +326,7 @@ public class GasUserImportHandler implements ImportHandler {
         // 身份证解析：性别 + 出生日期
         String[] idInfo = parseIdCard(strVal(row, "document_number"));
         ps.setString(i++, idInfo[0]);  // gender
-        ps.setDate(i++, idInfo[1] != null ? java.sql.Date.valueOf(idInfo[1]) : null); // birth_date
+        ps.setObject(i++, idInfo[1] != null ? java.sql.Date.valueOf(idInfo[1]) : null); // birth_date (nullable)
         ps.setString(i++, strVal(row, "phone"));
         ps.setString(i++, strVal(row, "gas_supply_certificate_number"));
         ps.setString(i++, strVal(row, "gas_company_name"));
