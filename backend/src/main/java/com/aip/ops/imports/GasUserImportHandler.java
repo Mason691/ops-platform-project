@@ -305,9 +305,9 @@ public class GasUserImportHandler implements ImportHandler {
 
     private String buildInsertSql() {
         return "INSERT INTO ops_gas_user " +
-               "(corp_id, community_id, batch_no, user_no, meter_no, user_name, " +
-               " phone, gas_supply_certificate_number, gas_company_name, area, address, " +
-               " status, balance, arrears, open_time, create_user, modify_user, " +
+               "(corp_id, community_id, batch_no, user_no, meter_no, full_name, " +
+               " phone, gas_supply_certificate_number, gas_company_name, area_name, detailed_address, " +
+               " status, gas_balance, arrears, account_opening_time, create_user, modify_user, " +
                " create_user_name, modify_user_name, create_time, modify_time) " +
                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,'','',NOW(),NOW())";
     }
