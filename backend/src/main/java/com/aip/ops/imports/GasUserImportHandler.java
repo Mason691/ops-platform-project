@@ -5,6 +5,7 @@ import com.aip.ops.entity.OpsGasUser;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.mapper.OpsGasUserMapper;
 import com.aip.ops.service.ImportTaskService;
+import com.aip.ops.util.AesUtils;
 import com.aip.ops.util.AmapGeocodeUtil;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -372,15 +373,23 @@ public class GasUserImportHandler implements ImportHandler {
         return r;
     }
 
-    /** 从平台组织 AI 配置中获取高德服务端 Key（解密后的）。 */
+    /** 从平台组织 AI 配置中获取高德服务端 Key（查询DB + AES解密）。 */
     private String getOrgAmapKey(Long corpId) {
         try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> resp = platformInternalClient.get(
-                    "/api/internal/user/org-ai-config?corpId=" + corpId, (String) null);
-            Map<String, Object> data = (Map<String, Object>) resp.get("data");
-            if (data != null && data.get("amapServerKey") != null) {
-                return data.get("amapServerKey").toString();
+            String encKey = localJdbcTemplate.queryForObject(
+                    "SELECT amap_server_key_enc FROM ai_platform.sys_org_ai_config WHERE corp_id = ? AND delete_flag = 0",
+                    String.class, corpId);
+            if (encKey != null) {
+                String decrypted = AesUtils.decrypt(encKey);
+                if (decrypted != null && !decrypted.isBlank()) return decrypted;
+            }
+            // Fallback: try corpId=0 (platform default)
+            encKey = localJdbcTemplate.queryForObject(
+                    "SELECT amap_server_key_enc FROM ai_platform.sys_org_ai_config WHERE corp_id = 0 AND delete_flag = 0",
+                    String.class);
+            if (encKey != null) {
+                String decrypted = AesUtils.decrypt(encKey);
+                if (decrypted != null && !decrypted.isBlank()) return decrypted;
             }
         } catch (Exception e) {
             log.warn("GasUserImport: failed to get org amap key for corpId={}: {}", corpId, e.getMessage());
