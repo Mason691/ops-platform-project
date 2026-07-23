@@ -295,7 +295,7 @@ public class GasUserController {
     }
 
     /** Update a single gas user (editable: communityId). */
-    @PutMapping("/{id}")
+    @PutMapping("/{id:\\d+}")
     public R<?> update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         OpsGasUser user = mapper.selectById(id);
         if (user == null) return R.fail("燃气用户不存在");
