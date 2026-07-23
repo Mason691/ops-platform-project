@@ -20,8 +20,26 @@
         document.write('<style>uni-page-head{display:none!important}uni-page-head~.uni-placeholder{display:none!important}<\/style>');
       }
     </script>
-    <!-- ═══ 微信 JSSDK — 加载本地 jweixin SDK（避免 CDN 超时） ═══ -->
-    <script src="./jweixin-1.6.0.js"></script>
+    <!-- ═══ 微信 JSSDK — CDN 优先(async), 本地兜底（微信 WebView 预缓存 res.wx.qq.com） ═══ -->
+    <script async src="https://res.wx.qq.com/open/js/jweixin-1.6.0.js" onerror="var s=document.createElement('script');s.src='./jweixin-1.6.0.js';document.head.appendChild(s)"></script>
+    <script>
+      // CDN fallback: if wx not available within 2s, load local copy
+      (function() {
+        if (typeof wx !== 'undefined') return;
+        var t = setInterval(function() {
+          if (typeof wx !== 'undefined') { clearInterval(t); return; }
+        }, 100);
+        setTimeout(function() {
+          if (typeof wx === 'undefined') {
+            console.warn('[JSSDK] CDN not loaded, falling back to local jweixin');
+            var s = document.createElement('script');
+            s.src = './jweixin-1.6.0.js';
+            document.head.appendChild(s);
+          }
+          clearInterval(t);
+        }, 2000);
+      })();
+    </script>
     <script>
       // ═══ 微信 JSSDK 初始化 — 等待 wx 可用后注入签名 ═══
       // 核心修复：不再立即调用 initWx()，而是监听 WeixinJSBridgeReady 事件，
@@ -81,7 +99,7 @@
           jsApiList.push('openChannelsLive');
 
           wx.config({
-            debug: s.debug || false,
+            debug: (location.search.indexOf('wxdebug=1') !== -1),
             appId: s.appId,
             timestamp: s.timestamp,
             nonceStr: s.nonceStr,

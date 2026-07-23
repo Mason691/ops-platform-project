@@ -124,6 +124,24 @@
         {{ btnText }}
       </view>
     </view>
+
+    <!-- ═══ Non-WeChat guide overlay ═══ -->
+    <view class="guide-mask" v-if="showGuide" @click="showGuide = false">
+      <view class="guide-card" @click.stop>
+        <text class="guide-icon">📱</text>
+        <text class="guide-title">请在微信客户端打开</text>
+        <text class="guide-desc">请使用微信扫描二维码，在微信中打开视频号直播间</text>
+        <image
+          v-if="qrUrl"
+          :src="qrUrl"
+          class="guide-qr"
+          mode="aspectFit"
+          @error="qrError = true"
+        />
+        <text class="guide-desc-sm">扫描二维码进入直播广场，选择正在直播的直播间观看</text>
+        <view class="guide-btn" @click="showGuide = false">知道了</view>
+      </view>
+    </view>
   </view>
 
   <!-- Loading / Error -->
@@ -137,12 +155,14 @@ import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { BASE_URL } from '@/config'
 import { assetUrl, onImgError } from '@/utils/image.js'
 import LiveStatusCard from '@/components/LiveStatusCard.vue'
+import { openChannelsLive } from '@/utils/jssdk.js'
 
 const act = ref(null), liveRoom = ref(null), liveStatus = ref(null), products = ref([])
 const loadErr = ref('')
 const booked = ref(false)
 const videoFailed = ref(false)
 const videoErrorInfo = ref('')
+const showGuide = ref(false)
 let pollTimer = null, pollInterval = 30000
 let lastDisplayStatus = null
 
@@ -275,6 +295,14 @@ const detailImages = computed(() => {
   return Array.isArray(di) ? di : []
 })
 
+const qrError = ref(false)
+/** QR code for non-WeChat fallback — 扫码进入直播广场 (always use prod URL for scannability) */
+const qrUrl = computed(() => {
+  if (qrError.value) return ''
+  return 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' +
+    encodeURIComponent('https://boss.jdzn99.com/ops/#/pages/live/index')
+})
+
 const now = computed(() => new Date())
 const statusText = computed(() => {
   if (!act.value) return ''
@@ -291,14 +319,24 @@ const badgeClass = computed(() => {
   return 'badge-ended'
 })
 const btnText = computed(() => {
-  if (act.value?.type === 'live_reserve' && liveStatus.value?.displayStatus === 'live') return '📺 观看直播'
+  if (act.value?.type === 'live_reserve') {
+    if (liveStatus.value?.displayStatus === 'live') return '📺 观看直播'
+    if (liveStatus.value?.displayStatus === 'ended') return '直播已结束'
+    if (booked.value) return '已预约 ✓'
+    return '预约参加'
+  }
   if (booked.value) return '已预约 ✓'
   if (statusText.value === '即将开始') return '预约参加'
   if (statusText.value === '进行中') return '立即参与'
   return '已结束'
 })
 const btnClass = computed(() => {
-  if (act.value?.type === 'live_reserve' && liveStatus.value?.displayStatus === 'live') return 'btn-live'
+  if (act.value?.type === 'live_reserve') {
+    if (liveStatus.value?.displayStatus === 'live') return 'btn-live'
+    if (liveStatus.value?.displayStatus === 'ended') return 'btn-disabled'
+    if (booked.value) return 'btn-done'
+    return 'btn-active'
+  }
   if (booked.value) return 'btn-done'
   if (statusText.value === '已结束') return 'btn-disabled'
   return 'btn-active'
@@ -306,12 +344,25 @@ const btnClass = computed(() => {
 
 // ── Actions ──
 function handleAction() {
-  if (statusText.value === '已结束' || booked.value) return
-  // Live: redirect to WeChat channel
-  if (act.value?.type === 'live_reserve' && liveStatus.value?.displayStatus === 'live') {
-    openLiveRoom()
+  // Live reserve — all states handled via liveStatus
+  if (act.value?.type === 'live_reserve') {
+    const ds = liveStatus.value?.displayStatus
+    if (ds === 'ended') {
+      uni.showToast({ title: '直播已结束', icon: 'none' })
+      return
+    }
+    if (ds === 'live') {
+      openLiveRoom()
+      return
+    }
+    // upcoming — book (skip if already booked)
+    if (booked.value) return
+    const token = uni.getStorageSync('ops_token')
+    if (!token) { uni.navigateTo({ url: '/pages/auth/login' }); return }
+    doBook()
     return
   }
+  if (statusText.value === '已结束' || booked.value) return
   const token = uni.getStorageSync('ops_token')
   if (!token) { uni.navigateTo({ url: '/pages/auth/login' }); return }
   doBook()
@@ -322,23 +373,17 @@ function openLiveRoom() {
     uni.showToast({ title: '直播信息不完整', icon: 'none' })
     return
   }
-  if (!/micromessenger/i.test(navigator.userAgent)) {
-    uni.showToast({ title: '请在微信中打开观看直播', icon: 'none', duration: 2500 })
+  if (liveStatus.value?.displayStatus === 'ended') {
+    uni.showToast({ title: '直播已结束', icon: 'none' })
     return
   }
-  var realWx = window.wx || window.WX || (typeof wx !== 'undefined' && wx.openChannelsLive ? wx : null)
-  if (realWx && typeof realWx.openChannelsLive === 'function') {
-    realWx.openChannelsLive({
-      finderUserName: liveRoom.value.finderUsername,
-      success: function() {},
-      fail: function(err) {
-        console.warn('[detail] openChannelsLive fail:', err)
-        uni.showToast({ title: '请在微信中搜索视频号观看直播', icon: 'none', duration: 3000 })
-      }
-    })
-  } else {
-    uni.showToast({ title: '请在微信中搜索视频号 "' + liveRoom.value.finderUsername + '" 观看直播', icon: 'none', duration: 3000 })
+  if (!/micromessenger/i.test(navigator.userAgent)) {
+    qrError.value = false
+    showGuide.value = true
+    return
   }
+
+  openChannelsLive(liveRoom.value.finderUsername)
 }
 
 async function doBook() {
@@ -558,4 +603,30 @@ function req(url, method, data) {
 
 /* ── Live section highlight ── */
 .live-section { background: linear-gradient(135deg, #fff5f0, #fff); border: 2rpx solid rgba(255, 107, 53, 0.15); padding: 0; }
+
+/* ── Non-WeChat guide overlay ── */
+.guide-mask {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 999;
+}
+.guide-card {
+  background: #fff; border-radius: 24rpx;
+  padding: 48rpx 40rpx; width: 84%; max-width: 560rpx; text-align: center;
+}
+.guide-icon { font-size: 64rpx; display: block; margin-bottom: 20rpx; }
+.guide-title { font-size: 34rpx; font-weight: 600; color: #333; display: block; margin-bottom: 12rpx; }
+.guide-desc { font-size: 26rpx; color: #999; display: block; margin-bottom: 16rpx; line-height: 1.5; }
+.guide-desc-sm { font-size: 22rpx; color: #bbb; display: block; margin-bottom: 16rpx; line-height: 1.4; }
+.guide-qr {
+  width: 200rpx; height: 200rpx;
+  margin: 0 auto 20rpx; display: block;
+  border: 2rpx solid #eee; border-radius: 12rpx;
+}
+.guide-btn {
+  background: #FF6B35; color: #fff;
+  padding: 20rpx 48rpx; border-radius: 48rpx;
+  font-size: 28rpx; display: inline-block;
+}
 </style>

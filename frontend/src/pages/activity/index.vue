@@ -70,6 +70,7 @@
 import { ref, onMounted, reactive } from 'vue'
 import { BASE_URL } from '@/config'
 import { assetUrl, onImgError } from '@/utils/image.js'
+import { isWechat, openChannelsLive } from '@/utils/jssdk.js'
 
 const list = ref([])
 const loading = ref(false)
@@ -158,7 +159,16 @@ function onPageScroll(e) {
 }
 
 // We use onReachBottom from pages.json or manual
-function goDetail(id) {
+async function goDetail(id) {
+  // For live_reserve type with live room, try to open video channel directly
+  var a = list.value.find(function(x) { return x.id === id })
+  if (a && a.type === 'live_reserve' && isWechat()) {
+    try {
+      var detail = await api('/api/ops/activity/' + id, 'GET')
+      var finder = detail && detail.liveRoom && detail.liveRoom.finderUsername
+      if (finder) { openChannelsLive(finder); return }
+    } catch (e) { /* fall through to detail page */ }
+  }
   uni.navigateTo({ url: '/pages/activity/detail?id=' + id })
 }
 

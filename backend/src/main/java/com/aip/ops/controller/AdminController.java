@@ -680,7 +680,7 @@ public class AdminController {
         List<OpsLiveRoom> list = liveRoomMapper.selectList(
                 new LambdaQueryWrapper<OpsLiveRoom>()
                         .in(OpsLiveRoom::getMerchantId, boundMerchantIds)
-                        .eq(OpsLiveRoom::getStatus, 0)
+                        .ne(OpsLiveRoom::getStatus, 2) // 排除"已结束"，可选"预告"+"直播中"
                         .orderByAsc(OpsLiveRoom::getSortOrder)
                         .orderByDesc(OpsLiveRoom::getStartTime));
         return R.ok(list);

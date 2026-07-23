@@ -114,7 +114,7 @@
           :src="qrUrl"
           class="lsc-qr"
           mode="aspectFit"
-          @error="qrUrl = ''"
+          @error="qrError = true"
         />
         <text class="lsc-guide-desc">请使用微信扫一扫观看直播</text>
         <view class="lsc-guide-btn" @click="showGuide = false">知道了</view>
@@ -127,6 +127,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { BASE_URL } from '@/config'
 import { assetUrl } from '@/utils/image.js'
+import { openChannelsLive } from '@/utils/jssdk.js'
 
 const props = defineProps({
   liveRoom: { type: Object, required: true },
@@ -153,10 +154,12 @@ const badgeText = computed(() => {
   }
 })
 
-// QR code URL for non-WeChat fallback
+const qrError = ref(false)
+// QR code URL for non-WeChat fallback (always use prod URL for scannability)
 const qrUrl = computed(() => {
-  const pageUrl = encodeURIComponent(BASE_URL + '/ops/#/pages/live/index')
-  return 'https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl=' + pageUrl
+  if (qrError.value) return ''
+  return 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' +
+    encodeURIComponent('https://boss.jdzn99.com/ops/#/pages/live/index')
 })
 
 onMounted(() => {
@@ -258,28 +261,12 @@ async function doRemind() {
 function isWechat() { return /micromessenger/i.test(navigator.userAgent) }
 
 function openLive() {
-  if (!isWechat()) { showGuide.value = true; return }
+  if (!isWechat()) { qrError.value = false; showGuide.value = true; return }
   if (!props.liveRoom?.finderUsername) {
     uni.showToast({ title: '直播信息不完整，请联系管理员', icon: 'none' })
     return
   }
-  var realWx = window.wx || window.WX
-    || (typeof wx !== 'undefined' && wx.openChannelsLive ? wx : null)
-  if (realWx && typeof realWx.openChannelsLive === 'function') {
-    realWx.openChannelsLive({
-      finderUserName: props.liveRoom.finderUsername,
-      success: function() {},
-      fail: function(err) {
-        console.warn('[LiveStatusCard] openChannelsLive fail:', err)
-        uni.showToast({ title: '请在微信中搜索视频号观看直播', icon: 'none', duration: 3000 })
-      }
-    })
-  } else {
-    uni.showToast({
-      title: '请在微信中搜索视频号 "' + props.liveRoom.finderUsername + '" 观看直播',
-      icon: 'none', duration: 3000
-    })
-  }
+  openChannelsLive(props.liveRoom.finderUsername)
 }
 
 function openReplay() {

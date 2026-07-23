@@ -115,3 +115,28 @@ export function wxStopRecordAndUpload() {
     })
   })
 }
+
+// ── 视频号直播跳转（共享工具）──────────────────────────────────────
+
+/**
+ * 打开微信视频号直播。
+ * 因公众号与视频号主体不一致，wx.openChannelsLive 静默失败（黑屏）。
+ * 改用 finder-preview URL 直接跳转，不受主体限制。
+ *
+ * @param {string} finderUsername 视频号 ID
+ */
+export function openChannelsLive(finderUsername) {
+  if (!finderUsername) {
+    uni.showToast({ title: '直播信息不完整', icon: 'none' })
+    return
+  }
+  window.location.href = getFinderPreviewUrl(finderUsername)
+}
+
+/**
+ * 视频号 finder-preview URL（观众端入口）
+ */
+export function getFinderPreviewUrl(finderUsername) {
+  return 'https://channels.weixin.qq.com/finder-preview/pages/live?finderUserName='
+    + encodeURIComponent(finderUsername)
+}
