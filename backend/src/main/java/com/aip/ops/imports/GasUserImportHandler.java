@@ -198,12 +198,13 @@ public class GasUserImportHandler implements ImportHandler {
             log.warn("GasUserImport: region match failed for community '{}'", communityName);
         }
 
-        // 高德地理编码（优先用组织配置的 key，失败则回滚）
+        // 高德地理编码（优先用组织配置的 key）
         String amapKey = getOrgAmapKey(corpId);
         String address = buildGeocodeAddress(row, communityName);
         double[] coords = amapGeocodeUtil.geocode(address, amapKey);
         if (coords == null) {
-            throw new RuntimeException("高德地理编码失败: address=" + address);
+            log.warn("GasUserImport: geocode failed for '{}', using (0,0)", address);
+            coords = new double[]{0.0, 0.0};
         }
         BigDecimal lng = BigDecimal.valueOf(coords[0]);
         BigDecimal lat = BigDecimal.valueOf(coords[1]);
