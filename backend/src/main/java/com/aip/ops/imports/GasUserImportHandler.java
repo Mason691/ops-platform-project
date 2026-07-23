@@ -71,6 +71,8 @@ public class GasUserImportHandler implements ImportHandler {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ImportResult execute(SysImportTask task) throws Exception {
+        // Force stderr output — guaranteed to show in docker logs
+        System.err.println(">>> GAS_IMPORT_HANDLER_START taskId=" + task.getId());
         Long corpId = task.getCorpId();
         String batchNo = IMPORT_BATCH_PREFIX + task.getId();
 
@@ -156,10 +158,10 @@ public class GasUserImportHandler implements ImportHandler {
                 company, srcRows.size(), skippedCount, existingCount, toImport.size());
 
         if (toImport.isEmpty()) {
-            log.warn("GasUserImport: ALL {} rows filtered! skipped={} existing={} sample-reasons={}",
-                    srcRows.size(), skippedCount, existingCount, skippedReasons);
+            System.err.println(">>> GAS_IMPORT ALL_FILTERED total=" + srcRows.size() + " skipped=" + skippedCount + " existing=" + existingCount + " reasons=" + skippedReasons);
             return buildResult(srcRows.size(), 0, existingCount, skippedCount);
         }
+        System.err.println(">>> GAS_IMPORT toImport=" + toImport.size());
 
         // Community name → ID cache (avoids N+1 cross-db queries for same community)
         Map<String, Long> communityCache = new HashMap<>();
@@ -197,6 +199,7 @@ public class GasUserImportHandler implements ImportHandler {
             ps.executeBatch();
         }
 
+        System.err.println(">>> GAS_IMPORT DONE imported=" + imported);
         return buildResult(srcRows.size(), imported, existingCount, skippedCount);
     }
 
