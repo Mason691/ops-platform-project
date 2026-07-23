@@ -110,6 +110,14 @@ public class GasUserImportHandler implements ImportHandler {
         int skippedCount = 0;
         List<String> skippedReasons = new ArrayList<>();
 
+        // Sample first 3 rows for debugging
+        for (int ri = 0; ri < Math.min(3, srcRows.size()); ri++) {
+            var r = srcRows.get(ri);
+            log.info("GasUserImport row[{}]: phone={} cert={} village={} area={} gasCompany={}",
+                    ri, strVal(r, "phone"), strVal(r, "gas_supply_certificate_number"),
+                    strVal(r, "village_name"), strVal(r, "area_name"), strVal(r, "gas_company_name"));
+        }
+
         for (var row : srcRows) {
             String phone = strVal(row, "phone");
             String cert = strVal(row, "gas_supply_certificate_number");
@@ -148,6 +156,8 @@ public class GasUserImportHandler implements ImportHandler {
                 company, srcRows.size(), skippedCount, existingCount, toImport.size());
 
         if (toImport.isEmpty()) {
+            log.warn("GasUserImport: ALL {} rows filtered! skipped={} existing={} sample-reasons={}",
+                    srcRows.size(), skippedCount, existingCount, skippedReasons);
             return buildResult(srcRows.size(), 0, existingCount, skippedCount);
         }
 
