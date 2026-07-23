@@ -360,7 +360,6 @@ public class GasUserController {
     /** 预览：查询外部数据库匹配数量 + 预计去重后新增数量。 */
     @PostMapping({"/preview-from-gas-platform", "/gas-import/query"})
     public R<?> previewFromGasPlatform(@RequestBody Map<String, String> body) {
-    public R<?> previewFromGasPlatform(@RequestBody Map<String, String> body) {
         String companyName = body.get("companyName");
         if (companyName == null || companyName.isBlank()) {
             return R.fail("请输入燃气公司名称");
