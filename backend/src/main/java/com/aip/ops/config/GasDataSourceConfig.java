@@ -1,32 +1,42 @@
 package com.aip.ops.config;
 
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.jdbc.DataSourceBuilder;
+import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.jdbc.core.JdbcTemplate;
-
-import javax.sql.DataSource;
 
 /**
  * 外部燃气平台数据源（jinyuan_info.sb_gas_user）。
- * 独立连接池，延迟初始化，仅在实际导入时创建连接。
+ * 使用 HikariCP 手动配置，initializationFailTimeout=-1 避免连接失败阻塞启动。
+ * 仅在 GasUserImportHandler 实际调用时尝试连接。
  */
 @Configuration
 public class GasDataSourceConfig {
 
-    @Bean("gasDataSource")
-    @Lazy
-    @ConfigurationProperties("gas.datasource")
-    public DataSource gasDataSource() {
-        return DataSourceBuilder.create().build();
-    }
+    @Value("${gas.datasource.jdbc-url}")
+    private String jdbcUrl;
+
+    @Value("${gas.datasource.username}")
+    private String username;
+
+    @Value("${gas.datasource.password}")
+    private String password;
+
+    @Value("${gas.datasource.driver-class-name}")
+    private String driverClassName;
 
     @Bean("gasJdbcTemplate")
-    @Lazy
-    public JdbcTemplate gasJdbcTemplate(@Qualifier("gasDataSource") DataSource ds) {
+    public JdbcTemplate gasJdbcTemplate() {
+        HikariDataSource ds = new HikariDataSource();
+        ds.setJdbcUrl(jdbcUrl);
+        ds.setUsername(username);
+        ds.setPassword(password);
+        ds.setDriverClassName(driverClassName);
+        ds.setMaximumPoolSize(3);
+        ds.setMinimumIdle(1);
+        ds.setConnectionTimeout(10000);
+        ds.setInitializationFailTimeout(-1); // 启动时不验证连接
         return new JdbcTemplate(ds);
     }
 }
