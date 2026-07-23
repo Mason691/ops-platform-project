@@ -390,19 +390,22 @@ public class GasUserImportHandler implements ImportHandler {
         if (idCard == null || idCard.isBlank()) return new String[]{null, null};
         String s = idCard.trim();
         try {
-            if (s.length() == 18) {
-                // 18位：7-14位=YYYYMMDD, 17位=性别(奇男偶女)
+            if (s.length() == 18 && s.matches("\\d{17}[\\dXx]")) {
                 birth = s.substring(6, 10) + "-" + s.substring(10, 12) + "-" + s.substring(12, 14);
+                // Validate date
+                java.sql.Date.valueOf(birth);
                 int g = Integer.parseInt(s.substring(16, 17));
                 gender = (g % 2 == 1) ? "M" : "F";
-            } else if (s.length() == 15) {
-                // 15位：7-12位=YYMMDD, 15位=性别
+            } else if (s.length() == 15 && s.matches("\\d{15}")) {
                 birth = "19" + s.substring(6, 8) + "-" + s.substring(8, 10) + "-" + s.substring(10, 12);
+                java.sql.Date.valueOf(birth);
                 int g = Integer.parseInt(s.substring(14, 15));
                 gender = (g % 2 == 1) ? "M" : "F";
+            } else {
+                return new String[]{null, null}; // not a valid ID card
             }
         } catch (Exception e) {
-            // 解析失败，返回 null
+            return new String[]{null, null};
         }
         return new String[]{gender, birth};
     }
