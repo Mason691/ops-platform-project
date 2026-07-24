@@ -399,7 +399,7 @@ public class GasUserImportHandler implements ImportHandler {
         return null;
     }
 
-    /** 从身份证号解析性别和出生日期。返回 [gender, birthDate] — gender: "M"/"F"/null, birthDate: "yyyy-MM-dd"/null */
+    /** 从身份证号解析性别和出生日期。返回 [gender, birthDate] — gender: "1"/"0"/null(=未知), birthDate: "yyyy-MM-dd"/null */
     private String[] parseIdCard(String idCard) {
         String gender = null, birth = null;
         if (idCard == null || idCard.isBlank()) return new String[]{null, null};
@@ -407,15 +407,14 @@ public class GasUserImportHandler implements ImportHandler {
         try {
             if (s.length() == 18 && s.matches("\\d{17}[\\dXx]")) {
                 birth = s.substring(6, 10) + "-" + s.substring(10, 12) + "-" + s.substring(12, 14);
-                // Validate date
                 java.sql.Date.valueOf(birth);
                 int g = Integer.parseInt(s.substring(16, 17));
-                gender = (g % 2 == 1) ? "M" : "F";
+                gender = (g % 2 == 1) ? "1" : "0";  // 1=男 0=女
             } else if (s.length() == 15 && s.matches("\\d{15}")) {
                 birth = "19" + s.substring(6, 8) + "-" + s.substring(8, 10) + "-" + s.substring(10, 12);
                 java.sql.Date.valueOf(birth);
                 int g = Integer.parseInt(s.substring(14, 15));
-                gender = (g % 2 == 1) ? "M" : "F";
+                gender = (g % 2 == 1) ? "1" : "0";
             } else {
                 return new String[]{null, null}; // not a valid ID card
             }
