@@ -177,6 +177,12 @@ public class GasUserController {
                 .toList());
     }
 
+    /** Alias for /convert-all — path expected by the platform frontend. */
+    @PostMapping("/convert/submit")
+    public R<?> convertSubmit() {
+        return convertAll();
+    }
+
     /** Bulk convert: match gas users to platform members by phone, auto-create missing members. */
     @PostMapping("/convert-all")
     public R<?> convertAll() {
