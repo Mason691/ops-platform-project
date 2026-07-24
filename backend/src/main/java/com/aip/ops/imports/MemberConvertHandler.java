@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
 import java.util.*;
 
 /**
@@ -15,6 +16,11 @@ import java.util.*;
  *
  * 数据范围：创建任务时前端不传 corpId（JWT 决定），Controller 调用 DataScopeService
  * 算出可见 corpId 写入 task.remark，本 Handler 从 remark 读取用作 SQL WHERE 过滤。
+ *
+ * 画像同步：转化时同步 gas_user 的 gender/birth_date/detailed_address/community_id
+ * → sys_member 的 gender/birthday/address/community_id。
+ * - 已有会员（按手机号匹配）：UPDATE 覆盖
+ * - 新创建会员：INSERT 时写入
  */
 @Slf4j
 @Component
@@ -37,10 +43,9 @@ public class MemberConvertHandler implements ImportHandler {
     public ImportResult execute(SysImportTask task) throws Exception {
         Long taskId = task.getId();
         Long corpId = task.getCorpId();
-        int updated = 0, created = 0, skipped = 0, failed = 0;
+        int updated = 0, profileUpdated = 0, created = 0, skipped = 0, failed = 0;
         List<String> errors = new ArrayList<>();
 
-        // 数据范围：从 remark 读取逗号分隔的 corpId 列表（由 Controller 在提交时写入）
         String corpIdCsv = task.getRemark();
         String scopeClause = "";
         if (corpId != null && corpId != 0 && corpIdCsv != null && !corpIdCsv.isBlank()) {
@@ -48,50 +53,87 @@ public class MemberConvertHandler implements ImportHandler {
         }
 
         try {
-            // ── Phase 1: 匹配已有会员（批量 UPDATE）──
+            // ── Phase 1: 匹配已有会员 + 同步更新画像 ──
             taskService.updateStatus(taskId, "PROCESSING", "MATCH_EXISTING",
-                    "正在按手机号匹配已有会员...");
+                    "正在按手机号匹配已有会员并更新画像...");
+
+            // 1a: 同步已有会员的画像字段
+            String syncProfileSql = "UPDATE ai_platform.sys_member sm " +
+                "JOIN (SELECT gu.phone, gu.gender, gu.birth_date, gu.detailed_address, gu.community_id " +
+                "      FROM ops_gas_user gu " +
+                "      WHERE gu.platform_member_id IS NULL AND gu.phone IS NOT NULL" + scopeClause + ") src " +
+                "  ON sm.phone = src.phone " +
+                "SET sm.gender = CASE WHEN src.gender IS NOT NULL AND src.gender != '' " +
+                "    THEN CAST(src.gender AS SIGNED) ELSE sm.gender END, " +
+                "    sm.birthday = COALESCE(src.birth_date, sm.birthday), " +
+                "    sm.address = CASE WHEN src.detailed_address IS NOT NULL AND src.detailed_address != '' " +
+                "    THEN src.detailed_address ELSE sm.address END, " +
+                "    sm.community_id = COALESCE(src.community_id, sm.community_id)";
+            try {
+                profileUpdated = jdbcTemplate.update(syncProfileSql);
+            } catch (Exception e) {
+                log.warn("MemberConvert: profile sync failed (non-fatal): {}", e.getMessage());
+            }
+
+            // 1b: 回写 platform_member_id
             String matchSql = "UPDATE ops_gas_user gu " +
                 "JOIN (SELECT phone, MIN(id) AS mid FROM ai_platform.sys_member WHERE phone IS NOT NULL GROUP BY phone) sm " +
                 "ON gu.phone = sm.phone " +
                 "SET gu.platform_member_id = sm.mid " +
                 "WHERE gu.platform_member_id IS NULL" + scopeClause;
             updated = jdbcTemplate.update(matchSql);
-            log.info("MemberConvert: taskId={} matched {} existing members by phone", taskId, updated);
+            log.info("MemberConvert: taskId={} profileUpdated={} matched={}", taskId, profileUpdated, updated);
 
-            // ── Phase 2: 查询未匹配用户 ──
+            // ── Phase 2: 查询未匹配用户（含画像字段）──
             List<Map<String, Object>> unmatched = new ArrayList<>();
-            String querySql = "SELECT gu.id, gu.phone, gu.full_name, gu.corp_id FROM ops_gas_user gu " +
+            String querySql = "SELECT gu.id, gu.phone, gu.full_name, gu.corp_id, " +
+                "gu.gender, gu.birth_date, gu.detailed_address, gu.community_id " +
+                "FROM ops_gas_user gu " +
                 "WHERE gu.platform_member_id IS NULL AND gu.phone IS NOT NULL " +
-                "AND gu.phone REGEXP '^[0-9]{11}$' " + scopeClause.replace("gu.", "gu.") + " LIMIT 5000";
+                "AND gu.phone REGEXP '^[0-9]{11}$' " + scopeClause + " LIMIT 5000";
             jdbcTemplate.query(querySql, (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
                 Map<String, Object> r = new LinkedHashMap<>();
                 r.put("id", rs.getLong("id"));
                 r.put("phone", rs.getString("phone"));
                 r.put("name", rs.getString("full_name"));
                 r.put("corp_id", rs.getLong("corp_id"));
+                r.put("gender", rs.getString("gender"));
+                r.put("birth_date", rs.getDate("birth_date") != null
+                        ? rs.getDate("birth_date").toLocalDate() : null);
+                r.put("detailed_address", rs.getString("detailed_address"));
+                long cid = rs.getLong("community_id");
+                r.put("community_id", rs.wasNull() ? null : cid);
                 unmatched.add(r);
             });
-            log.info("MemberConvert: taskId={} unmatched users with valid phone: {}", taskId, unmatched.size());
+            log.info("MemberConvert: taskId={} unmatched: {}", taskId, unmatched.size());
 
             if (unmatched.isEmpty()) {
-                return buildResult(updated, created, skipped, failed, errors, 0);
+                return buildResult(updated + profileUpdated, created, skipped, failed, errors, 0);
             }
 
-            // ── Phase 3: 逐条创建会员 ──
+            // ── Phase 3: 逐条创建/关联会员 ──
             int total = unmatched.size();
             SimpleDateFormat sdf = new SimpleDateFormat("yyMMddHHmmss");
             int seq = 0;
 
             for (Map<String, Object> row : unmatched) {
-                String ts = sdf.format(new Date()) + String.format("%02d", (seq % 100));
+                String ts = sdf.format(new java.util.Date()) + String.format("%02d", (seq % 100));
                 seq++;
                 String phone = (String) row.get("phone");
                 String name = (String) row.getOrDefault("name", "");
                 if (name == null || name.isBlank()) name = phone.substring(0, 3) + "****" + phone.substring(7);
 
+                // 画像字段类型转换
+                Integer genderInt = null;
+                String genderStr = (String) row.get("gender");
+                if (genderStr != null && !genderStr.isBlank()) {
+                    try { genderInt = Integer.parseInt(genderStr); } catch (NumberFormatException ignored) {}
+                }
+                LocalDate birthDate = (LocalDate) row.get("birth_date");
+                String detailedAddress = (String) row.get("detailed_address");
+                Long communityId = (Long) row.get("community_id");
+
                 try {
-                    // 先查是否已有同手机号的会员（上次批量匹配后的竞争条件 + 历史遗留）
                     Long existingId = null;
                     try {
                         existingId = jdbcTemplate.queryForObject(
@@ -103,12 +145,20 @@ public class MemberConvertHandler implements ImportHandler {
                         jdbcTemplate.update(
                             "UPDATE ops_gas_user SET platform_member_id = ? WHERE id = ?",
                             existingId, row.get("id"));
+                        jdbcTemplate.update(
+                            "UPDATE ai_platform.sys_member SET gender=COALESCE(?,gender), " +
+                            "birthday=COALESCE(?,birthday), address=COALESCE(NULLIF(?,''),address), " +
+                            "community_id=COALESCE(?,community_id) WHERE id=?",
+                            genderInt, birthDate, detailedAddress, communityId, existingId);
                         skipped++;
                     } else {
                         String memberId = "M" + ts;
                         jdbcTemplate.update(
-                            "INSERT INTO ai_platform.sys_member (member_id, phone, nickname, status, corp_id) VALUES (?,?,?,1,?)",
-                            memberId, phone, name, row.get("corp_id"));
+                            "INSERT INTO ai_platform.sys_member " +
+                            "(member_id, phone, nickname, status, corp_id, gender, birthday, address, community_id) " +
+                            "VALUES (?,?,?,1,?,?,?,?,?)",
+                            memberId, phone, name, row.get("corp_id"),
+                            genderInt, birthDate, detailedAddress, communityId);
                         Long memberDbId = jdbcTemplate.queryForObject(
                             "SELECT id FROM ai_platform.sys_member WHERE member_id = ?", Long.class, memberId);
                         if (memberDbId != null) {
@@ -119,7 +169,6 @@ public class MemberConvertHandler implements ImportHandler {
                         }
                     }
                 } catch (Exception e) {
-                    // 最后尝试回退查询
                     try {
                         Long fbId = jdbcTemplate.queryForObject(
                             "SELECT id FROM ai_platform.sys_member WHERE phone = ? LIMIT 1",
@@ -128,6 +177,11 @@ public class MemberConvertHandler implements ImportHandler {
                             jdbcTemplate.update(
                                 "UPDATE ops_gas_user SET platform_member_id = ? WHERE id = ?",
                                 fbId, row.get("id"));
+                            jdbcTemplate.update(
+                                "UPDATE ai_platform.sys_member SET gender=COALESCE(?,gender), " +
+                                "birthday=COALESCE(?,birthday), address=COALESCE(NULLIF(?,''),address), " +
+                                "community_id=COALESCE(?,community_id) WHERE id=?",
+                                genderInt, birthDate, detailedAddress, communityId, fbId);
                             skipped++;
                             continue;
                         }
@@ -138,7 +192,6 @@ public class MemberConvertHandler implements ImportHandler {
                     failed++;
                 }
 
-                // 每 100 条更新一次进度
                 if (seq % 100 == 0) {
                     taskService.updateStatus(taskId, "PROCESSING", "CREATING_MEMBER",
                             String.format("正在创建会员... 已处理 %d/%d (成功 %d 跳过 %d 失败 %d)",
@@ -150,17 +203,17 @@ public class MemberConvertHandler implements ImportHandler {
             return ImportResult.fail("EXCEPTION", List.of("转化异常: " + e.getMessage()), 0);
         }
 
-        return buildResult(updated, created, skipped, failed, errors, 0);
+        return buildResult(updated + profileUpdated, created, skipped, failed, errors, 0);
     }
 
     private ImportResult buildResult(int updated, int created, int skipped, int failed,
                                       List<String> errors, int total) {
         int totalProcessed = updated + created + skipped + failed;
         ImportResult r = ImportResult.success(created + updated, totalProcessed);
-        r.setExistingCount(skipped); // 复用 existingCount 字段表示"跳过（已有会员）"
+        r.setExistingCount(skipped);
         r.setFailRows(failed);
         r.setErrors(errors);
-        r.setMessage(String.format("匹配更新 %d 人，新建会员 %d 人，跳过（已有会员）%d 人，失败 %d 人",
+        r.setMessage(String.format("匹配更新 %d 人（含画像同步），新建会员 %d 人，跳过（已有会员）%d 人，失败 %d 人",
                 updated, created, skipped, failed));
         return r;
     }
