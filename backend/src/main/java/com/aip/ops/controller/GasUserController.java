@@ -177,99 +177,60 @@ public class GasUserController {
                 .toList());
     }
 
-    /** Alias for /convert-all — path expected by the platform frontend. */
+    /**
+     * Async batch convert: submit a member_convert task to Kafka.
+     * Returns taskId immediately; client polls GET /convert/{taskId}/status for progress.
+     */
     @PostMapping("/convert/submit")
     public R<?> convertSubmit() {
-        return convertAll();
+        return submitConvertTask();
     }
 
-    /** Bulk convert: match gas users to platform members by phone, auto-create missing members. */
+    /** Same as /convert/submit — canonical path. */
     @PostMapping("/convert-all")
     public R<?> convertAll() {
-        int updated = 0, created = 0, failed = 0;
-        try {
-            // Step 1: match existing sys_member by phone
-            updated = jdbcTemplate.update(
-                "UPDATE ops_gas_user gu " +
-                "JOIN (SELECT phone, MIN(id) AS mid FROM ai_platform.sys_member WHERE phone IS NOT NULL GROUP BY phone) sm " +
-                "ON gu.phone = sm.phone " +
-                "SET gu.platform_member_id = sm.mid " +
-                "WHERE gu.platform_member_id IS NULL");
+        return submitConvertTask();
+    }
 
-            // Step 2: for unmatched users, create sys_member records
-            List<Map<String, Object>> unmatched = new ArrayList<>();
-            jdbcTemplate.query(
-                "SELECT gu.id, gu.phone, gu.full_name FROM ops_gas_user gu " +
-                "WHERE gu.platform_member_id IS NULL AND gu.phone IS NOT NULL AND gu.phone REGEXP '^[0-9]{11}$' LIMIT 5000",
-                (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-                    Map<String, Object> r = new java.util.LinkedHashMap<>();
-                    r.put("id", rs.getLong("id")); r.put("phone", rs.getString("phone"));
-                    r.put("name", rs.getString("full_name")); unmatched.add(r);
-                });
-
-            int seq = 0;
-            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyMMddHHmmss");
-            for (Map<String, Object> row : unmatched) {
-                String ts2 = sdf.format(new java.util.Date()) + String.format("%02d", (seq % 100));
-                seq++;
-                try {
-                    String memberId = "M" + ts2;
-                    String phone = (String) row.get("phone");
-                    String name = (String) row.getOrDefault("name", "");
-                    if (name == null || name.isBlank()) name = phone.substring(0, 3) + "****" + phone.substring(7);
-
-                    // Check if a member with this phone already exists (from a previous run)
-                    Long existingId = null;
-                    try {
-                        existingId = jdbcTemplate.queryForObject(
-                            "SELECT id FROM ai_platform.sys_member WHERE phone = ? LIMIT 1",
-                            Long.class, phone);
-                    } catch (Exception ignored) {}
-
-                    if (existingId != null) {
-                        jdbcTemplate.update(
-                            "UPDATE ops_gas_user SET platform_member_id = ? WHERE id = ?",
-                            existingId, row.get("id"));
-                        created++;
-                    } else {
-                        // Create new sys_member
-                        jdbcTemplate.update(
-                            "INSERT INTO ai_platform.sys_member (member_id, phone, nickname, status) VALUES (?,?,?,1)",
-                            memberId, phone, name);
-                        Long memberDbId = jdbcTemplate.queryForObject(
-                            "SELECT id FROM ai_platform.sys_member WHERE member_id = ?", Long.class, memberId);
-                        if (memberDbId != null) {
-                            jdbcTemplate.update(
-                                "UPDATE ops_gas_user SET platform_member_id = ? WHERE id = ?",
-                                memberDbId, row.get("id"));
-                            created++;
-                        }
-                    }
-                } catch (Exception e) {
-                    // Phone unique collision — try one more time to link by phone
-                    try {
-                        Long existingId = jdbcTemplate.queryForObject(
-                            "SELECT id FROM ai_platform.sys_member WHERE phone = ? LIMIT 1",
-                            Long.class, (String) row.get("phone"));
-                        if (existingId != null) {
-                            jdbcTemplate.update(
-                                "UPDATE ops_gas_user SET platform_member_id = ? WHERE id = ?",
-                                existingId, row.get("id"));
-                            created++;
-                            continue;
-                        }
-                    } catch (Exception ignored2) {}
-                    log.warn("Failed to create member for gas_user id={}: {}", row.get("id"), e.getMessage());
-                    failed++;
-                }
-            }
-        } catch (Exception e) {
-            return R.fail("批量转化失败: " + e.getMessage());
+    private R<?> submitConvertTask() {
+        if (importTaskService.hasPendingTask("member_convert")) {
+            return R.fail("已有进行中的转化任务，请等待完成后重试");
         }
-        Integer remaining = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM ops_gas_user WHERE platform_member_id IS NULL", Integer.class);
-        return R.ok(Map.of("updated", updated, "created", created, "failed", failed,
-            "unmatched", remaining != null ? remaining : 0));
+        // 算数据范围：可见 corpId CSV 写入 remark，供 MemberConvertHandler 过滤
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
+        String scope = visibleCorpIds != null
+                ? visibleCorpIds.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse("")
+                : "";
+        SysImportTask task = importTaskService.createTaskWithoutFile(
+                "member_convert", "批量转化会员", scope);
+        try {
+            kafkaTemplate.send("async-import-task",
+                    objectMapper.writeValueAsString(Map.of("taskId", task.getId())));
+        } catch (Exception e) {
+            log.error("Failed to send member_convert kafka message for taskId={}", task.getId(), e);
+            importTaskService.markFailed(task.getId(), "KAFKA_SEND",
+                    "消息队列发送失败: " + e.getMessage(), 0, 0);
+            return R.fail("任务提交失败，请重试");
+        }
+        return R.ok(Map.of("taskId", task.getId()));
+    }
+
+    /** Poll convert task status. Returns detail counts when done. */
+    @GetMapping("/convert/{taskId}/status")
+    public R<?> convertStatus(@PathVariable Long taskId) {
+        SysImportTask task = importTaskService.getById(taskId);
+        if (task == null) return R.fail("任务不存在");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("taskId", task.getId());
+        result.put("status", task.getStatus());
+        result.put("phase", task.getPhase());
+        result.put("progressMsg", task.getProgressMsg());
+        result.put("totalRows", task.getTotalRows());
+        result.put("successRows", task.getSuccessRows());
+        result.put("failRows", task.getFailRows());
+        result.put("errorMsg", task.getErrorMsg());
+        result.put("finishTime", task.getFinishTime() != null ? task.getFinishTime().toString() : null);
+        return R.ok(result);
     }
 
     /** Single manual conversion: force associate a gas user with a specific platform member. */

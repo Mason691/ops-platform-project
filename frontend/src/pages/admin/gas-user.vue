@@ -20,6 +20,7 @@
         <view class="gu-btn" :class="filterUnassigned ? 'gu-btn--unassigned-active' : 'gu-btn--unassigned'" @click="toggleUnassigned">🔍 未指定小区</view>
         <view class="gu-btn gu-btn--assign" :class="{ disabled: !selected.length }" @click="openBatchAssign">📋 批量指定小区</view>
         <view class="gu-btn gu-btn--import" @click="openImport">📥 从燃气平台导入</view>
+        <view class="gu-btn gu-btn--convert" @click="openConvertConfirm">🔄 批量转化会员</view>
       </view>
     </view>
 
@@ -171,6 +172,84 @@
         </view>
       </view>
     </view>
+
+    <!-- ═══ Convert Confirm Modal ═══ -->
+    <view v-if="showConvertConfirm" class="gu-overlay" @click.self="closeConvertConfirm">
+      <view class="gu-modal gu-modal--sm">
+        <view class="gu-modal-header">
+          <text class="gu-modal-title">批量转化会员</text>
+          <text class="gu-modal-close" @click="closeConvertConfirm">✕</text>
+        </view>
+        <view class="gu-modal-body">
+          <text class="gu-import-desc">将当前组织下所有<text class="gu-highlight">未转化</text>的燃气用户匹配并创建为平台会员。</text>
+          <view style="margin-top:24rpx">
+            <view class="gu-preview-card">
+              <view class="gu-preview-row"><text class="gu-preview-label">转化方式</text><text class="gu-preview-val">按手机号自动匹配</text></view>
+              <view class="gu-preview-row"><text class="gu-preview-label">处理模式</text><text class="gu-preview-val">异步后台处理</text></view>
+              <view class="gu-preview-row"><text class="gu-preview-label">匹配逻辑</text><text class="gu-preview-val">手机号相同 → 自动关联</text></view>
+              <view class="gu-preview-row"><text class="gu-preview-label">未匹配用户</text><text class="gu-preview-val">自动创建会员</text></view>
+            </view>
+          </view>
+          <text style="display:block;margin-top:24rpx;font-size:24rpx;color:#999">⚠️ 任务提交后将在后台异步执行，您可关闭此页面继续其他操作。</text>
+        </view>
+        <view class="gu-modal-footer">
+          <view class="gu-btn gu-btn--cancel" @click="closeConvertConfirm">取消</view>
+          <view class="gu-btn gu-btn--confirm" :class="{ loading: convertState === 'submitting' }" @click="doConvertSubmit">
+            {{ convertState === 'submitting' ? '提交中...' : '确认转化' }}
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- ═══ Convert Progress/Result Modal ═══ -->
+    <view v-if="showConvertProgress" class="gu-overlay">
+      <view class="gu-modal gu-modal--sm">
+        <view class="gu-modal-header">
+          <text class="gu-modal-title">转化任务</text>
+          <text v-if="convertState === 'done'" class="gu-modal-close" @click="closeConvertProgress">✕</text>
+        </view>
+        <view class="gu-modal-body">
+          <!-- Submitting -->
+          <view v-if="convertState === 'submitting'" style="text-align:center;padding:20rpx 0">
+            <text style="font-size:48rpx;display:block;margin-bottom:16rpx">⏳</text>
+            <text class="gu-import-desc">正在提交转化任务...</text>
+          </view>
+          <!-- Polling -->
+          <view v-if="convertState === 'polling'" style="text-align:center;padding:20rpx 0">
+            <text style="font-size:48rpx;display:block;margin-bottom:16rpx">⏳</text>
+            <text class="gu-import-desc">转化任务已提交，正在后台处理中...</text>
+            <text v-if="convertMsg" style="display:block;margin-top:12rpx;font-size:24rpx;color:#999">{{ convertMsg }}</text>
+          </view>
+          <!-- Done: success -->
+          <view v-if="convertState === 'done' && convertResult?.status === 'success'" style="text-align:center;padding:20rpx 0">
+            <text style="font-size:60rpx;display:block;margin-bottom:12rpx">✅</text>
+            <view class="gu-preview-card">
+              <view class="gu-preview-row"><text class="gu-preview-label">转化成功</text><text class="gu-preview-val" style="color:#07C160">{{ convertResult.successRows || 0 }} 人</text></view>
+              <view class="gu-preview-row"><text class="gu-preview-label">已存在会员跳过</text><text class="gu-preview-val gu-preview-existing">{{ convertResult.existingCount || 0 }} 人</text></view>
+              <view class="gu-preview-row"><text class="gu-preview-label">失败</text><text class="gu-preview-val" style="color:#e53935">{{ convertResult.failRows || 0 }} 人</text></view>
+            </view>
+            <view v-if="convertResult.failRows > 0 && convertResult.errors?.length" style="margin-top:12rpx;text-align:left">
+              <view class="gu-btn gu-btn--xs" style="display:inline-block" @click="convertShowErrors = !convertShowErrors">
+                {{ convertShowErrors ? '收起详情 ▲' : '展开失败详情 ▼' }}
+              </view>
+              <view v-if="convertShowErrors" style="margin-top:8rpx;max-height:300rpx;overflow-y:auto;background:#fff5f5;border-radius:8rpx;padding:16rpx">
+                <view v-for="(err, i) in convertResult.errors" :key="i" style="font-size:22rpx;color:#e53935;padding:4rpx 0;border-bottom:1rpx solid #ffe0e0">{{ err }}</view>
+              </view>
+            </view>
+          </view>
+          <!-- Done: fail -->
+          <view v-if="convertState === 'done' && convertResult?.status === 'fail'" style="text-align:center;padding:20rpx 0">
+            <text style="font-size:60rpx;display:block;margin-bottom:12rpx">❌</text>
+            <text class="gu-import-error-title">转化失败</text>
+            <text class="gu-import-error" style="margin-top:8rpx">{{ convertMsg || '未知错误' }}</text>
+          </view>
+        </view>
+        <view class="gu-modal-footer">
+          <view v-if="convertState === 'polling'" class="gu-btn gu-btn--cancel" style="pointer-events:none;opacity:.5">处理中...</view>
+          <view v-if="convertState === 'done'" class="gu-btn gu-btn--confirm" @click="onConvertDone">确定</view>
+        </view>
+      </view>
+    </view>
 </template>
 
 <script setup>
@@ -224,6 +303,16 @@ const importPreviewResult = ref(null)
 let pollTimer = null
 const importTaskId = ref(null)
 
+// ── Convert state ──
+const showConvertConfirm = ref(false)
+const showConvertProgress = ref(false)
+const convertState = ref('idle')       // idle | submitting | polling | done
+const convertMsg = ref('')
+const convertResult = ref(null)        // { successRows, failRows, skippedCount, errorMsg, errors }
+const convertTaskId = ref(null)
+const convertShowErrors = ref(false)   // toggle error detail expansion
+let convertPollTimer = null
+
 // ── Computed ──
 const allChecked = computed(() => records.value.length > 0 && records.value.every(d => selected.value.includes(d.id)))
 
@@ -234,6 +323,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  if (convertPollTimer) { clearInterval(convertPollTimer); convertPollTimer = null }
 })
 
 // ── Data loading ──
@@ -459,6 +549,99 @@ function onImportDone() {
   pageNum.value = 1
   loadData()
 }
+
+// ── Convert flow ──
+function openConvertConfirm() {
+  convertState.value = 'idle'
+  convertMsg.value = ''
+  convertResult.value = null
+  convertTaskId.value = null
+  convertShowErrors.value = false
+  showConvertConfirm.value = true
+}
+function closeConvertConfirm() {
+  if (convertState.value === 'submitting') return
+  showConvertConfirm.value = false
+}
+function closeConvertProgress() {
+  if (convertState.value === 'polling') {
+    uni.showToast({ title: '任务执行中，请等待完成', icon: 'none' })
+    return
+  }
+  if (convertPollTimer) { clearInterval(convertPollTimer); convertPollTimer = null }
+  showConvertProgress.value = false
+}
+async function doConvertSubmit() {
+  convertState.value = 'submitting'
+  try {
+    const result = await api.gasUserConvertSubmit({ scope: 'all' })
+    convertTaskId.value = result.taskId
+    showConvertConfirm.value = false
+    showConvertProgress.value = true
+    convertState.value = 'polling'
+    convertMsg.value = '任务已提交，正在后台处理中...'
+    startConvertPolling()
+  } catch (e) {
+    convertState.value = 'idle'
+    uni.showToast({ title: e?.msg || '提交失败，请重试', icon: 'none' })
+  }
+}
+function startConvertPolling() {
+  if (convertPollTimer) clearInterval(convertPollTimer)
+  let pollCount = 0
+  let consecutiveErrors = 0
+  const MAX_POLLS = 200  // 10 min at 3s interval (conversion can take a while)
+  convertPollTimer = setInterval(async () => {
+    pollCount++
+    if (pollCount > MAX_POLLS) {
+      clearInterval(convertPollTimer); convertPollTimer = null
+      convertState.value = 'done'
+      convertResult.value = { status: 'fail' }
+      convertMsg.value = '转化任务超时，请稍后查看任务记录'
+      return
+    }
+    if (!convertTaskId.value) return
+    try {
+      const status = await api.gasUserConvertStatus(convertTaskId.value)
+      consecutiveErrors = 0
+      convertMsg.value = status.progressMsg || status.phase || ''
+      if (status.status === 'DONE') {
+        clearInterval(convertPollTimer); convertPollTimer = null
+        convertState.value = 'done'
+        convertResult.value = {
+          status: 'success',
+          successRows: status.successRows || 0,
+          failRows: status.failRows || 0,
+          existingCount: 0, // populated from handler's existingCount field
+          errors: [],
+          message: status.progressMsg || ''
+        }
+        // Parse errorMsg for failure details
+        if (status.errorMsg) {
+          convertResult.value.errors = status.errorMsg.split('\n').filter(Boolean)
+        }
+      } else if (status.status === 'FAILED') {
+        clearInterval(convertPollTimer); convertPollTimer = null
+        convertState.value = 'done'
+        convertResult.value = { status: 'fail' }
+        convertMsg.value = status.errorMsg || '转化失败'
+      }
+    } catch (e) {
+      consecutiveErrors++
+      if (consecutiveErrors >= 5) {
+        clearInterval(convertPollTimer); convertPollTimer = null
+        convertState.value = 'done'
+        convertResult.value = { status: 'fail' }
+        convertMsg.value = '网络异常，无法获取任务状态，请稍后查看任务记录'
+      }
+    }
+  }, 3000)
+}
+function onConvertDone() {
+  closeConvertProgress()
+  pageNum.value = 1
+  loadData()
+}
 </script>
 
 <style scoped>
@@ -533,6 +716,7 @@ function onImportDone() {
 
 /* Import button */
 .gu-btn--import { background: #1989FA; color: #fff }
+.gu-btn--convert { background: #FF6B35; color: #fff }
 
 /* Import modal */
 .gu-import-desc { font-size: 28rpx; color: #333; display: block; margin-bottom: 8rpx }
