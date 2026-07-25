@@ -262,7 +262,7 @@ function isWechat() { return /micromessenger/i.test(navigator.userAgent) }
 
 function openLive() {
   if (!isWechat()) { qrError.value = false; showGuide.value = true; return }
-  if (props.liveRoom?.schemeTicket) { openChannelsLive(props.liveRoom.schemeTicket); return }
+  if (props.liveRoom?.finderUsername) { openChannelsLive(props.liveRoom.finderUsername); return }
   if (props.liveRoom?.jumpUrl) { window.location.href = props.liveRoom.jumpUrl; return }
   uni.showToast({ title: '直播链接未配置', icon: 'none' })
 }

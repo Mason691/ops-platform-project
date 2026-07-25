@@ -107,9 +107,9 @@ function openLive(room){
   if(!/micromessenger/i.test(navigator.userAgent)){
     uni.showToast({title:'请在微信中打开直播间',icon:'none'});return
   }
-  if(room.schemeTicket){ openChannelsLive(room.schemeTicket); return }
+  if(room.finderUsername){ openChannelsLive(room.finderUsername); return }
   if(room.jumpUrl){ window.location.href = room.jumpUrl; return }
-  uni.showToast({title:'直播链接未配置，请稍后再试',icon:'none'})
+  uni.showToast({title:'直播链接未配置',icon:'none'})
 }
 </script>
 <style scoped>
