@@ -119,46 +119,26 @@ export function wxStopRecordAndUpload() {
 // ── 视频号直播跳转（共享工具）──────────────────────────────────────
 
 /**
- * 打开微信视频号直播。
- * 因公众号与视频号主体不一致，wx.openChannelsLive 静默失败（黑屏）。
- * 改用 channels.weixin.qq.com web URL 跳转视频号，不受主体限制。
+ * 跳转到视频号直播间。
+ * 通过管理员配置的公众号文章链接（文章内嵌视频号卡片）实现跳转。
+ * 微信不开放 H5 直接跳转视频号的 API，因此通过文章作为跳板。
  *
- * @param {string} finderUsername 视频号 ID
+ * @param {string} url 跳转链接（公众号文章 URL 或视频号主页链接）
  */
-export function openChannelsLive(finderUsername) {
-  if (!finderUsername) {
-    uni.showToast({ title: '直播信息不完整', icon: 'none' })
+export function openChannelsLive(url) {
+  if (!url) {
+    uni.showToast({ title: '直播链接未配置', icon: 'none' })
     return
   }
-  window.location.href = getFinderPreviewUrl(finderUsername)
+  window.location.href = url
 }
 
 /**
- * 视频号 web URL（微信官方视频号入口）
- */
-export function getFinderPreviewUrl(finderUsername) {
-  return 'https://channels.weixin.qq.com/web/pages/live?finderUserName='
-    + encodeURIComponent(finderUsername)
-}
-
-/**
- * 打开微信视频号主页（非具体直播间）。
- * 使用 weixin:// 原生 scheme 直接唤起。
+ * 跳转到视频号主页。
+ * 同 openChannelsLive，语义上用于「前往视频号主页」入口。
  *
- * @param {string} finderUsername 视频号 ID
+ * @param {string} url 跳转链接
  */
-export function openChannelsProfile(finderUsername) {
-  if (!finderUsername) {
-    uni.showToast({ title: '视频号信息不完整', icon: 'none' })
-    return
-  }
-  window.location.href = getChannelsProfileUrl(finderUsername)
-}
-
-/**
- * 视频号原生 scheme URL
- */
-export function getChannelsProfileUrl(finderUsername) {
-  return 'https://channels.weixin.qq.com/web/pages/live?finderUserName='
-    + encodeURIComponent(finderUsername)
+export function openChannelsProfile(url) {
+  openChannelsLive(url)
 }

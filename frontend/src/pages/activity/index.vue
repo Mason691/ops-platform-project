@@ -165,8 +165,8 @@ async function goDetail(id) {
   if (a && a.type === 'live_reserve' && isWechat()) {
     try {
       var detail = await api('/api/ops/activity/' + id, 'GET')
-      var finder = detail && detail.liveRoom && detail.liveRoom.finderUsername
-      if (finder) { openChannelsLive(finder); return }
+      var url = detail && detail.liveRoom && detail.liveRoom.jumpUrl
+      if (url) { openChannelsLive(url); return }
     } catch (e) { /* fall through to detail page */ }
   }
   uni.navigateTo({ url: '/pages/activity/detail?id=' + id })

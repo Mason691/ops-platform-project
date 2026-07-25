@@ -161,7 +161,7 @@ import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { BASE_URL } from '@/config'
 import { assetUrl, onImgError } from '@/utils/image.js'
 import LiveStatusCard from '@/components/LiveStatusCard.vue'
-import { openChannelsLive, openChannelsProfile } from '@/utils/jssdk.js'
+import { openChannelsLive } from '@/utils/jssdk.js'
 
 const act = ref(null), liveRoom = ref(null), liveStatus = ref(null), products = ref([])
 const loadErr = ref('')
@@ -375,8 +375,8 @@ function handleAction() {
 }
 
 function openLiveRoom() {
-  if (!liveRoom.value?.finderUsername && !liveRoom.value?.jumpUrl) {
-    uni.showToast({ title: '直播信息不完整', icon: 'none' })
+  if (!liveRoom.value?.jumpUrl) {
+    uni.showToast({ title: '直播链接未配置', icon: 'none' })
     return
   }
   if (liveStatus.value?.displayStatus === 'ended') {
@@ -388,14 +388,12 @@ function openLiveRoom() {
     showGuide.value = true
     return
   }
-
-  if (liveRoom.value?.jumpUrl) { window.location.href = liveRoom.value.jumpUrl; return }
-  openChannelsLive(liveRoom.value.finderUsername)
+  openChannelsLive(liveRoom.value.jumpUrl)
 }
 
 function openChannelHome() {
-  if (!liveRoom.value?.finderUsername && !liveRoom.value?.jumpUrl) {
-    uni.showToast({ title: '视频号信息不完整', icon: 'none' })
+  if (!liveRoom.value?.jumpUrl) {
+    uni.showToast({ title: '视频号链接未配置', icon: 'none' })
     return
   }
   if (!/micromessenger/i.test(navigator.userAgent)) {
@@ -403,9 +401,7 @@ function openChannelHome() {
     showGuide.value = true
     return
   }
-
-  if (liveRoom.value?.jumpUrl) { window.location.href = liveRoom.value.jumpUrl; return }
-  openChannelsProfile(liveRoom.value.finderUsername)
+  openChannelsLive(liveRoom.value.jumpUrl)
 }
 
 async function doBook() {

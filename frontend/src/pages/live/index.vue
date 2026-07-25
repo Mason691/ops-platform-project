@@ -39,7 +39,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { assetUrl, onImgError } from '@/utils/image.js'
-import { openChannelsLive } from '@/utils/jssdk.js'
+
 
 const rooms = ref([])
 const showGuide = ref(false)
@@ -70,7 +70,7 @@ onMounted(async () => {
 function openLive(room) {
   if (!isWechat()) { showGuide.value = true; return }
   if (room.jumpUrl) { window.location.href = room.jumpUrl; return }
-  openChannelsLive(room.finderUsername)
+  uni.showToast({ title: '直播链接未配置，请稍后再试', icon: 'none' })
 }
 </script>
 
