@@ -137,7 +137,7 @@ export function openChannelsLive(finderUsername) {
  * 视频号 finder-preview URL（直播间入口）
  */
 export function getFinderPreviewUrl(finderUsername) {
-  return 'https://channels.weixin.qq.com/finder-preview/pages/profile?finderUserName='
+  return 'https://channels.weixin.qq.com/finder-preview/pages/feed?finderUserName='
     + encodeURIComponent(finderUsername)
 }
 
@@ -159,6 +159,6 @@ export function openChannelsProfile(finderUsername) {
  * 视频号主页 URL（finder-preview profile 入口）
  */
 export function getChannelsProfileUrl(finderUsername) {
-  return 'https://channels.weixin.qq.com/finder-preview/pages/profile?finderUserName='
+  return 'https://channels.weixin.qq.com/finder-preview/pages/feed?finderUserName='
     + encodeURIComponent(finderUsername)
 }
