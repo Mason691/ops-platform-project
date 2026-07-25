@@ -139,11 +139,10 @@ public class MemberConvertHandler implements ImportHandler {
                 }
                 LocalDate birthDate = (LocalDate) row.get("birth_date");
                 String areaName = (String) row.get("area_name");
-                String rawAddress = (String) row.get("detailed_address");
                 Long communityId = (Long) row.get("community_id");
 
-                // 地址拼接：省+市+区县 + detailed_address
-                String fullAddress = buildFullAddress(areaName, rawAddress, regionPathCache);
+                // 地址 = 省+市+区县
+                String fullAddress = regionPathCache.getOrDefault(areaName, areaName != null ? areaName : "");
 
                 try {
                     // Step A: 检查 sys_member 中是否已有该手机号
@@ -241,26 +240,6 @@ public class MemberConvertHandler implements ImportHandler {
         }
         log.info("MemberConvert: region path cache loaded {} entries", cache.size());
         return cache;
-    }
-
-    /** 拼接完整地址：省+市+区县 + 详细地址 */
-    private String buildFullAddress(String areaName, String detailedAddress,
-                                     Map<String, String> regionPathCache) {
-        StringBuilder sb = new StringBuilder();
-        // 省市区前缀
-        if (areaName != null && !areaName.isBlank()) {
-            String prefix = regionPathCache.get(areaName);
-            if (prefix != null && !prefix.isBlank()) {
-                sb.append(prefix);
-            } else {
-                sb.append(areaName); // 回退：直接用 area_name
-            }
-        }
-        // 详细地址
-        if (detailedAddress != null && !detailedAddress.isBlank()) {
-            sb.append(detailedAddress);
-        }
-        return sb.toString();
     }
 
     private ImportResult buildResult(int updated, int created, int skipped, int failed,
