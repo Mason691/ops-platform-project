@@ -155,9 +155,9 @@ public class MemberConvertHandler implements ImportHandler {
                         String memberId = "M" + ts;
                         jdbcTemplate.update(
                             "INSERT INTO ai_platform.sys_member " +
-                            "(member_id, phone, nickname, status, corp_id, gender, birthday, address, community_id) " +
-                            "VALUES (?,?,?,1,?,?,?,?,?)",
-                            memberId, phone, name, row.get("corp_id"),
+                            "(member_id, phone, nickname, status, gender, birthday, address, community_id) " +
+                            "VALUES (?,?,?,1,?,?,?,?)",
+                            memberId, phone, name,
                             genderInt, birthDate, detailedAddress, communityId);
                         Long memberDbId = jdbcTemplate.queryForObject(
                             "SELECT id FROM ai_platform.sys_member WHERE member_id = ?", Long.class, memberId);
