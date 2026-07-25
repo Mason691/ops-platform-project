@@ -59,7 +59,7 @@ public class MemberConvertHandler implements ImportHandler {
 
             // 1a: 同步已有会员的画像字段
             String syncProfileSql = "UPDATE ai_platform.sys_member sm " +
-                "JOIN (SELECT gu.phone, gu.gender, gu.birth_date, gu.detailed_address, gu.community_id " +
+                "JOIN (SELECT gu.phone, gu.gender, gu.birth_date, gu.detailed_address, gu.community_id, gu.corp_id " +
                 "      FROM ops_gas_user gu " +
                 "      WHERE gu.platform_member_id IS NULL AND gu.phone IS NOT NULL" + scopeClause + ") src " +
                 "  ON sm.phone = src.phone " +
@@ -68,7 +68,8 @@ public class MemberConvertHandler implements ImportHandler {
                 "    sm.birthday = COALESCE(src.birth_date, sm.birthday), " +
                 "    sm.address = CASE WHEN src.detailed_address IS NOT NULL AND src.detailed_address != '' " +
                 "    THEN src.detailed_address ELSE sm.address END, " +
-                "    sm.community_id = COALESCE(src.community_id, sm.community_id)";
+                "    sm.community_id = COALESCE(src.community_id, sm.community_id), " +
+                "    sm.corp_id = COALESCE(src.corp_id, sm.corp_id)";
             try {
                 profileUpdated = jdbcTemplate.update(syncProfileSql);
             } catch (Exception e) {
@@ -148,17 +149,17 @@ public class MemberConvertHandler implements ImportHandler {
                         jdbcTemplate.update(
                             "UPDATE ai_platform.sys_member SET gender=COALESCE(?,gender), " +
                             "birthday=COALESCE(?,birthday), address=COALESCE(NULLIF(?,''),address), " +
-                            "community_id=COALESCE(?,community_id) WHERE id=?",
-                            genderInt, birthDate, detailedAddress, communityId, existingId);
+                            "community_id=COALESCE(?,community_id), corp_id=COALESCE(?,corp_id) WHERE id=?",
+                            genderInt, birthDate, detailedAddress, communityId, row.get("corp_id"), existingId);
                         skipped++;
                     } else {
                         String memberId = "M" + ts;
                         jdbcTemplate.update(
                             "INSERT INTO ai_platform.sys_member " +
-                            "(member_id, phone, nickname, status, gender, birthday, address, community_id) " +
-                            "VALUES (?,?,?,1,?,?,?,?)",
+                            "(member_id, phone, nickname, status, gender, birthday, address, community_id, corp_id) " +
+                            "VALUES (?,?,?,1,?,?,?,?,?)",
                             memberId, phone, name,
-                            genderInt, birthDate, detailedAddress, communityId);
+                            genderInt, birthDate, detailedAddress, communityId, row.get("corp_id"));
                         Long memberDbId = jdbcTemplate.queryForObject(
                             "SELECT id FROM ai_platform.sys_member WHERE member_id = ?", Long.class, memberId);
                         if (memberDbId != null) {
@@ -180,8 +181,8 @@ public class MemberConvertHandler implements ImportHandler {
                             jdbcTemplate.update(
                                 "UPDATE ai_platform.sys_member SET gender=COALESCE(?,gender), " +
                                 "birthday=COALESCE(?,birthday), address=COALESCE(NULLIF(?,''),address), " +
-                                "community_id=COALESCE(?,community_id) WHERE id=?",
-                                genderInt, birthDate, detailedAddress, communityId, fbId);
+                                "community_id=COALESCE(?,community_id), corp_id=COALESCE(?,corp_id) WHERE id=?",
+                                genderInt, birthDate, detailedAddress, communityId, row.get("corp_id"), fbId);
                             skipped++;
                             continue;
                         }
