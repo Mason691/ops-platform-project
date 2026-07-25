@@ -106,6 +106,7 @@ function openLive(room){
   if(!/micromessenger/i.test(navigator.userAgent)){
     uni.showToast({title:'请在微信中打开直播间',icon:'none'});return
   }
+  if(room.jumpUrl){ window.location.href = room.jumpUrl; return }
   openChannelsLive(room.finderUsername)
 }
 </script>

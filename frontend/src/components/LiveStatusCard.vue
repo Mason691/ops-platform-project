@@ -262,10 +262,11 @@ function isWechat() { return /micromessenger/i.test(navigator.userAgent) }
 
 function openLive() {
   if (!isWechat()) { qrError.value = false; showGuide.value = true; return }
-  if (!props.liveRoom?.finderUsername) {
+  if (!props.liveRoom?.finderUsername && !props.liveRoom?.jumpUrl) {
     uni.showToast({ title: '直播信息不完整，请联系管理员', icon: 'none' })
     return
   }
+  if (props.liveRoom?.jumpUrl) { window.location.href = props.liveRoom.jumpUrl; return }
   openChannelsLive(props.liveRoom.finderUsername)
 }
 

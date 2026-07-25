@@ -76,4 +76,8 @@ public class OpsLiveRoom extends BaseEntity {
     /** 直播间简介（展示在跳转前页面，支持换行） */
     @TableField("description")
     private String description;
+
+    /** 公众号文章跳转链接（含视频号卡片），优先于 finder_username 跳转 */
+    @TableField("jump_url")
+    private String jumpUrl;
 }

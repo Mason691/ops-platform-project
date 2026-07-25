@@ -375,7 +375,7 @@ function handleAction() {
 }
 
 function openLiveRoom() {
-  if (!liveRoom.value?.finderUsername) {
+  if (!liveRoom.value?.finderUsername && !liveRoom.value?.jumpUrl) {
     uni.showToast({ title: '直播信息不完整', icon: 'none' })
     return
   }
@@ -389,11 +389,12 @@ function openLiveRoom() {
     return
   }
 
+  if (liveRoom.value?.jumpUrl) { window.location.href = liveRoom.value.jumpUrl; return }
   openChannelsLive(liveRoom.value.finderUsername)
 }
 
 function openChannelHome() {
-  if (!liveRoom.value?.finderUsername) {
+  if (!liveRoom.value?.finderUsername && !liveRoom.value?.jumpUrl) {
     uni.showToast({ title: '视频号信息不完整', icon: 'none' })
     return
   }
@@ -403,6 +404,7 @@ function openChannelHome() {
     return
   }
 
+  if (liveRoom.value?.jumpUrl) { window.location.href = liveRoom.value.jumpUrl; return }
   openChannelsProfile(liveRoom.value.finderUsername)
 }
 

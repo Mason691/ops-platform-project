@@ -69,6 +69,7 @@ onMounted(async () => {
 
 function openLive(room) {
   if (!isWechat()) { showGuide.value = true; return }
+  if (room.jumpUrl) { window.location.href = room.jumpUrl; return }
   openChannelsLive(room.finderUsername)
 }
 </script>
