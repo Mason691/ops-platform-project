@@ -109,7 +109,8 @@ public class BattleMapEtlService {
                 "(SELECT COUNT(DISTINCT agent) FROM ops_member_ledger WHERE community_id=sc.id AND corp_id IN (" + scope + ") AND delete_flag=0 AND agent IS NOT NULL AND agent<>'')," +
                 "(SELECT COALESCE(SUM(sales_price),0) FROM ops_member_ledger WHERE community_id=sc.id AND corp_id IN (" + scope + ") AND delete_flag=0)," +
                 "(SELECT GROUP_CONCAT(mg.real_name) FROM ops_grid_manager_community mgc JOIN ops_grid_manager mg ON mg.id=mgc.grid_manager_id AND mg.delete_flag=0 AND (mg.end_time IS NULL OR mg.end_time>=CURDATE()) WHERE mgc.community_id=sc.id) " +
-                "FROM ai_platform.sys_community sc WHERE sc.delete_flag=0 AND sc.longitude IS NOT NULL AND (" +
+                "FROM ai_platform.sys_community sc WHERE sc.delete_flag=0 AND sc.longitude IS NOT NULL " +
+                "AND sc.corp_id IN (" + scope + ") AND (" +
                 "EXISTS(SELECT 1 FROM ops_gas_user WHERE community_id=sc.id AND corp_id IN (" + scope + ")) OR " +
                 "EXISTS(SELECT 1 FROM ops_member_ledger WHERE community_id=sc.id AND corp_id IN (" + scope + ") AND delete_flag=0))",
                 corpId);
