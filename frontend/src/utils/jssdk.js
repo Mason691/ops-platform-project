@@ -121,7 +121,7 @@ export function wxStopRecordAndUpload() {
 /**
  * 打开微信视频号直播。
  * 因公众号与视频号主体不一致，wx.openChannelsLive 静默失败（黑屏）。
- * 改用 finder-preview URL 直接跳转，不受主体限制。
+ * 改用 weixin:// 原生 scheme 直接唤起视频号，不受主体限制。
  *
  * @param {string} finderUsername 视频号 ID
  */
@@ -134,16 +134,16 @@ export function openChannelsLive(finderUsername) {
 }
 
 /**
- * 视频号 finder-preview URL（直播间入口）
+ * 视频号原生 scheme URL（直接唤起微信原生视频号页面）
  */
 export function getFinderPreviewUrl(finderUsername) {
-  return 'https://channels.weixin.qq.com/finder-preview/pages/feed?finderUserName='
+  return 'weixin://dl/business/?finderUserName='
     + encodeURIComponent(finderUsername)
 }
 
 /**
  * 打开微信视频号主页（非具体直播间）。
- * 使用 finder-preview profile 页面跳转。
+ * 使用 weixin:// 原生 scheme 直接唤起。
  *
  * @param {string} finderUsername 视频号 ID
  */
@@ -156,9 +156,9 @@ export function openChannelsProfile(finderUsername) {
 }
 
 /**
- * 视频号主页 URL（finder-preview profile 入口）
+ * 视频号原生 scheme URL
  */
 export function getChannelsProfileUrl(finderUsername) {
-  return 'https://channels.weixin.qq.com/finder-preview/pages/feed?finderUserName='
+  return 'weixin://dl/business/?finderUserName='
     + encodeURIComponent(finderUsername)
 }
