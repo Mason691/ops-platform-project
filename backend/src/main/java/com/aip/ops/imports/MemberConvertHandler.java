@@ -85,46 +85,49 @@ public class MemberConvertHandler implements ImportHandler {
             updated = jdbcTemplate.update(matchSql);
             log.info("MemberConvert: taskId={} profileUpdated={} matched={}", taskId, profileUpdated, updated);
 
-            // ── Phase 2: 查询未匹配用户（含画像字段）──
-            List<Map<String, Object>> unmatched = new ArrayList<>();
-            String querySql = "SELECT gu.id, gu.phone, gu.full_name, gu.corp_id, " +
-                "gu.gender, gu.birth_date, gu.detailed_address, gu.community_id " +
+            // ── Phase 2: 查询未匹配用户（按手机号去重，每号取 MIN(id)）──
+            List<Map<String, Object>> uniquePhones = new ArrayList<>();
+            String querySql = "SELECT MIN(gu.id) AS id, gu.phone, gu.corp_id, " +
+                "MAX(gu.gender) AS gender, MAX(gu.birth_date) AS birth_date, " +
+                "MAX(gu.detailed_address) AS detailed_address, MAX(gu.community_id) AS community_id, " +
+                "MAX(gu.full_name) AS full_name " +
                 "FROM ops_gas_user gu " +
                 "WHERE gu.platform_member_id IS NULL AND gu.phone IS NOT NULL " +
-                "AND gu.phone REGEXP '^[0-9]{11}$' " + scopeClause + " LIMIT 5000";
+                "AND gu.phone REGEXP '^[0-9]{11}$' " + scopeClause + " " +
+                "GROUP BY gu.phone, gu.corp_id LIMIT 5000";
             jdbcTemplate.query(querySql, (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
                 Map<String, Object> r = new LinkedHashMap<>();
                 r.put("id", rs.getLong("id"));
                 r.put("phone", rs.getString("phone"));
-                r.put("name", rs.getString("full_name"));
                 r.put("corp_id", rs.getLong("corp_id"));
+                r.put("name", rs.getString("full_name"));
                 r.put("gender", rs.getString("gender"));
                 r.put("birth_date", rs.getDate("birth_date") != null
                         ? rs.getDate("birth_date").toLocalDate() : null);
                 r.put("detailed_address", rs.getString("detailed_address"));
                 long cid = rs.getLong("community_id");
                 r.put("community_id", rs.wasNull() ? null : cid);
-                unmatched.add(r);
+                uniquePhones.add(r);
             });
-            log.info("MemberConvert: taskId={} unmatched: {}", taskId, unmatched.size());
+            log.info("MemberConvert: taskId={} unique phones to process: {}", taskId, uniquePhones.size());
 
-            if (unmatched.isEmpty()) {
+            if (uniquePhones.isEmpty()) {
                 return buildResult(updated + profileUpdated, created, skipped, failed, errors, 0);
             }
 
-            // ── Phase 3: 逐条创建/关联会员 ──
-            int total = unmatched.size();
+            // ── Phase 3: 逐号创建会员 + 回写所有同号燃气用户 ──
             SimpleDateFormat sdf = new SimpleDateFormat("yyMMddHHmmss");
             int seq = 0;
 
-            for (Map<String, Object> row : unmatched) {
-                String ts = sdf.format(new java.util.Date()) + String.format("%02d", (seq % 100));
+            for (Map<String, Object> row : uniquePhones) {
+                String memberIdSuffix = String.format("%s%03d",
+                        sdf.format(new java.util.Date()), seq % 1000);
                 seq++;
                 String phone = (String) row.get("phone");
                 String name = (String) row.getOrDefault("name", "");
                 if (name == null || name.isBlank()) name = phone.substring(0, 3) + "****" + phone.substring(7);
+                Long rowCorpId = (Long) row.get("corp_id");
 
-                // 画像字段类型转换
                 Integer genderInt = null;
                 String genderStr = (String) row.get("gender");
                 if (genderStr != null && !genderStr.isBlank()) {
@@ -135,6 +138,7 @@ public class MemberConvertHandler implements ImportHandler {
                 Long communityId = (Long) row.get("community_id");
 
                 try {
+                    // Step A: 检查 sys_member 中是否已有该手机号
                     Long existingId = null;
                     try {
                         existingId = jdbcTemplate.queryForObject(
@@ -142,51 +146,41 @@ public class MemberConvertHandler implements ImportHandler {
                             Long.class, phone);
                     } catch (Exception ignored) {}
 
+                    Long memberDbId;
                     if (existingId != null) {
-                        jdbcTemplate.update(
-                            "UPDATE ops_gas_user SET platform_member_id = ? WHERE id = ?",
-                            existingId, row.get("id"));
+                        // 已有会员：更新画像 + 回写 platform_member_id 到所有同号燃气用户
+                        memberDbId = existingId;
                         jdbcTemplate.update(
                             "UPDATE ai_platform.sys_member SET gender=COALESCE(?,gender), " +
                             "birthday=COALESCE(?,birthday), address=COALESCE(NULLIF(?,''),address), " +
                             "community_id=COALESCE(?,community_id), corp_id=COALESCE(?,corp_id) WHERE id=?",
-                            genderInt, birthDate, detailedAddress, communityId, row.get("corp_id"), existingId);
+                            genderInt, birthDate, detailedAddress, communityId, rowCorpId, memberDbId);
                         skipped++;
                     } else {
-                        String memberId = "M" + ts;
+                        // 新建会员
+                        String memberId = "M" + memberIdSuffix;
                         jdbcTemplate.update(
                             "INSERT INTO ai_platform.sys_member " +
                             "(member_id, phone, nickname, status, gender, birthday, address, community_id, corp_id) " +
                             "VALUES (?,?,?,1,?,?,?,?,?)",
-                            memberId, phone, name,
-                            genderInt, birthDate, detailedAddress, communityId, row.get("corp_id"));
-                        Long memberDbId = jdbcTemplate.queryForObject(
+                            memberId, phone, name, genderInt, birthDate, detailedAddress, communityId, rowCorpId);
+                        memberDbId = jdbcTemplate.queryForObject(
                             "SELECT id FROM ai_platform.sys_member WHERE member_id = ?", Long.class, memberId);
-                        if (memberDbId != null) {
-                            jdbcTemplate.update(
-                                "UPDATE ops_gas_user SET platform_member_id = ? WHERE id = ?",
-                                memberDbId, row.get("id"));
-                            created++;
+                        created++;
+                    }
+
+                    // Step B: 回写 platform_member_id 到所有同手机号、尚未转化的燃气用户
+                    if (memberDbId != null) {
+                        int linked = jdbcTemplate.update(
+                            "UPDATE ops_gas_user SET platform_member_id = ? " +
+                            "WHERE phone = ? AND platform_member_id IS NULL",
+                            memberDbId, phone);
+                        if (linked > 1) {
+                            skipped += (linked - 1); // 第一条计入 created/skipped，其余计入 skipped
                         }
                     }
                 } catch (Exception e) {
-                    try {
-                        Long fbId = jdbcTemplate.queryForObject(
-                            "SELECT id FROM ai_platform.sys_member WHERE phone = ? LIMIT 1",
-                            Long.class, phone);
-                        if (fbId != null) {
-                            jdbcTemplate.update(
-                                "UPDATE ops_gas_user SET platform_member_id = ? WHERE id = ?",
-                                fbId, row.get("id"));
-                            jdbcTemplate.update(
-                                "UPDATE ai_platform.sys_member SET gender=COALESCE(?,gender), " +
-                                "birthday=COALESCE(?,birthday), address=COALESCE(NULLIF(?,''),address), " +
-                                "community_id=COALESCE(?,community_id), corp_id=COALESCE(?,corp_id) WHERE id=?",
-                                genderInt, birthDate, detailedAddress, communityId, row.get("corp_id"), fbId);
-                            skipped++;
-                            continue;
-                        }
-                    } catch (Exception ignored2) {}
+                    log.warn("MemberConvert: failed for phone={}: {}", phone, e.getMessage());
                     String err = "手机号 " + phone + ": " + e.getMessage();
                     if (err.length() > 200) err = err.substring(0, 200);
                     errors.add(err);
@@ -196,7 +190,7 @@ public class MemberConvertHandler implements ImportHandler {
                 if (seq % 100 == 0) {
                     taskService.updateStatus(taskId, "PROCESSING", "CREATING_MEMBER",
                             String.format("正在创建会员... 已处理 %d/%d (成功 %d 跳过 %d 失败 %d)",
-                                    seq, total, created, skipped, failed));
+                                    seq, uniquePhones.size(), created, skipped, failed));
                 }
             }
         } catch (Exception e) {
