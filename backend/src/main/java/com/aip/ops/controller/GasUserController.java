@@ -215,7 +215,7 @@ public class GasUserController {
         return R.ok(Map.of("taskId", task.getId()));
     }
 
-    /** Poll convert task status. Returns detail counts when done. */
+    /** Poll convert task status. Returns parsed detail counts when done. */
     @GetMapping("/convert/{taskId}/status")
     public R<?> convertStatus(@PathVariable Long taskId) {
         SysImportTask task = importTaskService.getById(taskId);
@@ -224,13 +224,46 @@ public class GasUserController {
         result.put("taskId", task.getId());
         result.put("status", task.getStatus());
         result.put("phase", task.getPhase());
-        result.put("progressMsg", task.getProgressMsg());
         result.put("totalRows", task.getTotalRows());
         result.put("successRows", task.getSuccessRows());
         result.put("failRows", task.getFailRows());
         result.put("errorMsg", task.getErrorMsg());
         result.put("finishTime", task.getFinishTime() != null ? task.getFinishTime().toString() : null);
+
+        // 解析 progressMsg 中的 JSON 计数（格式: {"created":N,"skipped":N,...}|可读文本）
+        String msg = task.getProgressMsg();
+        result.put("progressMsg", msg);
+        int createdCount = 0, skippedCount = 0, failedCount = 0, updatedCount = 0;
+        if (msg != null && msg.contains("|") && msg.startsWith("{")) {
+            try {
+                String jsonPart = msg.substring(0, msg.indexOf("|"));
+                @SuppressWarnings("unchecked")
+                Map<String, Object> counts = objectMapper.readValue(jsonPart, Map.class);
+                updatedCount = toInt(counts.get("updated"));
+                createdCount = toInt(counts.get("created"));
+                skippedCount = toInt(counts.get("skipped"));
+                failedCount = toInt(counts.get("failed"));
+                // 可读文本部分
+                result.put("detailMsg", msg.substring(msg.indexOf("|") + 1));
+            } catch (Exception ignored) {
+                result.put("detailMsg", msg);
+            }
+        } else {
+            result.put("detailMsg", msg);
+        }
+        result.put("createdCount", createdCount);
+        result.put("skippedCount", skippedCount);
+        result.put("failedCount", failedCount);
+        result.put("updatedCount", updatedCount);
         return R.ok(result);
+    }
+
+    private int toInt(Object v) {
+        if (v instanceof Number n) return n.intValue();
+        if (v instanceof String s) {
+            try { return Integer.parseInt(s); } catch (NumberFormatException e) { return 0; }
+        }
+        return 0;
     }
 
     /** Single manual conversion: force associate a gas user with a specific platform member. */

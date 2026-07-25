@@ -249,7 +249,10 @@ public class MemberConvertHandler implements ImportHandler {
         r.setExistingCount(skipped);
         r.setFailRows(failed);
         r.setErrors(errors);
-        r.setMessage(String.format("匹配更新 %d 人（含画像同步），新建会员 %d 人，跳过（已有会员）%d 人，失败 %d 人",
+        // 结构化 JSON 供 status 接口解析 → 前端展示精确计数
+        String json = String.format("{\"updated\":%d,\"created\":%d,\"skipped\":%d,\"failed\":%d}",
+                updated, created, skipped, failed);
+        r.setMessage(json + "|" + String.format("匹配更新 %d 人（含画像同步），新建会员 %d 人，跳过（已有会员）%d 人，失败 %d 人",
                 updated, created, skipped, failed));
         return r;
     }

@@ -224,8 +224,9 @@
           <view v-if="convertState === 'done' && convertResult?.status === 'success'" style="text-align:center;padding:20rpx 0">
             <text style="font-size:60rpx;display:block;margin-bottom:12rpx">✅</text>
             <view class="gu-preview-card">
-              <view class="gu-preview-row"><text class="gu-preview-label">转化成功</text><text class="gu-preview-val" style="color:#07C160">{{ convertResult.successRows || 0 }} 人</text></view>
-              <view class="gu-preview-row"><text class="gu-preview-label">已存在会员跳过</text><text class="gu-preview-val gu-preview-existing">{{ convertResult.existingCount || 0 }} 人</text></view>
+              <view class="gu-preview-row"><text class="gu-preview-label">新建会员</text><text class="gu-preview-val" style="color:#07C160">{{ convertResult.successRows || 0 }} 人</text></view>
+              <view class="gu-preview-row"><text class="gu-preview-label">匹配已有会员</text><text class="gu-preview-val" style="color:#1989FA">{{ convertResult.updatedCount || 0 }} 人</text></view>
+              <view class="gu-preview-row"><text class="gu-preview-label">跳过（已有会员）</text><text class="gu-preview-val gu-preview-existing">{{ convertResult.existingCount || 0 }} 人</text></view>
               <view class="gu-preview-row"><text class="gu-preview-label">失败</text><text class="gu-preview-val" style="color:#e53935">{{ convertResult.failRows || 0 }} 人</text></view>
             </view>
             <view v-if="convertResult.failRows > 0 && convertResult.errors?.length" style="margin-top:12rpx;text-align:left">
@@ -610,13 +611,13 @@ function startConvertPolling() {
         convertState.value = 'done'
         convertResult.value = {
           status: 'success',
-          successRows: status.successRows || 0,
-          failRows: status.failRows || 0,
-          existingCount: 0, // populated from handler's existingCount field
+          successRows: status.createdCount || status.successRows || 0,
+          failRows: status.failedCount || status.failRows || 0,
+          existingCount: status.skippedCount || 0,
+          updatedCount: status.updatedCount || 0,
           errors: [],
-          message: status.progressMsg || ''
+          message: status.detailMsg || status.progressMsg || ''
         }
-        // Parse errorMsg for failure details
         if (status.errorMsg) {
           convertResult.value.errors = status.errorMsg.split('\n').filter(Boolean)
         }
@@ -624,7 +625,7 @@ function startConvertPolling() {
         clearInterval(convertPollTimer); convertPollTimer = null
         convertState.value = 'done'
         convertResult.value = { status: 'fail' }
-        convertMsg.value = status.errorMsg || '转化失败'
+        convertMsg.value = status.errorMsg || status.detailMsg || '转化失败'
       }
     } catch (e) {
       consecutiveErrors++
