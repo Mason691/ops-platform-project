@@ -186,9 +186,17 @@ public class GridManagerController {
                         while (rs.next()) occupied.add(rs.getLong("community_id"));
                     });
 
-            // Return all communities (not filtered by gas users)
-            String communitySql = "SELECT id, community_name FROM ai_platform.sys_community WHERE delete_flag=0 ORDER BY community_name";
-            jdbcTemplate.query(communitySql,
+            // Return only communities in visible organizations
+            StringBuilder commSql = new StringBuilder(
+                "SELECT id, community_name FROM ai_platform.sys_community WHERE delete_flag=0");
+            if (visibleCorpIds != null && !visibleCorpIds.isEmpty()) {
+                commSql.append(" AND corp_id IN (")
+                    .append(visibleCorpIds.stream().map(String::valueOf).collect(Collectors.joining(",")))
+                    .append(")");
+            }
+            commSql.append(" ORDER BY community_name");
+            String finalCommSql = commSql.toString();
+            jdbcTemplate.query(finalCommSql,
                     (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
                         while (rs.next()) {
                             long cid = rs.getLong("id");
