@@ -153,17 +153,18 @@ public class MemberConvertHandler implements ImportHandler {
                         jdbcTemplate.update(
                             "UPDATE ai_platform.sys_member SET gender=COALESCE(?,gender), " +
                             "birthday=COALESCE(?,birthday), address=COALESCE(NULLIF(?,''),address), " +
-                            "community_id=COALESCE(?,community_id), corp_id=COALESCE(?,corp_id) WHERE id=?",
-                            genderInt, birthDate, detailedAddress, communityId, rowCorpId, memberDbId);
+                            "community_id=COALESCE(?,community_id), corp_id=COALESCE(?,corp_id), " +
+                            "real_name=COALESCE(NULLIF(?,''),real_name) WHERE id=?",
+                            genderInt, birthDate, detailedAddress, communityId, rowCorpId, name, memberDbId);
                         skipped++;
                     } else {
                         // 新建会员
                         String memberId = "M" + memberIdSuffix;
                         jdbcTemplate.update(
                             "INSERT INTO ai_platform.sys_member " +
-                            "(member_id, phone, nickname, status, gender, birthday, address, community_id, corp_id) " +
-                            "VALUES (?,?,?,1,?,?,?,?,?)",
-                            memberId, phone, name, genderInt, birthDate, detailedAddress, communityId, rowCorpId);
+                            "(member_id, phone, nickname, real_name, status, gender, birthday, address, community_id, corp_id) " +
+                            "VALUES (?,?,?,?,1,?,?,?,?,?)",
+                            memberId, phone, name, name, genderInt, birthDate, detailedAddress, communityId, rowCorpId);
                         memberDbId = jdbcTemplate.queryForObject(
                             "SELECT id FROM ai_platform.sys_member WHERE member_id = ?", Long.class, memberId);
                         created++;
