@@ -90,7 +90,7 @@ public class MemberConvertHandler implements ImportHandler {
             String querySql = "SELECT MIN(gu.id) AS id, gu.phone, gu.corp_id, " +
                 "MAX(gu.gender) AS gender, MAX(gu.birth_date) AS birth_date, " +
                 "MAX(gu.detailed_address) AS detailed_address, MAX(gu.community_id) AS community_id, " +
-                "MAX(gu.full_name) AS full_name " +
+                "MAX(gu.full_name) AS full_name, MAX(gu.area_name) AS area_name " +
                 "FROM ops_gas_user gu " +
                 "WHERE gu.platform_member_id IS NULL AND gu.phone IS NOT NULL " +
                 "AND gu.phone REGEXP '^[0-9]{11}$' " + scopeClause + " " +
@@ -105,6 +105,7 @@ public class MemberConvertHandler implements ImportHandler {
                 r.put("birth_date", rs.getDate("birth_date") != null
                         ? rs.getDate("birth_date").toLocalDate() : null);
                 r.put("detailed_address", rs.getString("detailed_address"));
+                r.put("area_name", rs.getString("area_name"));
                 long cid = rs.getLong("community_id");
                 r.put("community_id", rs.wasNull() ? null : cid);
                 uniquePhones.add(r);
@@ -114,6 +115,9 @@ public class MemberConvertHandler implements ImportHandler {
             if (uniquePhones.isEmpty()) {
                 return buildResult(updated + profileUpdated, created, skipped, failed, errors, 0);
             }
+
+            // ── Pre-load region path map: area_name → "省+市+区" ──
+            Map<String, String> regionPathCache = buildRegionPathCache(uniquePhones);
 
             // ── Phase 3: 逐号创建会员 + 回写所有同号燃气用户 ──
             SimpleDateFormat sdf = new SimpleDateFormat("yyMMddHHmmss");
@@ -134,8 +138,12 @@ public class MemberConvertHandler implements ImportHandler {
                     try { genderInt = Integer.parseInt(genderStr); } catch (NumberFormatException ignored) {}
                 }
                 LocalDate birthDate = (LocalDate) row.get("birth_date");
-                String detailedAddress = (String) row.get("detailed_address");
+                String areaName = (String) row.get("area_name");
+                String rawAddress = (String) row.get("detailed_address");
                 Long communityId = (Long) row.get("community_id");
+
+                // 地址拼接：省+市+区县 + detailed_address
+                String fullAddress = buildFullAddress(areaName, rawAddress, regionPathCache);
 
                 try {
                     // Step A: 检查 sys_member 中是否已有该手机号
@@ -155,7 +163,7 @@ public class MemberConvertHandler implements ImportHandler {
                             "birthday=COALESCE(?,birthday), address=COALESCE(NULLIF(?,''),address), " +
                             "community_id=COALESCE(?,community_id), corp_id=COALESCE(?,corp_id), " +
                             "real_name=COALESCE(NULLIF(?,''),real_name) WHERE id=?",
-                            genderInt, birthDate, detailedAddress, communityId, rowCorpId, name, memberDbId);
+                            genderInt, birthDate, fullAddress, communityId, rowCorpId, name, memberDbId);
                         skipped++;
                     } else {
                         // 新建会员
@@ -164,7 +172,7 @@ public class MemberConvertHandler implements ImportHandler {
                             "INSERT INTO ai_platform.sys_member " +
                             "(member_id, phone, nickname, real_name, status, gender, birthday, address, community_id, corp_id) " +
                             "VALUES (?,?,?,?,1,?,?,?,?,?)",
-                            memberId, phone, name, name, genderInt, birthDate, detailedAddress, communityId, rowCorpId);
+                            memberId, phone, name, name, genderInt, birthDate, fullAddress, communityId, rowCorpId);
                         memberDbId = jdbcTemplate.queryForObject(
                             "SELECT id FROM ai_platform.sys_member WHERE member_id = ?", Long.class, memberId);
                         created++;
@@ -200,6 +208,59 @@ public class MemberConvertHandler implements ImportHandler {
         }
 
         return buildResult(updated + profileUpdated, created, skipped, failed, errors, 0);
+    }
+
+    /**
+     * 构建 area_name → "省+市+区" 缓存。
+     * 从 sys_region 表三级自联查出每个区县的全路径。
+     */
+    private Map<String, String> buildRegionPathCache(List<Map<String, Object>> rows) {
+        Map<String, String> cache = new LinkedHashMap<>();
+        // 收集所有非空 area_name
+        List<String> areas = rows.stream()
+                .map(r -> (String) r.get("area_name"))
+                .filter(a -> a != null && !a.isBlank())
+                .distinct()
+                .toList();
+        if (areas.isEmpty()) return cache;
+
+        // 批量查：区县名 → 省+市+区县
+        String placeholders = String.join(",", areas.stream().map(a -> "?").toArray(String[]::new));
+        String sql = "SELECT r3.region_name AS district, " +
+                "CONCAT_WS('', r1.region_name, r2.region_name, r3.region_name) AS full_path " +
+                "FROM ai_platform.sys_region r3 " +
+                "LEFT JOIN ai_platform.sys_region r2 ON r2.id = r3.parent_id AND r2.region_level = 2 " +
+                "LEFT JOIN ai_platform.sys_region r1 ON r1.id = r2.parent_id AND r1.region_level = 1 " +
+                "WHERE r3.region_level = 3 AND r3.region_name IN (" + placeholders + ")";
+        try {
+            jdbcTemplate.query(sql, (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                cache.put(rs.getString("district"), rs.getString("full_path"));
+            }, areas.toArray());
+        } catch (Exception e) {
+            log.warn("MemberConvert: failed to load region path cache: {}", e.getMessage());
+        }
+        log.info("MemberConvert: region path cache loaded {} entries", cache.size());
+        return cache;
+    }
+
+    /** 拼接完整地址：省+市+区县 + 详细地址 */
+    private String buildFullAddress(String areaName, String detailedAddress,
+                                     Map<String, String> regionPathCache) {
+        StringBuilder sb = new StringBuilder();
+        // 省市区前缀
+        if (areaName != null && !areaName.isBlank()) {
+            String prefix = regionPathCache.get(areaName);
+            if (prefix != null && !prefix.isBlank()) {
+                sb.append(prefix);
+            } else {
+                sb.append(areaName); // 回退：直接用 area_name
+            }
+        }
+        // 详细地址
+        if (detailedAddress != null && !detailedAddress.isBlank()) {
+            sb.append(detailedAddress);
+        }
+        return sb.toString();
     }
 
     private ImportResult buildResult(int updated, int created, int skipped, int failed,
