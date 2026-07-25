@@ -48,6 +48,21 @@ public class GasUserController {
         this.gasDataSourceConfig = gasDataSourceConfig;
     }
 
+    /** Get current org short_name for gas import default. */
+    @GetMapping("/org-short-name")
+    public R<?> orgShortName() {
+        Long corpId = null;
+        try { corpId = com.aip.sdk.security.SecurityUtils.getCurrentCorpId(); } catch (Exception ignored) {}
+        if (corpId == null || corpId == 0) return R.ok(Map.of("shortName", ""));
+        try {
+            String sn = jdbcTemplate.queryForObject(
+                "SELECT short_name FROM ai_platform.sys_corp WHERE id=?", String.class, corpId);
+            return R.ok(Map.of("shortName", sn != null ? sn : ""));
+        } catch (Exception e) {
+            return R.ok(Map.of("shortName", ""));
+        }
+    }
+
     /** Paginated list with optional community filter and keyword search. */
     @GetMapping
     public R<?> list(@RequestParam(defaultValue = "1") int pageNum,

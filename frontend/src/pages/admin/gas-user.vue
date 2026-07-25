@@ -457,14 +457,19 @@ async function doSingleEdit() {
 }
 
 // ── Import from gas platform ──
-function openImport() {
+async function openImport() {
   importState.value = 'idle'
   importMsg.value = ''
   importResult.value = null
   importPreviewResult.value = null
   importTaskId.value = null
+  // 默认填入当前组织的 short_name
   importCompanyName.value = ''
   showImport.value = true
+  try {
+    const r = await api.gasUserOrgShortName()
+    if (r?.shortName) importCompanyName.value = r.shortName
+  } catch (e) { /* ignore */ }
 }
 function closeImport() {
   if (importState.value === 'importing' || importState.value === 'querying') {

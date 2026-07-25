@@ -221,6 +221,7 @@ export const api = {
   gasUserImportSubmit: (companyName) => request({url:'/api/ops/admin/gas-user/import-from-gas-platform',method:'POST',data:{companyName}}),
   gasUserImportStatus: (taskId) => request({url:'/api/ops/admin/gas-user/import/'+taskId+'/status'}),
   gasUserPreviewFromPlatform: (companyName) => request({url:'/api/ops/admin/gas-user/preview-from-gas-platform',method:'POST',data:{companyName}}),
+  gasUserOrgShortName: () => request({url:'/api/ops/admin/gas-user/org-short-name'}),
   // 燃气用户 — 批量转化会员（异步）
   gasUserConvertSubmit: (data) => request({url:'/api/ops/admin/gas-user/convert/submit',method:'POST',data}),
   gasUserConvertStatus: (taskId) => request({url:'/api/ops/admin/gas-user/convert/'+taskId+'/status'}),
