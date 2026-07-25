@@ -46,6 +46,12 @@
     <!-- ═══ Live room — prominent below cover for live_reserve ═══ -->
     <view v-if="liveRoom && liveStatus" class="live-section section">
       <LiveStatusCard :liveRoom="liveRoom" :liveStatus="liveStatus" :activityTitle="act?.title" />
+      <!-- 视频号主页入口 -->
+      <view v-if="liveRoom?.finderUsername" class="channel-home-entry" @click="openChannelHome">
+        <text class="channel-home-icon">🏠</text>
+        <text class="channel-home-text">前往视频号主页</text>
+        <text class="channel-home-arrow">›</text>
+      </view>
     </view>
 
     <!-- ═══ Info ═══ -->
@@ -155,7 +161,7 @@ import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { BASE_URL } from '@/config'
 import { assetUrl, onImgError } from '@/utils/image.js'
 import LiveStatusCard from '@/components/LiveStatusCard.vue'
-import { openChannelsLive } from '@/utils/jssdk.js'
+import { openChannelsLive, openChannelsProfile } from '@/utils/jssdk.js'
 
 const act = ref(null), liveRoom = ref(null), liveStatus = ref(null), products = ref([])
 const loadErr = ref('')
@@ -386,6 +392,20 @@ function openLiveRoom() {
   openChannelsLive(liveRoom.value.finderUsername)
 }
 
+function openChannelHome() {
+  if (!liveRoom.value?.finderUsername) {
+    uni.showToast({ title: '视频号信息不完整', icon: 'none' })
+    return
+  }
+  if (!/micromessenger/i.test(navigator.userAgent)) {
+    qrError.value = false
+    showGuide.value = true
+    return
+  }
+
+  openChannelsProfile(liveRoom.value.finderUsername)
+}
+
 async function doBook() {
   try {
     await req('/api/ops/activity/' + act.value.id + '/book', 'POST')
@@ -603,6 +623,20 @@ function req(url, method, data) {
 
 /* ── Live section highlight ── */
 .live-section { background: linear-gradient(135deg, #fff5f0, #fff); border: 2rpx solid rgba(255, 107, 53, 0.15); padding: 0; }
+
+/* ── Channel homepage entry ── */
+.channel-home-entry {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  padding: 24rpx 28rpx 32rpx;
+  border-top: 1rpx solid rgba(255, 107, 53, 0.12);
+  cursor: pointer;
+}
+.channel-home-icon { font-size: 28rpx; }
+.channel-home-text { font-size: 28rpx; color: #FF6B35; font-weight: 500; }
+.channel-home-arrow { font-size: 32rpx; color: #FF6B35; margin-left: 4rpx; }
 
 /* ── Non-WeChat guide overlay ── */
 .guide-mask {

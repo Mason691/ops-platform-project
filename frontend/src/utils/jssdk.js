@@ -134,9 +134,31 @@ export function openChannelsLive(finderUsername) {
 }
 
 /**
- * 视频号 finder-preview URL（观众端入口）
+ * 视频号 finder-preview URL（直播间入口）
  */
 export function getFinderPreviewUrl(finderUsername) {
   return 'https://channels.weixin.qq.com/finder-preview/pages/live?finderUserName='
+    + encodeURIComponent(finderUsername)
+}
+
+/**
+ * 打开微信视频号主页（非具体直播间）。
+ * 使用 finder-preview profile 页面跳转。
+ *
+ * @param {string} finderUsername 视频号 ID
+ */
+export function openChannelsProfile(finderUsername) {
+  if (!finderUsername) {
+    uni.showToast({ title: '视频号信息不完整', icon: 'none' })
+    return
+  }
+  window.location.href = getChannelsProfileUrl(finderUsername)
+}
+
+/**
+ * 视频号主页 URL（finder-preview profile 入口）
+ */
+export function getChannelsProfileUrl(finderUsername) {
+  return 'https://channels.weixin.qq.com/finder-preview/pages/profile?finderUserName='
     + encodeURIComponent(finderUsername)
 }
