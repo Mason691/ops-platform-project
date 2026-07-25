@@ -375,7 +375,10 @@ function handleAction() {
 }
 
 function openLiveRoom() {
-  if (!liveRoom.value?.jumpUrl) {
+  const url = liveRoom.value?.schemeTicket
+    ? 'weixin://dl/business/?ticket=' + encodeURIComponent(liveRoom.value.schemeTicket)
+    : liveRoom.value?.jumpUrl
+  if (!url) {
     uni.showToast({ title: '直播链接未配置', icon: 'none' })
     return
   }
@@ -388,11 +391,14 @@ function openLiveRoom() {
     showGuide.value = true
     return
   }
-  openChannelsLive(liveRoom.value.jumpUrl)
+  window.location.href = url
 }
 
 function openChannelHome() {
-  if (!liveRoom.value?.jumpUrl) {
+  const url = liveRoom.value?.schemeTicket
+    ? 'weixin://dl/business/?ticket=' + encodeURIComponent(liveRoom.value.schemeTicket)
+    : liveRoom.value?.jumpUrl
+  if (!url) {
     uni.showToast({ title: '视频号链接未配置', icon: 'none' })
     return
   }
@@ -401,7 +407,7 @@ function openChannelHome() {
     showGuide.value = true
     return
   }
-  openChannelsLive(liveRoom.value.jumpUrl)
+  window.location.href = url
 }
 
 async function doBook() {

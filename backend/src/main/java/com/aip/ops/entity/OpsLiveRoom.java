@@ -80,4 +80,8 @@ public class OpsLiveRoom extends BaseEntity {
     /** 公众号文章跳转链接（含视频号卡片），优先于 finder_username 跳转 */
     @TableField("jump_url")
     private String jumpUrl;
+
+    /** 微信视频号 scheme ticket（用于 weixin://dl/business/?ticket=xxx 直跳） */
+    @TableField("scheme_ticket")
+    private String schemeTicket;
 }

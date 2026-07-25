@@ -119,26 +119,22 @@ export function wxStopRecordAndUpload() {
 // ── 视频号直播跳转（共享工具）──────────────────────────────────────
 
 /**
- * 跳转到视频号直播间。
- * 通过管理员配置的公众号文章链接（文章内嵌视频号卡片）实现跳转。
- * 微信不开放 H5 直接跳转视频号的 API，因此通过文章作为跳板。
+ * 通过 weixin:// scheme 跳转到视频号。
+ * 接受 ticket（由管理员从微信后台获取），拼装 scheme URL 后跳转。
  *
- * @param {string} url 跳转链接（公众号文章 URL 或视频号主页链接）
+ * @param {string} ticket 微信视频号 scheme ticket
  */
-export function openChannelsLive(url) {
-  if (!url) {
+export function openChannelsLive(ticket) {
+  if (!ticket) {
     uni.showToast({ title: '直播链接未配置', icon: 'none' })
     return
   }
-  window.location.href = url
+  window.location.href = 'weixin://dl/business/?ticket=' + encodeURIComponent(ticket)
 }
 
 /**
- * 跳转到视频号主页。
- * 同 openChannelsLive，语义上用于「前往视频号主页」入口。
- *
- * @param {string} url 跳转链接
+ * 跳转到视频号主页（与 openChannelsLive 相同）。
  */
-export function openChannelsProfile(url) {
-  openChannelsLive(url)
+export function openChannelsProfile(ticket) {
+  openChannelsLive(ticket)
 }

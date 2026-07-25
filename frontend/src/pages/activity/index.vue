@@ -165,8 +165,9 @@ async function goDetail(id) {
   if (a && a.type === 'live_reserve' && isWechat()) {
     try {
       var detail = await api('/api/ops/activity/' + id, 'GET')
-      var url = detail && detail.liveRoom && detail.liveRoom.jumpUrl
-      if (url) { openChannelsLive(url); return }
+      var lr = detail && detail.liveRoom
+      if (lr && lr.schemeTicket) { openChannelsLive(lr.schemeTicket); return }
+      if (lr && lr.jumpUrl) { window.location.href = lr.jumpUrl; return }
     } catch (e) { /* fall through to detail page */ }
   }
   uni.navigateTo({ url: '/pages/activity/detail?id=' + id })
