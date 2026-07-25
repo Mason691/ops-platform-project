@@ -56,6 +56,7 @@
 <script setup>
 import {ref,onMounted} from 'vue';import {api} from '@/api/index'
 import { assetUrl, onImgError } from '@/utils/image.js'
+import { openChannelsLive } from '@/utils/jssdk.js'
 const categories=ref([]),activeCatId=ref(null),products=ref([]),loading=ref(false),showGuide=ref(false),liveRoom=ref(null)
 onMounted(async()=>{
   try{const lr=await api.activeLiveRooms();liveRoom.value=(lr||[])[0]||null}catch{}
@@ -89,22 +90,7 @@ function jumpToMiniProgram(cfg){
 }
 function openLive(room){
   if(!isWechat()){uni.showToast({title:'请在微信中打开直播间',icon:'none'});return}
-  if(!room.finderUsername){uni.showToast({title:'直播信息不完整',icon:'none'});return}
-
-  var realWx = window.wx || window.WX
-            || (typeof wx !== 'undefined' && wx.openChannelsLive ? wx : null)
-  if (realWx && typeof realWx.openChannelsLive === 'function'){
-    realWx.openChannelsLive({
-      finderUserName: room.finderUsername,
-      success: function(){},
-      fail: function(err){
-        console.warn('[Live] fail:', err)
-        uni.showToast({title:'请在微信中搜索视频号观看',icon:'none',duration:3000})
-      }
-    })
-  } else {
-    uni.showToast({title:'请在微信中搜索视频号 "'+room.finderUsername+'" 观看',icon:'none',duration:3000})
-  }
+  openChannelsLive(room.finderUsername)
 }
 </script>
 <style scoped>

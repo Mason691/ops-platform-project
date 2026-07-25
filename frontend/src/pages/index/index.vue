@@ -61,6 +61,7 @@
 <script setup>
 import {ref,computed,onMounted} from 'vue';import {api} from '@/api/index'
 import { assetUrl, onImgError } from '@/utils/image.js'
+import { openChannelsLive } from '@/utils/jssdk.js'
 const isLogin=ref(false),points=ref(0),products=ref([])
 const banners=ref([])           // from homeData
 const homeVideos=ref([])        // from homeData
@@ -105,29 +106,7 @@ function openLive(room){
   if(!/micromessenger/i.test(navigator.userAgent)){
     uni.showToast({title:'请在微信中打开直播间',icon:'none'});return
   }
-  if(!room.finderUsername){uni.showToast({title:'直播信息不完整',icon:'none'});return}
-
-  // uni-app's module named 'wx' shadows window.wx. Must reach through window.
-  var realWx = window.wx       // WeChat WebView global
-            || window.WX        // some builds use WX
-            || (typeof wx !== 'undefined' && wx.openChannelsLive ? wx : null)
-  console.log('[Live] realWx:', typeof realWx, 'openChannelsLive:', typeof (realWx && realWx.openChannelsLive))
-
-  if (realWx && typeof realWx.openChannelsLive === 'function'){
-    realWx.openChannelsLive({
-      finderUserName: room.finderUsername,
-      success: function(){ console.log('[Live] openChannelsLive success') },
-      fail: function(err){
-        console.warn('[Live] openChannelsLive fail:', err)
-        uni.showToast({title:'请在微信中搜索视频号 "'+room.finderUsername+'" 观看',icon:'none'})
-      }
-    })
-  } else {
-    // openChannelsLive = undefined: 测试号(wxe0eb0deb7d251505)不支持视频号API。
-    // 正式环境需: 1)认证公众号(wx095b91409f8ecbfe) 2)在mp.weixin.qq.com关联视频号sphaxIEW2Etr8EL
-    console.warn('[Live] openChannelsLive=undefined — 测试号限制, 请在微信中搜索视频号观看')
-    uni.showToast({title:'请在微信中搜索视频号观看',icon:'none',duration:2000})
-  }
+  openChannelsLive(room.finderUsername)
 }
 </script>
 <style scoped>

@@ -39,6 +39,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { assetUrl, onImgError } from '@/utils/image.js'
+import { openChannelsLive } from '@/utils/jssdk.js'
 
 const rooms = ref([])
 const showGuide = ref(false)
@@ -68,27 +69,7 @@ onMounted(async () => {
 
 function openLive(room) {
   if (!isWechat()) { showGuide.value = true; return }
-  if (!room.finderUsername) {
-    uni.showToast({ title: '直播信息不完整，请联系管理员', icon: 'none' })
-    return
-  }
-
-  // uni-app shadows global wx — reach through window.wx
-  var realWx = window.wx || window.WX
-            || (typeof wx !== 'undefined' && wx.openChannelsLive ? wx : null)
-
-  if (realWx && typeof realWx.openChannelsLive === 'function') {
-    realWx.openChannelsLive({
-      finderUserName: room.finderUsername,
-      success: function(){},
-      fail: function(err) {
-        console.warn('[Live] fail:', err)
-        uni.showToast({ title: '请在微信中搜索视频号观看直播', icon: 'none', duration: 3000 })
-      }
-    })
-  } else {
-    uni.showToast({ title: '请在微信中搜索视频号 "'+room.finderUsername+'" 观看直播', icon: 'none', duration: 3000 })
-  }
+  openChannelsLive(room.finderUsername)
 }
 </script>
 
