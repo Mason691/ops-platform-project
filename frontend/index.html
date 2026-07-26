@@ -186,4 +186,39 @@
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
   </body>
+  <!-- 视频号跳转小程序全局容器（在 Vue 之外，避免编译器处理 script 标签） -->
+  <div id="mp-launch-container" style="display:none;position:fixed;top:0;left:0;z-index:9999">
+    <wx-open-launch-weapp
+      id="mp-launch-tag"
+      appid="wx095b91409f8ecbfe"
+      path=""
+      style="position:absolute;top:0;left:0;width:100%;height:100%"
+    >
+      <script type="text/wxtag-template">
+        <style>.mp-overlay{width:100%;height:100%;opacity:0;display:block}</style>
+        <div class="mp-overlay"></div>
+      </script>
+    </wx-open-launch-weapp>
+  </div>
+  <script>
+    // 全局工具：将微信开放标签覆盖到指定按钮上（一次点击即可唤起小程序）
+    window.__openMp = function(el, finderUsername) {
+      var c = document.getElementById('mp-launch-container')
+      var t = document.getElementById('mp-launch-tag')
+      if (!c || !t || !el) return
+      t.setAttribute('path', 'pages/channels/live?finderUserName=' + encodeURIComponent(finderUsername || ''))
+      var r = el.getBoundingClientRect()
+      c.style.display = 'block'
+      c.style.position = 'fixed'
+      c.style.top = r.top + 'px'
+      c.style.left = r.left + 'px'
+      c.style.width = r.width + 'px'
+      c.style.height = r.height + 'px'
+      c.style.zIndex = '9999'
+    }
+    window.__hideMp = function() {
+      var c = document.getElementById('mp-launch-container')
+      if (c) c.style.display = 'none'
+    }
+  </script>
 </html>

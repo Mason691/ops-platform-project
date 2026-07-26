@@ -78,16 +78,7 @@
         <text v-else class="lsc-viewers lsc-viewers-placeholder">
           🔴 正在直播
         </text>
-        <MpLauncher
-          v-if="isWechatLive"
-          :finder-username="liveRoom.finderUsername"
-          width="100%"
-        >
-          <view class="lsc-watch-btn">
-            <text>📺 点击观看直播</text>
-          </view>
-        </MpLauncher>
-        <view v-else class="lsc-watch-btn" @click="openLive">
+        <view class="lsc-watch-btn" @click="openLive">
           <text>📺 点击观看直播</text>
         </view>
         <text class="lsc-hint">将在微信视频号中打开</text>
@@ -137,7 +128,6 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { BASE_URL } from '@/config'
 import { assetUrl } from '@/utils/image.js'
 import { openChannelsLive } from '@/utils/jssdk.js'
-import MpLauncher from '@/components/MpLauncher.vue'
 
 const props = defineProps({
   liveRoom: { type: Object, required: true },
@@ -155,12 +145,6 @@ const cd = ref({ d: 0, h: 0, m: 0, s: 0 })
 let countdownTimer = null
 
 const displayStatus = computed(() => props.liveStatus?.displayStatus || 'upcoming')
-
-const isWechatLive = computed(() => {
-  return displayStatus.value === 'live'
-    && props.liveRoom?.finderUsername
-    && /micromessenger/i.test(navigator.userAgent)
-})
 
 const badgeText = computed(() => {
   switch (displayStatus.value) {
@@ -278,7 +262,10 @@ function isWechat() { return /micromessenger/i.test(navigator.userAgent) }
 
 function openLive() {
   if (!isWechat()) { qrError.value = false; showGuide.value = true; return }
-  if (props.liveRoom?.finderUsername) { openChannelsLive(props.liveRoom.finderUsername); return }
+  if (props.liveRoom?.finderUsername && window.__openMp) {
+    window.__openMp(props.liveRoom.finderUsername)
+    return
+  }
   if (props.liveRoom?.jumpUrl) { window.location.href = props.liveRoom.jumpUrl; return }
   uni.showToast({ title: '直播链接未配置', icon: 'none' })
 }
