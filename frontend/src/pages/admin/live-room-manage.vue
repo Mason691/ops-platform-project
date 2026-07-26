@@ -88,7 +88,7 @@
         <text class="lrm-qr-title">扫码观看直播</text>
         <view class="lrm-qr-box" id="qrCodeBox"></view>
         <text class="lrm-qr-info">{{ qrData.liveTitle }}</text>
-        <text class="lrm-qr-info">视频号: {{ qrData.finderUsername }}</text>
+        <text class="lrm-qr-info" v-if="qrData.liveLink">直播链接已配置</text>
         <button class="lrm-btn lrm-btn--cancel" @click="qrVisible = false" style="margin-top:24rpx">关闭</button>
       </view>
     </view>
@@ -105,7 +105,7 @@ const rooms = ref([])
 const editingId = ref(null)
 const editForm = reactive({ viewerCount: 0, replayUrl: '', description: '' })
 const qrVisible = ref(false)
-const qrData = reactive({ pagePath: '', finderUsername: '', liveTitle: '' })
+const qrData = reactive({ pagePath: '', liveLink: '', liveTitle: '' })
 
 // ── Init ──
 onMounted(async () => {
@@ -193,7 +193,7 @@ async function showQrCode(room) {
   try {
     const data = await api.adminLiveRoomQrCode(room.id)
     qrData.pagePath = data.pagePath || '/pages/live/index'
-    qrData.finderUsername = data.finderUsername || room.finderUsername
+    qrData.liveLink = data.liveLink || room.liveLink
     qrData.liveTitle = data.liveTitle || room.liveTitle
     qrVisible.value = true
     // Generate QR code after DOM renders

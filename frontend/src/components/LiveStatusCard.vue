@@ -81,7 +81,7 @@
         <view class="lsc-watch-btn" @click="openLive">
           <text>📺 点击观看直播</text>
         </view>
-        <text class="lsc-hint">将在微信视频号中打开</text>
+        <text class="lsc-hint">即将跳转至直播间</text>
       </view>
 
       <!-- ═ Ended: replay or finished ═ -->

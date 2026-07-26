@@ -47,7 +47,7 @@
     <view v-if="liveRoom && liveStatus" class="live-section section">
       <LiveStatusCard :liveRoom="liveRoom" :liveStatus="liveStatus" :activityTitle="act?.title" />
       <!-- 视频号主页入口 -->
-      <view v-if="liveRoom?.finderUsername" class="channel-home-entry" @click="openChannelHome">
+      <view v-if="liveRoom?.liveLink" class="channel-home-entry" @click="openChannelHome">
         <text class="channel-home-icon">🏠</text>
         <text class="channel-home-text">前往视频号主页</text>
         <text class="channel-home-arrow">›</text>

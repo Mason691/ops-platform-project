@@ -647,19 +647,4 @@ public class AdminController {
         catch (Exception e) { return java.time.LocalDateTime.now(); }
     }
 
-    /** Map common WeChat API error codes to human-readable hints */
-    private String resolveWechatErrorHint(Object errcode, Object errmsg) {
-        String code = errcode != null ? errcode.toString() : "";
-        String msg = errmsg != null ? errmsg.toString() : "未知错误";
-        switch (code) {
-            case "40125": return "appSecret 无效（40125）— 请检查公众号配置中的 appSecret 是否正确";
-            case "40001": return "access_token 无效（40001）— appSecret 可能被刷新，请重新测试";
-            case "40013": return "无效的 appId（40013）— 请检查公众号配置中的 appId";
-            case "48001": return "API 功能未授权（48001）— 公众号未获得该接口权限，请检查公众平台授权";
-            case "41001": return "缺少 access_token 参数（41001）";
-            case "42001": return "access_token 已过期（42001）";
-            case "41002": return "缺少 appId 参数（41002）";
-            default: return "errcode=" + code + ", errmsg=" + msg;
-        }
-    }
 }
