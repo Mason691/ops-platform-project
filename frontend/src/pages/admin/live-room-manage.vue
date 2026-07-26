@@ -25,7 +25,7 @@
         <!-- Info -->
         <view class="lrm-card-body">
           <text class="lrm-card-title">{{ room.liveTitle }}</text>
-          <text class="lrm-card-finder">视频号: {{ room.finderUsername }}</text>
+          <text class="lrm-card-link" v-if="room.liveLink">🔗 直播链接已配置</text>
           <text class="lrm-card-time" v-if="room.startTime">
             开播: {{ fmtFull(room.startTime) }}
           </text>
