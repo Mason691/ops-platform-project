@@ -54,6 +54,9 @@ function syncDocumentTitle() {
 export function createApp() {
   const app = createSSRApp(App)
 
+  // 注册微信开放标签为自定义元素，避免 Vue 警告
+  app.config.compilerOptions.isCustomElement = (tag) => tag === 'wx-open-launch-weapp'
+
   // ── 全局混入：每个页面 onShow 时同步 document.title ──
   app.mixin({
     onShow() {

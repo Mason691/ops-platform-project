@@ -126,7 +126,18 @@
         <text class="share-icon">↗</text>
         <text>分享</text>
       </view>
-      <view class="action-btn" :class="btnClass" @click="handleAction">
+      <MpLauncher
+        v-if="showMpLauncher"
+        :finder-username="liveRoom.finderUsername"
+        class="action-btn-wrap"
+        width="100%"
+        height="80rpx"
+      >
+        <view class="action-btn" :class="btnClass">
+          {{ btnText }}
+        </view>
+      </MpLauncher>
+      <view v-else class="action-btn" :class="btnClass" @click="handleAction">
         {{ btnText }}
       </view>
     </view>
@@ -162,6 +173,7 @@ import { BASE_URL } from '@/config'
 import { assetUrl, onImgError } from '@/utils/image.js'
 import LiveStatusCard from '@/components/LiveStatusCard.vue'
 import { openChannelsLive } from '@/utils/jssdk.js'
+import MpLauncher from '@/components/MpLauncher.vue'
 
 const act = ref(null), liveRoom = ref(null), liveStatus = ref(null), products = ref([])
 const loadErr = ref('')
@@ -336,6 +348,14 @@ const btnText = computed(() => {
   if (statusText.value === '进行中') return '立即参与'
   return '已结束'
 })
+// 是否展示小程序启动标签（仅在微信内、直播类型、直播中时）
+const showMpLauncher = computed(() => {
+  return act.value?.type === 'live_reserve'
+    && liveRoom.value?.finderUsername
+    && liveStatus.value?.displayStatus === 'live'
+    && /micromessenger/i.test(navigator.userAgent)
+})
+
 const btnClass = computed(() => {
   if (act.value?.type === 'live_reserve') {
     if (liveStatus.value?.displayStatus === 'live') return 'btn-live'
@@ -590,6 +610,7 @@ function req(url, method, data) {
   align-items: center; justify-content: center; font-size: 22rpx; color: #666;
 }
 .share-icon { font-size: 28rpx; }
+.action-btn-wrap { flex: 1; }
 .action-btn {
   flex: 1; height: 80rpx; border-radius: 40rpx;
   display: flex; align-items: center; justify-content: center;
