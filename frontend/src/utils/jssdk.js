@@ -119,8 +119,8 @@ export function wxStopRecordAndUpload() {
 // ── 视频号直播跳转（共享工具）──────────────────────────────────────
 
 /**
- * 通过微信 URL Link API 跳转到小程序视频号页面。
- * 调用后端 /api/public-account/mp-url-link 获取生成的短链。
+ * 通过 index.html 中的 wx-open-launch-weapp 标签跳转到小程序视频号。
+ * 标签位于 Vue 应用之外，由全局 __openMp 函数动态创建并定位。
  *
  * @param {string} finderUsername 视频号 finder_username
  */
@@ -129,23 +129,11 @@ export function openChannelsLive(finderUsername) {
     uni.showToast({ title: '直播信息不完整', icon: 'none' })
     return
   }
-  uni.showLoading({ title: '加载中...' })
-  uni.request({
-    url: '/api/public-account/mp-url-link?finderUserName=' + encodeURIComponent(finderUsername),
-    method: 'GET',
-    success: function(res) {
-      uni.hideLoading()
-      if (res.data && res.data.code === 200 && res.data.data && res.data.data.urlLink) {
-        window.location.href = res.data.data.urlLink
-      } else {
-        uni.showToast({ title: '跳转失败，请稍后再试', icon: 'none' })
-      }
-    },
-    fail: function() {
-      uni.hideLoading()
-      uni.showToast({ title: '网络错误，请稍后再试', icon: 'none' })
-    }
-  })
+  if (window.__openMp) {
+    window.__openMp(null, finderUsername)
+  } else {
+    uni.showToast({ title: '请在微信中打开', icon: 'none' })
+  }
 }
 
 /**
