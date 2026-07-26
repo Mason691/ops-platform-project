@@ -5,7 +5,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 
 const props = defineProps({
   finderUsername: { type: String, required: true },
@@ -17,6 +17,7 @@ const emit = defineEmits(['launch', 'error'])
 
 const container = ref(null)
 const appid = 'wx095b91409f8ecbfe'
+let tagEl = null
 
 const isWechat = () => {
   // #ifdef H5
@@ -39,37 +40,54 @@ const wrapStyle = computed(() => {
 function onLaunch(e) { emit('launch', e) }
 function onError(e) { console.error('[MpLauncher] error:', e); emit('error', e) }
 
-function renderTag() {
+function createTag() {
   if (!isWechat() || !container.value) return
 
+  // 获取宿主 DOM 元素
   const el = container.value.$el || container.value
-  const html = '<wx-open-launch-weapp'
-    + ' appid="' + appid + '"'
-    + ' path="' + mpPath.value + '"'
-    + ' style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:1"'
-    + '><script type="text/wxtag-template"><style>.mp-tag-btn{width:100%;height:100%;opacity:0}</style><div class="mp-tag-btn"></div><\/script><\/wx-open-launch-weapp>'
+  if (!el || !el.appendChild) return
 
-  // 移除旧的标签（如果有）
-  const old = el.querySelector('wx-open-launch-weapp')
-  if (old) old.remove()
-
-  // 用原生 DOM 注入，绕过 Vue 编译器保留 <script> 标签
-  const temp = document.createElement('div')
-  temp.innerHTML = html
-  const tag = temp.firstChild
-  if (tag) {
-    tag.addEventListener('launch', onLaunch)
-    tag.addEventListener('error', onError)
-    el.appendChild(tag)
+  // 移除旧标签
+  if (tagEl && tagEl.parentNode) {
+    tagEl.removeEventListener('launch', onLaunch)
+    tagEl.removeEventListener('error', onError)
+    tagEl.parentNode.removeChild(tagEl)
+    tagEl = null
   }
+
+  // 用 DOM API 创建元素（innerHTML 会丢弃 script 标签）
+  tagEl = document.createElement('wx-open-launch-weapp')
+  tagEl.setAttribute('appid', appid)
+  tagEl.setAttribute('path', mpPath.value)
+  tagEl.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:1'
+  tagEl.addEventListener('launch', onLaunch)
+  tagEl.addEventListener('error', onError)
+
+  // 创建必需的 <script type="text/wxtag-template"> 子元素
+  const script = document.createElement('script')
+  script.type = 'text/wxtag-template'
+  script.textContent = '<style>.mp-btn{width:100%;height:100%;opacity:0}</style><div class="mp-btn"></div>'
+  tagEl.appendChild(script)
+
+  el.appendChild(tagEl)
 }
 
 onMounted(() => {
-  renderTag()
+  // 延迟一帧确保 DOM 就绪
+  setTimeout(createTag, 100)
 })
 
 watch(() => props.finderUsername, () => {
-  renderTag()
+  setTimeout(createTag, 100)
+})
+
+onBeforeUnmount(() => {
+  if (tagEl) {
+    tagEl.removeEventListener('launch', onLaunch)
+    tagEl.removeEventListener('error', onError)
+    if (tagEl.parentNode) tagEl.parentNode.removeChild(tagEl)
+    tagEl = null
+  }
 })
 </script>
 
