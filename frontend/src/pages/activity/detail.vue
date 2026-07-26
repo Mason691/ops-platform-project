@@ -223,10 +223,26 @@ async function fetchDetail(activityId) {
       liveStatus.value = res.liveStatus
       lastDisplayStatus = cur
     }
+    // 直播中 + 微信内 → 预定位小程序标签
+    positionMpTag()
   } catch (e) {
     loadErr.value = '加载失败，请返回重试'
     console.error(e)
   }
+}
+
+function positionMpTag() {
+  if (!window.__openMp || !actionBtn.value) return
+  if (act.value?.type !== 'live_reserve') return
+  if (liveStatus.value?.displayStatus !== 'live') { window.__hideMp && window.__hideMp(); return }
+  if (!/micromessenger/i.test(navigator.userAgent)) return
+  if (!liveRoom.value?.finderUsername) return
+  // 延迟确保 DOM 渲染完毕
+  setTimeout(function() {
+    var el = actionBtn.value
+    if (el && el.$el) el = el.$el
+    window.__openMp(el, liveRoom.value.finderUsername)
+  }, 500)
 }
 
 function schedulePolling(activityId) {
@@ -376,10 +392,8 @@ function handleAction() {
 }
 
 function openLiveRoom() {
-  if (!liveRoom.value?.finderUsername && !liveRoom.value?.jumpUrl) {
-    uni.showToast({ title: '直播链接未配置', icon: 'none' })
-    return
-  }
+  // 覆盖层已定位时，点击会被 wx-open-launch-weapp 拦截
+  // 此函数仅在覆盖层未显示时被调用（非微信/已结束/降级场景）
   if (liveStatus.value?.displayStatus === 'ended') {
     uni.showToast({ title: '直播已结束', icon: 'none' })
     return
@@ -389,14 +403,10 @@ function openLiveRoom() {
     showGuide.value = true
     return
   }
-  if (liveRoom.value?.finderUsername && window.__openMp) {
-    var el = actionBtn.value
-    if (el && el.$el) el = el.$el
-    window.__openMp(el, liveRoom.value.finderUsername)
-    return
-  }
+  // 降级：尝试重新定位标签
+  if (liveRoom.value?.finderUsername) { positionMpTag(); return }
   if (liveRoom.value?.jumpUrl) { window.location.href = liveRoom.value.jumpUrl; return }
-  uni.showToast({ title: '跳转失败，请稍后再试', icon: 'none' })
+  uni.showToast({ title: '直播链接未配置', icon: 'none' })
 }
 
 function openChannelHome() {
