@@ -25,10 +25,6 @@ public class OpsLiveRoom extends BaseEntity {
     @TableField("merchant_id")
     private Long merchantId;
 
-    /** 视频号 finderUserName（如 sphxxxx@finder） */
-    @TableField("finder_username")
-    private String finderUsername;
-
     /** 直播标题 */
     @TableField("live_title")
     private String liveTitle;
@@ -77,15 +73,7 @@ public class OpsLiveRoom extends BaseEntity {
     @TableField("description")
     private String description;
 
-    /** 公众号文章跳转链接（含视频号卡片），优先于 finder_username 跳转 */
-    @TableField("jump_url")
-    private String jumpUrl;
-
-    /** 微信视频号 scheme ticket（用于 weixin://dl/business/?ticket=xxx 直跳） */
-    @TableField("scheme_ticket")
-    private String schemeTicket;
-
-    /** 第三方直播链接（腾讯云/阿里云等），优先于 finder_username */
+    /** 第三方直播链接（腾讯云/阿里云等） */
     @TableField("live_link")
     private String liveLink;
 }

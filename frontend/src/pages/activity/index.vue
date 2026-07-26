@@ -70,7 +70,7 @@
 import { ref, onMounted, reactive } from 'vue'
 import { BASE_URL } from '@/config'
 import { assetUrl, onImgError } from '@/utils/image.js'
-import { isWechat, openChannelsLive } from '@/utils/jssdk.js'
+import { isWechat } from '@/utils/jssdk.js'
 
 const list = ref([])
 const loading = ref(false)
@@ -167,8 +167,6 @@ async function goDetail(id) {
       var detail = await api('/api/ops/activity/' + id, 'GET')
       var lr = detail && detail.liveRoom
       if (lr && lr.liveLink) { window.location.href = lr.liveLink; return }
-      if (lr && lr.finderUsername) { openChannelsLive(lr.finderUsername); return }
-      if (lr && lr.jumpUrl) { window.location.href = lr.jumpUrl; return }
     } catch (e) { /* fall through to detail page */ }
   }
   uni.navigateTo({ url: '/pages/activity/detail?id=' + id })
