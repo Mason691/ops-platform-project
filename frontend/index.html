@@ -201,20 +201,32 @@
     </wx-open-launch-weapp>
   </div>
   <script>
-    // 全局工具：将微信开放标签覆盖到指定按钮上（一次点击即可唤起小程序）
+    // 全局工具：显示微信开放标签覆盖层
+    // 调用方式1: __openMp(element, finderUsername) — 定位到指定元素上方
+    // 调用方式2: __openMp(null, finderUsername) — 全屏覆盖
     window.__openMp = function(el, finderUsername) {
       var c = document.getElementById('mp-launch-container')
       var t = document.getElementById('mp-launch-tag')
-      if (!c || !t || !el) return
+      if (!c || !t) return
       t.setAttribute('path', 'pages/channels/live?finderUserName=' + encodeURIComponent(finderUsername || ''))
-      var r = el.getBoundingClientRect()
-      c.style.display = 'block'
+      if (el) {
+        var r = el.getBoundingClientRect()
+        c.style.top = r.top + 'px'
+        c.style.left = r.left + 'px'
+        c.style.width = r.width + 'px'
+        c.style.height = r.height + 'px'
+      } else {
+        c.style.top = '0'
+        c.style.left = '0'
+        c.style.width = '100vw'
+        c.style.height = '100vh'
+      }
       c.style.position = 'fixed'
-      c.style.top = r.top + 'px'
-      c.style.left = r.left + 'px'
-      c.style.width = r.width + 'px'
-      c.style.height = r.height + 'px'
-      c.style.zIndex = '9999'
+      c.style.display = 'block'
+      c.style.zIndex = '99999'
+      // 10 秒后自动隐藏
+      clearTimeout(window.__mpTimer)
+      window.__mpTimer = setTimeout(function(){ c.style.display = 'none' }, 10000)
     }
     window.__hideMp = function() {
       var c = document.getElementById('mp-launch-container')
