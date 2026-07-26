@@ -118,39 +118,23 @@ export function wxStopRecordAndUpload() {
 
 // ── 视频号直播跳转（共享工具）──────────────────────────────────────
 
-const MP_APPID = 'wx095b91409f8ecbfe'
-const MP_PATH = 'pages/channels/live'
-
 /**
- * 通过小程序 scheme 跳转到视频号。
- * H5 → weixin:// scheme 唤起小程序 → 小程序内调用 wx.openChannelsUserProfile → 视频号主页。
+ * 跳转到视频号（已由 MpLauncher 组件处理，此函数作为非微信环境降级）。
+ * 优先使用页面上的 wx-open-launch-weapp 标签，此函数仅用于降级场景。
  *
- * @param {string} finderUsername 视频号 finder_username
+ * @param {string} url 跳转链接
  */
-export function openChannelsLive(finderUsername) {
-  if (!finderUsername) {
-    uni.showToast({ title: '直播信息不完整', icon: 'none' })
+export function openChannelsLive(url) {
+  if (!url) {
+    uni.showToast({ title: '直播链接未配置', icon: 'none' })
     return
   }
-  window.location.href = buildMpScheme(finderUsername)
+  window.location.href = url
 }
 
 /**
- * 跳转到视频号主页（与 openChannelsLive 相同）。
+ * 跳转到视频号主页。
  */
-export function openChannelsProfile(finderUsername) {
-  openChannelsLive(finderUsername)
-}
-
-/**
- * 构建小程序 scheme URL。
- * 格式: weixin://dl/business/?appid=xxx&path=xxx&query=xxx&env_version=release
- */
-function buildMpScheme(finderUsername) {
-  var path = encodeURIComponent(MP_PATH)
-  var query = encodeURIComponent('finderUserName=' + encodeURIComponent(finderUsername))
-  return 'weixin://dl/business/?appid=' + MP_APPID
-    + '&path=' + path
-    + '&query=' + query
-    + '&env_version=release'
+export function openChannelsProfile(url) {
+  openChannelsLive(url)
 }

@@ -56,7 +56,7 @@
 <script setup>
 import {ref,onMounted} from 'vue';import {api} from '@/api/index'
 import { assetUrl, onImgError } from '@/utils/image.js'
-import { openChannelsLive } from '@/utils/jssdk.js'
+
 
 const categories=ref([]),activeCatId=ref(null),products=ref([]),loading=ref(false),showGuide=ref(false),liveRoom=ref(null)
 onMounted(async()=>{
@@ -91,8 +91,8 @@ function jumpToMiniProgram(cfg){
 }
 function openLive(room){
   if(!isWechat()){uni.showToast({title:'请在微信中打开直播间',icon:'none'});return}
-  if(room.finderUsername){ openChannelsLive(room.finderUsername); return }
   if(room.jumpUrl){ window.location.href = room.jumpUrl; return }
+  if(room.finderUsername){ uni.showToast({title:'请从活动详情页进入直播间',icon:'none'}); return }
   uni.showToast({title:'直播链接未配置',icon:'none'})
 }
 </script>
