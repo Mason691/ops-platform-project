@@ -433,7 +433,7 @@ public class AdminController {
         // 前端已有 BASE_URL，这里返回页面路径即可
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("pagePath", "/pages/live/index");
-        data.put("finderUsername", room.getFinderUsername());
+        data.put("liveLink", room.getLiveLink());
         data.put("liveTitle", room.getLiveTitle());
         return R.ok(data);
     }
@@ -455,84 +455,6 @@ public class AdminController {
         assertMerchantBound(operatorId, existing.getMerchantId());
         liveRoomMapper.deleteById(id);
         return R.ok();
-    }
-
-    /**
-     * 测试直播 API 连通性。
-     * 接收 finderUserName，通过微信 access_token 验证配置是否有效。
-     */
-    @PostMapping("/live-rooms/test-connection")
-    public R<?> testLiveConnection(@RequestBody Map<String, String> body) {
-        String finderUsername = body.get("finderUsername");
-        if (finderUsername == null || finderUsername.isBlank()) return R.fail("视频号 ID 不能为空");
-
-        Long operatorId = currentOperatorId();
-        // Verify operator has bound merchants
-        Set<Long> bound = omMapper.selectList(new LambdaQueryWrapper<OperatorMerchant>()
-                .eq(OperatorMerchant::getOperatorId, operatorId)
-                .eq(OperatorMerchant::getStatus, 1))
-                .stream().map(OperatorMerchant::getMerchantId).collect(Collectors.toSet());
-        if (bound.isEmpty()) return R.fail("当前运营商未绑定任何销售商");
-
-        // Fetch public account config — try operator's own org ID first,
-        // then fall back to bound merchant's org ID
-        PublicAccountConfig pubCfg = publicAccountConfigMapper.selectOne(
-                new LambdaQueryWrapper<PublicAccountConfig>()
-                        .eq(PublicAccountConfig::getCorpId, operatorId)
-                        .eq(PublicAccountConfig::getStatus, 1));
-
-        if (pubCfg == null) {
-            Long merchantId = bound.iterator().next();
-            pubCfg = publicAccountConfigMapper.selectOne(
-                    new LambdaQueryWrapper<PublicAccountConfig>()
-                            .eq(PublicAccountConfig::getCorpId, merchantId)
-                            .eq(PublicAccountConfig::getStatus, 1));
-        }
-
-        if (pubCfg == null || pubCfg.getAppId() == null)
-            return R.fail("公众号未配置 appId，请先在「公众号配置」中完成配置");
-
-        // Try to fetch access_token to verify credentials
-        try {
-            String appId = pubCfg.getAppId();
-            String appSecret = pubCfg.getAppSecret();
-
-            if (appSecret == null || appSecret.isBlank())
-                return R.fail("公众号 appSecret 未配置，无法获取 access_token。请先在「公众号配置」中完善");
-
-            // Call WeChat token API
-            String tokenUrl = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid="
-                    + appId + "&secret=" + appSecret;
-
-            log.info("测试连接: finderUsername={}, appId={}", finderUsername, appId);
-            @SuppressWarnings("rawtypes")
-            ResponseEntity<Map> resp = restTemplate.exchange(
-                    tokenUrl, HttpMethod.GET, null, Map.class);
-
-            if (resp.getBody() != null && resp.getBody().get("access_token") != null) {
-                String accessToken = resp.getBody().get("access_token").toString();
-                log.info("测试连接成功: access_token 获取成功, finderUsername={}", finderUsername);
-                return R.ok(Map.of(
-                        "success", true,
-                        "message", "微信 API 连通正常（access_token 获取成功），finderUserName=" + finderUsername,
-                        "detail", "appId=" + appId.substring(0, Math.min(appId.length(), 10)) + "...",
-                        "tokenPrefix", accessToken.length() > 10
-                                ? accessToken.substring(0, 10) + "..." : accessToken
-                ));
-            } else {
-                Object errcode = resp.getBody() != null ? resp.getBody().get("errcode") : "unknown";
-                Object errmsg = resp.getBody() != null ? resp.getBody().get("errmsg") : "unknown";
-                log.error("测试连接失败: finderUsername={}, 微信返回 errcode={}, errmsg={}",
-                        finderUsername, errcode, errmsg);
-                String hint = resolveWechatErrorHint(errcode, errmsg);
-                return R.fail("微信API调用失败: " + hint + " [errcode=" + errcode + ", errmsg=" + errmsg + "]");
-            }
-        } catch (Exception e) {
-            String errStr = e.getMessage() != null ? e.getMessage() : "未知错误";
-            log.error("测试连接异常: finderUsername={}, error={}", finderUsername, errStr);
-            String shortErr = errStr.length() > 100 ? errStr.substring(0, 100) + "..." : errStr;
-            return R.fail("网络请求失败: " + shortErr);
-        }
     }
 
     // ═══ 活动管理 ═══
