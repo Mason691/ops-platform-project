@@ -1,5 +1,5 @@
 <template>
-  <view ref="container" class="mp-launcher" :style="wrapStyle">
+  <view :id="uid" class="mp-launcher" :style="wrapStyle">
     <slot />
   </view>
 </template>
@@ -15,8 +15,8 @@ const props = defineProps({
 
 const emit = defineEmits(['launch', 'error'])
 
-const container = ref(null)
 const appid = 'wx095b91409f8ecbfe'
+const uid = 'mpl_' + Math.random().toString(36).slice(2, 8)
 let tagEl = null
 
 const isWechat = () => {
@@ -40,14 +40,14 @@ const wrapStyle = computed(() => {
 function onLaunch(e) { emit('launch', e) }
 function onError(e) { console.error('[MpLauncher] error:', e); emit('error', e) }
 
-function createTag() {
-  if (!isWechat() || !container.value) return
+function injectTag() {
+  if (!isWechat()) return
 
-  // 获取宿主 DOM 元素
-  const el = container.value.$el || container.value
-  if (!el || !el.appendChild) return
+  // 用唯一 ID 精确定位宿主元素
+  const el = document.getElementById(uid)
+  if (!el) { console.warn('[MpLauncher] container #' + uid + ' not found'); return }
 
-  // 移除旧标签
+  // 清除旧标签
   if (tagEl && tagEl.parentNode) {
     tagEl.removeEventListener('launch', onLaunch)
     tagEl.removeEventListener('error', onError)
@@ -55,30 +55,30 @@ function createTag() {
     tagEl = null
   }
 
-  // 用 DOM API 创建元素（innerHTML 会丢弃 script 标签）
+  // 用 DOM API 构建完整标签树
   tagEl = document.createElement('wx-open-launch-weapp')
   tagEl.setAttribute('appid', appid)
   tagEl.setAttribute('path', mpPath.value)
-  tagEl.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:1'
+  tagEl.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:10'
+
+  const tmpl = document.createElement('script')
+  tmpl.type = 'text/wxtag-template'
+  tmpl.appendChild(document.createTextNode('<style>.mpx-btn{width:100%;height:100%;opacity:0;display:block}</style><div class="mpx-btn"></div>'))
+
+  tagEl.appendChild(tmpl)
   tagEl.addEventListener('launch', onLaunch)
   tagEl.addEventListener('error', onError)
-
-  // 创建必需的 <script type="text/wxtag-template"> 子元素
-  const script = document.createElement('script')
-  script.type = 'text/wxtag-template'
-  script.textContent = '<style>.mp-btn{width:100%;height:100%;opacity:0}</style><div class="mp-btn"></div>'
-  tagEl.appendChild(script)
 
   el.appendChild(tagEl)
 }
 
 onMounted(() => {
-  // 延迟一帧确保 DOM 就绪
-  setTimeout(createTag, 100)
+  // 延迟确保 DOM 完全就绪
+  setTimeout(injectTag, 200)
 })
 
 watch(() => props.finderUsername, () => {
-  setTimeout(createTag, 100)
+  setTimeout(injectTag, 200)
 })
 
 onBeforeUnmount(() => {
