@@ -270,13 +270,16 @@ public class PublicAccountController {
             body.put("env_version", "release");
             body.put("is_expire", false);
 
+            log.info("mp-url-link: calling generate_urllink, body={}", body);
             var resp = restTemplate.postForObject(url, body, Map.class);
+            log.info("mp-url-link: response={}", resp);
             if (resp != null && resp.containsKey("url_link")) {
                 String urlLink = (String) resp.get("url_link");
                 urlLinkCache.put(finderUserName, urlLink);
                 return R.ok(Map.of("urlLink", urlLink));
             }
-            return R.fail("生成 URL Link 失败: " + (resp != null ? resp.get("errmsg") : "无响应"));
+            return R.fail("生成 URL Link 失败: "
+                + (resp != null ? resp.getOrDefault("errmsg", resp.getOrDefault("errcode", resp.toString())) : "无响应"));
         } catch (Exception e) {
             return R.fail("生成失败: " + e.getMessage());
         }
