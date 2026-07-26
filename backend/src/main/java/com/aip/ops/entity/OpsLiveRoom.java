@@ -84,4 +84,8 @@ public class OpsLiveRoom extends BaseEntity {
     /** 微信视频号 scheme ticket（用于 weixin://dl/business/?ticket=xxx 直跳） */
     @TableField("scheme_ticket")
     private String schemeTicket;
+
+    /** 第三方直播链接（腾讯云/阿里云等），优先于 finder_username */
+    @TableField("live_link")
+    private String liveLink;
 }

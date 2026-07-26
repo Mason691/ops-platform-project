@@ -39,6 +39,8 @@
             <input class="lrm-input" v-model="editForm.viewerCount" type="number" placeholder="0" />
             <text class="lrm-label">回放URL</text>
             <input class="lrm-input" v-model="editForm.replayUrl" placeholder="https://..." />
+            <text class="lrm-label">直播链接（第三方直播地址）</text>
+            <input class="lrm-input" v-model="editForm.liveLink" placeholder="https://... 如腾讯云/阿里云直播地址" />
             <text class="lrm-label">直播简介</text>
             <textarea class="lrm-input lrm-textarea" v-model="editForm.description" placeholder="直播内容介绍（展示在跳转前页面）" />
             <view class="lrm-edit-btns">
@@ -166,6 +168,7 @@ function startEdit(room) {
   editingId.value = room.id
   editForm.viewerCount = room.viewerCount || 0
   editForm.replayUrl = room.replayUrl || ''
+  editForm.liveLink = room.liveLink || ''
   editForm.description = room.description || ''
 }
 
@@ -174,6 +177,7 @@ async function saveEdit(id) {
     await api.adminUpdateLiveRoom(id, {
       viewerCount: Number(editForm.viewerCount || 0),
       replayUrl: editForm.replayUrl,
+      liveLink: editForm.liveLink || '',
       description: editForm.description
     })
     uni.showToast({ title: '已保存', icon: 'success' })

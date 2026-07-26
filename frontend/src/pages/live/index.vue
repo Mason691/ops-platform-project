@@ -70,6 +70,7 @@ onMounted(async () => {
 
 function openLive(room) {
   if (!isWechat()) { showGuide.value = true; return }
+  if (room.liveLink) { window.location.href = room.liveLink; return }
   if (room.finderUsername) { openChannelsLive(room.finderUsername); return }
   if (room.jumpUrl) { window.location.href = room.jumpUrl; return }
   uni.showToast({ title: '直播链接未配置', icon: 'none' })

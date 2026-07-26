@@ -166,6 +166,7 @@ async function goDetail(id) {
     try {
       var detail = await api('/api/ops/activity/' + id, 'GET')
       var lr = detail && detail.liveRoom
+      if (lr && lr.liveLink) { window.location.href = lr.liveLink; return }
       if (lr && lr.finderUsername) { openChannelsLive(lr.finderUsername); return }
       if (lr && lr.jumpUrl) { window.location.href = lr.jumpUrl; return }
     } catch (e) { /* fall through to detail page */ }

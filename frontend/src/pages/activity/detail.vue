@@ -384,6 +384,7 @@ function openLiveRoom() {
     showGuide.value = true
     return
   }
+  if (liveRoom.value?.liveLink) { window.location.href = liveRoom.value.liveLink; return }
   if (liveRoom.value?.finderUsername) { openChannelsLive(liveRoom.value.finderUsername); return }
   if (liveRoom.value?.jumpUrl) { window.location.href = liveRoom.value.jumpUrl; return }
   uni.showToast({ title: '直播链接未配置', icon: 'none' })
@@ -395,6 +396,7 @@ function openChannelHome() {
     showGuide.value = true
     return
   }
+  if (liveRoom.value?.liveLink) { window.location.href = liveRoom.value.liveLink; return }
   if (liveRoom.value?.finderUsername && window.__openMp) {
     window.__openMp(null, liveRoom.value.finderUsername)
     return
