@@ -230,4 +230,49 @@ public class PublicAccountController {
         r.put("signature", signature);
         return R.ok(r);
     }
+
+    // ═══ 小程序 URL Link 生成 (公开，H5 调用) ═══
+    private final Map<String,String> urlLinkCache = new ConcurrentHashMap<>();
+
+    @GetMapping("/api/public-account/mp-url-link")
+    public R<?> mpUrlLink(@RequestParam String finderUserName,
+                          @RequestParam(required = false) Long corpId) {
+        // 缓存命中
+        String cached = urlLinkCache.get(finderUserName);
+        if (cached != null) return R.ok(Map.of("urlLink", cached));
+
+        PublicAccountConfig cfg = configService.getOne(new LambdaQueryWrapper<PublicAccountConfig>()
+                .eq(corpId != null, PublicAccountConfig::getCorpId, corpId)
+                .eq(PublicAccountConfig::getIsDefault, 1)
+                .eq(PublicAccountConfig::getStatus, 1).last("LIMIT 1"));
+        if (cfg == null) return R.fail("无可用公众号配置");
+
+        // 获取 access_token
+        String tokenUrl = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential"
+                + "&appid=" + cfg.getAppId() + "&secret=" + cfg.getAppSecret();
+        try {
+            var tokenResp = restTemplate.getForObject(tokenUrl, Map.class);
+            if (tokenResp == null || !tokenResp.containsKey("access_token")) {
+                return R.fail("获取 access_token 失败: " + tokenResp);
+            }
+            String accessToken = (String) tokenResp.get("access_token");
+
+            // 调用 generate_urllink
+            String url = "https://api.weixin.qq.com/wxa/generate_urllink?access_token=" + accessToken;
+            Map<String,Object> body = new LinkedHashMap<>();
+            body.put("path", "pages/channels/live?finderUserName=" + finderUserName);
+            body.put("env_version", "release");
+            body.put("is_expire", false);
+
+            var resp = restTemplate.postForObject(url, body, Map.class);
+            if (resp != null && resp.containsKey("url_link")) {
+                String urlLink = (String) resp.get("url_link");
+                urlLinkCache.put(finderUserName, urlLink);
+                return R.ok(Map.of("urlLink", urlLink));
+            }
+            return R.fail("生成 URL Link 失败: " + (resp != null ? resp.get("errmsg") : "无响应"));
+        } catch (Exception e) {
+            return R.fail("生成失败: " + e.getMessage());
+        }
+    }
 }

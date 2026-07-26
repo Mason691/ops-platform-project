@@ -119,22 +119,38 @@ export function wxStopRecordAndUpload() {
 // ── 视频号直播跳转（共享工具）──────────────────────────────────────
 
 /**
- * 跳转到视频号（已由 MpLauncher 组件处理，此函数作为非微信环境降级）。
- * 优先使用页面上的 wx-open-launch-weapp 标签，此函数仅用于降级场景。
+ * 通过微信 URL Link API 跳转到小程序视频号页面。
+ * 调用后端 /api/public-account/mp-url-link 获取生成的短链。
  *
- * @param {string} url 跳转链接
+ * @param {string} finderUsername 视频号 finder_username
  */
-export function openChannelsLive(url) {
-  if (!url) {
-    uni.showToast({ title: '直播链接未配置', icon: 'none' })
+export function openChannelsLive(finderUsername) {
+  if (!finderUsername) {
+    uni.showToast({ title: '直播信息不完整', icon: 'none' })
     return
   }
-  window.location.href = url
+  uni.showLoading({ title: '加载中...' })
+  uni.request({
+    url: '/api/public-account/mp-url-link?finderUserName=' + encodeURIComponent(finderUsername),
+    method: 'GET',
+    success: function(res) {
+      uni.hideLoading()
+      if (res.data && res.data.code === 200 && res.data.data && res.data.data.urlLink) {
+        window.location.href = res.data.data.urlLink
+      } else {
+        uni.showToast({ title: '跳转失败，请稍后再试', icon: 'none' })
+      }
+    },
+    fail: function() {
+      uni.hideLoading()
+      uni.showToast({ title: '网络错误，请稍后再试', icon: 'none' })
+    }
+  })
 }
 
 /**
  * 跳转到视频号主页。
  */
-export function openChannelsProfile(url) {
-  openChannelsLive(url)
+export function openChannelsProfile(finderUsername) {
+  openChannelsLive(finderUsername)
 }

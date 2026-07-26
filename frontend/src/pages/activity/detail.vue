@@ -384,11 +384,7 @@ function openLiveRoom() {
     showGuide.value = true
     return
   }
-  // 调用全局 __openMp 弹出小程序标签覆盖层
-  if (liveRoom.value?.finderUsername && window.__openMp) {
-    window.__openMp(null, liveRoom.value.finderUsername)
-    return
-  }
+  if (liveRoom.value?.finderUsername) { openChannelsLive(liveRoom.value.finderUsername); return }
   if (liveRoom.value?.jumpUrl) { window.location.href = liveRoom.value.jumpUrl; return }
   uni.showToast({ title: '直播链接未配置', icon: 'none' })
 }
