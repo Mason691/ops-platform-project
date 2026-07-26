@@ -241,11 +241,17 @@ public class PublicAccountController {
         String cached = urlLinkCache.get(finderUserName);
         if (cached != null) return R.ok(Map.of("urlLink", cached));
 
+        // 使用小程序 AppID 对应的配置（wx095b91409f8ecbfe）获取 token
         PublicAccountConfig cfg = configService.getOne(new LambdaQueryWrapper<PublicAccountConfig>()
-                .eq(corpId != null, PublicAccountConfig::getCorpId, corpId)
-                .eq(PublicAccountConfig::getIsDefault, 1)
+                .eq(PublicAccountConfig::getAppId, "wx095b91409f8ecbfe")
                 .eq(PublicAccountConfig::getStatus, 1).last("LIMIT 1"));
-        if (cfg == null) return R.fail("无可用公众号配置");
+        if (cfg == null) {
+            cfg = configService.getOne(new LambdaQueryWrapper<PublicAccountConfig>()
+                    .eq(corpId != null, PublicAccountConfig::getCorpId, corpId)
+                    .eq(PublicAccountConfig::getIsDefault, 1)
+                    .eq(PublicAccountConfig::getStatus, 1).last("LIMIT 1"));
+        }
+        if (cfg == null) return R.fail("无可用小程序配置");
 
         // 获取 access_token
         String tokenUrl = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential"
