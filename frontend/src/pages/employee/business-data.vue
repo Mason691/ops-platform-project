@@ -80,8 +80,8 @@
                 <text class="detail-sale">{{ formatMoney(d.salePrice) }}</text>
                 <text class="detail-commission">提成 {{ formatMoney(d.commissionAmount) }}</text>
                 <text v-if="d.commissionRate != null && d.commissionRate !== ''" class="detail-rate">比例 {{ formatRate(d.commissionRate) }}</text>
-                <text class="detail-status" :class="d.calcStatus === '经办人已核对' ? 'status-checked' : 'status-calc'">
-                  {{ d.calcStatus === '经办人已核对' ? '经办人已核对' : '已计算' }}
+                <text class="detail-status" :class="statusClass(d.calcStatus)">
+                  {{ d.calcStatus || '未计算' }}
                 </text>
               </view>
             </view>
@@ -195,6 +195,11 @@ function formatMoney(val) {
   return '¥' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
+function statusClass(s) {
+  if (s === '经办人已核对') return 'status-checked'
+  if (s === '已计算') return 'status-calc'
+  return 'status-raw'
+}
 function formatRate(val) {
   const n = Number(val)
   if (isNaN(n)) return '-'
@@ -286,4 +291,5 @@ function goProfile() { uni.navigateTo({ url: '/pages/employee/profile' }) }
 .detail-status { font-size:22rpx; padding:2rpx 10rpx; border-radius:6rpx; margin-left:8rpx; }
 .status-calc { background:#E6F0FF; color:#409EFF; }
 .status-checked { background:#E8F8E8; color:#07C160; }
+.status-raw { background:#F5F5F5; color:#999; }
 </style>
