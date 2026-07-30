@@ -81,7 +81,7 @@
                 <text class="detail-commission">提成 {{ formatMoney(d.commissionAmount) }}</text>
                 <text v-if="d.commissionRate != null && d.commissionRate !== ''" class="detail-rate">比例 {{ formatRate(d.commissionRate) }}</text>
                 <text class="detail-status" :class="d.calcStatus === '经办人已核对' ? 'status-checked' : 'status-calc'">
-                  {{ d.calcStatus === '经办人已核对' ? '已核对' : '已计算' }}
+                  {{ d.calcStatus === '经办人已核对' ? '经办人已核对' : '已计算' }}
                 </text>
               </view>
             </view>
