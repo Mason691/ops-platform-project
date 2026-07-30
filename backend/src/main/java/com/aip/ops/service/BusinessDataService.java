@@ -10,6 +10,9 @@ public interface BusinessDataService {
     List<String> getBatches();
     Map<String, Object> importExcel(MultipartFile file, String batchNo, Long corpId);
     void batchDelete(List<Long> ids);
+
+    /** 经办人核对：将指定批次下已计算数据标记为已核对 */
+    int batchCheck(String batchNo);
     Map<String, Object> calcCommission();
     void exportExcel(String company, String batchNo, String agent, HttpServletResponse response);
 }

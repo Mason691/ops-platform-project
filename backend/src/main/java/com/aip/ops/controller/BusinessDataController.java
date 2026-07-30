@@ -249,6 +249,15 @@ public class BusinessDataController {
         return R.ok("删除成功");
     }
 
+    /** 经办人核对：将指定批次已计算数据标记为已核对 */
+    @PutMapping("/batch/check")
+    public R<?> batchCheck(@RequestBody Map<String, String> params) {
+        String batchNo = params.get("batchNo");
+        if (batchNo == null || batchNo.isBlank()) return R.fail("批次号不能为空");
+        int count = service.batchCheck(batchNo);
+        return R.ok(Map.of("checkedCount", count, "message", "已核对 " + count + " 条数据"));
+    }
+
     /** Download Excel import template. */
     @GetMapping("/template")
     public void downloadTemplate(HttpServletResponse response) throws IOException {

@@ -23,6 +23,9 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
             + "ORDER BY month DESC")
     List<String> selectAvailableMonths(@Param("agentPhone") String agentPhone);
 
+    @Select("SELECT DISTINCT batch_no FROM ops_business_data WHERE agent_phone = #{agentPhone} AND calc_status IN ('已计算','经办人已核对') AND delete_flag = 0 ORDER BY batch_no DESC")
+    List<String> selectBatchNos(@Param("agentPhone") String agentPhone);
+
     /** Group by category within a month — sum sale, commission, count orders. */
     @Select("<script>"
             + "SELECT category, COALESCE(SUM(sale_price),0) as totalSale, "

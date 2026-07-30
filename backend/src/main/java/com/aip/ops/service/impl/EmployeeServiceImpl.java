@@ -88,6 +88,12 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     @Override
+    public List<String> getBatchNos() {
+        String phone = resolvePhone();
+        return employeeMapper.selectBatchNos(phone);
+    }
+
+    @Override
     public List<Map<String, Object>> getCategorySummary(String month) {
         String phone = resolvePhone();
         List<Map<String, Object>> rows = employeeMapper.selectCategorySummary(phone, month);
@@ -185,17 +191,19 @@ public class EmployeeServiceImpl implements EmployeeService {
         return member;
     }
 
-    /** Resolve the current member's phone number. Fall back to JWT username (phone) for employees without ops_member record. */
+    /** Resolve the employee's phone for agent_phone matching.
+     * Uses JWT username (sys_user.username) which is the employee login account name (phone number).
+     * Falls back to ops_member.phone for non-employee accounts. */
     private String resolvePhone() {
-        OpsMember member = resolveMember();
-        if (member != null) {
-            return member.getPhone();
+        // Primary: JWT username = sys_user.username (phone number for employee accounts)
+        String username = SecurityUtils.getCurrentUser().getUsername();
+        if (username != null && username.matches("^1[3-9]\\d{9}$")) {
+            return username;
         }
-        // Fallback for employees authenticated via sys_user but lacking ops_member:
-        // the JWT username for employee accounts is sys_user.username which is the phone number.
-        String phone = SecurityUtils.getCurrentUser().getUsername();
-        if (phone != null && phone.matches("^1[3-9]\\d{9}$")) {
-            return phone;
+        // Fallback: ops_member.phone for non-employee/member accounts
+        OpsMember member = resolveMember();
+        if (member != null && member.getPhone() != null) {
+            return member.getPhone();
         }
         throw BusinessException.of("会员信息不存在");
     }

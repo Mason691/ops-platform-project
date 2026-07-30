@@ -95,27 +95,27 @@ ops-platform-project/
 ├── backend/
 │   ├── src/main/java/com/aip/ops/
 │   │   ├── OpsApplication.java
-│   │   ├── config/          # SecurityConfig, AuthConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig, JacksonConfig
+│   │   ├── config/          # SecurityConfig, AuthConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig, JacksonConfig, GasDataSourceConfig
 │   │   ├── controller/      # 27 controllers（见下方）
-│   │   ├── entity/          # 33 entities（全部继承 SDK BaseEntity，SysImportTask 例外）
+│   │   ├── entity/          # 35 entities（全部继承 SDK BaseEntity，SysImportTask 例外；含 MerchantMiniappConfig, OperatorMerchant）
 │   │   ├── mapper/          # 34 MyBatis-Plus mappers
 │   │   ├── service/         # 17 service interfaces + 8 standalone services + 17 impls
 │   │   ├── client/          # 子系统间 HTTP 客户端（MemberSyncClient, ProductBatchClient）
 │   │   ├── agent/           # AI DomainAgent（OpsAgent.java）
 │   │   ├── tool/            # MCP 工具（OpsOrderQueryTool, OpsEmployeeBusinessDataTool）
 │   │   ├── export/          # 通用异步导出策略（ExportHandler 接口 + 策略模式）
-│   │   ├── imports/         # 通用异步导入策略（ImportHandler 接口 + 策略模式）
+│   │   ├── imports/         # 通用异步导入策略（ImportHandler 接口 + 策略模式：BusinessDataImportHandler, GasUserImportHandler, MemberConvertHandler）
 │   │   ├── kafka/           # Kafka — 4 consumers, 1 producer, 3 message DTOs（条件加载）
 │   │   ├── scheduler/        # 定时任务（BattleMapEtlBootstrap, BattleMapEtlScheduler）
 │   │   ├── dto/             # 数据传输对象
-│   │   └── util/            # 工具类（ImageUrlUtil 等）
+│   │   └── util/            # 工具类（ImageUrlUtil, AesUtils, AmapGeocodeUtil 等）
 │   └── pom.xml
 ├── frontend/
 │   ├── src/main.js          # uni-app 入口
 │   ├── src/manifest.json    # uni-app 配置（H5 base 路径等）
-│   ├── src/pages/           # uni-app 页面（28 个路由，含 Tab/C 端/员工/管理）
+│   ├── src/pages/           # uni-app 页面（29 个路由，含 Tab/C 端/员工/管理）
 │   ├── src/components/      # 跨页面复用组件（ImageCropperModal, LiveStatusCard, EmployeeTabBar, Pager）
-│   ├── src/api/index.js     # 集中 API 注册（137 个方法）
+│   ├── src/api/index.js     # 集中 API 注册（152 个方法）
 │   ├── src/utils/           # request.js, image.js, config.js, jssdk.js, auth-bridge.js
 │   ├── src/config.js        # BASE_URL + DEFAULT_CORP_ID
 │   ├── src/static/          # 静态资源（jweixin-1.6.0.js 等）
@@ -348,6 +348,58 @@ battle-map:
 
 `WechatPhoneService` 通过微信 code + session_key 解密获取用户手机号，用于小程序端静默授权。只在微信小程序环境生效。
 
+### 燃气用户外部导入 & 会员转换
+
+燃气用户（`ops_gas_user`）可从外部燃气平台 PolarDB 批量导入，并支持异步转换为平台会员。
+
+**外部数据源**：`GasDataSourceConfig` 按需创建独立 HikariCP 连接池（`jinyuan_info`），不注册 Spring Bean 以免覆盖主数据源。
+
+**导入流程**：
+- `POST /api/ops/admin/gas-user/gas-import/query` — 预览外部源记录数
+- `POST /api/ops/admin/gas-user/import-from-gas-platform` — 提交异步导入任务
+- `GasUserImportHandler`（taskType=`gas_user_import`）— 读取外部 Polardb `sb_gas_user` 表，按 `user_no` 去重，自动创建小区记录，调用高德地理编码
+- 导入参数 `company-filter`（默认 `德保`）过滤来源公司
+
+**会员转换**（Kafka 异步）：
+- `POST /api/ops/admin/gas-user/convert/submit` — 提交批量转换任务
+- `MemberConvertHandler`（taskType=`member_convert`）— 异步将燃气用户转为平台 `sys_member`，同步性别/出生日期/地址/小区
+- 通过现有 `ImportTaskConsumer` 消费（新增第 5 种异步任务类型）
+
+### 微信小程序跳转（H5）
+
+H5 端使用 `wx-open-launch-weapp` 开放标签跳转小程序，经多次迭代后最终方案：
+
+**核心组件**：`frontend/src/components/MpLauncher.vue` — 动态创建微信开放标签，每次点击重建 DOM 元素以绕过微信标签复用限制
+
+**关键演化**：`weixin://` scheme（不可用）→ `finder-preview` URL → `wx-open-launch-weapp` 标签（innerHTML 注入绕过 Vue 编译器）→ 微信 URL Link API → 最终回到 `wx-open-launch-weapp` + 每次点击动态重建
+
+**独立测试页**：`frontend/src/static/mp-test.html`（用于微信 URL Link 功能测试）
+
+### 直播室管理（Live Room）
+
+运营商可配置面向 C 端的直播室，H5 端展示并引导用户跳转观看。
+
+**实体**：`OpsLiveRoom`（`ops_live_room` 表）— 标题、封面、开播时段、状态（0=预告 1=直播中 2=已结束）、回放 URL、观看人数、`live_link`（第三方直播链接，如腾讯云/阿里云等）
+
+**架构演进**：2026-07 从视频号专用（finderUsername/jumpUrl/schemeTicket）简化为**纯 `live_link` 字段**，支持任意第三方直播平台跳转。
+
+**C 端 API**（`PlatformController` `/api/ops/live-rooms`）：
+- `GET /active` — 获取进行中 + 预告的直播间（公开，按状态+排序）
+- `GET /{id}` — 直播间详情（含 liveStatus 计算、倒计时）
+- `POST /{id}/remind` — 设置开播提醒
+
+**管理后台 API**（`AdminController` `/api/ops/admin`）：
+- `GET /live-rooms` — 分页列表
+- `POST /live-rooms` — 创建直播室
+- `PUT /live-rooms/{id}` — 编辑
+- `DELETE /live-rooms/{id}` — 删除
+- `GET /live-rooms/{id}` — 详情
+- `PUT /live-rooms/{id}/status` — 更新状态（预告→直播中→已结束）
+- `GET /live-rooms/{id}/qrcode` — 生成二维码
+- `GET /live-rooms/available` — 可选直播列表（供活动关联使用）
+
+**管理前端**：`pages/admin/live-room-manage.vue`（已注册到 pages.json）
+
 ### 异步导出/导入（Kafka + 策略模式）
 
 导出采用 `ExportHandler` 接口 + 策略模式，导入对称使用 `ImportHandler`：
@@ -390,7 +442,7 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 - **双 Token 体系**：`request.js` 优先使用 `ops_token`（会员），fallback 使用 `ops_employee_token`（员工）。401 时清除两者
 - **iframe SSO**：`auth-bridge.js` 监听 `postMessage`（`AIP_AUTH` / `AIP_NAVIGATE`），信任同源和 `boss.jdzn99.com`
 - **公众号深链**：`App.vue` 支持 `?route=pages/employee/login` 和 `?from=employee` 查询参数跳转（公众号自定义菜单不支持 hash fragment）
-- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（137 个方法），统一使用 `request` 实例
+- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（152 个方法），统一使用 `request` 实例
 - **H5 hash 路由**：实际 base 由构建时 `VITE_BASE` 环境变量控制
 
 ### 前端页面路由（pages.json）
@@ -399,14 +451,14 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 
 | Tab | 页面 | 说明 |
 |-----|------|------|
-| AI助手 | `pages/ai/chat` | AI 对话（语音输入、TTS）— **入口页** |
+| AI助手 | `pages/ai/chat`, `pages/ai/settings` | AI 对话（语音输入、TTS、个性化设置）— **入口页** |
 | 商品 | `pages/product/index`, `pages/product/detail` | 积分商城 |
 | 首页 | `pages/index/index` | 轮播/视频/推荐/直播/优惠券 |
 | 活动 | `pages/activity/index`, `pages/activity/detail`, `pages/live/index` | 活动 + 直播广场 |
 | 我的 | `pages/mine/index`, `pages/order/*`, `pages/address/*`, `pages/points/log`, `pages/coupon/list`, `pages/auth/*`, `pages/booking/list` | 用户中心 |
 
-管理页面（已注册，不在 Tab 中）：`pages/admin/commission-rules`, `pages/admin/gas-user`, `pages/admin/annual-plan`  
-管理页面（文件存在，未注册到 pages.json，由平台主站 componentMap 加载）：`pages/admin/activity-form`, `pages/admin/home-config`, `pages/admin/live-room-manage`, `pages/admin/business-data`, `pages/admin/members`  
+管理页面（已注册，不在 Tab 中）：`pages/admin/commission-rules`, `pages/admin/gas-user`, `pages/admin/annual-plan`, `pages/admin/live-room-manage`  
+管理页面（文件存在，未注册到 pages.json，由平台主站 componentMap 加载）：`pages/admin/activity-form`, `pages/admin/home-config`, `pages/admin/business-data`, `pages/admin/members`  
 站长页面：`pages/station/apply`, `pages/station/center`  
 员工页面（已注册）：`pages/employee/login`（员工登录）、`pages/employee/ai-chat`（员工 AI 助手 H5）、`pages/employee/dashboard`、`pages/employee/business-data`、`pages/employee/profile`  
 员工页面（未注册）：`pages/employee/company-select`（文件存在但未在 pages.json 注册）
@@ -430,12 +482,17 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 | `spring.servlet.multipart.max-request-size` | 上传请求大小限制 | `50MB` |
 | `mall-service.base-url` | mall 子系统地址 | `http://localhost:8083` |
 | `app.upload.base-dir` | 上传根目录 | `/app/uploads`（Docker） |
+| `app.import.upload-dir` | 异步导入文件暂存目录 | `${user.home}/data/imports`（Docker 环境变量覆盖） |
 | `app.resource.base-url` | 静态资源域名 | `https://boss.jdzn99.com` |
 | `spring.kafka.enabled` | Kafka 开关 | `true`（生产）/ `false`（测试） |
 | `battle-map.etl.auto-refresh` | 作战地图定时 ETL | `true` |
 | `battle-map.etl.init-on-startup` | 启动时全量 ETL | `true` |
 | `battle-map.etl.cron` | ETL 刷新间隔 | `0 */30 * * * *`（每 30 分钟） |
 | `ops.remind.hours-before` | 活动提醒提前小时数 | `24,1` |
+| `gas.datasource.jdbc-url` | 外部燃气平台 PolarDB 连接 | `jdbc:mysql://parking-db.mysql.polardb.rds.aliyuncs.com:3306/jinyuan_info` |
+| `gas.datasource.username` | 燃气平台 DB 用户名 | `jinyuan_kaifa_only` |
+| `gas.import.company-filter` | 燃气导入公司过滤 | `德保` |
+| `amap.key` | 高德地图 API Key（作战地图边界） | 需配置 |
 | `platform.merchant-role-name` | 商家角色名称 | `销售商` |
 | `logging.level.com.aip.ops` | 应用日志级别 | `DEBUG` |
 | `management.endpoints.web.exposure.include` | Actuator 暴露端点 | `health,info` |
@@ -536,7 +593,7 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-07-20 | 负责人：架构师（新增年度任务管理、作战地图看板重构、活动复盘、提成规则等模块文档）
+最后更新：2026-07-30 | 负责人：架构师（新增直播室管理、燃气用户导入/会员转换、微信小程序跳转模块文档；更新 API 方法数/路由数/实体数；补充外部数据源配置）
 
 ### 自定义 Claude 命令
 

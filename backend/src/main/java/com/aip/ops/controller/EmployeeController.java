@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.EmployeeAuthService;
 import com.aip.ops.service.EmployeeService;
 import com.aip.sdk.client.PlatformInternalClient;
@@ -40,6 +41,7 @@ public class EmployeeController {
 
     private final EmployeeService employeeService;
     private final EmployeeAuthService employeeAuthService;
+    private final BusinessDataService businessDataService;
     private final PlatformInternalClient platformInternalClient;
 
     @Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
@@ -178,5 +180,20 @@ public class EmployeeController {
         if (newPassword == null || newPassword.length() < 6) return R.fail("新密码至少6位");
         employeeAuthService.changePassword(oldPassword, newPassword);
         return R.ok(null);
+    }
+
+    /** 获取当前经办人的批次列表 */
+    @GetMapping("/business-data/batches")
+    public R<?> getBatches() {
+        return R.ok(employeeService.getBatchNos());
+    }
+
+    /** 经办人核对：将指定批次已计算数据标记为已核对 */
+    @PostMapping("/business-data/batch/check")
+    public R<?> batchCheck(@RequestBody Map<String, String> params) {
+        String batchNo = params.get("batchNo");
+        if (batchNo == null || batchNo.isBlank()) return R.fail("批次号不能为空");
+        int count = businessDataService.batchCheck(batchNo);
+        return R.ok(Map.of("checkedCount", count, "message", "已核对 " + count + " 条数据"));
     }
 }

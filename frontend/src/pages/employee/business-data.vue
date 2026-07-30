@@ -22,6 +22,18 @@
       <!-- All-time Totals -->
       <view class="alltime-section">
         <text class="section-title">📊 总计</text>
+        <!-- Batch selector -->
+        <view class="batch-row">
+          <picker mode="selector" :range="batchList" range-key="label" @change="onBatchChange">
+            <view class="batch-picker">
+              <text>{{ selectedBatchLabel }}</text>
+              <text class="batch-arrow">▼</text>
+            </view>
+          </picker>
+          <view class="check-btn" v-if="selectedBatch" @click="doBatchCheck">
+            <text>✅ 经办人核对</text>
+          </view>
+        </view>
         <view class="alltime-cards">
           <view class="at-card">
             <text class="at-label">总销售额</text>
@@ -68,6 +80,9 @@
                 <text class="detail-sale">{{ formatMoney(d.salePrice) }}</text>
                 <text class="detail-commission">提成 {{ formatMoney(d.commissionAmount) }}</text>
                 <text v-if="d.commissionRate != null && d.commissionRate !== ''" class="detail-rate">比例 {{ formatRate(d.commissionRate) }}</text>
+                <text class="detail-status" :class="d.calcStatus === '经办人已核对' ? 'status-checked' : 'status-calc'">
+                  {{ d.calcStatus === '经办人已核对' ? '已核对' : '已计算' }}
+                </text>
               </view>
             </view>
           </view>
@@ -102,8 +117,66 @@ const errorMsg = ref('')
 const allTime = reactive({ totalSale: 0, totalCommission: 0, orderCount: 0 })
 const months = ref([])
 const expanded = reactive({})
+const batchList = reactive([{ label: '全部批次', value: '' }])
+const selectedBatch = ref('')
+const selectedBatchLabel = ref('全部批次')
 
-onMounted(() => {
+async function loadBatches() {
+  try {
+    const token = uni.getStorageSync('ops_employee_token') || ''
+    const res = await new Promise((resolve, reject) => {
+      uni.request({
+        url: '/api/ops/employee/business-data/batches',
+        method: 'GET',
+        header: token ? { 'Authorization': 'Bearer ' + token } : {},
+        success: (r) => r.data?.code === 200 ? resolve(r.data.data) : reject(r.data),
+        fail: reject
+      })
+    })
+    const batches = res || []
+    batchList.length = 1
+    batches.forEach(b => batchList.push({ label: b, value: b }))
+  } catch { /* ignore */ }
+}
+
+function onBatchChange(e) {
+  const idx = e.detail.value
+  const item = batchList[idx]
+  selectedBatch.value = item.value
+  selectedBatchLabel.value = item.label
+  loadData()
+}
+
+async function doBatchCheck() {
+  if (!selectedBatch.value) return
+  const r = await new Promise((resolve) => {
+    uni.showModal({
+      title: '确认核对',
+      content: '将批次 ' + selectedBatch.value + ' 下所有已计算数据标记为已核对，确认？',
+      success: (res) => resolve(res.confirm)
+    })
+  })
+  if (!r) return
+  try {
+    const token = uni.getStorageSync('ops_employee_token') || ''
+    const res = await new Promise((resolve, reject) => {
+      uni.request({
+        url: '/api/ops/employee/business-data/batch/check',
+        method: 'POST',
+        data: { batchNo: selectedBatch.value },
+        header: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        success: (r) => r.data?.code === 200 ? resolve(r.data.data) : reject(r.data),
+        fail: reject
+      })
+    })
+    uni.showToast({ title: res.message || '核对成功', icon: 'success' })
+    loadData()
+  } catch (e) {
+    uni.showToast({ title: e.msg || '核对失败', icon: 'none' })
+  }
+}
+
+onMounted(() => { loadBatches();
   // Auth guard
   const empToken = uni.getStorageSync('ops_employee_token')
   if (!empToken) {
@@ -221,4 +294,11 @@ function goProfile() { uni.navigateTo({ url: '/pages/employee/profile' }) }
 .bar-icon { font-size: 40rpx; }
 .bar-label { font-size: 22rpx; color: #999; }
 .bar-item.active .bar-label { color: #FF6B35; font-weight: 600; }
+.batch-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:16rpx; gap:12rpx; }
+.batch-picker { display:flex; align-items:center; padding:12rpx 20rpx; background:#f5f5f5; border-radius:8rpx; font-size:26rpx; color:#333; flex:1; }
+.batch-arrow { font-size:20rpx; color:#999; margin-left:8rpx; }
+.check-btn { padding:12rpx 20rpx; background:#07C160; color:#fff; border-radius:8rpx; font-size:26rpx; white-space:nowrap; }
+.detail-status { font-size:22rpx; padding:2rpx 10rpx; border-radius:6rpx; margin-left:8rpx; }
+.status-calc { background:#E6F0FF; color:#409EFF; }
+.status-checked { background:#E8F8E8; color:#07C160; }
 </style>

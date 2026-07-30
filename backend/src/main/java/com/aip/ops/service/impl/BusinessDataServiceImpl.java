@@ -698,6 +698,16 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         } catch (Exception e) { throw new RuntimeException("批量删除失败", e); }
     }
 
+    @Override
+    public int batchCheck(String batchNo) {
+        if (batchNo == null || batchNo.isBlank()) throw BusinessException.of("批次号不能为空");
+        String sql = "UPDATE ops_business_data SET calc_status = '经办人已核对' WHERE batch_no = ? AND calc_status = '已计算'";
+        try (var conn = dataSource.getConnection(); var ps = conn.prepareStatement(sql)) {
+            ps.setString(1, batchNo);
+            return ps.executeUpdate();
+        } catch (Exception e) { throw new RuntimeException("核对失败", e); }
+    }
+
     /**
      * Append corp_id scope filter to query wrapper.
      * null visibleIds (super admin) → no filter added.
