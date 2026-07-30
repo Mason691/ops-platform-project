@@ -276,6 +276,8 @@ public class EmployeeServiceImpl implements EmployeeService {
             detail.put("saleDate", saleDate);
             detail.put("customer", row.get("customer"));
             detail.put("category", row.get("category"));
+            if (row.get("calcStatus") != null) detail.put("calcStatus", row.get("calcStatus"));
+            if (row.get("batchNo") != null) detail.put("batchNo", row.get("batchNo"));
             String catKey = (String) row.get("category");
             detail.put("categoryName", BusinessDataServiceImpl.KEY_TO_CN.getOrDefault(catKey, catKey));
             g.details.add(detail);
