@@ -123,20 +123,14 @@ const selectedBatchLabel = ref('全部批次')
 
 async function loadBatches() {
   try {
-    const token = uni.getStorageSync('ops_employee_token') || ''
-    const res = await new Promise((resolve, reject) => {
-      uni.request({
-        url: '/api/ops/employee/business-data/batches',
-        method: 'GET',
-        header: token ? { 'Authorization': 'Bearer ' + token } : {},
-        success: (r) => r.data?.code === 200 ? resolve(r.data.data) : reject(r.data),
-        fail: reject
-      })
-    })
-    const batches = res || []
-    batchList.length = 1
-    batches.forEach(b => batchList.push({ label: b, value: b }))
-  } catch { /* ignore */ }
+    const data = await api.employeeBatches()
+    batchList.length = 1 // keep "全部批次"
+    if (Array.isArray(data)) {
+      data.forEach(b => batchList.push({ label: b, value: b }))
+    }
+  } catch (e) {
+    console.error('[bd] loadBatches error:', e)
+  }
 }
 
 function onBatchChange(e) {
@@ -158,21 +152,11 @@ async function doBatchCheck() {
   })
   if (!r) return
   try {
-    const token = uni.getStorageSync('ops_employee_token') || ''
-    const res = await new Promise((resolve, reject) => {
-      uni.request({
-        url: '/api/ops/employee/business-data/batch/check',
-        method: 'POST',
-        data: { batchNo: selectedBatch.value },
-        header: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        success: (r) => r.data?.code === 200 ? resolve(r.data.data) : reject(r.data),
-        fail: reject
-      })
-    })
+    const res = await api.employeeBatchCheck({ batchNo: selectedBatch.value })
     uni.showToast({ title: res.message || '核对成功', icon: 'success' })
     loadData()
   } catch (e) {
-    uni.showToast({ title: e.msg || '核对失败', icon: 'none' })
+    uni.showToast({ title: (e && e.msg) || '核对失败', icon: 'none' })
   }
 }
 
@@ -189,7 +173,8 @@ onMounted(() => { loadBatches();
 async function loadData() {
   loading.value = true; errorMsg.value = ''
   try {
-    const data = await api.employeeOverview()
+    const params = selectedBatch.value ? { batchNo: selectedBatch.value } : {}
+    const data = await api.employeeOverview(params)
     if (data?.allTime) Object.assign(allTime, data.allTime)
     months.value = Array.isArray(data?.months) ? data.months : []
   } catch (e) {

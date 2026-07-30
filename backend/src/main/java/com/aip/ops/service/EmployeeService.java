@@ -36,5 +36,5 @@ public interface EmployeeService {
      * Returns {allTime: {totalSale, totalCommission, orderCount},
      *          months: [{month, monthLabel, totalSale, totalCommission, orderCount, details: [...]}]}
      */
-    Map<String, Object> getOverview();
+    Map<String, Object> getOverview(String batchNo);
 }

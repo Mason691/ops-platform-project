@@ -233,10 +233,14 @@ public class EmployeeServiceImpl implements EmployeeService {
     // ---- overview (all-time totals + monthly breakdown) ----
 
     @Override
-    public Map<String, Object> getOverview() {
+    public Map<String, Object> getOverview(String batchNo) {
         String phone = resolvePhone();
 
         List<Map<String, Object>> all = employeeMapper.selectAllRecords(phone);
+        // Filter by batchNo if specified
+        if (batchNo != null && !batchNo.isBlank()) {
+            all = all.stream().filter(r -> batchNo.equals(r.get("batchNo"))).collect(java.util.stream.Collectors.toList());
+        }
         BigDecimal allTimeSale = BigDecimal.ZERO;
         BigDecimal allTimeCommission = BigDecimal.ZERO;
 

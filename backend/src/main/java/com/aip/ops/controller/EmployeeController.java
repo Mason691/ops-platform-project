@@ -83,8 +83,8 @@ public class EmployeeController {
 
     /** All-in-one overview: all-time totals + monthly breakdown with detail records. */
     @GetMapping("/business-data/overview")
-    public R<?> getOverview() {
-        return R.ok(employeeService.getOverview());
+    public R<?> getOverview(@RequestParam(required = false) String batchNo) {
+        return R.ok(employeeService.getOverview(batchNo));
     }
 
     private static final int AVATAR_SIZE = 200;
