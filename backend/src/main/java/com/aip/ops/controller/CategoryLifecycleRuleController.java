@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.OpsCategoryLifecycleRule;
 import com.aip.ops.service.CategoryLifecycleRuleService;
 import com.aip.ops.service.OrgRoleService;
@@ -52,6 +53,7 @@ public class CategoryLifecycleRuleController {
     }
 
     /** 新增 */
+    @OperationLog(module = "增值业务", action = "新增", targetTable = "ops_category_lifecycle_rule")
     @PostMapping
     public R<?> create(@RequestBody OpsCategoryLifecycleRule rule) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -63,6 +65,7 @@ public class CategoryLifecycleRuleController {
     }
 
     /** 编辑 */
+    @OperationLog(module = "增值业务", action = "修改", targetTable = "ops_category_lifecycle_rule")
     @PutMapping("/{id}")
     public R<?> update(@PathVariable Long id, @RequestBody OpsCategoryLifecycleRule rule) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -73,6 +76,7 @@ public class CategoryLifecycleRuleController {
     }
 
     /** 单个删除 */
+    @OperationLog(module = "增值业务", action = "删除", targetTable = "ops_category_lifecycle_rule")
     @DeleteMapping("/{id}")
     public R<?> delete(@PathVariable Long id) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -83,6 +87,7 @@ public class CategoryLifecycleRuleController {
     }
 
     /** 批量删除 */
+    @OperationLog(module = "增值业务", action = "批量删除", targetTable = "ops_category_lifecycle_rule")
     @DeleteMapping("/batch")
     public R<?> batchDelete(@RequestBody java.util.Map<String, List<Long>> body) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {

@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,7 @@ public class StationController {
     private String internalToken;
 
     /** 提交站长申请 */
+    @OperationLog(module = "运营管理", action = "新增", targetTable = "sys_station_apply")
     @PostMapping("/apply")
     @SuppressWarnings("unchecked")
     public R<?> apply(@RequestBody Map<String, Object> body) {

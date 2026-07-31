@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
@@ -55,6 +56,7 @@ public class AdminStationController {
     }
 
     /** 审批通过 */
+    @OperationLog(module = "运营管理", action = "审批通过", targetTable = "sys_station_apply")
     @PostMapping("/applies/{id}/approve")
     @SuppressWarnings("unchecked")
     public R<?> approve(@PathVariable Long id, @RequestBody Map<String, Object> body) {
@@ -77,6 +79,7 @@ public class AdminStationController {
     }
 
     /** 审批拒绝 */
+    @OperationLog(module = "运营管理", action = "审批拒绝", targetTable = "sys_station_apply")
     @PostMapping("/applies/{id}/reject")
     @SuppressWarnings("unchecked")
     public R<?> reject(@PathVariable Long id, @RequestBody Map<String, Object> body) {
@@ -120,6 +123,7 @@ public class AdminStationController {
     }
 
     /** 启用/停用站长 */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "sys_station_master")
     @PutMapping("/masters/{id}/status")
     @SuppressWarnings("unchecked")
     public R<?> toggleStatus(@PathVariable Long id, @RequestBody Map<String, Object> body) {

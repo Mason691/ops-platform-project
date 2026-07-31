@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.OpsAnnualPlan;
 import com.aip.ops.service.AnnualPlanService;
 import com.aip.ops.service.DataScopeService;
@@ -55,6 +56,7 @@ public class AnnualPlanController {
 
     // ═══ 写操作（仅运营商） ═══
 
+    @OperationLog(module = "增值业务", action = "新增", targetTable = "ops_annual_plan")
     @PostMapping
     public R<?> create(@RequestBody OpsAnnualPlan plan) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -64,6 +66,7 @@ public class AnnualPlanController {
         return R.ok("创建成功");
     }
 
+    @OperationLog(module = "增值业务", action = "修改", targetTable = "ops_annual_plan")
     @PutMapping("/{id}")
     public R<?> update(@PathVariable Long id, @RequestBody OpsAnnualPlan plan) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -77,6 +80,7 @@ public class AnnualPlanController {
         }
     }
 
+    @OperationLog(module = "增值业务", action = "删除", targetTable = "ops_annual_plan")
     @DeleteMapping("/{id}")
     public R<?> delete(@PathVariable Long id) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -90,6 +94,7 @@ public class AnnualPlanController {
         }
     }
 
+    @OperationLog(module = "增值业务", action = "审核", targetTable = "ops_annual_plan")
     @PutMapping("/{id}/approve")
     public R<?> approve(@PathVariable Long id) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -122,6 +127,7 @@ public class AnnualPlanController {
 
     // ═══ Excel 导入（仅运营商） ═══
 
+    @OperationLog(module = "增值业务", action = "导入", targetTable = "ops_annual_plan")
     @PostMapping("/import")
     public R<?> importExcel(@RequestParam("file") MultipartFile file) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {

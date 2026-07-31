@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.OpsMemberLedger;
 import com.aip.ops.mapper.OpsMemberLedgerMapper;
 import com.aip.ops.service.DataScopeService;
@@ -99,6 +100,7 @@ public class MemberLedgerController {
         return R.ok(data);
     }
 
+    @OperationLog(module = "增值业务", action = "新增", targetTable = "ops_member_ledger")
     @PostMapping
     @Transactional
     public R<?> create(@RequestBody OpsMemberLedger rec) {
@@ -108,6 +110,7 @@ public class MemberLedgerController {
         return R.ok(Map.of("id", rec.getId()));
     }
 
+    @OperationLog(module = "增值业务", action = "修改", targetTable = "ops_member_ledger")
     @PutMapping("/{id}")
     @Transactional
     public R<?> update(@PathVariable Long id, @RequestBody OpsMemberLedger rec) {
@@ -119,6 +122,7 @@ public class MemberLedgerController {
         return R.ok();
     }
 
+    @OperationLog(module = "增值业务", action = "删除", targetTable = "ops_member_ledger")
     @DeleteMapping("/{id}")
     @Transactional
     public R<?> delete(@PathVariable Long id) {

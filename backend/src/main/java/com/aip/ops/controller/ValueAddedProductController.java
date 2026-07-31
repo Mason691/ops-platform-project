@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.OpsValueAddedProduct;
 import com.aip.ops.service.OrgRoleService;
 import com.aip.ops.service.ValueAddedProductService;
@@ -39,6 +40,7 @@ public class ValueAddedProductController {
         return R.ok(service.getById(id));
     }
 
+    @OperationLog(module = "增值业务", action = "新增", targetTable = "ops_value_added_product")
     @PostMapping
     public R<?> create(@RequestBody OpsValueAddedProduct product) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -50,6 +52,7 @@ public class ValueAddedProductController {
         return R.ok("创建成功");
     }
 
+    @OperationLog(module = "增值业务", action = "修改", targetTable = "ops_value_added_product")
     @PutMapping("/{id}")
     public R<?> update(@PathVariable Long id, @RequestBody OpsValueAddedProduct product) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -59,6 +62,7 @@ public class ValueAddedProductController {
         return R.ok("更新成功");
     }
 
+    @OperationLog(module = "增值业务", action = "删除", targetTable = "ops_value_added_product")
     @DeleteMapping("/{id}")
     public R<?> delete(@PathVariable Long id) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {

@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.service.BattleMapCache;
 import com.aip.ops.service.BattleMapEtlService;
 import com.aip.ops.service.DataScopeService;
@@ -48,6 +49,7 @@ public class BattleMapController {
     private String scope(Long corpId) { return dataScope.getVisibleCorpIdCsv(corpId); }
 
     // ── ETL 触发 ───────────────────────────────────────────────────────────────
+    @OperationLog(module = "增值业务", action = "刷新缓存", targetTable = "ops_map_*")
     @PostMapping("/refresh-cache")
     public R<?> refreshCache(@RequestParam(defaultValue = "10") Long corpId) {
         if (!canView(corpId)) return R.ok(Map.of("refreshed", false));
@@ -56,6 +58,7 @@ public class BattleMapController {
     }
 
     /** 全量重算所有活跃组织（初始化 / 手动全量）。 */
+    @OperationLog(module = "增值业务", action = "全量刷新", targetTable = "ops_map_*")
     @PostMapping("/refresh-all")
     public R<?> refreshAll() {
         etl.refreshAllOrgs();

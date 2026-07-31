@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.EmployeeAuthService;
 import com.aip.ops.service.EmployeeService;
@@ -189,6 +190,7 @@ public class EmployeeController {
     }
 
     /** 经办人核对：将指定批次已计算数据标记为已核对 */
+    @OperationLog(module = "运营管理", action = "核对", targetTable = "ops_business_data")
     @PostMapping("/business-data/batch/check")
     public R<?> batchCheck(@RequestBody Map<String, String> params) {
         String batchNo = params.get("batchNo");

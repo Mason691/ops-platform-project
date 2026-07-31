@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.OpsGridManager;
 import com.aip.ops.entity.OpsGridManagerCommunity;
 import com.aip.ops.mapper.OpsGridManagerCommunityMapper;
@@ -76,6 +77,7 @@ public class GridManagerController {
     }
 
     /** Create grid manager with community assignments. */
+    @OperationLog(module = "增值业务", action = "新增", targetTable = "ops_grid_manager")
     @PostMapping
     @Transactional
     public R<?> create(@RequestBody OpsGridManager gm) {
@@ -91,6 +93,7 @@ public class GridManagerController {
     }
 
     /** Update grid manager with community assignments. */
+    @OperationLog(module = "增值业务", action = "修改", targetTable = "ops_grid_manager")
     @PutMapping("/{id}")
     @Transactional
     public R<?> update(@PathVariable Long id, @RequestBody OpsGridManager gm) {
@@ -113,6 +116,7 @@ public class GridManagerController {
     }
 
     /** Delete grid manager and its community associations. */
+    @OperationLog(module = "增值业务", action = "删除", targetTable = "ops_grid_manager")
     @DeleteMapping("/{id}")
     @Transactional
     public R<?> delete(@PathVariable Long id) {

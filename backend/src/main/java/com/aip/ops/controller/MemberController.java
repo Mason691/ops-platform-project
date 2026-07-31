@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.service.MemberService;
 import com.aip.ops.service.OrgRoleService;
 import com.aip.sdk.result.R;
@@ -41,6 +42,7 @@ public class MemberController {
     }
 
     /** 启用/禁用会员 */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "ops_member")
     @PutMapping("/{id}/status")
     public R<?> updateStatus(@PathVariable Long id, @RequestBody Map<String, Integer> body) {
         // 仅运营商/超管可操作状态

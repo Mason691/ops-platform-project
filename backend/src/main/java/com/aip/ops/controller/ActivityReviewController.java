@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.*;
 import com.aip.ops.mapper.*;
 import com.aip.ops.service.DataScopeService;
@@ -92,6 +93,7 @@ public class ActivityReviewController {
     }
 
     /** Create review (partners only). */
+    @OperationLog(module = "增值业务", action = "新增", targetTable = "ops_activity_review")
     @PostMapping
     @Transactional
     public R<?> create(@RequestBody OpsActivityReview rev) {
@@ -104,6 +106,7 @@ public class ActivityReviewController {
     }
 
     /** Update review (partners, only pending/rejected). */
+    @OperationLog(module = "增值业务", action = "修改", targetTable = "ops_activity_review")
     @PutMapping("/{id}")
     @Transactional
     public R<?> update(@PathVariable Long id, @RequestBody OpsActivityReview rev) {
@@ -119,6 +122,7 @@ public class ActivityReviewController {
     }
 
     /** Delete review (partners, only pending/rejected). */
+    @OperationLog(module = "增值业务", action = "删除", targetTable = "ops_activity_review")
     @DeleteMapping("/{id}")
     @Transactional
     public R<?> delete(@PathVariable Long id) {
@@ -131,6 +135,7 @@ public class ActivityReviewController {
     }
 
     /** Operator approves or rejects. */
+    @OperationLog(module = "增值业务", action = "审核", targetTable = "ops_activity_review")
     @PutMapping("/{id}/approve")
     @Transactional
     public R<?> approve(@PathVariable Long id, @RequestBody Map<String, Object> body) {

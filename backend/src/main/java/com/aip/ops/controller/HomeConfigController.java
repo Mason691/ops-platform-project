@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.OpsHomeConfig;
 import com.aip.ops.service.HomeConfigService;
 import com.aip.sdk.result.R;
@@ -40,6 +41,7 @@ public class HomeConfigController {
     /**
      * 新增首页配置。
      */
+    @OperationLog(module = "运营管理", action = "新增", targetTable = "ops_home_config")
     @PostMapping("/home-configs")
     public R<?> create(@RequestBody OpsHomeConfig config) {
         config.setOperatorId(currentOperatorId());
@@ -50,6 +52,7 @@ public class HomeConfigController {
     /**
      * 批量更新排序 — 必须在 /{id} 路由之前声明，避免 "sort" 被当作路径变量。
      */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "ops_home_config")
     @PutMapping("/home-configs/sort")
     public R<?> batchSort(@RequestBody Map<String, Object> body) {
         @SuppressWarnings("unchecked")
@@ -64,6 +67,7 @@ public class HomeConfigController {
     /**
      * 修改首页配置（部分更新）。
      */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "ops_home_config")
     @PutMapping("/home-configs/{id}")
     public R<?> update(@PathVariable Long id, @RequestBody OpsHomeConfig config) {
         homeConfigService.update(id, config);
@@ -73,6 +77,7 @@ public class HomeConfigController {
     /**
      * 删除首页配置。
      */
+    @OperationLog(module = "运营管理", action = "删除", targetTable = "ops_home_config")
     @DeleteMapping("/home-configs/{id}")
     public R<?> delete(@PathVariable Long id) {
         homeConfigService.delete(id);

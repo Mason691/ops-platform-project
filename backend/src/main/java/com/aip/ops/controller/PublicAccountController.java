@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.PublicAccountConfig;
 import com.aip.ops.service.impl.PublicAccountConfigServiceImpl;
 import com.aip.sdk.result.R;
@@ -98,6 +99,7 @@ public class PublicAccountController {
         return R.ok(list);
     }
 
+    @OperationLog(module = "运营管理", action = "新增", targetTable = "public_account_config")
     @PostMapping("/api/ops/public-account-config")
     public R<?> create(@RequestBody PublicAccountConfig config) {
         Long corpId = SecurityUtils.getCurrentCorpId();
@@ -107,6 +109,7 @@ public class PublicAccountController {
         return R.ok();
     }
 
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "public_account_config")
     @PutMapping("/api/ops/public-account-config/{id}")
     public R<?> update(@PathVariable Long id, @RequestBody PublicAccountConfig config) {
         Long corpId = SecurityUtils.getCurrentCorpId();
@@ -124,6 +127,7 @@ public class PublicAccountController {
         return R.ok();
     }
 
+    @OperationLog(module = "运营管理", action = "删除", targetTable = "public_account_config")
     @DeleteMapping("/api/ops/public-account-config/{id}")
     public R<?> delete(@PathVariable Long id) {
         Long corpId = SecurityUtils.getCurrentCorpId();
@@ -134,6 +138,7 @@ public class PublicAccountController {
         return R.ok();
     }
 
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "public_account_config")
     @PutMapping("/api/ops/public-account-config/{id}/set-default")
     public R<?> setDefault(@PathVariable Long id) {
         Long corpId = SecurityUtils.getCurrentCorpId();

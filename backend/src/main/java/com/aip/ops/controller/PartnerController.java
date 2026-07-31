@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
@@ -65,6 +66,7 @@ public class PartnerController {
     }
 
     /** 新增城市合伙人 */
+    @OperationLog(module = "运营管理", action = "新增", targetTable = "sys_corp")
     @PostMapping
     @SuppressWarnings("unchecked")
     public R<?> create(@RequestBody Map<String, Object> body) {
@@ -83,6 +85,7 @@ public class PartnerController {
     }
 
     /** 修改城市合伙人信息 */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "sys_corp")
     @PutMapping("/{corpId}")
     public R<?> update(@PathVariable Long corpId, @RequestBody Map<String, Object> body) {
         try {
@@ -97,6 +100,7 @@ public class PartnerController {
     }
 
     /** 启用/停用城市合伙人 */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "sys_corp")
     @PutMapping("/{corpId}/toggle")
     public R<?> toggleStatus(@PathVariable Long corpId, @RequestBody Map<String, Object> body) {
         try {

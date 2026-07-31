@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.config.GasDataSourceConfig;
 import com.aip.ops.entity.OpsGasUser;
 import com.aip.ops.entity.SysImportTask;
@@ -282,6 +283,7 @@ public class GasUserController {
     }
 
     /** Single manual conversion: force associate a gas user with a specific platform member. */
+    @OperationLog(module = "增值业务", action = "转化", targetTable = "ops_gas_user")
     @PostMapping("/{id}/convert")
     public R<?> convertOne(@PathVariable Long id, @RequestBody Map<String, Long> body) {
         Long memberId = body.get("platformMemberId");
@@ -340,6 +342,7 @@ public class GasUserController {
     }
 
     /** Update a single gas user (editable: communityId). */
+    @OperationLog(module = "增值业务", action = "修改", targetTable = "ops_gas_user")
     @PutMapping("/{id:\\d+}")
     public R<?> update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         OpsGasUser user = mapper.selectById(id);
@@ -361,6 +364,7 @@ public class GasUserController {
     }
 
     /** Batch assign community to selected gas users. */
+    @OperationLog(module = "增值业务", action = "批量分配", targetTable = "ops_gas_user")
     @PutMapping("/batch-assign-community")
     public R<?> batchAssignCommunity(@RequestBody Map<String, Object> body) {
         // Validate communityId
@@ -462,6 +466,7 @@ public class GasUserController {
     }
 
     /** 触发从外部燃气数据库导入。仅限管理员/运营角色操作。 */
+    @OperationLog(module = "增值业务", action = "导入", targetTable = "ops_gas_user")
     @PostMapping({"/import-from-gas-platform", "/gas-import/start", "/gas-import/submit"})
     public R<?> importFromGasPlatform(@RequestBody Map<String, String> body) {
         String areaName = body.getOrDefault("areaName", body.get("companyName"));

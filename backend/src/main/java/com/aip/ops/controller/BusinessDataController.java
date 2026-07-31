@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.entity.SysExportTask;
 import com.aip.ops.service.BusinessDataService;
@@ -95,6 +96,7 @@ public class BusinessDataController {
      * success → { status: "success", count: N }
      * failure → { status: "fail", totalErrors: N, errors: [...] }
      */
+    @OperationLog(module = "增值业务", action = "导入", targetTable = "ops_business_data")
     @PostMapping("/import/submit")
     public R<Map<String, Object>> importSubmit(@RequestParam("file") MultipartFile file) {
         String batchNo = "金厨美家" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
@@ -243,6 +245,7 @@ public class BusinessDataController {
         }
     }
 
+    @OperationLog(module = "增值业务", action = "删除", targetTable = "ops_business_data")
     @DeleteMapping("/batch")
     public R<?> batchDelete(@RequestBody Map<String, List<Long>> params) {
         service.batchDelete(params.get("ids"));
@@ -250,6 +253,7 @@ public class BusinessDataController {
     }
 
     /** 经办人核对：将指定批次已计算数据标记为已核对 */
+    @OperationLog(module = "增值业务", action = "核对", targetTable = "ops_business_data")
     @PutMapping("/batch/check")
     public R<?> batchCheck(@RequestBody Map<String, String> params) {
         String batchNo = params.get("batchNo");

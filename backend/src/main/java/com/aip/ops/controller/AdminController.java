@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.*;
 import com.aip.ops.mapper.*;
 import com.aip.ops.service.OpsActivityService;
@@ -104,6 +105,7 @@ public class AdminController {
     }
 
     /** 批量绑定销售商 */
+    @OperationLog(module = "运营管理", action = "新增", targetTable = "operator_merchant")
     @PostMapping("/bind-merchants")
     @Transactional
     public R<?> bindMerchants(@RequestBody Map<String,Object> body) {
@@ -133,6 +135,7 @@ public class AdminController {
     }
 
     /** 解绑单个销售商 */
+    @OperationLog(module = "运营管理", action = "删除", targetTable = "operator_merchant")
     @DeleteMapping("/bind-merchants/{merchantId}")
     public R<?> unbind(@PathVariable Long merchantId) {
         Long operatorId = currentOperatorId();
@@ -170,6 +173,7 @@ public class AdminController {
      * 新增或更新指定销售商的小程序跳转配置（upsert）。
      * 仅允许当前运营商已绑定的销售商。
      */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "merchant_miniapp_config")
     @PutMapping("/merchant/{merchantId}/miniapp-config")
     @Transactional
     public R<?> saveMiniappConfig(@PathVariable Long merchantId,
@@ -225,6 +229,7 @@ public class AdminController {
     }
 
     /** 单个商品上下架 */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "ops_product")
     @PutMapping("/products/{id}/shelf-status")
     public R<?> toggleShelf(@PathVariable Long id, @RequestBody Map<String,Object> body) {
         Integer shelfStatus = Integer.valueOf(body.getOrDefault("shelfStatus", 1).toString());
@@ -233,6 +238,7 @@ public class AdminController {
     }
 
     /** 批量上下架 */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "ops_product")
     @PostMapping("/products/batch-shelf")
     public R<?> batchShelf(@RequestBody Map<String,Object> body) {
         Long operatorId = currentOperatorId();
@@ -246,6 +252,7 @@ public class AdminController {
     }
 
     /** 批量设置分类 */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "ops_product")
     @PutMapping("/products/batch-category")
     public R<?> batchCategory(@RequestBody Map<String,Object> body) {
         Long operatorId = currentOperatorId();
@@ -259,6 +266,7 @@ public class AdminController {
     }
 
     /** 设置单个商品积分配额 */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "ops_product")
     @PutMapping("/products/{id}/points-config")
     public R<?> updatePointsConfig(@PathVariable Long id, @RequestBody Map<String,Object> body) {
         Long operatorId = currentOperatorId();
@@ -270,6 +278,7 @@ public class AdminController {
     }
 
     /** 批量设置积分配额 */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "ops_product")
     @PostMapping("/products/batch-points-config")
     public R<?> batchPointsConfig(@RequestBody Map<String,Object> body) {
         Long operatorId = currentOperatorId();
@@ -306,14 +315,17 @@ public class AdminController {
         return R.ok(roots);
     }
 
+    @OperationLog(module = "运营管理", action = "新增", targetTable = "product_category")
     @PostMapping("/product-categories")
     public R<?> createCategory(@RequestBody ProductCategory cat) { categoryMapper.insert(cat); return R.ok(); }
 
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "product_category")
     @PutMapping("/product-categories/{id}")
     public R<?> updateCategory(@PathVariable Long id, @RequestBody ProductCategory cat) {
         cat.setId(id); categoryMapper.updateById(cat); return R.ok();
     }
 
+    @OperationLog(module = "运营管理", action = "删除", targetTable = "product_category")
     @DeleteMapping("/product-categories/{id}")
     public R<?> deleteCategory(@PathVariable Long id) { categoryMapper.deleteById(id); return R.ok(); }
 
@@ -345,6 +357,7 @@ public class AdminController {
         return R.ok(list);
     }
 
+    @OperationLog(module = "运营管理", action = "新增", targetTable = "ops_live_room")
     @PostMapping("/live-rooms")
     public R<?> createLiveRoom(@RequestBody OpsLiveRoom room) {
         Long operatorId = currentOperatorId();
@@ -358,6 +371,7 @@ public class AdminController {
         return R.ok();
     }
 
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "ops_live_room")
     @PutMapping("/live-rooms/{id}")
     public R<?> updateLiveRoom(@PathVariable Long id, @RequestBody OpsLiveRoom room) {
         Long operatorId = currentOperatorId();
@@ -391,6 +405,7 @@ public class AdminController {
      * status: 0=预告, 1=直播中, 2=已结束
      * status 0→1 时自动记录实际开播时间; →2 时自动记录实际结束时间
      */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "ops_live_room")
     @PutMapping("/live-rooms/{id}/status")
     public R<?> updateLiveRoomStatus(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         Long operatorId = currentOperatorId();
@@ -447,6 +462,7 @@ public class AdminController {
                 .stream().map(OperatorMerchant::getMerchantId).findFirst().orElse(null);
     }
 
+    @OperationLog(module = "运营管理", action = "删除", targetTable = "ops_live_room")
     @DeleteMapping("/live-rooms/{id}")
     public R<?> deleteLiveRoom(@PathVariable Long id) {
         Long operatorId = currentOperatorId();
@@ -538,6 +554,7 @@ public class AdminController {
      * 创建活动。
      * 接收 type、liveRoomId、productIds 等字段。
      */
+    @OperationLog(module = "运营管理", action = "新增", targetTable = "ops_activity")
     @PostMapping("/activities")
     public R<?> createActivity(@RequestBody Map<String, Object> body) {
         OpsActivity a = buildActivityFromBody(body);
@@ -555,6 +572,7 @@ public class AdminController {
     /**
      * 更新活动（含商品关联）。
      */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "ops_activity")
     @PutMapping("/activities/{id}")
     public R<?> updateActivity(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         OpsActivity a = buildActivityFromBody(body);
@@ -570,6 +588,7 @@ public class AdminController {
     /**
      * 更新活动状态（上架/下架/结束）。
      */
+    @OperationLog(module = "运营管理", action = "修改", targetTable = "ops_activity")
     @PutMapping("/activities/{id}/status")
     public R<?> updateActivityStatus(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         Integer status = Integer.valueOf(body.get("status").toString());
@@ -580,6 +599,7 @@ public class AdminController {
     /**
      * 删除活动（同时清除关联商品）。
      */
+    @OperationLog(module = "运营管理", action = "删除", targetTable = "ops_activity")
     @DeleteMapping("/activities/{id}")
     public R<?> deleteActivity(@PathVariable Long id) {
         activityService.deleteActivity(id);

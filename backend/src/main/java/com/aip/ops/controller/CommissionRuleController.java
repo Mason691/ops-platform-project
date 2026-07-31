@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.OpsCompanyCommissionRule;
 import com.aip.ops.entity.OpsPersonalCommissionRule;
 import com.aip.ops.service.CommissionRuleService;
@@ -42,6 +43,7 @@ public class CommissionRuleController {
         return R.ok(service.personalGetById(id));
     }
 
+    @OperationLog(module = "增值业务", action = "新增", targetTable = "ops_personal_commission_rule")
     @PostMapping("/personal")
     public R<?> personalCreate(@RequestBody OpsPersonalCommissionRule rule) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -54,6 +56,7 @@ public class CommissionRuleController {
         return R.ok("创建成功");
     }
 
+    @OperationLog(module = "增值业务", action = "修改", targetTable = "ops_personal_commission_rule")
     @PutMapping("/personal/{id}")
     public R<?> personalUpdate(@PathVariable Long id, @RequestBody OpsPersonalCommissionRule rule) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -63,6 +66,7 @@ public class CommissionRuleController {
         return R.ok("更新成功");
     }
 
+    @OperationLog(module = "增值业务", action = "删除", targetTable = "ops_personal_commission_rule")
     @DeleteMapping("/personal/{id}")
     public R<?> personalDelete(@PathVariable Long id) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -88,6 +92,7 @@ public class CommissionRuleController {
         return R.ok(service.companyGetById(id));
     }
 
+    @OperationLog(module = "增值业务", action = "新增", targetTable = "ops_company_commission_rule")
     @PostMapping("/company")
     public R<?> companyCreate(@RequestBody OpsCompanyCommissionRule rule) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -100,6 +105,7 @@ public class CommissionRuleController {
         return R.ok("创建成功");
     }
 
+    @OperationLog(module = "增值业务", action = "修改", targetTable = "ops_company_commission_rule")
     @PutMapping("/company/{id}")
     public R<?> companyUpdate(@PathVariable Long id, @RequestBody OpsCompanyCommissionRule rule) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -109,6 +115,7 @@ public class CommissionRuleController {
         return R.ok("更新成功");
     }
 
+    @OperationLog(module = "增值业务", action = "删除", targetTable = "ops_company_commission_rule")
     @DeleteMapping("/company/{id}")
     public R<?> companyDelete(@PathVariable Long id) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
