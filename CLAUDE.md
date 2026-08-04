@@ -11,12 +11,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # restart.sh — 本地开发一键操作（推荐）
+./restart.sh             # 默认: 停止后端 + 编译打包 + 启动后端（等同于 all）
 ./restart.sh backend     # 仅重启后端（stop + start，JAR 不存在时自动编译）
 ./restart.sh frontend    # 仅重启前端 Vite dev server（stop + start，端口 3035）
-./restart.sh all         # 后端编译 + 重启（不含前端）
+./restart.sh all         # 停止后端 + 编译 + 启动后端（默认行为）
 ./restart.sh rebuild     # 强制重编译后端 + 重启
-./restart.sh dev         # 后端编译 + 启动后端 + 启动前端 dev server
-./restart.sh stop        # 停止所有服务
+./restart.sh dev         # 停止前后端 + 编译后端 + 启动后端 + 启动前端 dev server
+./restart.sh stop        # 停止所有服务（后端 8084 + 前端 3035）
 ./restart.sh build       # 构建前端 H5 生产包 + 后端 JAR
 
 # 后端编译（离线模式，本地 JDK 17）
@@ -57,6 +58,15 @@ ssh jason@104.238.165.57 "kill \$(lsof -ti:8084) 2>/dev/null; sleep 1; \
 
 依赖 `ai-platform-sdk` 接入底座的安全、多租户、MCP、Agent 等能力。
 
+### 规格驱动开发 (SDD)
+
+新功能先在 `Specs/` 创建中文规格文档（复制 `specs/template.md`），包含：功能概述、用户故事、验收标准、API 设计、多租户/安全考虑。完成后在规格中标记 ✅。
+
+现有规格：
+- `Specs/增值业务-规格说明.md`
+- `Specs/活动管理-规格说明.md`
+- `Specs/annual-plan-spec.md`（英文）
+
 ---
 
 ## 技术栈
@@ -85,6 +95,31 @@ ssh jason@104.238.165.57 "kill \$(lsof -ti:8084) 2>/dev/null; sleep 1; \
 - Java：`com.aip.ops.*`
 - 表前缀：`ops_`（运营平台业务表），`biz_`（跨子系统共享业务表），`sys_`（系统级配置表）
 - 前端路由 base：`/ops/`（生产 hash 模式）
+
+---
+
+## 新增业务模块模式
+
+项目中每个管理后台模块遵循统一的分层模式，新增模块时按以下清单逐层实现：
+
+| 层 | 文件 | 模式 |
+|---|---|---|
+| 实体 | `entity/OpsXxx.java` | 继承 `BaseEntity`，`@TableName("ops_xxx")`，含 `corpId` + `deleteFlag` |
+| Mapper | `mapper/OpsXxxMapper.java` | 继承 `BaseMapper<OpsXxx>`，复杂查询写在 `resources/mapper/OpsXxxMapper.xml` |
+| Service | `service/XxxService.java` + `impl/XxxServiceImpl.java` | 继承 `ServiceImpl<Mapper, Entity>`，分页用 `Page<Entity>` |
+| Controller | `controller/XxxController.java` | RESTful CRUD + 分页查询，所有写操作校验 `corpId` |
+| 导入（可选） | `imports/XxxImportHandler.java` | 实现 `ImportHandler` 接口，分阶段校验（FILE→HEADER→ROW→INSERT），全量通过后 JDBC batch 原子写入 |
+| 导出（可选） | `export/XxxExportHandler.java` | 实现 `ExportHandler` 接口，TSV → Python openpyxl 转 XLSX，降级 TSV |
+| 前端页面 | `pages/admin/xxx.vue` | uni-app 页面，注册到 `pages.json` |
+| 前端 API | `api/index.js` | 在 `api` 对象中添加方法，使用 `request` 实例 |
+
+**数据隔离要求**：
+- 所有查询自动带 `WHERE corp_id = {current}`（MyBatis-Plus `TenantLineHandler`）
+- 写操作前必须校验数据归属当前组织（`OrgRoleService.isOperatorOrSuperAdmin()` 判定角色）
+- 禁止跨库 JOIN（产品信息通过 `ProductBatchClient`，组织信息通过 `PlatformInternalClient`）
+- 城市合伙人（`orgRoleId=5`）仅可查看，不可写入
+
+**参考实现**：`GasUserController` + `GasUserImportHandler`（含导入）、`AnnualPlanController`（含权限守卫）、`CommissionRuleController`（含组织层级继承）
 
 ---
 
@@ -463,6 +498,29 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 员工页面（已注册）：`pages/employee/login`（员工登录）、`pages/employee/ai-chat`（员工 AI 助手 H5）、`pages/employee/dashboard`、`pages/employee/business-data`、`pages/employee/profile`  
 员工页面（未注册）：`pages/employee/company-select`（文件存在但未在 pages.json 注册）
 
+### 关键前端组件
+
+| 组件 | 文件 | 说明 |
+|------|------|------|
+| `MpLauncher` | `components/MpLauncher.vue` | 微信开放标签跳转小程序 — 每次点击动态重建 DOM 绕过微信标签复用限制 |
+| `EmployeeTabBar` | `components/EmployeeTabBar.vue` | 员工端底部导航栏（AI助手/业务数据/我的） |
+| `ImageCropperModal` | `components/ImageCropperModal.vue` | 图片裁剪上传弹窗，uni-app `<image>` 的 `mode` 裁剪封装 |
+| `LiveStatusCard` | `components/LiveStatusCard.vue` | 直播状态卡片（预告/直播中/结束 + 开播倒计时） |
+| `Pager` | `components/Pager.vue` | 通用分页器，配合列表页使用 |
+
+---
+
+## 测试与验证
+
+项目**无自动化测试**（无单元测试/集成测试）。所有验证依赖手动检查：
+
+- **编译验证**：`JAVA_HOME=/home/jason/jdk17/jdk-17.0.9+9 mvn -f backend/pom.xml compile -o`
+- **后端 API**：`curl` 测试端点，查看日志 `tail -f /tmp/ops-backend.log`
+- **前端 H5**：`npm run build:h5` → 部署到测试服务器 → 微信开发者工具打开 `https://a.15891589.xyz/ops/`
+- **前端管理页**：平台主站 `https://a.15891589.xyz` 加载 `/ops/` 路由组件（非微前端，是 componentMap 直接加载）
+- **微信 JSSDK**：必须在微信环境中测试，普通浏览器不可用（详见 `docs/testing.md`）
+- **Kafka 功能**：仅在 `spring.kafka.enabled=true` 时可用（生产环境），测试环境 Kafka 禁用时自动降级为同步调用
+
 ---
 
 ## 关键配置
@@ -562,6 +620,7 @@ cd frontend && npm run build:h5
 | **BaseEntity 字段命名** | SDK 使用 `modifyTime`（不是 `updateTime`） |
 | **增值业务物理删除** | `ops_business_data` 的 `batchDelete()` 用原始 JDBC 物理删除，不走 `@TableLogic` |
 | **SysImportTask 未继承 BaseEntity** | 自行声明所有审计字段，是唯一例外 |
+| **数据库环境隔离** | 生产与测试共享同一 MySQL 实例但使用不同数据库（生产 `mall_db` / 测试 `mall_db_test`），极易混淆。**部署时必须确认 `SPRING_DATASOURCE_URL` 指向正确的库**。历史事故：生产容器曾错误使用 `mall_db_test`，导致 17,745 条数据写入测试库而非生产库 |
 | **无自动化测试** | 所有验证依赖手动检查和生产监控 |
 | **首页配置 corpId** | `/api/ops/home-data` 公开接口（无 JWT），必须传 `?corpId=` 参数 |
 | **Kafka 条件加载** | Consumer 仅在 `spring.kafka.enabled=true` 时加载，测试环境无 Kafka 降级同步 |
@@ -597,9 +656,20 @@ cd frontend && npm run build:h5
 
 ### 自定义 Claude 命令
 
-项目 `.claude/commands/` 目录提供两个自定义命令：
+项目 `.claude/commands/` 目录提供两个自定义命令，定义在 `.claude/commands/pr.md` 和 `.claude/commands/loop.md`。
 
-| 命令 | 说明 |
-|------|------|
-| `/pr` | 基于当前 git diff 生成结构化 PR 描述（标题/动机/变更/影响/测试/风险） |
-| `/loop` | 严格开发闭环：plan → implement → verify → code-review → PR 描述，自动循环不中断 |
+**`/pr`** — 基于当前 git diff 生成结构化 PR 描述，包含：
+1. 标题（一句话概括）
+2. 动机（为什么做、解决什么问题）
+3. 模块级变更列表（按模块/文件分类）
+4. 影响范围（受影响的模块/接口/页面/数据流）
+5. 测试建议（reviewer 应重点测试的功能点/边界条件）
+6. 风险提示（已知风险/未解决问题/潜在副作用）
+
+**`/loop`** — 严格开发闭环，自动完成以下步骤，非极特殊情况不中断：
+1. **plan** — 列出受影响文件、接口/数据流变更、潜在风险点；修改接口时列出所有引用方
+2. **implement** — 按 plan 分步编写代码，每次只做最小原子改动
+3. **verify** — 运行编译检查（`mvn compile`），失败立即修复，不通过不继续（项目无自动化测试，verify 仅验证编译通过）
+4. **code-review** — 多角度审查（逻辑/安全/性能/规范/删除影响）；严重问题自动修复并跳回步骤3；风格建议记录但不阻塞
+5. **PR** — 生成结构化 PR 描述
+6. **结束** — 报告闭环完成，等待用户确认是否提交

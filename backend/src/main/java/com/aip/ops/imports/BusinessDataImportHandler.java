@@ -440,18 +440,31 @@ public class BusinessDataImportHandler implements ImportHandler {
         String brand = val(cols, brandIdx);
         String model = val(cols, modelIdx);
         String cat = val(cols, catIdx);
-        // Only skip completely empty rows; non-appliance cats can lack brand/model
-        if (cat.isEmpty() && brand.isEmpty() && model.isEmpty()) return null;
+        String customer = val(cols, customerIdx);
+        String company = val(cols, companyIdx);
+        String agent = val(cols, agentIdx);
+        String agentPhone = val(cols, agentPhoneIdx);
+        String priceStr = val(cols, priceIdx);
+
+        // Skip only TRULY blank rows: ALL meaningful fields empty.
+        // Any row with partial data must go through validation —
+        // if validation fails, the ENTIRE file is rejected (all-or-nothing).
+        if (cat.isEmpty() && brand.isEmpty() && model.isEmpty()
+                && customer.isEmpty() && company.isEmpty()
+                && agent.isEmpty() && agentPhone.isEmpty()
+                && priceStr.isEmpty()) {
+            return null;
+        }
 
         ParsedRow pr = new ParsedRow();
-        pr.company = val(cols, companyIdx);
-        pr.customer = val(cols, customerIdx);
+        pr.company = company;
+        pr.customer = customer;
         pr.brand = brand;
         pr.model = model;
-        pr.catCn = val(cols, catIdx);
-        pr.salePrice = toDecimal(val(cols, priceIdx));
-        pr.agent = val(cols, agentIdx);
-        pr.agentPhone = val(cols, agentPhoneIdx);
+        pr.catCn = cat;
+        pr.salePrice = toDecimal(priceStr);
+        pr.agent = agent;
+        pr.agentPhone = agentPhone;
         pr.dept = val(cols, deptIdx);
         // Normalize dates: convert Chinese/ISO/Excel formats → YYYY-MM-DD
         pr.saleDate = normalizeDate(val(cols, saleDateIdx));

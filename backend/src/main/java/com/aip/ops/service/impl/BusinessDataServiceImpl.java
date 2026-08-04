@@ -435,6 +435,20 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             cascadeParentRules(ruleMapByCorp, parentMap);
         }
 
+        // For super admin (visibleIds=null): merge all corp rules into a
+        // platform-level fallback (corpId=0) so records from any org can
+        // match when their own corp has no rules configured.
+        if (visibleIds == null) {
+            Map<String, OpsPersonalCommissionRule> allRules = new HashMap<>();
+            for (Map<String, OpsPersonalCommissionRule> corpRules : ruleMapByCorp.values()) {
+                for (Map.Entry<String, OpsPersonalCommissionRule> e : corpRules.entrySet()) {
+                    allRules.putIfAbsent(e.getKey(), e.getValue());
+                }
+            }
+            ruleMapByCorp.put(0L, allRules);
+            log.info("Super admin: merged {} rules from all corps as fallback", allRules.size());
+        }
+
         LambdaQueryWrapper<OpsBusinessData> uncalcQw = new LambdaQueryWrapper<OpsBusinessData>()
                 .eq(OpsBusinessData::getCalcStatus, "未计算");
         applyCorpScope(uncalcQw);
@@ -456,7 +470,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             results.put(d.getId(), new BigDecimal[]{cr[0], cr[1]});
         }
 
-        // ── Phase 2: Split by receipt group ──
+        // ── Phase 2: Split by receipt×customer×category×model group ──
         int splitGroups = splitCommissionByReceiptGroup(uncalcs, results);
 
         // Count commissioned / zero AFTER splitting (results may have changed)
@@ -507,20 +521,32 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     /**
-     * Split commission evenly within receipt groups (N > 1).
+     * Split commission evenly within receipt×customer×category×model groups (N > 1).
+     * Groups are formed by (receiptNo, customer, category, model) so that:
+     * <ul>
+     *   <li>Same receipt + same customer + same category + same model
+     *       + different agents → split evenly (multi-agent collaboration)</li>
+     *   <li>Different category or different model → independent calculation,
+     *       each row keeps its own commission</li>
+     * </ul>
+     * Rule inheritance across org hierarchy is handled by
+     * {@link #cascadeParentRules} at rule-load time, not by grouping.
      * The last row in each group absorbs rounding remainder so the
      * sum of adjusted amounts matches the original total exactly.
      *
-     * @return number of receipt groups that were split
+     * @return number of receipt×customer×category×model groups that were split
      */
     private int splitCommissionByReceiptGroup(List<OpsBusinessData> records,
                                                Map<Long, BigDecimal[]> results) {
-        // Build receipt groups
+        // Build receipt×customer×category×model groups
         Map<String, List<OpsBusinessData>> groups = new LinkedHashMap<>();
         for (OpsBusinessData d : records) {
             String rn = d.getReceiptNo();
             if (rn != null && !rn.isEmpty()) {
-                groups.computeIfAbsent(rn, k -> new ArrayList<>()).add(d);
+                String key = rn + "|" + Objects.toString(d.getCustomer(), "")
+                        + "|" + Objects.toString(d.getCategory(), "")
+                        + "|" + Objects.toString(d.getModel(), "");
+                groups.computeIfAbsent(key, k -> new ArrayList<>()).add(d);
             }
         }
 
@@ -530,10 +556,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             if (group.size() <= 1) continue;
             splitGroups++;
 
-            // Use FIRST row's commission as the total for this receipt order.
-            // Since RECEIPT_CHECK guarantees consistent customer/category/
-            // brand/model/salePrice within the group, any row gives the same
-            // commission result.  We pick the first for traceability.
+            // Within a (receiptNo, customer, category, model) group, all rows
+            // represent the same product sold to the same customer, so every row
+            // should match the same commission rule and yield the same amount.
+            // We pick the first row's result as the reference for splitting.
             BigDecimal[] firstResult = results.get(group.get(0).getId());
             BigDecimal totalAmount = (firstResult != null && firstResult[1] != null)
                     ? firstResult[1] : BigDecimal.ZERO;
@@ -574,7 +600,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         for (OpsBusinessData d : records) {
             String rn = d.getReceiptNo();
             if (rn != null && !rn.isEmpty()) {
-                groups.computeIfAbsent(rn, k -> new ArrayList<>()).add(d);
+                String key = rn + "|" + Objects.toString(d.getCustomer(), "")
+                        + "|" + Objects.toString(d.getCategory(), "")
+                        + "|" + Objects.toString(d.getModel(), "");
+                groups.computeIfAbsent(key, k -> new ArrayList<>()).add(d);
             }
         }
 
