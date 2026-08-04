@@ -153,8 +153,16 @@ public class BusinessDataController {
         return R.ok(importTaskService.listHistory(userId, 20));
     }
 
+    /** 获取所有含"未计算"数据的批次列表，按时间倒序。 */
+    @GetMapping("/uncalc-batches")
+    public R<List<String>> uncalcBatches() { return R.ok(service.getUncalcBatches()); }
+
+    /** 个人提成计算（按指定批次，batchNo 为空时计算全部）。 */
     @PostMapping("/calc-commission")
-    public R<?> calcCommission() { return R.ok(service.calcCommission()); }
+    public R<?> calcCommission(@RequestBody Map<String, String> body) {
+        String batchNo = body != null ? body.getOrDefault("batchNo", null) : null;
+        return R.ok(service.calcCommission(batchNo));
+    }
 
     /**
      * Async export: creates a task record and sends to Kafka.

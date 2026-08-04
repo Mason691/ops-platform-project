@@ -374,8 +374,20 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
+    public List<String> getUncalcBatches() {
+        LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<OpsBusinessData>()
+                .select(OpsBusinessData::getBatchNo)
+                .eq(OpsBusinessData::getCalcStatus, "未计算")
+                .groupBy(OpsBusinessData::getBatchNo)
+                .orderByDesc(OpsBusinessData::getBatchNo);
+        applyCorpScope(qw);
+        List<OpsBusinessData> all = mapper.selectList(qw);
+        return all.stream().map(OpsBusinessData::getBatchNo).filter(Objects::nonNull).distinct().toList();
+    }
+
+    @Override
     @Transactional
-    public Map<String, Object> calcCommission() {
+    public Map<String, Object> calcCommission(String batchNo) {
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
 
         // ── Build parent chain BEFORE querying rules ──
@@ -451,6 +463,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
         LambdaQueryWrapper<OpsBusinessData> uncalcQw = new LambdaQueryWrapper<OpsBusinessData>()
                 .eq(OpsBusinessData::getCalcStatus, "未计算");
+        if (batchNo != null && !batchNo.isBlank()) {
+            uncalcQw.eq(OpsBusinessData::getBatchNo, batchNo);
+        }
         applyCorpScope(uncalcQw);
         List<OpsBusinessData> uncalcs = mapper.selectList(uncalcQw);
 

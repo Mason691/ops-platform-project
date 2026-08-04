@@ -13,6 +13,9 @@ public interface BusinessDataService {
 
     /** 经办人核对：将指定批次下已计算数据标记为已核对 */
     int batchCheck(String batchNo);
-    Map<String, Object> calcCommission();
+    /** 获取所有"未计算"批次列表，按时间倒序 */
+    List<String> getUncalcBatches();
+    /** 个人提成计算（按指定批次），batchNo 为 null 时计算所有未计算批次 */
+    Map<String, Object> calcCommission(String batchNo);
     void exportExcel(String company, String batchNo, String agent, HttpServletResponse response);
 }
