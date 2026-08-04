@@ -44,4 +44,13 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
                        @Param("agent") String agent,
                        @Param("receiptNo") String receiptNo,
                        @Param("corpIds") List<Long> corpIds);
+
+    /** Find which receipt numbers from the given set already exist in DB (within corp scope). */
+    @Select("<script>"
+            + "SELECT DISTINCT receipt_no FROM ops_business_data WHERE delete_flag=0 "
+            + "<if test='corpId != null'>AND corp_id = #{corpId}</if> "
+            + "AND receipt_no IN <foreach collection='receiptNos' item='r' open='(' separator=',' close=')'>#{r}</foreach>"
+            + "</script>")
+    List<String> findExistingReceiptNos(@Param("receiptNos") List<String> receiptNos,
+                                        @Param("corpId") Long corpId);
 }

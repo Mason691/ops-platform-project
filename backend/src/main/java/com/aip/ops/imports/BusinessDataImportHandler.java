@@ -190,6 +190,27 @@ public class BusinessDataImportHandler implements ImportHandler {
             return ImportResult.fail("RECEIPT_CHECK", receiptErrors, totalRows);
         }
 
+        // ── Phase 1c: Receipt number uniqueness check ──
+        // Extract unique receipt numbers from the file, then query DB for
+        // duplicates. Entire file is rejected if ANY receipt already exists.
+        List<String> uniqueReceiptNos = parsedRows.stream()
+                .map(r -> r.receiptNo)
+                .filter(r -> r != null && !r.isEmpty())
+                .distinct()
+                .collect(java.util.stream.Collectors.toList());
+        if (!uniqueReceiptNos.isEmpty()) {
+            Long corpId = task.getCorpId() != null ? task.getCorpId() : 4L;
+            List<String> existing = mapper.findExistingReceiptNos(uniqueReceiptNos, corpId);
+            if (!existing.isEmpty()) {
+                String dupList = existing.size() <= 10
+                        ? String.join(", ", existing)
+                        : String.join(", ", existing.subList(0, 10))
+                            + " ...共" + existing.size() + "个";
+                return ImportResult.fail("RECEIPT_DUP",
+                        List.of("以下收据号已存在，请检查：" + dupList), totalRows);
+            }
+        }
+
         // ── Phase 2: Single-transaction JDBC batch insert ──
         // DataSourceUtils returns the Spring-managed connection
         // (participates in @Transactional — all-or-nothing)
