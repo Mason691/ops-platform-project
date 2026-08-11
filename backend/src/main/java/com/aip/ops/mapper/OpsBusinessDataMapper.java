@@ -13,16 +13,26 @@ import java.util.Map;
 @Mapper
 public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
 
-    /** Aggregate stats for current filter — single query, no full table scan. */
+    /** Aggregate stats for current filter — deduplicated by (receipt_no, category, model)
+     *  so that multi-agent rows sharing the same order+product are counted once.
+     *  Rows with NULL receipt_no use a per-row sentinel (COALESCE + id) to stay
+     *  independent — unrelated orders must not merge under a shared NULL group. */
     @Select("<script>"
-            + "SELECT COALESCE(SUM(sale_price),0) as totalSale, "
-            + "COALESCE(SUM(commission_amount),0) as totalCommission "
+            + "SELECT COALESCE(SUM(t.sale_price),0) as totalSale, "
+            + "COALESCE(SUM(t.commission_amount),0) as totalCommission "
+            + "FROM ("
+            + "SELECT COALESCE(receipt_no, CONCAT('__NULL__', id)) as receipt_no, "
+            + "category, model, "
+            + "MAX(sale_price) as sale_price, "
+            + "SUM(commission_amount) as commission_amount "
             + "FROM ops_business_data WHERE delete_flag=0 "
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
             + "<if test='batchNo != null and batchNo != \"\"'>AND batch_no = #{batchNo}</if> "
             + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "
             + "<if test='receiptNo != null and receiptNo != \"\"'>AND receipt_no = #{receiptNo}</if> "
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
+            + "GROUP BY 1, category, model"
+            + ") t"
             + "</script>")
     Map<String, BigDecimal> aggregateStats(@Param("company") String company,
                                            @Param("batchNo") String batchNo,
