@@ -230,16 +230,19 @@ public class BattleMapEtlService {
         try {
             jdbc.update("DELETE FROM ops_map_category_sales WHERE org_id=?", corpId);
             // 品类中文名优先从数据字典转换，降级用原始 category 值
+            // 数据源：ops_business_data（已计算 + 经办人已核对）
             jdbc.update(
                 "INSERT INTO ops_map_category_sales (org_id,category_key,category_name,total_sales," +
                 "sales_count,rank_order) " +
-                "SELECT ?,ml.category AS category_key," +
-                "COALESCE((SELECT item_value FROM ai_platform.sys_dict_item WHERE type_id=9 AND item_key=ml.category AND delete_flag=0 LIMIT 1),ml.category) AS category_name," +
-                "COALESCE(SUM(ml.sales_price),0),COUNT(*)," +
-                "ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(ml.sales_price),0) DESC) " +
-                "FROM ops_member_ledger ml " +
-                "WHERE ml.corp_id IN (" + scope + ") AND ml.delete_flag=0 AND ml.category IS NOT NULL AND ml.category<>'' " +
-                "GROUP BY ml.category ORDER BY COALESCE(SUM(ml.sales_price),0) DESC LIMIT 5",
+                "SELECT ?,bd.category AS category_key," +
+                "COALESCE((SELECT item_value FROM ai_platform.sys_dict_item WHERE type_id=9 AND item_key=bd.category AND delete_flag=0 LIMIT 1),bd.category) AS category_name," +
+                "COALESCE(SUM(bd.sale_price),0),COUNT(*)," +
+                "ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(bd.sale_price),0) DESC) " +
+                "FROM ops_business_data bd " +
+                "WHERE bd.corp_id IN (" + scope + ") AND bd.delete_flag=0 " +
+                "AND bd.calc_status IN ('已计算','经办人已核对') " +
+                "AND bd.category IS NOT NULL AND bd.category<>'' " +
+                "GROUP BY bd.category ORDER BY COALESCE(SUM(bd.sale_price),0) DESC LIMIT 5",
                 corpId);
         } catch (Exception e) { log.warn("ETL category sales org={} failed: {}", corpId, e.getMessage()); }
     }
