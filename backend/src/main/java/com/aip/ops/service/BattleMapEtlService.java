@@ -10,15 +10,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 作战地图 ETL：从原始业务表抽取聚合到 4 张预计算表（org 维度隔离）。
+ * 作战地图 ETL：从原始业务表抽取聚合到 6 张预计算表（org 维度隔离）。
  * <ul>
- *   <li>{@link #refreshOrg(Long)} 单组织全量重算（点击刷新 / 数据变更后）</li>
- *   <li>{@link #refreshAllOrgs()} 全量重算所有活跃组织（定时增量入口）</li>
+ *   <li>经办人业绩 TOP5：来源 {@code ops_business_data}，按 agent(姓名) 分组，
+ *       仅统计 {@code calc_status IN ('已计算','经办人已核对')}</li>
+ *   <li>{@link #refreshOrg(Long)} 单组织全量重算</li>
+ *   <li>{@link #refreshAllOrgs()} 全量重算所有活跃组织</li>
  * </ul>
- * <b>组织+下级聚合</b>：每个组织的预计算行按「自身 + 所有下级组织」({@code corp_id IN scope}) 聚合，
- * 行主键 {@code org_id} 仍为被计算组织。叶子组织(城市合伙人) scope=自身、行为与单组织一致；
- * 运营商 scope=自身+旗下合伙人，故其看板聚合下级数据。scope 由 {@link DataScopeService} 解析，
- * 平台不可达时回退自身（不越权、不聚合）。
+ * <b>组织+下级聚合</b>：每个组织的预计算行按「自身 + 所有下级组织」聚合。
+ * scope 由 {@link DataScopeService} 解析，平台不可达时回退自身（不越权、不聚合）。
  * 每张表刷新前先按 org_id 物理删除再重写；失败仅记录日志不阻断其余表；完成后清该组织读缓存。
  */
 @Slf4j
@@ -29,46 +29,6 @@ public class BattleMapEtlService {
     private final JdbcTemplate jdbc;
     private final BattleMapCache cache;
     private final DataScopeService dataScope;
-
-    /**
-     * 统一经办人姓名解析：以 ops_business_data.agent 为权威显示源。
-     * 解析优先级:
-     * 1) ops_business_data.agent (agent_phone 匹配) - 导入时填写的经办人姓名
-     * 2) sys_user.real_name (phone 匹配) - 系统用户
-     * 3) 原始 agentKey (手机号) - 无匹配时直接展示
-     * 注意: ops_business_data 与 ops_member_ledger 表可能有字符集不一致
-     * (unicode_ci vs 0900_ai_ci)，因此在 Java 侧分步查询而非单条 SQL。
-     */
-    private String resolveAgentName(String agentKey) {
-        // 1) 优先从 ops_business_data.agent 取 (agent_phone 匹配)
-        try {
-            List<Map<String, Object>> bdRows = jdbc.queryForList(
-                "SELECT bd.agent FROM ops_business_data bd " +
-                "WHERE bd.agent_phone=? AND bd.delete_flag=0 AND bd.agent IS NOT NULL AND bd.agent<>'' LIMIT 1",
-                agentKey);
-            if (!bdRows.isEmpty()) {
-                Object an = bdRows.get(0).get("agent");
-                if (an != null && !an.toString().isBlank()) return an.toString();
-            }
-        } catch (Exception ignored) { /* collation 差异等异常, 降级 */ }
-
-        // 2) 降级: sys_user.real_name (phone 匹配, 兼容逗号分隔多号码)
-        try {
-            List<Map<String, Object>> u = jdbc.queryForList(
-                "SELECT real_name FROM ai_platform.sys_user WHERE phone=? LIMIT 1", agentKey);
-            if (u.isEmpty()) {
-                u = jdbc.queryForList(
-                    "SELECT real_name FROM ai_platform.sys_user WHERE CONCAT(',',phone,',') LIKE CONCAT('%,',?,'%') LIMIT 1", agentKey);
-            }
-            if (!u.isEmpty()) {
-                Object rn = u.get(0).get("real_name");
-                if (rn != null && !rn.toString().isBlank()) return rn.toString();
-            }
-        } catch (Exception ignored) { /* 跨库查询失败, 降级 */ }
-
-        // 3) 无匹配: 展示原始值
-        return agentKey;
-    }
 
     @Transactional
     public void refreshOrg(Long corpId) {
@@ -117,15 +77,20 @@ public class BattleMapEtlService {
         } catch (Exception e) { log.warn("ETL community org={} failed: {}", corpId, e.getMessage()); }
     }
 
-    // ── 经办人业绩表（TOP10）────────────────────────────────────────────────────
+    // ── 经办人业绩表（TOP5）— 来源 ops_business_data（已计算 + 经办人已核对）──
     private void refreshEmployeePerformance(Long corpId, String scope) {
         try {
             jdbc.update("DELETE FROM ops_map_employee_performance WHERE org_id=?", corpId);
             List<Map<String, Object>> tops = jdbc.queryForList(
-                "SELECT ml.agent AS agent_key,COALESCE(SUM(ml.sales_price),0) AS total_sales,COUNT(*) AS sales_count," +
-                "COUNT(DISTINCT ml.community_id) AS covered,COUNT(DISTINCT ml.activity_id) AS act " +
-                "FROM ops_member_ledger ml WHERE ml.corp_id IN (" + scope + ") AND ml.delete_flag=0 AND ml.agent IS NOT NULL AND ml.agent<>'' " +
-                "GROUP BY ml.agent ORDER BY total_sales DESC LIMIT 5");
+                "SELECT bd.agent AS agent_key," +
+                "COALESCE(SUM(bd.sale_price),0) AS total_sales," +
+                "COUNT(*) AS sales_count," +
+                "MIN(bd.agent_phone) AS agent_phone " +
+                "FROM ops_business_data bd WHERE bd.corp_id IN (" + scope + ") " +
+                "AND bd.delete_flag=0 " +
+                "AND bd.agent IS NOT NULL AND bd.agent<>'' " +
+                "AND bd.calc_status IN ('已计算','经办人已核对') " +
+                "GROUP BY bd.agent ORDER BY total_sales DESC LIMIT 5");
             int rank = 0;
             for (Map<String, Object> t : tops) {
                 rank++;
@@ -135,9 +100,10 @@ public class BattleMapEtlService {
     }
 
     private void insertEmployeeRow(Long corpId, String scope, String agentKey, Map<String, Object> t, int rank) {
-        String name = resolveAgentName(agentKey);
-        String phone = agentKey;  // agentKey 本身就是手机号
-        // 解析部门：从当前组织名称获取
+        // agentKey is now agent name (from ops_business_data.agent), not phone
+        String name = agentKey;
+        String phone = (String) t.getOrDefault("agent_phone", "");
+        // 部门：当前组织简称
         String department = null;
         try {
             List<Map<String, Object>> deptRows = jdbc.queryForList(
@@ -147,16 +113,24 @@ public class BattleMapEtlService {
                 if (dsn != null && !dsn.toString().isBlank()) department = dsn.toString();
             }
         } catch (Exception ignored) { /* 跨库查询失败不影响主流程 */ }
-        List<Map<String, Object>> pc = jdbc.queryForList(
-            "SELECT sc.community_name cn FROM ops_member_ledger ml JOIN ai_platform.sys_community sc ON sc.id=ml.community_id " +
-            "WHERE ml.agent=? AND ml.corp_id IN (" + scope + ") AND ml.delete_flag=0 GROUP BY ml.community_id ORDER BY SUM(ml.sales_price) DESC LIMIT 1",
-            agentKey);
-        String primaryCommunity = pc.isEmpty() ? null : (String) pc.get(0).get("cn");
+        // 主营区域：按销售额最高的公司（即 ops_business_data.company）
+        String primaryCommunity = null;
+        try {
+            List<Map<String, Object>> pc = jdbc.queryForList(
+                "SELECT company FROM ops_business_data " +
+                "WHERE agent=? AND corp_id IN (" + scope + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对') " +
+                "GROUP BY company ORDER BY SUM(sale_price) DESC LIMIT 1",
+                agentKey);
+            if (!pc.isEmpty()) {
+                Object c = pc.get(0).get("company");
+                if (c != null && !c.toString().isBlank()) primaryCommunity = c.toString();
+            }
+        } catch (Exception ignored) { /* 查询失败不影响主流程 */ }
         jdbc.update(
             "INSERT INTO ops_map_employee_performance (org_id,agent_key,employee_name,employee_phone,department,primary_community," +
             "activity_count,covered_communities,total_sales,sales_count,rank_order) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             corpId, agentKey, name, phone, department, primaryCommunity,
-            t.get("act"), t.get("covered"), t.get("total_sales"), t.get("sales_count"), rank);
+            0, 0, t.get("total_sales"), t.get("sales_count"), rank);
     }
 
     // ── 活动统计表 ─────────────────────────────────────────────────────────────

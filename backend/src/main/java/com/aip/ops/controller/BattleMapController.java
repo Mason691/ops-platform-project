@@ -149,14 +149,14 @@ public class BattleMapController {
                 String year = Integer.toString(LocalDate.now().getYear());
                 Double bd = jdbcTemplate.queryForObject(
                     "SELECT COALESCE(SUM(sale_price),0) FROM ops_business_data " +
-                    "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status='已计算' AND sale_date>=?",
+                    "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对') AND sale_date>=?",
                     Double.class, year + "-01-01");
                 Double ml = jdbcTemplate.queryForObject(
                     "SELECT COALESCE(SUM(sales_price),0) FROM ops_member_ledger " +
                     "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND usage_date>=?",
                     Double.class, year + "-01-01");
                 s.put("ytdAmount", (bd != null ? bd : 0d) + (ml != null ? ml : 0d));
-                // 销售金额：仅 ops_business_data（已计算），用于指标卡片
+                // 销售金额：ops_business_data（已计算 + 经办人已核对），用于指标卡片
                 s.put("salesAmount", bd != null ? bd : 0d);
             } catch (Exception ignore) { s.put("ytdAmount", 0); s.put("salesAmount", 0); }
 
@@ -266,10 +266,10 @@ public class BattleMapController {
             String since = first.format(ym) + "-01";
             String sc = scope(corpId);
 
-            // 1) 主数据源：ops_business_data (仅已计算)
+            // 1) 主数据源：ops_business_data (已计算 + 经办人已核对)
             jdbcTemplate.queryForList(
                 "SELECT DATE_FORMAT(sale_date,'%Y-%m') ym, COALESCE(SUM(sale_price),0) total " +
-                "FROM ops_business_data WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status='已计算' AND sale_date>=? GROUP BY ym", since)
+                "FROM ops_business_data WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对') AND sale_date>=? GROUP BY ym", since)
                 .forEach(row -> {
                     Map<String, Object> r = buckets.get((String) row.get("ym"));
                     if (r != null) {
