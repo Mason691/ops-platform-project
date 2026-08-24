@@ -72,8 +72,9 @@ public class BusinessDataController {
                      @RequestParam(required = false) String company,
                      @RequestParam(required = false) String batchNo,
                      @RequestParam(required = false) String agent,
-                     @RequestParam(required = false) String receiptNo) {
-        return R.ok(service.page(pageNum, pageSize, company, batchNo, agent, receiptNo));
+                     @RequestParam(required = false) String receiptNo,
+                     @RequestParam(required = false) String category) {
+        return R.ok(service.page(pageNum, pageSize, company, batchNo, agent, receiptNo, category));
     }
 
     @GetMapping("/batches")
@@ -173,6 +174,7 @@ public class BusinessDataController {
         String company = params.get("company");
         String batchNo = params.get("batchNo");
         String agent = params.get("agent");
+        String category = params.get("category");
 
         String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
         String fileName = "业务数据_" + ts + ".xlsx";
@@ -181,6 +183,7 @@ public class BusinessDataController {
         if (company != null) filters.put("company", company);
         if (batchNo != null) filters.put("batchNo", batchNo);
         if (agent != null) filters.put("agent", agent);
+        if (category != null) filters.put("category", category);
         String filtersJson;
         try { filtersJson = objectMapper.writeValueAsString(filters); } catch (Exception e) { filtersJson = "{}"; }
 
