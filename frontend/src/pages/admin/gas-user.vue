@@ -38,6 +38,7 @@
             <view class="gu-td" style="width:140rpx">姓名</view>
             <view class="gu-td" style="width:200rpx">手机号</view>
             <view class="gu-td" style="width:200rpx">区域</view>
+            <view class="gu-td gu-td--wrap" style="width:240rpx">详细地址</view>
             <view class="gu-td" style="width:200rpx">所属小区</view>
             <view class="gu-td" style="width:150rpx">操作</view>
           </view>
@@ -49,6 +50,7 @@
             <view class="gu-td" style="width:140rpx">{{ d.fullName || '-' }}</view>
             <view class="gu-td" style="width:200rpx">{{ d.phone || '-' }}</view>
             <view class="gu-td" style="width:200rpx">{{ d.areaName || '-' }}</view>
+            <view class="gu-td gu-td--wrap" style="width:240rpx">{{ d.detailedAddress || '-' }}</view>
             <view class="gu-td" style="width:200rpx">
               <text :class="{ 'gu-community-bound': d.communityName }">{{ d.communityName || '(未指定)' }}</text>
             </view>
@@ -691,6 +693,7 @@ function onConvertDone() {
 .gu-th { background: #fafafa }
 .gu-th .gu-td { font-weight: 600; color: #666 }
 .gu-td { padding: 16rpx 10rpx; font-size: 24rpx; color: #333; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.gu-td--wrap { white-space: normal; word-break: break-all }
 .gu-loading, .gu-empty { text-align: center; padding: 80rpx 0; color: #999; font-size: 28rpx }
 
 /* Community display */
