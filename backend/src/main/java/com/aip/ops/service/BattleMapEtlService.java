@@ -235,7 +235,7 @@ public class BattleMapEtlService {
                 "INSERT INTO ops_map_category_sales (org_id,category_key,category_name,total_sales," +
                 "sales_count,rank_order) " +
                 "SELECT ?,bd.category AS category_key," +
-                "COALESCE((SELECT item_value FROM ai_platform.sys_dict_item WHERE type_id=9 AND item_key=bd.category AND delete_flag=0 LIMIT 1),bd.category) AS category_name," +
+                "COALESCE((SELECT item_value FROM ai_platform.sys_dict_item WHERE type_id=9 AND item_key=bd.category COLLATE utf8mb4_0900_ai_ci AND delete_flag=0 LIMIT 1),bd.category) AS category_name," +
                 "COALESCE(SUM(bd.sale_price),0),COUNT(*)," +
                 "ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(bd.sale_price),0) DESC) " +
                 "FROM ops_business_data bd " +
