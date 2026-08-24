@@ -60,12 +60,12 @@ ssh jason@104.238.165.57 "kill \$(lsof -ti:8084) 2>/dev/null; sleep 1; \
 
 ### 规格驱动开发 (SDD)
 
-新功能先在 `Specs/` 创建中文规格文档（复制 `specs/template.md`），包含：功能概述、用户故事、验收标准、API 设计、多租户/安全考虑。完成后在规格中标记 ✅。
+新功能先在 `Specs/` 创建中文规格文档（以 `Specs/增值业务-规格说明.md` 为参考模板，`specs/template.md` 尚不存在），包含：功能概述、用户故事、验收标准、API 设计、多租户/安全考虑。完成后在规格中标记 ✅。
 
 现有规格：
 - `Specs/增值业务-规格说明.md`
 - `Specs/活动管理-规格说明.md`
-- `Specs/annual-plan-spec.md`（英文）
+- `specs/annual-plan-spec.md`（英文）
 
 ---
 
@@ -131,10 +131,11 @@ ops-platform-project/
 │   ├── src/main/java/com/aip/ops/
 │   │   ├── OpsApplication.java
 │   │   ├── config/          # SecurityConfig, AuthConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig, JacksonConfig, GasDataSourceConfig
-│   │   ├── controller/      # 27 controllers（见下方）
-│   │   ├── entity/          # 35 entities（全部继承 SDK BaseEntity，SysImportTask 例外；含 MerchantMiniappConfig, OperatorMerchant）
-│   │   ├── mapper/          # 34 MyBatis-Plus mappers
-│   │   ├── service/         # 17 service interfaces + 8 standalone services + 17 impls
+│   │   ├── controller/      # 28 controllers（见下方）
+│   │   ├── entity/          # 34 entities（全部继承 SDK BaseEntity，SysImportTask 例外；含 MerchantMiniappConfig, OperatorMerchant）
+│   │   ├── mapper/          # 35 MyBatis-Plus mappers
+│   │   ├── service/         # 18 service interfaces + 9 standalone services + 18 impls
+│   │   ├── aspect/          # AOP 切面（OperationLogAspect）
 │   │   ├── client/          # 子系统间 HTTP 客户端（MemberSyncClient, ProductBatchClient）
 │   │   ├── agent/           # AI DomainAgent（OpsAgent.java）
 │   │   ├── tool/            # MCP 工具（OpsOrderQueryTool, OpsEmployeeBusinessDataTool）
@@ -150,7 +151,7 @@ ops-platform-project/
 │   ├── src/manifest.json    # uni-app 配置（H5 base 路径等）
 │   ├── src/pages/           # uni-app 页面（29 个路由，含 Tab/C 端/员工/管理）
 │   ├── src/components/      # 跨页面复用组件（ImageCropperModal, LiveStatusCard, EmployeeTabBar, Pager）
-│   ├── src/api/index.js     # 集中 API 注册（152 个方法）
+│   ├── src/api/index.js     # 集中 API 注册（148 个方法）
 │   ├── src/utils/           # request.js, image.js, config.js, jssdk.js, auth-bridge.js
 │   ├── src/config.js        # BASE_URL + DEFAULT_CORP_ID
 │   ├── src/static/          # 静态资源（jweixin-1.6.0.js 等）
@@ -169,7 +170,7 @@ ops-platform-project/
 └── uploads/                 # 文件上传输出目录
 ```
 
-### Controllers（27 个）
+### Controllers（28 个）
 
 | Controller | 端点前缀 | 说明 |
 |---|---|---|
@@ -182,19 +183,20 @@ ops-platform-project/
 | **管理后台** | | |
 | `AdminController` | `/api/ops/admin` | 活动/商品/直播室 CRUD、预约查询、首页统计、商家绑定 |
 | `AdminStationController` | `/api/ops/admin/station` | 站长审批/列表/统计 |
-| `BusinessDataController` | `/api/ops/admin/business-data` | 增值业务：Excel 导入/提成计算/异步导出/模板下载 |
+| `BusinessDataController` | `/api/ops/admin/business-data` | 增值业务：Excel 导入（含收据号唯一性校验 + 原子写入）/提成计算（按批次选择）/销售统计（按收据号+品类+型号去重）/异步导出/模板下载/状态流转 + 经办人核对 |
 | `CommissionRuleController` | `/api/ops/admin/commission` | 个人/公司提成规则 CRUD（支持组织层级继承） |
 | `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD |
 | `MemberController` | `/api/ops/admin/members` | 会员管理：分页查询/详情/启用禁用 |
 | `ExportTaskController` | `/api/ops/admin/export` | 通用异步导出：提交/状态轮询/下载/历史 |
 | `PermissionController` | `/api/ops/admin/permission` | 权限概要查询 |
 | `HomeConfigController` | `/api/ops/admin/home-configs` | 首页配置 CRUD + 批量排序 |
-| `BattleMapController` | `/api/ops/admin/battle-map` | **作战地图看板**：ETL 触发/员工绩效/小区统计/summary/趋势/下钻详情 |
+| `BattleMapController` | `/api/ops/admin/battle-map` | **作战地图看板**：ETL 触发/经办人·网格员·品类·小区 TOP5/summary/趋势/下钻详情 |
 | `ActivityReviewController` | `/api/ops/admin/activity-review` | **活动复盘**：复盘 CRUD + 审核 + 费用台账 + 参与员工 |
 | `AnnualPlanController` | `/api/ops/admin/annual-plans` | **年度任务**：子公司年度计划 CRUD + 审核 + 汇总 + Excel 导入 |
 | `GasUserController` | `/api/ops/admin/gas-user` | **燃气用户**：分页查询/批量导入/小区关联 |
 | `GridManagerController` | `/api/ops/admin/grid-manager` | **网格员管理**：CRUD + 小区分配 |
 | `MemberLedgerController` | `/api/ops/admin/member-ledger` | **会员台账**：分页查询/按小区+品类+经办人筛选/批量导入 |
+| `CategoryLifecycleRuleController` | `/api/ops/admin/category-lifecycle-rules` | **品类使用年限规则**：CRUD + 品类下拉选项 + 按品类查询 |
 | **员工通道** | | |
 | `EmployeeAuthController` | `/api/ops/auth/employee` | **员工** 登录（手机号+密码+验证码），独立于会员认证 |
 | `EmployeeController` | `/api/ops/employee` | 员工身份校验 + 个人业务数据查询 + 头像上传 |
@@ -248,6 +250,18 @@ ops-platform-project/
 - `OrgRoleService`：判定 org 角色类型，缓存 60 秒
 - 安全兜底：底座 API 不可达 → 视为运营商（不阻断写），但数据 scope 回退到仅自己
 
+### 操作日志审计（Operation Log Audit）
+
+通过 `@OperationLog` 注解 + AOP 切面，对所有管理后台写操作自动记录审计日志。与主平台格式兼容。
+
+**注解**：`com.aip.common.annotation.OperationLog`（定义在底座 `common` 模块），参数 `value` 为操作描述（如 "新增活动"、"编辑提成规则"）。
+
+**AOP 切面**：`OperationLogAspect` — 拦截 `@OperationLog` 注解方法，捕获请求参数、响应结果、操作用户、IP、时间戳，异步写入 JSON-Lines 日志文件。
+
+**日志存储**：`OperationLogService` — 按月分文件写入 `/home/jason/data/logs/operation/operation_YYYYMM.log`，每条日志一行 JSON，包含 `traceId`、`userId`、`corpId`、`ip`、`operation`、`params`、`result`、`timestamp`。
+
+**覆盖范围**：截至 2026-08，已覆盖 18 个管理后台 Controller（`AdminController`、`CommissionRuleController`、`AnnualPlanController`、`BusinessDataController`、`CategoryLifecycleRuleController`、`GasUserController`、`GridManagerController`、`MemberLedgerController`、`HomeConfigController`、`ValueAddedProductController`、`ActivityReviewController`、`AdminStationController`、`StationController`、`EmployeeController`、`MemberController`、`PartnerController`、`PublicAccountController`、`BattleMapController`）。
+
 ### AI 助手架构（双通道：会员 + 员工）
 
 平台有两个 AI 代理通道，共用底座 Hermes Agent：
@@ -285,15 +299,17 @@ ops-platform-project/
 
 ETL 预计算 + 缓存架构，将原始业务数据聚合为只读看板，按组织维度隔离。
 
-**数据流**：`ops_member_ledger` / `ops_activity` / `ops_activity_review` → `BattleMapEtlService` → 4 张预计算表（`ops_map_*`）→ `BattleMapController` 只读查询
+**数据流**：`ops_member_ledger` / `ops_business_data` / `ops_activity` / `ops_activity_review` / `ops_gas_user` → `BattleMapEtlService` → 6 张预计算表（`ops_map_*`）→ `BattleMapController` 只读查询
 
-**4 张 ETL 表**：
-| 表 | 说明 |
-|---|---|
-| `ops_map_employee_performance` | 经办人业绩排行（rank_order） |
-| `ops_map_community` | 小区销售分布（total_sales） |
-| `ops_map_org_summary` | 组织汇总（总销售额/活动数/员工数/小区数） |
-| `ops_map_category_sales` | 品类销售统计 |
+**6 张 ETL 表**：
+| 表 | 说明 | 数据源 |
+|---|---|---|
+| `ops_map_employee_performance` | 经办人业绩 TOP5（rank_order，按 agent 姓名分组） | `ops_business_data`（`calc_status IN ('已计算','经办人已核对')`） |
+| `ops_map_category_sales` | 品类销售额 TOP5（品类名经 `ai_platform.sys_dict_item` 翻译，跨库需 COLLATE） | `ops_business_data`（同 calc_status 过滤） |
+| `ops_map_grid_performance` | 网格员业绩 TOP5（按负责小区台账销售额汇总） | `ops_grid_manager` + `ops_grid_manager_community` + `ops_member_ledger` |
+| `ops_map_activity` | 活动统计（报名数/费用/覆盖小区/销售额） | `ops_activity` + `ops_activity_booking` + `ops_activity_review` |
+| `ops_map_community` | 小区销售分布（total_sales） | `ops_gas_user` + `ops_member_ledger` |
+| `ops_map_org_summary` | 组织汇总（总销售额/活动数/员工数/小区数） | 各源表聚合 |
 
 **核心服务**：
 - `BattleMapEtlService` — ETL 重算引擎：`refreshOrg(corpId)` 单组织全量重算，`refreshAllOrgs()` 全量重算所有活跃组织。每张表按 org_id 物理删除后重写。组织+下级聚合：运营商看板数据 = 自身 + 旗下所有合伙人数据。
@@ -312,7 +328,10 @@ battle-map:
 - `POST /refresh-cache` — 单组织 ETL 刷新
 - `POST /refresh-all` — 全量重算
 - `GET /summary` — 组织汇总（含 region 定位、short_name 标题）
-- `GET /employee-performance` — 经办人 TOP10
+- `GET /employee-performance` — 经办人 TOP5
+- `GET /grid-performance` — 网格员业绩 TOP5
+- `GET /category-sales` — 品类销售额 TOP5
+- `GET /community-top5` — 小区业绩 TOP5
 - `GET /community-stats` — 小区销售分布
 - `GET /community/{id}/detail` — 小区下钻（经办人 + 台账明细 + 品类分布）
 - `GET /employee/detail` — 经办人下钻（负责小区 + 参与活动）
@@ -350,6 +369,23 @@ battle-map:
 - 个人规则 CRUD：`GET/POST/PUT/DELETE /personal`
 - 公司规则 CRUD：`GET/POST/PUT/DELETE /company`
 - `GET /categories` — 品类字典
+
+### 品类使用年限规则（Category Lifecycle Rule）
+
+按品类配置燃气设备使用年限、安检间隔和提醒天数，供设备生命周期管理使用。
+
+**实体**：`OpsCategoryLifecycleRule`（`ops_category_lifecycle_rule` 表）— 品类 `category` + 使用年限 `maxYears`（年）+ 安检间隔 `inspectionInterval`（月）+ 提前提醒天数 `remindDays`
+
+**权限**：运营商/超管可增删改查；城市合伙人仅可查看。写操作由 `OrgRoleService.isOperatorOrSuperAdmin()` 守卫。
+
+**API**：`CategoryLifecycleRuleController` `/api/ops/admin/category-lifecycle-rules`
+- `GET /` — 分页列表（按品类筛选）
+- `GET /category-options` — 品类下拉选项（PRODUCT_CATEGORY 字典）
+- `GET /by-category/{category}` — 按品类查询单条规则
+- `GET /{id}` — 详情
+- `POST /` — 创建（运营商/超管）
+- `PUT /{id}` — 编辑（运营商/超管）
+- `DELETE /{id}` — 删除（运营商/超管）
 
 ### 年度任务计划（Annual Plan）
 
@@ -477,7 +513,7 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 - **双 Token 体系**：`request.js` 优先使用 `ops_token`（会员），fallback 使用 `ops_employee_token`（员工）。401 时清除两者
 - **iframe SSO**：`auth-bridge.js` 监听 `postMessage`（`AIP_AUTH` / `AIP_NAVIGATE`），信任同源和 `boss.jdzn99.com`
 - **公众号深链**：`App.vue` 支持 `?route=pages/employee/login` 和 `?from=employee` 查询参数跳转（公众号自定义菜单不支持 hash fragment）
-- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（152 个方法），统一使用 `request` 实例
+- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（148 个方法），统一使用 `request` 实例
 - **H5 hash 路由**：实际 base 由构建时 `VITE_BASE` 环境变量控制
 
 ### 前端页面路由（pages.json）
@@ -634,7 +670,7 @@ cd frontend && npm run build:h5
 | **Kafka 消费者组冲突** | 同一 consumer group 内分区独占。多容器共享 `ai-platform-group` 时，旧容器（如 `determined_lehmann`）抢到 `async-export-task` 分区但连错数据库 → 任务僵死 PENDING → 新容器永远收不到消息。**部署新容器前必须 `docker stop/rm` 旧容器**，部署后 `docker ps` 确认无僵尸容器残留。参见 `[[kafka-consumer-group-conflict]]` |
 | **旧容器/代码不留存** | **铁律**：新容器部署后旧容器必须立即清理（`docker stop + rm`）。旧代码、旧容器、旧配置不留存——git history 可随时恢复。参见 `[[no-legacy-code-retention]]`、`[[kafka-consumer-group-conflict]]` |
 | **作战地图跨库查询** | `BattleMapController.summary()` 和 `region` 解析方法直读 `ai_platform.sys_corp` 和 `ai_platform.sys_region`（跨库）。这是仅有的例外——组织区域信息无法通过 API 获取。维护时注意表结构变更 |
-| **作战地图数据源仅生产** | 作战地图源表（`ops_gas_user`/`ops_member_ledger`/`ops_grid_manager`）仅在**生产库**有数据。测试 `mall_db` 无这些表的记录，ETL 只能在生产环境跑。参见 `[[battle-map-data-only-on-prod]]` |
+| **作战地图数据源仅生产** | 作战地图源表（`ops_business_data`/`ops_gas_user`/`ops_member_ledger`/`ops_grid_manager`）仅在**生产库**有数据。测试 `mall_db` 无这些表的记录，ETL 只能在生产环境跑。参见 `[[battle-map-data-only-on-prod]]` |
 | **ops_activity_review_cost 无 delete_flag** | 此表缺少逻辑删除字段，`costMapper.delete()` 走物理删除。重构时需注意 |
 | **company-select 未注册路由** | `frontend/src/pages/employee/company-select.vue` 文件存在但**未在 pages.json 中注册路由**。该页面通过其他方式引用（如 `uni.navigateTo` 直接跳转），不要误删 |
 
@@ -652,7 +688,7 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-07-30 | 负责人：架构师（新增直播室管理、燃气用户导入/会员转换、微信小程序跳转模块文档；更新 API 方法数/路由数/实体数；补充外部数据源配置）
+最后更新：2026-08-18 | 负责人：架构师（作战地图看板文档校准：6 张 ETL 表、经办人/品类 TOP5 数据源改为 ops_business_data + calc_status 过滤、新增网格员/品类/小区 TOP5 端点；修正控制器/服务层/操作日志覆盖/前端 API 计数；补充销售统计收据号+品类+型号去重规则）
 
 ### 自定义 Claude 命令
 
