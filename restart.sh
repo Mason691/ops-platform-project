@@ -12,8 +12,8 @@ set -e
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 JAR="$PROJECT_DIR/backend/target/ops-platform-1.0.0-SNAPSHOT.jar"
 
-export JAVA_HOME=/home/jason/.local/jdk17
-export PATH="$JAVA_HOME/bin:/home/jason/.hermes/node/bin:$PATH"
+export JAVA_HOME=/home/jason/jdk17
+export PATH="$JAVA_HOME/bin:/home/jason/apache-maven-3.9.9/bin:/home/jason/.nvm/versions/node/v24.18.0/bin:$PATH"
 
 BACKEND_LOG=/tmp/ops-backend.log
 FRONTEND_LOG=/tmp/ops-frontend.log

@@ -21,7 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./restart.sh build       # 构建前端 H5 生产包 + 后端 JAR
 
 # 后端编译（离线模式，本地 JDK 17）
-JAVA_HOME=/home/jason/jdk17/jdk-17.0.9+9 mvn -f backend/pom.xml clean package -DskipTests -o
+JAVA_HOME=/home/jason/jdk17 /home/jason/apache-maven-3.9.9/bin/mvn -f backend/pom.xml clean package -DskipTests -o
 
 # 后端本地运行（需要 JDK 17 在 PATH）
 java -jar backend/target/ops-platform-1.0.0-SNAPSHOT.jar
@@ -41,7 +41,7 @@ ssh jason@104.238.165.57 "mkdir -p /home/jason/aa-platform/html/aa/ops"
 scp -r dist/build/h5/* jason@104.238.165.57:/home/jason/aa-platform/html/aa/ops/
 
 # 后端部署到测试环境
-cd backend && JAVA_HOME=/home/jason/jdk17/jdk-17.0.9+9 mvn clean package -DskipTests -o
+cd backend && JAVA_HOME=/home/jason/jdk17 /home/jason/apache-maven-3.9.9/bin/mvn clean package -DskipTests -o
 scp target/ops-platform-1.0.0-SNAPSHOT.jar jason@104.238.165.57:~/ops-platform-project/backend/target/
 ssh jason@104.238.165.57 "kill \$(lsof -ti:8084) 2>/dev/null; sleep 1; \
   nohup /home/jason/jdk17/bin/java -jar ~/ops-platform-project/backend/target/ops-platform-1.0.0-SNAPSHOT.jar > /tmp/ops.log 2>&1 &"
@@ -550,7 +550,7 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 
 项目**无自动化测试**（无单元测试/集成测试）。所有验证依赖手动检查：
 
-- **编译验证**：`JAVA_HOME=/home/jason/jdk17/jdk-17.0.9+9 mvn -f backend/pom.xml compile -o`
+- **编译验证**：`JAVA_HOME=/home/jason/jdk17 /home/jason/apache-maven-3.9.9/bin/mvn -f backend/pom.xml compile -o`
 - **后端 API**：`curl` 测试端点，查看日志 `tail -f /tmp/ops-backend.log`
 - **前端 H5**：`npm run build:h5` → 部署到测试服务器 → 微信开发者工具打开 `https://a.15891589.xyz/ops/`
 - **前端管理页**：平台主站 `https://a.15891589.xyz` 加载 `/ops/` 路由组件（非微前端，是 componentMap 直接加载）
@@ -620,7 +620,7 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 
 ```bash
 # 后端
-cd backend && JAVA_HOME=/home/jason/jdk17/jdk-17.0.9+9 mvn clean package -DskipTests -o
+cd backend && JAVA_HOME=/home/jason/jdk17 /home/jason/apache-maven-3.9.9/bin/mvn clean package -DskipTests -o
 # JAR → /data2/boss-platform/ops-backend/app.jar
 # docker build -t boss-platform/ops:latest ./ops-backend/
 # docker compose up -d ops-backend
@@ -645,7 +645,7 @@ cd frontend && npm run build:h5
 
 | 陷阱 | 说明 |
 |------|------|
-| **服务器 JDK** | 测试服务器默认 JDK 8，运行 JAR 必须用绝对路径；本地 `restart.sh` 用 `/home/jason/.local/jdk17`，手动编译用 `/home/jason/jdk17/jdk-17.0.9+9`（两个路径不同，但等效） |
+| **服务器 JDK** | 测试服务器默认 JDK 8，运行 JAR 必须用绝对路径；本地 JDK 17（Temurin 17.0.20.1）统一在 `/home/jason/jdk17`，Maven 在 `/home/jason/apache-maven-3.9.9/bin/mvn`（均不在 PATH，必须绝对路径）；Maven 本地仓库 `/home/jason/m2_local`（`~/.m2/settings.xml` 已配置 `localRepository`，离线编译必须 `-o`） |
 | **Maven offline** | 手动编译必须 `-o`（离线模式），本地仓库 `/home/jason/m2_local`。`restart.sh` 不使用离线模式 |
 | **生产 base 路径** | 生产 base 是 `/ops/`（`.env.production` `VITE_BASE=/ops/`），manifest.json 已同步为 `/ops/` |
 | **H5 图片 URL** | uni-app `<image>` 渲染为 CSS `background-image`，根相对路径被解析到 `/ops/` → 必须用完整 HTTPS 路径 |
