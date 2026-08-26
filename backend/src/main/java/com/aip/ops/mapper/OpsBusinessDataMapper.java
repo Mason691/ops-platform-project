@@ -42,6 +42,34 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
                                            @Param("category") String category,
                                            @Param("corpIds") List<Long> corpIds);
 
+    /** Per-category totals for current filter — same (receipt_no, category, model)
+     *  dedup rule as aggregateStats so per-category sums reconcile with overall totals. */
+    @Select("<script>"
+            + "SELECT t.category as category, "
+            + "COALESCE(SUM(t.sale_price),0) as totalSale, "
+            + "COALESCE(SUM(t.commission_amount),0) as totalCommission "
+            + "FROM ("
+            + "SELECT COALESCE(receipt_no, CONCAT('__NULL__', id)) as receipt_no, "
+            + "category, model, "
+            + "MAX(sale_price) as sale_price, "
+            + "SUM(commission_amount) as commission_amount "
+            + "FROM ops_business_data WHERE delete_flag=0 "
+            + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
+            + "<if test='batchNo != null and batchNo != \"\"'>AND batch_no = #{batchNo}</if> "
+            + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "
+            + "<if test='receiptNo != null and receiptNo != \"\"'>AND receipt_no = #{receiptNo}</if> "
+            + "<if test='category != null and category != \"\"'>AND category = #{category}</if> "
+            + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
+            + "GROUP BY 1, category, model"
+            + ") t GROUP BY t.category ORDER BY SUM(t.sale_price) DESC"
+            + "</script>")
+    List<Map<String, Object>> categoryStats(@Param("company") String company,
+                                            @Param("batchNo") String batchNo,
+                                            @Param("agent") String agent,
+                                            @Param("receiptNo") String receiptNo,
+                                            @Param("category") String category,
+                                            @Param("corpIds") List<Long> corpIds);
+
     /** Count only — delegates to COUNT(*) for speed. */
     @Select("<script>"
             + "SELECT COUNT(*) FROM ops_business_data WHERE delete_flag=0 "

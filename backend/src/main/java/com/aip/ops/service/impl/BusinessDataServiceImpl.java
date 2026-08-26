@@ -123,6 +123,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         BigDecimal totalCommission = stats != null && stats.get("totalCommission") != null
                 ? stats.get("totalCommission") : BigDecimal.ZERO;
 
+        // Per-category totals (same dedup rule as overall stats)
+        List<Map<String, Object>> categoryStats =
+                mapper.categoryStats(company, batchNo, agent, receiptNo, category, corpIdList);
+        normalizeCategoryStats(categoryStats);
+
         // ── DATA: only fetch the requested page ──
         int offset = (pageNum - 1) * pageSize;
         LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
@@ -139,7 +144,16 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         return Map.of("records", records, "total", total,
                 "size", pageSize, "current", pageNum,
                 "totalSale", totalSale.setScale(2, RoundingMode.HALF_UP),
-                "totalCommission", totalCommission.setScale(2, RoundingMode.HALF_UP));
+                "totalCommission", totalCommission.setScale(2, RoundingMode.HALF_UP),
+                "categoryStats", categoryStats);
+    }
+
+    /** Round per-category totals to 2 decimals for display consistency. */
+    private static void normalizeCategoryStats(List<Map<String, Object>> categoryStats) {
+        for (Map<String, Object> row : categoryStats) {
+            if (row.get("totalSale") instanceof BigDecimal b) row.put("totalSale", b.setScale(2, RoundingMode.HALF_UP));
+            if (row.get("totalCommission") instanceof BigDecimal b) row.put("totalCommission", b.setScale(2, RoundingMode.HALF_UP));
+        }
     }
 
     @Override
