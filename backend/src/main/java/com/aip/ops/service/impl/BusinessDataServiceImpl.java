@@ -810,12 +810,15 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         }
     }
 
-    /** 按优化后格式生成单 sheet Excel：序号|公司名称|品类名称|销售总额|提成总额 + 合计行。返回 xlsx 临时文件路径。 */
+    /** 按模板格式生成双 sheet（提成金额/销售额）Excel：品类行 × 公司列 + 合计行列。返回 xlsx 临时文件路径。 */
     private String buildCommissionSummaryXlsx(List<Map<String, Object>> rows) throws Exception {
         List<String> categoryKeys = collectCategoryKeys(rows);
         List<String> companies = collectCompanies(rows);
         Map<String, BigDecimal[]> cell = buildCellMap(rows);
-        return writeSummaryXlsx(List.of(buildSummarySheet("品类提成汇总", categoryKeys, companies, cell)));
+        List<Map<String, Object>> sheets = new ArrayList<>();
+        sheets.add(buildSummarySheet("提成金额", categoryKeys, companies, cell, 0));
+        sheets.add(buildSummarySheet("销售额", categoryKeys, companies, cell, 1));
+        return writeSummaryXlsx(sheets);
     }
 
     /** 品类行轴：模板固定 12 品类顺序（原始字典 key，DB 存储值）；未在映射中的品类追加在末尾。 */
@@ -835,7 +838,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         return categoryKeys;
     }
 
-    /** 公司分组顺序：固定顺序在前，其余按名称排序追加（行值 = 组织简称 + "公司"）。 */
+    /** 公司列轴：按固定顺序，其余按名称排序追加（列头 = 组织简称 + "公司"）。 */
     private List<String> collectCompanies(List<Map<String, Object>> rows) {
         Set<String> presentCompanies = new HashSet<>();
         for (Map<String, Object> r : rows) {
@@ -862,34 +865,37 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         return cell;
     }
 
-    /** 组装单 sheet：平铺行（有数据的公司×品类组合）+ 合计行（销售合计/提成合计，合并 A:C）。 */
+    /** 组装单个 sheet 矩阵：表头 + 品类数据行 + 合计行（含行列合计）。 */
     private Map<String, Object> buildSummarySheet(String title, List<String> categoryKeys,
-                                                  List<String> companies, Map<String, BigDecimal[]> cell) {
+                                                  List<String> companies,
+                                                  Map<String, BigDecimal[]> cell, int metricIdx) {
         List<Object> header = new ArrayList<>();
-        header.add("序号"); header.add("公司名称"); header.add("品类名称");
-        header.add("销售总额"); header.add("提成总额");
+        header.add("序号"); header.add("品类");
+        for (String c : companies) header.add(c + "公司");
+        header.add("合计");
         List<List<Object>> dataRows = new ArrayList<>();
-        BigDecimal saleSum = BigDecimal.ZERO, commissionSum = BigDecimal.ZERO;
-        int seq = 0;
-        for (String company : companies) {
-            for (String categoryKey : categoryKeys) {
-                BigDecimal[] v = cell.get(categoryKey + "::" + company);
-                if (v == null) continue;   // 只输出有数据的组合，避免全 0 行噪音
-                List<Object> row = new ArrayList<>();
-                row.add(String.valueOf(++seq));
-                row.add(company + "公司");
-                row.add(getCategoryDisplayName(categoryKey));
-                row.add(v[0].setScale(2, RoundingMode.HALF_UP));
-                row.add(v[1].setScale(2, RoundingMode.HALF_UP));
-                saleSum = saleSum.add(v[0]);
-                commissionSum = commissionSum.add(v[1]);
-                dataRows.add(row);
-            }
-        }
         List<Object> totalRow = new ArrayList<>();
-        totalRow.add("合计"); totalRow.add(""); totalRow.add("");
-        totalRow.add(saleSum.setScale(2, RoundingMode.HALF_UP));
-        totalRow.add(commissionSum.setScale(2, RoundingMode.HALF_UP));
+        totalRow.add("合计"); totalRow.add("");
+        BigDecimal[] colTotals = new BigDecimal[companies.size()];
+        java.util.Arrays.fill(colTotals, BigDecimal.ZERO);
+        BigDecimal grand = BigDecimal.ZERO;
+        BigDecimal[] zero = {BigDecimal.ZERO, BigDecimal.ZERO};
+        for (int i = 0; i < categoryKeys.size(); i++) {
+            List<Object> row = new ArrayList<>();
+            row.add(String.valueOf(i + 1)); row.add(getCategoryDisplayName(categoryKeys.get(i)));
+            BigDecimal rowSum = BigDecimal.ZERO;
+            for (int j = 0; j < companies.size(); j++) {
+                BigDecimal v = cell.getOrDefault(categoryKeys.get(i) + "::" + companies.get(j), zero)[metricIdx];
+                row.add(v.setScale(2, RoundingMode.HALF_UP));
+                rowSum = rowSum.add(v);
+                colTotals[j] = colTotals[j].add(v);
+            }
+            row.add(rowSum.setScale(2, RoundingMode.HALF_UP));
+            grand = grand.add(rowSum);
+            dataRows.add(row);
+        }
+        for (int j = 0; j < companies.size(); j++) totalRow.add(colTotals[j].setScale(2, RoundingMode.HALF_UP));
+        totalRow.add(grand.setScale(2, RoundingMode.HALF_UP));
         Map<String, Object> sheet = new LinkedHashMap<>();
         sheet.put("title", title);
         sheet.put("header", header);
@@ -921,8 +927,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         try { return new BigDecimal(String.valueOf(o)); } catch (Exception e) { return BigDecimal.ZERO; }
     }
 
-    /** 汇总 Excel 生成脚本：单 sheet 平铺表（序号|公司名称|品类名称|销售总额|提成总额），
-     *  表头/合计加粗、细边框、数字格式 #,##0.00，合计行合并 A:C */
+    /** 汇总 Excel 生成脚本：双 sheet 矩阵，表头/合计加粗、细边框、数字格式 #,##0.00，合计行合并 A:B */
     private static final String SUMMARY_PYTHON_SCRIPT = """
             import json, openpyxl
             from openpyxl.styles import Font, Alignment, Border, Side
@@ -949,11 +954,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 last = ws.max_row
                 for cell in ws[last]:
                     cell.font = bold
-                ws.merge_cells(start_row=last, start_column=1, end_row=last, end_column=3)
+                ws.merge_cells(start_row=last, start_column=1, end_row=last, end_column=2)
                 ws.column_dimensions['A'].width = 6
-                ws.column_dimensions['B'].width = 16
-                ws.column_dimensions['C'].width = 20
-                for col in range(4, len(s['header']) + 1):
+                ws.column_dimensions['B'].width = 20
+                for col in range(3, len(s['header']) + 1):
                     ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 14
             wb.save('__XLSX__')
             """;
