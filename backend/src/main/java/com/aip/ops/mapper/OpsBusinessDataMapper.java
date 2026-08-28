@@ -95,4 +95,34 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "</script>")
     List<String> findExistingReceiptNos(@Param("receiptNos") List<String> receiptNos,
                                         @Param("corpId") Long corpId);
+
+    /** Per-category × per-company totals for commission summary (品类提成汇总) —
+     *  same (receipt_no, category, model) dedup rule as aggregateStats, grouped by
+     *  category+company, excluding rows already reported to group (已上报集团). */
+    @Select("<script>"
+            + "SELECT t.category as category, t.company as company, "
+            + "COALESCE(SUM(t.sale_price),0) as totalSale, "
+            + "COALESCE(SUM(t.commission_amount),0) as totalCommission "
+            + "FROM ("
+            + "SELECT COALESCE(receipt_no, CONCAT('__NULL__', id)) as receipt_no, "
+            + "category, model, company, "
+            + "MAX(sale_price) as sale_price, "
+            + "SUM(commission_amount) as commission_amount "
+            + "FROM ops_business_data WHERE delete_flag=0 "
+            + "AND calc_status != '已上报集团' "   // != 而非 <>：<script> XML 解析器中 <> 会破坏标签解析
+            + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
+            + "<if test='batchNo != null and batchNo != \"\"'>AND batch_no = #{batchNo}</if> "
+            + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "
+            + "<if test='receiptNo != null and receiptNo != \"\"'>AND receipt_no = #{receiptNo}</if> "
+            + "<if test='category != null and category != \"\"'>AND category = #{category}</if> "
+            + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
+            + "GROUP BY 1, category, model, company"
+            + ") t GROUP BY t.category, t.company"
+            + "</script>")
+    List<Map<String, Object>> categoryCompanyStats(@Param("company") String company,
+                                                   @Param("batchNo") String batchNo,
+                                                   @Param("agent") String agent,
+                                                   @Param("receiptNo") String receiptNo,
+                                                   @Param("category") String category,
+                                                   @Param("corpIds") List<Long> corpIds);
 }

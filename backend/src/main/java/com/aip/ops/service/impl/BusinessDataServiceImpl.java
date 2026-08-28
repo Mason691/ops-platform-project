@@ -34,6 +34,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.net.URLEncoder;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
@@ -55,6 +56,16 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final ImportTaskService importTaskService;
 
     private static final Set<String> VALID_COMPANIES = Set.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
+
+    /** 锁定状态：已上报集团的数据禁止删除/修改/重新计算（所有组织一致） */
+    public static final String REPORTED_STATUS = "已上报集团";
+
+    /** 汇总 Excel 的公司列固定展示顺序（未在列表中的公司按名称排序追加） */
+    private static final List<String> COMPANY_ORDER =
+            List.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
     /** Dynamic category maps loaded from platform dict at first access. */
     private static volatile Map<String, String> CN_TO_KEY = null;
@@ -403,6 +414,15 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     @Override
     @Transactional
     public Map<String, Object> calcCommission(String batchNo) {
+        // 锁定守卫：已上报集团的批次禁止重新计算（否则 CASE-WHEN UPDATE 会覆盖锁定状态）
+        if (batchNo != null && !batchNo.isBlank()) {
+            long reported = mapper.selectCount(new LambdaQueryWrapper<OpsBusinessData>()
+                    .eq(OpsBusinessData::getBatchNo, batchNo)
+                    .eq(OpsBusinessData::getCalcStatus, REPORTED_STATUS));
+            if (reported > 0) {
+                throw BusinessException.of("该批次包含" + reported + "条已上报集团数据，禁止重新计算");
+            }
+        }
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
 
         // ── Build parent chain BEFORE querying rules ──
@@ -741,10 +761,214 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     private String fmt(Object o) { return o == null ? "" : String.valueOf(o); }
 
+    // ── 提成上报集团 & 品类提成汇总 ──
+
+    @Override
+    public int reportToGroup(String company, String batchNo, String agent, String receiptNo, String category) {
+        // 显式 delete_flag=0：MyBatis-Plus 的 update 不会自动过滤逻辑删除
+        LambdaUpdateWrapper<OpsBusinessData> uw = new LambdaUpdateWrapper<>();
+        uw.set(OpsBusinessData::getCalcStatus, REPORTED_STATUS)
+          .eq(OpsBusinessData::getDeleteFlag, 0)
+          .ne(OpsBusinessData::getCalcStatus, REPORTED_STATUS);
+        if (company != null && !company.isBlank()) uw.eq(OpsBusinessData::getCompany, company.trim());
+        if (batchNo != null && !batchNo.isBlank()) uw.eq(OpsBusinessData::getBatchNo, batchNo.trim());
+        if (agent != null && !agent.isBlank()) uw.eq(OpsBusinessData::getAgent, agent.trim());
+        if (receiptNo != null && !receiptNo.isBlank()) uw.eq(OpsBusinessData::getReceiptNo, receiptNo.trim());
+        if (category != null && !category.isBlank()) uw.eq(OpsBusinessData::getCategory, category.trim());
+        Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        if (visibleIds != null && !visibleIds.isEmpty()) uw.in(OpsBusinessData::getCorpId, visibleIds);
+        return mapper.update(null, uw);
+    }
+
+    @Override
+    public void exportCommissionSummary(String company, String batchNo, String agent, String receiptNo,
+                                        String category, HttpServletResponse response) {
+        try {
+            // 先确保品类字典已加载：KEY_TO_CN 需含平台全量字典（如 气密性检测→qimi），
+            // 否则汇总 Excel 品类列会显示原始 item_key 而非中文 item_value
+            loadValidCategories();
+            Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+            List<Long> corpIds = (visibleIds == null || visibleIds.isEmpty()) ? null : new ArrayList<>(visibleIds);
+            List<Map<String, Object>> rows = mapper.categoryCompanyStats(
+                    company, batchNo, agent, receiptNo, category, corpIds);
+            String xlsx = buildCommissionSummaryXlsx(rows);
+            String fileName = "品类提成汇总_" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + ".xlsx";
+            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            response.setHeader("Content-Disposition", "attachment; filename=\"=?UTF-8?B?"
+                    + Base64.getEncoder().encodeToString(fileName.getBytes(StandardCharsets.UTF_8))
+                    + "?=\"; filename*=UTF-8''" + URLEncoder.encode(fileName, "UTF-8"));
+            Files.copy(Path.of(xlsx), response.getOutputStream());
+            response.getOutputStream().flush();
+            Files.deleteIfExists(Path.of(xlsx));
+        } catch (Exception e) {
+            log.error("品类提成汇总导出失败", e);
+            try {
+                response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                response.setContentType("application/json;charset=UTF-8");
+                response.getWriter().write("{\"code\":500,\"msg\":\"汇总导出失败，请稍后重试\"}");
+            } catch (Exception ignored) {}
+        }
+    }
+
+    /** 按优化后格式生成单 sheet Excel：序号|公司名称|品类名称|销售总额|提成总额 + 合计行。返回 xlsx 临时文件路径。 */
+    private String buildCommissionSummaryXlsx(List<Map<String, Object>> rows) throws Exception {
+        List<String> categoryKeys = collectCategoryKeys(rows);
+        List<String> companies = collectCompanies(rows);
+        Map<String, BigDecimal[]> cell = buildCellMap(rows);
+        return writeSummaryXlsx(List.of(buildSummarySheet("品类提成汇总", categoryKeys, companies, cell)));
+    }
+
+    /** 品类行轴：模板固定 12 品类顺序（原始字典 key，DB 存储值）；未在映射中的品类追加在末尾。 */
+    private List<String> collectCategoryKeys(List<Map<String, Object>> rows) {
+        List<String> categoryKeys = new ArrayList<>();
+        for (int k = 1; k <= 12; k++) {
+            if (KEY_TO_CN.containsKey(String.valueOf(k))) categoryKeys.add(String.valueOf(k));
+        }
+        Set<String> presentCategories = new HashSet<>();
+        for (Map<String, Object> r : rows) {
+            Object c = r.get("category");
+            if (c != null) presentCategories.add(String.valueOf(c));
+        }
+        for (String c : presentCategories) {
+            if (!categoryKeys.contains(c)) categoryKeys.add(c);
+        }
+        return categoryKeys;
+    }
+
+    /** 公司分组顺序：固定顺序在前，其余按名称排序追加（行值 = 组织简称 + "公司"）。 */
+    private List<String> collectCompanies(List<Map<String, Object>> rows) {
+        Set<String> presentCompanies = new HashSet<>();
+        for (Map<String, Object> r : rows) {
+            Object c = r.get("company");
+            if (c != null) presentCompanies.add(String.valueOf(c));
+        }
+        List<String> companies = new ArrayList<>();
+        for (String c : COMPANY_ORDER) if (presentCompanies.contains(c)) companies.add(c);
+        List<String> extras = new ArrayList<>();
+        for (String c : presentCompanies) if (!companies.contains(c)) extras.add(c);
+        extras.sort(String::compareTo);
+        companies.addAll(extras);
+        return companies;
+    }
+
+    /** 单元格定位：category + "::" + company → {销售额, 提成金额}。 */
+    private Map<String, BigDecimal[]> buildCellMap(List<Map<String, Object>> rows) {
+        Map<String, BigDecimal[]> cell = new HashMap<>();
+        for (Map<String, Object> r : rows) {
+            String key = String.valueOf(r.get("category")) + "::" + String.valueOf(r.get("company"));
+            cell.put(key, new BigDecimal[]{
+                    toDecimal(r.get("totalSale")), toDecimal(r.get("totalCommission"))});
+        }
+        return cell;
+    }
+
+    /** 组装单 sheet：平铺行（有数据的公司×品类组合）+ 合计行（销售合计/提成合计，合并 A:C）。 */
+    private Map<String, Object> buildSummarySheet(String title, List<String> categoryKeys,
+                                                  List<String> companies, Map<String, BigDecimal[]> cell) {
+        List<Object> header = new ArrayList<>();
+        header.add("序号"); header.add("公司名称"); header.add("品类名称");
+        header.add("销售总额"); header.add("提成总额");
+        List<List<Object>> dataRows = new ArrayList<>();
+        BigDecimal saleSum = BigDecimal.ZERO, commissionSum = BigDecimal.ZERO;
+        int seq = 0;
+        for (String company : companies) {
+            for (String categoryKey : categoryKeys) {
+                BigDecimal[] v = cell.get(categoryKey + "::" + company);
+                if (v == null) continue;   // 只输出有数据的组合，避免全 0 行噪音
+                List<Object> row = new ArrayList<>();
+                row.add(String.valueOf(++seq));
+                row.add(company + "公司");
+                row.add(getCategoryDisplayName(categoryKey));
+                row.add(v[0].setScale(2, RoundingMode.HALF_UP));
+                row.add(v[1].setScale(2, RoundingMode.HALF_UP));
+                saleSum = saleSum.add(v[0]);
+                commissionSum = commissionSum.add(v[1]);
+                dataRows.add(row);
+            }
+        }
+        List<Object> totalRow = new ArrayList<>();
+        totalRow.add("合计"); totalRow.add(""); totalRow.add("");
+        totalRow.add(saleSum.setScale(2, RoundingMode.HALF_UP));
+        totalRow.add(commissionSum.setScale(2, RoundingMode.HALF_UP));
+        Map<String, Object> sheet = new LinkedHashMap<>();
+        sheet.put("title", title);
+        sheet.put("header", header);
+        sheet.put("rows", dataRows);
+        sheet.put("total", totalRow);
+        return sheet;
+    }
+
+    /** JSON 数据 → python openpyxl 生成 xlsx（临时文件方式，避免 -c 转义问题）。返回 xlsx 路径。 */
+    private String writeSummaryXlsx(List<Map<String, Object>> sheets) throws Exception {
+        Path jsonFile = Files.createTempFile("commission_summary_", ".json");
+        Path pyFile = Files.createTempFile("commission_summary_", ".py");
+        Path xlsxFile = Path.of(jsonFile.toString().replace(".json", ".xlsx"));
+        Files.writeString(jsonFile, JSON_MAPPER.writeValueAsString(sheets));
+        Files.writeString(pyFile, SUMMARY_PYTHON_SCRIPT
+                .replace("__JSON__", jsonFile.toAbsolutePath().toString())
+                .replace("__XLSX__", xlsxFile.toAbsolutePath().toString()));
+        int exit = new ProcessBuilder("python3", pyFile.toAbsolutePath().toString())
+                .redirectErrorStream(true).start().waitFor();
+        Files.deleteIfExists(jsonFile); Files.deleteIfExists(pyFile);
+        if (exit != 0) throw new IllegalStateException("python3 openpyxl 执行失败, exit=" + exit);
+        return xlsxFile.toAbsolutePath().toString();
+    }
+
+    private static BigDecimal toDecimal(Object o) {
+        if (o instanceof BigDecimal b) return b;
+        if (o instanceof Number n) return new BigDecimal(n.toString());
+        if (o == null) return BigDecimal.ZERO;
+        try { return new BigDecimal(String.valueOf(o)); } catch (Exception e) { return BigDecimal.ZERO; }
+    }
+
+    /** 汇总 Excel 生成脚本：单 sheet 平铺表（序号|公司名称|品类名称|销售总额|提成总额），
+     *  表头/合计加粗、细边框、数字格式 #,##0.00，合计行合并 A:C */
+    private static final String SUMMARY_PYTHON_SCRIPT = """
+            import json, openpyxl
+            from openpyxl.styles import Font, Alignment, Border, Side
+            sheets = json.load(open('__JSON__', encoding='utf-8'))
+            wb = openpyxl.Workbook()
+            wb.remove(wb.active)
+            thin = Side(style='thin', color='999999')
+            border = Border(left=thin, right=thin, top=thin, bottom=thin)
+            bold = Font(bold=True)
+            for s in sheets:
+                ws = wb.create_sheet(title=s['title'])
+                ws.append(s['header'])
+                for r in s['rows']:
+                    ws.append(r)
+                ws.append(s['total'])
+                for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=len(s['header'])):
+                    for cell in row:
+                        cell.border = border
+                        cell.alignment = Alignment(horizontal='center', vertical='center')
+                        if isinstance(cell.value, float):
+                            cell.number_format = '#,##0.00'
+                for cell in ws[1]:
+                    cell.font = bold
+                last = ws.max_row
+                for cell in ws[last]:
+                    cell.font = bold
+                ws.merge_cells(start_row=last, start_column=1, end_row=last, end_column=3)
+                ws.column_dimensions['A'].width = 6
+                ws.column_dimensions['B'].width = 16
+                ws.column_dimensions['C'].width = 20
+                for col in range(4, len(s['header']) + 1):
+                    ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 14
+            wb.save('__XLSX__')
+            """;
+
     @Override
     @Transactional
     public void batchDelete(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return;
+        // 锁定守卫：已上报集团的数据禁止删除（所有组织一致）
+        long reported = mapper.selectCount(new LambdaQueryWrapper<OpsBusinessData>()
+                .in(OpsBusinessData::getId, ids)
+                .eq(OpsBusinessData::getCalcStatus, REPORTED_STATUS));
+        if (reported > 0) {
+            throw BusinessException.of("所选数据包含" + reported + "条已上报集团记录，已上报数据禁止删除");
+        }
         // physical DELETE bypassing @TableLogic, but enforce corp_id scope
         String in = ids.stream().map(Object::toString).reduce((a, b) -> a + "," + b).orElse("");
         StringBuilder sql = new StringBuilder("DELETE FROM ops_business_data WHERE id IN (").append(in).append(")");

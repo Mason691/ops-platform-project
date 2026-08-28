@@ -18,4 +18,9 @@ public interface BusinessDataService {
     /** 个人提成计算（按指定批次），batchNo 为 null 时计算所有未计算批次 */
     Map<String, Object> calcCommission(String batchNo);
     void exportExcel(String company, String batchNo, String agent, HttpServletResponse response);
+    /** 提成上报集团：将当前筛选条件下非"已上报集团"的数据锁定为"已上报集团"，返回受影响行数 */
+    int reportToGroup(String company, String batchNo, String agent, String receiptNo, String category);
+    /** 品类提成汇总：按品类×公司汇总非已上报数据（提成金额+销售额），按模板格式生成 Excel 流式输出 */
+    void exportCommissionSummary(String company, String batchNo, String agent, String receiptNo, String category,
+                                 HttpServletResponse response);
 }

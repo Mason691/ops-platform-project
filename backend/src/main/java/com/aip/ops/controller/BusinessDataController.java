@@ -6,6 +6,7 @@ import com.aip.ops.entity.SysExportTask;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.ExportTaskService;
 import com.aip.ops.service.ImportTaskService;
+import com.aip.ops.service.OrgRoleService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -37,6 +38,7 @@ public class BusinessDataController {
     private final ExportTaskService taskService;
     private final ImportTaskService importTaskService;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final OrgRoleService orgRoleService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final String TOPIC_EXPORT_TASK = "async-export-task";
@@ -59,11 +61,13 @@ public class BusinessDataController {
     }
 
     public BusinessDataController(BusinessDataService service, ExportTaskService taskService,
-                                  ImportTaskService importTaskService, KafkaTemplate<String, String> kafkaTemplate) {
+                                  ImportTaskService importTaskService, KafkaTemplate<String, String> kafkaTemplate,
+                                  OrgRoleService orgRoleService) {
         this.service = service;
         this.taskService = taskService;
         this.importTaskService = importTaskService;
         this.kafkaTemplate = kafkaTemplate;
+        this.orgRoleService = orgRoleService;
     }
 
     @GetMapping
@@ -261,6 +265,45 @@ public class BusinessDataController {
     public R<?> batchDelete(@RequestBody Map<String, List<Long>> params) {
         service.batchDelete(params.get("ids"));
         return R.ok("删除成功");
+    }
+
+    /**
+     * 提成上报集团：将当前筛选条件下的数据锁定为"已上报集团"。
+     * 仅运营商管理员/超管可操作；只处理非"已上报集团"的数据；
+     * 锁定后所有组织均不可删除/修改/重新计算。
+     */
+    @OperationLog(module = "增值业务", action = "提成上报集团", targetTable = "ops_business_data")
+    @PostMapping("/report-to-group")
+    public R<?> reportToGroup(@RequestBody(required = false) Map<String, String> params) {
+        if (!orgRoleService.isOperatorOrSuperAdmin()) {
+            return R.fail("仅运营商管理员可执行提成上报集团操作");
+        }
+        Map<String, String> p = params != null ? params : Map.of();
+        int count = service.reportToGroup(p.get("company"), p.get("batchNo"),
+                p.get("agent"), p.get("receiptNo"), p.get("category"));
+        if (count == 0) return R.fail("当前筛选条件下没有可上报的数据");
+        return R.ok(Map.of("reportedCount", count));
+    }
+
+    /**
+     * 品类提成汇总：按当前筛选条件汇总非"已上报集团"数据（品类×公司×提成金额/销售额），
+     * 按模板格式生成 Excel 同步下载。仅运营商管理员/超管可操作。
+     */
+    @OperationLog(module = "增值业务", action = "品类提成汇总", targetTable = "ops_business_data")
+    @GetMapping("/commission-summary")
+    public void commissionSummary(@RequestParam(required = false) String company,
+                                  @RequestParam(required = false) String batchNo,
+                                  @RequestParam(required = false) String agent,
+                                  @RequestParam(required = false) String receiptNo,
+                                  @RequestParam(required = false) String category,
+                                  HttpServletResponse response) throws IOException {
+        if (!orgRoleService.isOperatorOrSuperAdmin()) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write("{\"code\":403,\"msg\":\"仅运营商管理员可执行品类提成汇总\"}");
+            return;
+        }
+        service.exportCommissionSummary(company, batchNo, agent, receiptNo, category, response);
     }
 
     /** 经办人核对：将指定批次已计算数据标记为已核对 */
