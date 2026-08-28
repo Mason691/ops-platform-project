@@ -816,8 +816,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         List<String> companies = collectCompanies(rows);
         Map<String, BigDecimal[]> cell = buildCellMap(rows);
         List<Map<String, Object>> sheets = new ArrayList<>();
-        sheets.add(buildSummarySheet("提成金额", categoryKeys, companies, cell, 0));
-        sheets.add(buildSummarySheet("销售额", categoryKeys, companies, cell, 1));
+        // cell 数组索引：0=销售额，1=提成金额（见 buildCellMap），按表名各取对应值
+        sheets.add(buildSummarySheet("提成金额", categoryKeys, companies, cell, 1));
+        sheets.add(buildSummarySheet("销售额", categoryKeys, companies, cell, 0));
         return writeSummaryXlsx(sheets);
     }
 
