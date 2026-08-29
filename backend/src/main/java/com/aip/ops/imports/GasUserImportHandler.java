@@ -327,12 +327,12 @@ public class GasUserImportHandler implements ImportHandler {
         return "INSERT INTO ops_gas_user " +
                "(corp_id, community_id, batch_no, user_no, meter_no, full_name, " +
                " gender, birth_date, " +
-               " phone, gas_supply_certificate_number, gas_company_name, area_name, detailed_address, " +
+               " phone, gas_supply_certificate_number, gas_company_name, gas_company_id, area_name, detailed_address, " +
                " status, gas_balance, arrears, account_opening_time, " +
                " accumulated_gas_purchase_volume, accumulated_gas_purchase_money, " +
                " document_type, document_number, create_user, modify_user, " +
                " create_user_name, modify_user_name, create_time, modify_time) " +
-               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,'','',NOW(),NOW())";
+               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,'','',NOW(),NOW())";
     }
 
     private void bindInsertParams(PreparedStatement ps, Map<String, Object> row,
@@ -351,27 +351,13 @@ public class GasUserImportHandler implements ImportHandler {
         ps.setString(i++, strVal(row, "phone"));
         ps.setString(i++, strVal(row, "gas_supply_certificate_number"));
         ps.setString(i++, strVal(row, "gas_company_name"));
+        ps.setString(i++, strValOrNull(row, "gas_company_id"));  // 空值存 NULL，避免未来关联匹配 ''='' 假阳性
         ps.setString(i++, strVal(row, "area_name"));             // area_name (matches ops_gas_user)
         ps.setString(i++, strVal(row, "detailed_address"));      // detailed_address (matches ops_gas_user)
         ps.setString(i++, "active");
         ps.setBigDecimal(i++, toBigDecimal(row, "gas_balance")); // gas_balance (matches ops_gas_user)
         ps.setBigDecimal(i++, BigDecimal.ZERO);                  // arrears
-        // openTime — parse once, then set at current index
-        Object openTimeVal = null;
-        String openTimeStr = strVal(row, "account_opening_time");
-        if (openTimeStr != null && !openTimeStr.isBlank()) {
-            try {
-                openTimeVal = LocalDateTime.parse(openTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-            } catch (Exception e1) {
-                try {
-                    openTimeVal = LocalDateTime.parse(openTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-                } catch (Exception e2) {
-                    try { openTimeVal = LocalDateTime.parse(openTimeStr, DateTimeFormatter.ISO_LOCAL_DATE_TIME); }
-                    catch (Exception e3) { /* leave as null */ }
-                }
-            }
-        }
-        ps.setObject(i++, openTimeVal);
+        ps.setObject(i++, parseOpenTime(strVal(row, "account_opening_time")));
         // sb_gas_user 额外字段（列名一致，直接映射）
         ps.setBigDecimal(i++, toBigDecimal(row, "accumulated_gas_purchase_volume"));
         ps.setBigDecimal(i++, toBigDecimal(row, "accumulated_gas_purchase_money"));
@@ -446,6 +432,22 @@ public class GasUserImportHandler implements ImportHandler {
     private String strVal(Map<String, Object> row, String key) {
         Object v = row.get(key);
         return v != null ? v.toString().trim() : "";
+    }
+
+    private String strValOrNull(Map<String, Object> row, String key) {
+        String s = strVal(row, key);
+        return s.isEmpty() ? null : s;
+    }
+
+    /** 开户时间多格式解析（yyyy-MM-dd HH:mm:ss / yyyy-MM-dd / ISO），失败返回 null。 */
+    private LocalDateTime parseOpenTime(String s) {
+        if (s == null || s.isBlank()) return null;
+        try { return LocalDateTime.parse(s, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")); }
+        catch (Exception e1) {}
+        try { return LocalDateTime.parse(s, DateTimeFormatter.ofPattern("yyyy-MM-dd")); }
+        catch (Exception e2) {}
+        try { return LocalDateTime.parse(s, DateTimeFormatter.ISO_LOCAL_DATE_TIME); }
+        catch (Exception e3) { return null; }
     }
 
     private BigDecimal toBigDecimal(Map<String, Object> row, String key) {
