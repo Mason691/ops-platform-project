@@ -7,6 +7,7 @@ import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.mapper.OpsGasUserMapper;
 import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.ImportTaskService;
+import com.aip.ops.service.PlatformMerchantService;
 import com.aip.sdk.result.R;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -18,6 +19,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @RestController
@@ -31,6 +33,7 @@ public class GasUserController {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
     private final GasDataSourceConfig gasDataSourceConfig;
+    private final PlatformMerchantService platformMerchantService;
 
     public GasUserController(
             OpsGasUserMapper mapper,
@@ -39,7 +42,8 @@ public class GasUserController {
             ImportTaskService importTaskService,
             KafkaTemplate<String, String> kafkaTemplate,
             ObjectMapper objectMapper,
-            GasDataSourceConfig gasDataSourceConfig) {
+            GasDataSourceConfig gasDataSourceConfig,
+            PlatformMerchantService platformMerchantService) {
         this.mapper = mapper;
         this.dataScopeService = dataScopeService;
         this.jdbcTemplate = jdbcTemplate;
@@ -47,6 +51,7 @@ public class GasUserController {
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
         this.gasDataSourceConfig = gasDataSourceConfig;
+        this.platformMerchantService = platformMerchantService;
     }
 
     /** Get current org short_name for gas import default. */
@@ -125,9 +130,13 @@ public class GasUserController {
 
         // Community names
         Map<Long, String> nameMap = resolveCommunityNames(result.getRecords());
+        Map<Long, Integer> deviceCounts = resolveDeviceCounts(result.getRecords());
+        Map<Long, String> corpNames = resolveCorpNames(result.getRecords());
         java.time.LocalDate today = java.time.LocalDate.now();
         for (OpsGasUser u : result.getRecords()) {
             if (u.getCommunityId() != null) u.setCommunityName(nameMap.get(u.getCommunityId()));
+            u.setDeviceCount(deviceCounts.getOrDefault(u.getId(), 0));
+            u.setCorpName(corpNames.get(u.getCorpId()));
             // Computed fields
             u.setIsMember(u.getPlatformMemberId() != null);
             if (u.getBirthDate() != null)
@@ -146,6 +155,13 @@ public class GasUserController {
         return R.ok(data);
     }
 
+    /** 批量解析组织简称（列表组织列展示；corp_id=0 未匹配行不解析，前端显示"未匹配"标记）。 */
+    private Map<Long, String> resolveCorpNames(List<OpsGasUser> users) {
+        Set<Long> ids = users.stream().map(OpsGasUser::getCorpId)
+                .filter(Objects::nonNull).filter(id -> id > 0).collect(Collectors.toSet());
+        return ids.isEmpty() ? Map.of() : platformMerchantService.getCorpNames(ids);
+    }
+
     private Map<Long, String> resolveCommunityNames(List<OpsGasUser> users) {
         Set<Long> ids = new LinkedHashSet<>();
         for (OpsGasUser u : users) if (u.getCommunityId() != null) ids.add(u.getCommunityId());
@@ -159,6 +175,41 @@ public class GasUserController {
                     (org.springframework.jdbc.core.RowCallbackHandler) rs -> map.put(rs.getLong("id"), rs.getString("community_name")));
         } catch (Exception e) {
             log.warn("Failed to resolve community names: {}", e.getMessage());
+        }
+        return map;
+    }
+
+    /**
+     * 设备查询的组织范围 SQL 片段：超管（null）不过滤；
+     * 普通组织仅可见本范围设备 + 未匹配异常（corp_id=0），跨组织设备隔离；
+     * 空集合（无认证上下文）→ 全不命中，安全兜底（防 IN () 非法 SQL）。
+     */
+    private String stoveCorpScopeSql(Set<Long> visibleCorpIds) {
+        if (visibleCorpIds == null) return "";
+        if (visibleCorpIds.isEmpty()) return " AND 1=0";
+        String csv = visibleCorpIds.stream().map(String::valueOf).collect(Collectors.joining(","));
+        return " AND (corp_id IN (" + csv + ") OR corp_id = 0)";
+    }
+
+    /** 批量统计每个燃气用户名下的设备数（ops_gas_stoves_info.gas_user_id，分块 IN 防参数过多）。 */
+    private Map<Long, Integer> resolveDeviceCounts(List<OpsGasUser> users) {
+        Map<Long, Integer> map = new LinkedHashMap<>();
+        List<Long> ids = users.stream().map(OpsGasUser::getId).toList();
+        try {
+            for (int i = 0; i < ids.size(); i += 500) {
+                int end = Math.min(i + 500, ids.size());
+                List<Long> batch = ids.subList(i, end);
+                String ph = String.join(",", batch.stream().map(u -> "?").toList());
+                jdbcTemplate.query(
+                        "SELECT gas_user_id, COUNT(*) AS cnt FROM ops_gas_stoves_info " +
+                        "WHERE delete_flag=0 AND gas_user_id IN (" + ph + ")" + stoveCorpScopeSql(dataScopeService.getVisibleCorpIds()) +
+                        " GROUP BY gas_user_id",
+                        rs -> { map.put(rs.getLong("gas_user_id"), rs.getInt("cnt")); },
+                        batch.toArray());
+            }
+        } catch (Exception e) {
+            // gas_user_id 列不存在（DDL 未执行）时按 0 处理，不阻断列表
+            log.warn("Failed to resolve device counts: {}", e.getMessage());
         }
         return map;
     }
@@ -339,6 +390,41 @@ public class GasUserController {
             user.setCommunityName(resolveSingleCommunityName(user.getCommunityId()));
         }
         return R.ok(user);
+    }
+
+    /** 查询燃气用户名下的设备记录（列表展开区；走 idx_gas_user_id 索引，分页返回）。 */
+    @GetMapping("/{id:\\d+}/stoves")
+    public R<?> userStoves(@PathVariable Long id,
+                           @RequestParam(defaultValue = "1") int pageNum,
+                           @RequestParam(defaultValue = "20") int pageSize) {
+        OpsGasUser user = mapper.selectById(id);
+        if (user == null) return R.fail("燃气用户不存在");
+        // Data scope check（与 detail 一致：仅可见组织）
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
+        if (visibleCorpIds != null && !visibleCorpIds.contains(user.getCorpId())) {
+            return R.fail("无权限查看该用户");
+        }
+        int limit = Math.max(1, Math.min(pageSize, 100));
+        int offset = Math.max(0, pageNum - 1) * limit;
+        // 组织隔离：仅可见本组织范围的设备；未匹配异常（corp_id=0）保留展示，超管不过滤
+        String scopeSql = stoveCorpScopeSql(visibleCorpIds);
+        Integer total = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ops_gas_stoves_info WHERE delete_flag=0 AND gas_user_id=?" + scopeSql,
+                Integer.class, id);
+        List<Map<String, Object>> stoves = jdbcTemplate.queryForList(
+                "SELECT id, t_gas_stoves_info_id AS tGasStovesInfoId, " +
+                "gas_stoves_class AS gasStovesClass, gas_stoves_brand AS gasStovesBrand, " +
+                "gas_stoves_type AS gasStovesType, `power`, focal_eye AS focalEye, " +
+                "installation_position AS installationPosition, " +
+                "DATE_FORMAT(installation_time, '%Y-%m-%d %H:%i:%s') AS installationTime, " +
+                "user_number AS userNumber " +
+                "FROM ops_gas_stoves_info WHERE delete_flag=0 AND gas_user_id=?" + scopeSql +
+                " ORDER BY installation_time DESC, id ASC LIMIT ? OFFSET ?",
+                id, limit, offset);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("records", stoves);
+        data.put("total", total != null ? total : 0);
+        return R.ok(data);
     }
 
     /** Update a single gas user (editable: communityId). */

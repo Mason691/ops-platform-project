@@ -5,6 +5,7 @@ import com.aip.ops.entity.OpsGasUser;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.mapper.OpsGasUserMapper;
 import com.aip.ops.service.ImportTaskService;
+import com.aip.ops.service.PlatformMerchantService;
 import com.aip.ops.util.AesUtils;
 import com.aip.ops.util.AmapGeocodeUtil;
 import com.aip.sdk.client.PlatformInternalClient;
@@ -29,6 +30,9 @@ import java.util.*;
  * 以 user_no（= sb_gas_user.id）去重后增量写入 ops_gas_user。
  * 自动创建缺失小区（含高德地理编码 + 地区匹配）。
  * 采用事务内 JDBC batch INSERT，任一步失败全部回滚。
+ *
+ * corp_id 逐行解析（2026-08-29 重构）：sb_gas_user.gas_company_id → sys_corp.gas_company_id → sys_corp.id，
+ * 不再取任务发起组织；未匹配 → corp_id=0 + corp_match_status=0 异常标记（不猜测、不沿用其他字段）。
  */
 @Slf4j
 @Component
@@ -41,6 +45,7 @@ public class GasUserImportHandler implements ImportHandler {
     private final AmapGeocodeUtil amapGeocodeUtil;
     private final ImportTaskService taskService;
     private final PlatformInternalClient platformInternalClient;
+    private final PlatformMerchantService platformMerchantService;
     private final String companyFilter;
 
     private static final String IMPORT_BATCH_PREFIX = "GAS_IMP_";
@@ -53,6 +58,7 @@ public class GasUserImportHandler implements ImportHandler {
             AmapGeocodeUtil amapGeocodeUtil,
             ImportTaskService taskService,
             PlatformInternalClient platformInternalClient,
+            PlatformMerchantService platformMerchantService,
             @Qualifier("gasCompanyFilter") String companyFilter) {
         this.gasUserMapper = gasUserMapper;
         this.localJdbcTemplate = localJdbcTemplate;
@@ -61,6 +67,7 @@ public class GasUserImportHandler implements ImportHandler {
         this.amapGeocodeUtil = amapGeocodeUtil;
         this.taskService = taskService;
         this.platformInternalClient = platformInternalClient;
+        this.platformMerchantService = platformMerchantService;
         this.companyFilter = companyFilter;
     }
 
@@ -110,6 +117,8 @@ public class GasUserImportHandler implements ImportHandler {
         int existingCount = 0;
         int skippedCount = 0;
         List<String> skippedReasons = new ArrayList<>();
+        // 组织未匹配统计：gas_company_id → 条数（供结果消息与异常日志，后续人工修正）
+        Map<String, Integer> corpUnmatched = new LinkedHashMap<>();
 
         for (var row : srcRows) {
             String phone = strVal(row, "phone");
@@ -129,13 +138,16 @@ public class GasUserImportHandler implements ImportHandler {
                 company, srcRows.size(), skippedCount, existingCount, toImport.size());
 
         if (toImport.isEmpty()) {
-            return buildResult(srcRows.size(), 0, existingCount, skippedCount);
+            return buildResult(srcRows.size(), 0, existingCount, skippedCount, corpUnmatched);
         }
+
+        // 组织映射：外部 gas_company_id → sys_corp.id（迁移前一次性拉取；平台不可达时为空 → 全部标记未匹配，fail-safe）
+        Map<String, Long> corpIndex = platformMerchantService.getCorpIdsByGasCompanyId();
 
         // Community name → ID cache (avoids N+1 cross-db queries for same community)
         Map<String, Long> communityCache = new HashMap<>();
 
-        // ── Phase 4: 逐条导入（查/建小区 → 插入用户） ──
+        // ── Phase 4: 逐条导入（解析组织 → 查/建小区 → 插入用户） ──
         taskService.updateStatus(task.getId(), "PROCESSING", "INSERT",
                 "正在导入 " + toImport.size() + " 条新增用户...");
 
@@ -146,11 +158,16 @@ public class GasUserImportHandler implements ImportHandler {
                 .prepareStatement(insertSql)) {
 
             for (var row : toImport) {
-                // 4a. 查找或创建小区（带缓存）
+                // 4a. 逐行解析组织（corp_id 来源唯一：gas_company_id → sys_corp 匹配）
+                long[] corp = resolveCorp(row, corpIndex, corpUnmatched);
+                long rowCorpId = corp[0];
+                int matchStatus = (int) corp[1];
+
+                // 4b. 查找或创建小区（带缓存；未匹配行回退任务组织，避免小区归属 corp 0）
                 String communityName = strVal(row, "village_name");
                 Long communityId = communityCache.get(communityName);
                 if (communityId == null) {
-                    communityId = findOrCreateCommunity(row, corpId, communityName);
+                    communityId = findOrCreateCommunity(row, rowCorpId > 0 ? rowCorpId : corpId, communityName);
                     if (communityId != null) {
                         communityCache.put(communityName, communityId);
                     }
@@ -159,8 +176,8 @@ public class GasUserImportHandler implements ImportHandler {
                     throw new RuntimeException("无法创建小区: " + communityName);
                 }
 
-                // 4b. 插入 ops_gas_user（JDBC batch）
-                bindInsertParams(ps, row, corpId, communityId, batchNo);
+                // 4c. 插入 ops_gas_user（JDBC batch）
+                bindInsertParams(ps, row, rowCorpId, matchStatus, communityId, batchNo);
                 ps.addBatch();
                 imported++;
             }
@@ -168,7 +185,26 @@ public class GasUserImportHandler implements ImportHandler {
             ps.executeBatch();
         }
 
-        return buildResult(srcRows.size(), imported, existingCount, skippedCount);
+        return buildResult(srcRows.size(), imported, existingCount, skippedCount, corpUnmatched);
+    }
+
+    /** 逐行解析组织：sb_gas_user.gas_company_id → sys_corp.gas_company_id → sys_corp.id。
+     *  未匹配 → corp_id=0 + 状态0（异常标记），不猜测、不沿用任务组织或其他字段。 */
+    private long[] resolveCorp(Map<String, Object> row, Map<String, Long> corpIndex,
+                               Map<String, Integer> corpUnmatched) {
+        String companyKey = strValOrNull(row, "gas_company_id");
+        Long matched = companyKey != null ? corpIndex.get(companyKey) : null;
+        if (matched == null) {
+            String key = companyKey != null ? companyKey : "(空)";
+            // 每公司仅记前 3 条明细日志防刷屏，全量计数进结果消息
+            int n = corpUnmatched.merge(key, 1, Integer::sum);
+            if (n <= 3) {
+                log.warn("GasUserImport: 组织未匹配 gas_company_id=[{}] user_no=[{}] 姓名=[{}]，corp_id 置 0 待人工处理",
+                        key, strVal(row, "id"), strVal(row, "full_name"));
+            }
+            return new long[]{0L, 0L};
+        }
+        return new long[]{matched, 1L};
     }
 
     /** 规整源表 phone：多号码拼接时取首个合法 11 位手机号；
@@ -325,20 +361,21 @@ public class GasUserImportHandler implements ImportHandler {
 
     private String buildInsertSql() {
         return "INSERT INTO ops_gas_user " +
-               "(corp_id, community_id, batch_no, user_no, meter_no, full_name, " +
+               "(corp_id, corp_match_status, community_id, batch_no, user_no, meter_no, full_name, " +
                " gender, birth_date, " +
                " phone, gas_supply_certificate_number, gas_company_name, gas_company_id, area_name, detailed_address, " +
                " status, gas_balance, arrears, account_opening_time, " +
                " accumulated_gas_purchase_volume, accumulated_gas_purchase_money, " +
                " document_type, document_number, create_user, modify_user, " +
                " create_user_name, modify_user_name, create_time, modify_time) " +
-               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,'','',NOW(),NOW())";
+               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,'','',NOW(),NOW())";
     }
 
     private void bindInsertParams(PreparedStatement ps, Map<String, Object> row,
-                                   Long corpId, Long communityId, String batchNo) throws Exception {
+                                   Long corpId, int matchStatus, Long communityId, String batchNo) throws Exception {
         int i = 1;
         ps.setLong(i++, corpId);
+        ps.setInt(i++, matchStatus);       // corp_match_status
         ps.setLong(i++, communityId);
         ps.setString(i++, batchNo);
         ps.setString(i++, strVal(row, "id"));                   // user_no
@@ -367,11 +404,18 @@ public class GasUserImportHandler implements ImportHandler {
 
     // ── 结果构建 ──
 
-    private ImportResult buildResult(int totalSrc, int imported, int existing, int skipped) {
+    private ImportResult buildResult(int totalSrc, int imported, int existing, int skipped,
+                                     Map<String, Integer> corpUnmatched) {
         ImportResult r = ImportResult.success(imported, totalSrc);
         r.setExistingCount(existing);
         r.setFailRows(skipped);
-        r.setMessage("外部共 " + totalSrc + " 条，已有用户 " + existing + "，增量导入 " + imported);
+        StringBuilder msg = new StringBuilder("外部共 ").append(totalSrc)
+                .append(" 条，已有用户 ").append(existing).append("，增量导入 ").append(imported);
+        if (!corpUnmatched.isEmpty()) {
+            msg.append("；组织未匹配（corp_id=0 已标记异常，待人工处理）");
+            corpUnmatched.forEach((k, v) -> msg.append(" ").append(k).append(":").append(v).append(" 条"));
+        }
+        r.setMessage(msg.toString());
         return r;
     }
 
