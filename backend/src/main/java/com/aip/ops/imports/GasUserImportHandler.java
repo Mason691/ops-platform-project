@@ -116,6 +116,9 @@ public class GasUserImportHandler implements ImportHandler {
             String cert = strVal(row, "gas_supply_certificate_number");
             String communityName = strVal(row, "village_name");
             if (phone == null || phone.isBlank()) { skippedCount++; continue; }
+            // 源数据 phone 可能多号码拼接（如 "15009597943、15121945317"）或超长，规整后再入库
+            String normalizedPhone = normalizePhone(phone);
+            if (!normalizedPhone.equals(phone)) row.put("phone", normalizedPhone);
             if (cert == null || cert.isBlank()) { skippedCount++; continue; }
             if (communityName == null || communityName.isBlank()) { skippedCount++; continue; }
             // 去重：user_no = sb_gas_user.id
@@ -166,6 +169,20 @@ public class GasUserImportHandler implements ImportHandler {
         }
 
         return buildResult(srcRows.size(), imported, existingCount, skippedCount);
+    }
+
+    /** 规整源表 phone：多号码拼接时取首个合法 11 位手机号；
+     *  否则按常见分隔符拆段取首段，并兜底截断到 20 字符（ops_gas_user.phone varchar(20)），
+     *  保证入库不报 Data truncation。正常 11 位手机号原样保留。 */
+    private String normalizePhone(String raw) {
+        if (raw == null) return null;
+        String s = raw.trim();
+        if (s.isEmpty()) return s;
+        if (s.matches("1\\d{10}")) return s;
+        for (String part : s.split("[、，,;；/|\\s]+")) {
+            if (part.matches("1\\d{10}")) return part;
+        }
+        return s.length() > 20 ? s.substring(0, 20) : s;
     }
 
     // ── 去重集合（按 user_no = sb_gas_user.id） ──
