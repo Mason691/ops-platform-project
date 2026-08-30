@@ -279,7 +279,8 @@ public class GasUserController {
                     "消息队列发送失败: " + e.getMessage(), 0, 0);
             return R.fail("任务提交失败，请重试");
         }
-        return R.ok(Map.of("taskId", task.getId()));
+        // async:true 标记：主平台前端据此启动轮询（与 gas-import 端点契约一致）
+        return R.ok(Map.of("async", true, "taskId", task.getId()));
     }
 
     /** Poll convert task status. Returns parsed detail counts when done. */
