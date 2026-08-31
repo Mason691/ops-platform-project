@@ -13,7 +13,7 @@ import java.util.Map;
  * 作战地图 ETL：从原始业务表抽取聚合到 6 张预计算表（org 维度隔离）。
  * <ul>
  *   <li>经办人业绩 TOP5：来源 {@code ops_business_data}，按 agent(姓名) 分组，
- *       仅统计 {@code calc_status IN ('已计算','经办人已核对')}</li>
+ *       仅统计 {@code calc_status IN ('已计算','经办人已核对','已上报集团')}</li>
  *   <li>{@link #refreshOrg(Long)} 单组织全量重算</li>
  *   <li>{@link #refreshAllOrgs()} 全量重算所有活跃组织</li>
  * </ul>
@@ -44,11 +44,14 @@ public class BattleMapEtlService {
         log.info("battle-map ETL refreshed org={} scope=({})", corpId, scope);
     }
 
-    /** 全量：对所有有燃气用户或台账的组织逐一重算。 */
+    /** 全量：对有燃气用户/台账的组织，以及已存在看板数据的组织逐一重算。
+     *  union ops_map_org_summary 是为了覆盖运营商组织（自身无燃气用户行、只聚合下级），
+     *  否则此类组织的看板数据永远不会被定时刷新。 */
     public void refreshAllOrgs() {
         List<Long> orgs = jdbc.queryForList(
             "SELECT corp_id FROM ops_gas_user WHERE corp_id IS NOT NULL " +
-            "UNION SELECT corp_id FROM ops_member_ledger WHERE corp_id IS NOT NULL AND delete_flag=0",
+            "UNION SELECT corp_id FROM ops_member_ledger WHERE corp_id IS NOT NULL AND delete_flag=0 " +
+            "UNION SELECT org_id FROM ops_map_org_summary",
             Long.class);
         for (Long org : orgs) {
             try { refreshOrg(org); } catch (Exception e) { log.warn("ETL org={} failed: {}", org, e.getMessage()); }
@@ -89,7 +92,7 @@ public class BattleMapEtlService {
                 "FROM ops_business_data bd WHERE bd.corp_id IN (" + scope + ") " +
                 "AND bd.delete_flag=0 " +
                 "AND bd.agent IS NOT NULL AND bd.agent<>'' " +
-                "AND bd.calc_status IN ('已计算','经办人已核对') " +
+                "AND bd.calc_status IN ('已计算','经办人已核对','已上报集团') " +
                 "GROUP BY bd.agent ORDER BY total_sales DESC LIMIT 5");
             int rank = 0;
             for (Map<String, Object> t : tops) {
@@ -118,7 +121,7 @@ public class BattleMapEtlService {
         try {
             List<Map<String, Object>> pc = jdbc.queryForList(
                 "SELECT company FROM ops_business_data " +
-                "WHERE agent=? AND corp_id IN (" + scope + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对') " +
+                "WHERE agent=? AND corp_id IN (" + scope + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对','已上报集团') " +
                 "GROUP BY company ORDER BY SUM(sale_price) DESC LIMIT 1",
                 agentKey);
             if (!pc.isEmpty()) {
@@ -230,7 +233,7 @@ public class BattleMapEtlService {
         try {
             jdbc.update("DELETE FROM ops_map_category_sales WHERE org_id=?", corpId);
             // 品类中文名优先从数据字典转换，降级用原始 category 值
-            // 数据源：ops_business_data（已计算 + 经办人已核对）
+            // 数据源：ops_business_data（已计算 + 经办人已核对 + 已上报集团）
             jdbc.update(
                 "INSERT INTO ops_map_category_sales (org_id,category_key,category_name,total_sales," +
                 "sales_count,rank_order) " +
@@ -240,7 +243,7 @@ public class BattleMapEtlService {
                 "ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(bd.sale_price),0) DESC) " +
                 "FROM ops_business_data bd " +
                 "WHERE bd.corp_id IN (" + scope + ") AND bd.delete_flag=0 " +
-                "AND bd.calc_status IN ('已计算','经办人已核对') " +
+                "AND bd.calc_status IN ('已计算','经办人已核对','已上报集团') " +
                 "AND bd.category IS NOT NULL AND bd.category<>'' " +
                 "GROUP BY bd.category ORDER BY COALESCE(SUM(bd.sale_price),0) DESC LIMIT 5",
                 corpId);

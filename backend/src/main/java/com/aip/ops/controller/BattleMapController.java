@@ -144,12 +144,12 @@ public class BattleMapController {
                 Map<String, Object> os = jdbcTemplate.queryForMap("SELECT * FROM ops_map_org_summary WHERE org_id=?", corpId);
                 s.putAll(os);
             } catch (Exception ignore) { /* 尚未 ETL 的组织无汇总行 */ }
-            // YTD total: ops_business_data (已计算) + ops_member_ledger (本年)
+            // YTD total: ops_business_data (已计算/已核对/已上报集团) + ops_member_ledger (本年)
             try {
                 String year = Integer.toString(LocalDate.now().getYear());
                 Double bd = jdbcTemplate.queryForObject(
                     "SELECT COALESCE(SUM(sale_price),0) FROM ops_business_data " +
-                    "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对') AND sale_date>=?",
+                    "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对','已上报集团') AND sale_date>=?",
                     Double.class, year + "-01-01");
                 Double ml = jdbcTemplate.queryForObject(
                     "SELECT COALESCE(SUM(sales_price),0) FROM ops_member_ledger " +
@@ -243,7 +243,7 @@ public class BattleMapController {
     private String now() { return LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME); }
 
     /**
-     * 近 6 个月销售趋势：优先 ops_business_data (calc_status='已计算') 按月汇总 sale_price，
+     * 近 6 个月销售趋势：优先 ops_business_data (calc_status IN 已计算/已核对/已上报集团) 按月汇总 sale_price，
      * 月内无数据或为零时从 ops_member_ledger 取 sales_price 补充；仍无数据补 0。
      * 保证连续 6 个桶不缺月。
      */
@@ -266,10 +266,10 @@ public class BattleMapController {
             String since = first.format(ym) + "-01";
             String sc = scope(corpId);
 
-            // 1) 主数据源：ops_business_data (已计算 + 经办人已核对)
+            // 1) 主数据源：ops_business_data (已计算 + 经办人已核对 + 已上报集团)
             jdbcTemplate.queryForList(
                 "SELECT DATE_FORMAT(sale_date,'%Y-%m') ym, COALESCE(SUM(sale_price),0) total " +
-                "FROM ops_business_data WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对') AND sale_date>=? GROUP BY ym", since)
+                "FROM ops_business_data WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对','已上报集团') AND sale_date>=? GROUP BY ym", since)
                 .forEach(row -> {
                     Map<String, Object> r = buckets.get((String) row.get("ym"));
                     if (r != null) {
