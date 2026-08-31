@@ -146,6 +146,8 @@ public class GasUserImportHandler implements ImportHandler {
 
         // Community name → ID cache (avoids N+1 cross-db queries for same community)
         Map<String, Long> communityCache = new HashMap<>();
+        // area_name → region_id 缓存（同一区县解析结果一致，避免逐行查询）
+        Map<String, Long> regionCache = new HashMap<>();
 
         // ── Phase 4: 逐条导入（解析组织 → 查/建小区 → 插入用户） ──
         taskService.updateStatus(task.getId(), "PROCESSING", "INSERT",
@@ -163,13 +165,17 @@ public class GasUserImportHandler implements ImportHandler {
                 long rowCorpId = corp[0];
                 int matchStatus = (int) corp[1];
 
-                // 4b. 查找或创建小区（带缓存；未匹配行回退任务组织，避免小区归属 corp 0）
+                // 4b. 查找或创建小区（带缓存；未匹配行回退任务组织，避免小区归属 corp 0。
+                //     小区唯一性 = region_id + 名称：同一 region 内不重名，跨 region 可同名）
                 String communityName = strVal(row, "village_name");
-                Long communityId = communityCache.get(communityName);
+                long effectiveCorpId = rowCorpId > 0 ? rowCorpId : corpId;
+                Long regionId = resolveRegionCached(row, regionCache);
+                String cacheKey = (regionId == null ? "R-" : "R" + regionId) + "|" + communityName;
+                Long communityId = communityCache.get(cacheKey);
                 if (communityId == null) {
-                    communityId = findOrCreateCommunity(row, rowCorpId > 0 ? rowCorpId : corpId, communityName);
+                    communityId = findOrCreateCommunity(row, effectiveCorpId, communityName, regionId);
                     if (communityId != null) {
-                        communityCache.put(communityName, communityId);
+                        communityCache.put(cacheKey, communityId);
                     }
                 }
                 if (communityId == null) {
@@ -241,13 +247,11 @@ public class GasUserImportHandler implements ImportHandler {
     /**
      * 查找已有小区，不存在则创建（含地区匹配 + 高德地理编码）。
      */
-    private Long findOrCreateCommunity(Map<String, Object> row, Long corpId, String communityName) {
-        // 精确查已有小区
-        Long existingId = findCommunityIdByName(communityName);
+    private Long findOrCreateCommunity(Map<String, Object> row, Long corpId, String communityName, Long regionId) {
+        // 精确查已有小区（region+名称；region 解析失败时回退 corp 隔离）
+        Long existingId = findCommunityId(corpId, regionId, communityName);
         if (existingId != null) return existingId;
 
-        // 匹配地区
-        Long regionId = matchRegion(row);
         if (regionId == null) {
             log.warn("GasUserImport: region match failed for community '{}'", communityName);
         }
@@ -267,14 +271,33 @@ public class GasUserImportHandler implements ImportHandler {
                 strVal(row, "province_name"), strVal(row, "city_name"), strVal(row, "area_name"), address, corpId);
     }
 
-    private Long findCommunityIdByName(String name) {
+    /** 按名称+组织查找小区。小区归属组织（corp_id），同名小区在不同组织下是不同记录，
+     *  必须带 corp_id 过滤——否则会跨组织复用他人小区（如德保导入错挂到彭阳的财富广场）。 */
+    /** 按唯一键查找小区：region_id + 名称（同一 region 内小区名唯一，跨 region 可同名）。
+     *  region 解析失败时回退 corp_id + 名称，避免跨组织复用他人小区。 */
+    private Long findCommunityId(Long corpId, Long regionId, String name) {
         try {
+            if (regionId != null) {
+                return localJdbcTemplate.queryForObject(
+                        "SELECT id FROM ai_platform.sys_community WHERE community_name = ? AND region_id = ? AND delete_flag = 0 LIMIT 1",
+                        Long.class, name, regionId);
+            }
             return localJdbcTemplate.queryForObject(
-                    "SELECT id FROM ai_platform.sys_community WHERE community_name = ? AND delete_flag = 0 LIMIT 1",
-                    Long.class, name);
+                    "SELECT id FROM ai_platform.sys_community WHERE community_name = ? AND corp_id = ? AND delete_flag = 0 LIMIT 1",
+                    Long.class, name, corpId);
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** 按区县缓存解析 region_id：同一 area_name 解析结果一致，避免逐行查询。
+     *  区县为空时以省+市组合作键，防止不同地区空区县行共享缓存。 */
+    private Long resolveRegionCached(Map<String, Object> row, Map<String, Long> regionCache) {
+        String area = strVal(row, "area_name");
+        String key = area.isBlank()
+                ? strVal(row, "province_name") + "|" + strVal(row, "city_name")
+                : area;
+        return regionCache.computeIfAbsent(key, k -> matchRegion(row));
     }
 
     /**
@@ -318,7 +341,7 @@ public class GasUserImportHandler implements ImportHandler {
     private Long createCommunity(String name, Long regionId, BigDecimal lng, BigDecimal lat,
                                   String province, String city, String district, String address, Long corpId) {
         // 二次检查（避免并发创建）
-        Long existing = findCommunityIdByName(name);
+        Long existing = findCommunityId(corpId, regionId, name);
         if (existing != null) return existing;
 
         try {
@@ -329,9 +352,11 @@ public class GasUserImportHandler implements ImportHandler {
                     "VALUES (?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                     name, regionId, address, lng, lat, corpId);
 
+            String postSql = regionId != null
+                    ? "SELECT id FROM ai_platform.sys_community WHERE community_name = ? AND region_id = ? AND delete_flag = 0 ORDER BY id DESC LIMIT 1"
+                    : "SELECT id FROM ai_platform.sys_community WHERE community_name = ? AND corp_id = ? AND delete_flag = 0 ORDER BY id DESC LIMIT 1";
             Map<String, Object> newCommunity = localJdbcTemplate.queryForMap(
-                    "SELECT id FROM ai_platform.sys_community WHERE community_name = ? AND delete_flag = 0 ORDER BY id DESC LIMIT 1",
-                    name);
+                    postSql, name, regionId != null ? regionId : corpId);
             Long newId = newCommunity != null ? ((Number) newCommunity.get("id")).longValue() : null;
             log.warn("GasUserImport: created community id={} name={} regionId={} lng={} lat={}",
                     newId, name, regionId, lng, lat);
@@ -339,7 +364,7 @@ public class GasUserImportHandler implements ImportHandler {
         } catch (Exception e) {
             // 可能是唯一约束冲突，再次查询
             log.warn("GasUserImport: createCommunity failed '{}': {}, retry query", name, e.getMessage());
-            return findCommunityIdByName(name);
+            return findCommunityId(corpId, regionId, name);
         }
     }
 
