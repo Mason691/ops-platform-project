@@ -1,10 +1,12 @@
 -- 燃具信息表（外部燃气系统 jinyuan_info.sb_gas_stoves_info 全量同步镜像）
--- gas_stoves_class 存平台字典 GAS_APPLIANCE_TYPE itemKey（1灶具 2热水器 3挂壁炉）
+-- id 直接存外部 sb_gas_stoves_info.id（varchar 主键），gas_stoves_class 存平台字典 GAS_APPLIANCE_TYPE itemKey（1灶具 2热水器 3挂壁炉）
+-- ⚠️ 重建脚本：CREATE TABLE IF NOT EXISTS 不会覆盖旧表（旧版为 BIGINT 自增 id + remote_id）。
+--    生产/已有旧表的库升级时必须先 DROP TABLE ops_gas_stoves_info; 再执行本脚本，然后重跑「迁移导入」重新同步。
 CREATE TABLE IF NOT EXISTS ops_gas_stoves_info (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    corp_id BIGINT NOT NULL DEFAULT 0 COMMENT '组织ID（同步触发组织；重复同步不覆盖）',
+    id VARCHAR(32) NOT NULL COMMENT '主键（= 外部 sb_gas_stoves_info.id）',
+    corp_id BIGINT NOT NULL DEFAULT 0 COMMENT '组织ID（优先取关联 ops_gas_user.corp_id；无关联时取同步触发组织）',
+    gas_user_id BIGINT DEFAULT NULL COMMENT '关联燃气用户ID（ops_gas_user.id；匹配条件：u.gas_company_id=s.gas_the_company_id AND u.gas_supply_certificate_number=s.user_number）',
     batch_no VARCHAR(100) DEFAULT NULL COMMENT '同步批次号',
-    remote_id VARCHAR(64) NOT NULL COMMENT '外部 sb_gas_stoves_info.id（去重键）',
     sb_gas_user_id VARCHAR(64) DEFAULT NULL COMMENT '燃气用户表ID（sb_gas_user.id = ops_gas_user.user_no，远程当前全为空）',
     t_gas_stoves_info_id VARCHAR(64) DEFAULT NULL COMMENT '燃气系统-燃具信息表ID',
     gas_stoves_class VARCHAR(20) DEFAULT NULL COMMENT '燃具种类（字典 GAS_APPLIANCE_TYPE itemKey：1灶具 2热水器 3挂壁炉）',
@@ -34,8 +36,9 @@ CREATE TABLE IF NOT EXISTS ops_gas_stoves_info (
     sort INT DEFAULT 0,
     remark VARCHAR(500) DEFAULT NULL,
     delete_flag INT DEFAULT 0,
-    UNIQUE KEY uk_remote_id (remote_id),
+    PRIMARY KEY (id),
     INDEX idx_sb_gas_user (sb_gas_user_id),
     INDEX idx_corp (corp_id),
+    INDEX idx_gas_user_id (gas_user_id),
     INDEX idx_gas_stoves_class (gas_stoves_class)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='燃具信息表（外部燃气系统同步）';

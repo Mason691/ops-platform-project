@@ -131,16 +131,16 @@ ops-platform-project/
 │   ├── src/main/java/com/aip/ops/
 │   │   ├── OpsApplication.java
 │   │   ├── config/          # SecurityConfig, AuthConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig, JacksonConfig, GasDataSourceConfig
-│   │   ├── controller/      # 28 controllers（见下方）
-│   │   ├── entity/          # 34 entities（全部继承 SDK BaseEntity，SysImportTask 例外；含 MerchantMiniappConfig, OperatorMerchant）
-│   │   ├── mapper/          # 35 MyBatis-Plus mappers
+│   │   ├── controller/      # 29 controllers（见下方）
+│   │   ├── entity/          # 35 entities（全部继承 SDK BaseEntity，SysImportTask 例外；含 MerchantMiniappConfig, OperatorMerchant）
+│   │   ├── mapper/          # 36 MyBatis-Plus mappers
 │   │   ├── service/         # 18 service interfaces + 9 standalone services + 18 impls
 │   │   ├── aspect/          # AOP 切面（OperationLogAspect）
 │   │   ├── client/          # 子系统间 HTTP 客户端（MemberSyncClient, ProductBatchClient）
 │   │   ├── agent/           # AI DomainAgent（OpsAgent.java）
 │   │   ├── tool/            # MCP 工具（OpsOrderQueryTool, OpsEmployeeBusinessDataTool）
 │   │   ├── export/          # 通用异步导出策略（ExportHandler 接口 + 策略模式）
-│   │   ├── imports/         # 通用异步导入策略（ImportHandler 接口 + 策略模式：BusinessDataImportHandler, GasUserImportHandler, MemberConvertHandler）
+│   │   ├── imports/         # 通用异步导入策略（ImportHandler 接口 + 策略模式：BusinessDataImportHandler, GasUserImportHandler, MemberConvertHandler, GasStovesImportHandler）
 │   │   ├── kafka/           # Kafka — 4 consumers, 1 producer, 3 message DTOs（条件加载）
 │   │   ├── scheduler/        # 定时任务（BattleMapEtlBootstrap, BattleMapEtlScheduler）
 │   │   ├── dto/             # 数据传输对象
@@ -170,7 +170,7 @@ ops-platform-project/
 └── uploads/                 # 文件上传输出目录
 ```
 
-### Controllers（28 个）
+### Controllers（29 个）
 
 | Controller | 端点前缀 | 说明 |
 |---|---|---|
@@ -194,6 +194,7 @@ ops-platform-project/
 | `ActivityReviewController` | `/api/ops/admin/activity-review` | **活动复盘**：复盘 CRUD + 审核 + 费用台账 + 参与员工 |
 | `AnnualPlanController` | `/api/ops/admin/annual-plans` | **年度任务**：子公司年度计划 CRUD + 审核 + 汇总 + Excel 导入 |
 | `GasUserController` | `/api/ops/admin/gas-user` | **燃气用户**：分页查询/批量导入/小区关联 |
+| `GasStovesController` | `/api/ops/admin/gas-stoves` | **燃具信息**：分页查询（用户号/种类/品牌筛选）/迁移预览/异步迁移导入/任务状态 |
 | `GridManagerController` | `/api/ops/admin/grid-manager` | **网格员管理**：CRUD + 小区分配 |
 | `MemberLedgerController` | `/api/ops/admin/member-ledger` | **会员台账**：分页查询/按小区+品类+经办人筛选/批量导入 |
 | `CategoryLifecycleRuleController` | `/api/ops/admin/category-lifecycle-rules` | **品类使用年限规则**：CRUD + 品类下拉选项 + 按品类查询 |
@@ -436,6 +437,22 @@ battle-map:
 - `MemberConvertHandler`（taskType=`member_convert`）— 异步将燃气用户转为平台 `sys_member`，同步性别/出生日期/地址/小区
 - 通过现有 `ImportTaskConsumer` 消费（新增第 5 种异步任务类型）
 
+### 燃具信息迁移（Gas Stoves）
+
+燃具信息（`ops_gas_stoves_info`）为外部燃气系统 `jinyuan_info.sb_gas_stoves_info` 的全量同步镜像。主键 `id` 直接存外部表 id（`VARCHAR(32)`，非自增），`gas_stoves_class` 存平台字典 `GAS_APPLIANCE_TYPE` itemKey（1灶具 2热水器 3挂壁炉）。前端入口在主平台「增值业务 → 安检采集设备」（ops H5 无对应页面）。
+
+**API**（`GasStovesController` `/api/ops/admin/gas-stoves`）：
+- `GET /` — 分页列表（用户号/燃具种类/品牌筛选，数据 scope 隔离，富化燃气用户姓名 + 组织名）
+- `POST /preview` — 迁移预览（外部总数/本地已有/预计新增/待补全关联数）
+- `POST /submit` — 触发异步全量迁移（Kafka `async-import-task`，taskType=`gas_stoves`）
+- `GET /{taskId}/status` — 任务状态轮询
+
+**处理器**：`GasStovesImportHandler` — 按外部 id 分页增量读取；corp 匹配链：`sb_gas_stoves_info.gas_the_company_id` → `ai_platform.sys_corp.gas_company_id` → `sys_corp.id`，无关联时取同步触发组织。
+
+**燃气用户关联**：`gas_user_id` 匹配规则 `ops_gas_user.gas_company_id = s.gas_the_company_id AND ops_gas_user.gas_supply_certificate_number = s.user_number`（需求字面的 `gas_company_id` 匹配实测 0 条，不可用）。关联字段历经 `user_no` → `gas_user_id` 重构：`sql/migrate_gas_stoves_user_no.sql` → `migrate_gas_stoves_gas_user_id.sql`（回填）→ `migrate_gas_stoves_drop_user_no.sql`（**删列段必须在新 JAR 部署后执行**，旧 JAR 仍查询 user_no 列）。
+
+**重建注意**：`migrate_gas_stoves.sql` 是重建脚本，`CREATE TABLE IF NOT EXISTS` 不会覆盖旧表（旧版为 BIGINT 自增 id + remote_id）。升级已有旧表的库必须先 `DROP TABLE ops_gas_stoves_info;` 再建表，然后重跑「迁移导入」重新同步。2026-08-31 该表曾随 `sys_community`/`ops_gas_user` 被物理清空，重导入即恢复路径（参见 `[[sys-community-gas-user-wipe-2026-08-31]]`）。
+
 ### 微信小程序跳转（H5）
 
 H5 端使用 `wx-open-launch-weapp` 开放标签跳转小程序，经多次迭代后最终方案：
@@ -673,6 +690,7 @@ cd frontend && npm run build:h5
 | **作战地图数据源仅生产** | 作战地图源表（`ops_business_data`/`ops_gas_user`/`ops_member_ledger`/`ops_grid_manager`）仅在**生产库**有数据。测试 `mall_db` 无这些表的记录，ETL 只能在生产环境跑。参见 `[[battle-map-data-only-on-prod]]` |
 | **ops_activity_review_cost 无 delete_flag** | 此表缺少逻辑删除字段，`costMapper.delete()` 走物理删除。重构时需注意 |
 | **company-select 未注册路由** | `frontend/src/pages/employee/company-select.vue` 文件存在但**未在 pages.json 中注册路由**。该页面通过其他方式引用（如 `uni.navigateTo` 直接跳转），不要误删 |
+| **mysql 客户端默认 latin1** | `docker exec mysql mysql` 不指定字符集时 `character_set_client/connection/results=latin1`（服务器为 utf8mb4）。含中文的 SQL（DDL 注释/INSERT/LIKE）必须加 `--default-character-set=utf8mb4`：不加则**写操作双重编码损坏数据**（2026-08-29 `sys_corp.gas_company_id` 注释被写坏已修复），读操作则**显示乱码**（数据无损）。判别：`HEX()` 看字节，`C3A7E280A1`（ç‡ƒ）序列=损坏，`E4`-`E9` 开头=正常。详见 `MEMORY.md` 1.4 节 |
 
 ### UI/UX 质量规范（强制）
 
@@ -688,7 +706,7 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-08-18 | 负责人：架构师（作战地图看板文档校准：6 张 ETL 表、经办人/品类 TOP5 数据源改为 ops_business_data + calc_status 过滤、新增网格员/品类/小区 TOP5 端点；修正控制器/服务层/操作日志覆盖/前端 API 计数；补充销售统计收据号+品类+型号去重规则）
+最后更新：2026-09-01 | 负责人：架构师（2026-09-01 补录燃具信息模块 GasStovesController/迁移流程/重建注意事项 + mysql 客户端 latin1 陷阱；此前 2026-08-18 作战地图看板文档校准：6 张 ETL 表、经办人/品类 TOP5 数据源改为 ops_business_data + calc_status 过滤、新增网格员/品类/小区 TOP5 端点；修正控制器/服务层/操作日志覆盖/前端 API 计数；补充销售统计收据号+品类+型号去重规则）
 
 ### 自定义 Claude 命令
 
