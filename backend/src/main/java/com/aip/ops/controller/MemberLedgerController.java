@@ -2,14 +2,19 @@ package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.OpsMemberLedger;
+import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.mapper.OpsMemberLedgerMapper;
 import com.aip.ops.service.DataScopeService;
+import com.aip.ops.service.ImportTaskService;
+import com.aip.ops.service.OrgRoleService;
 import com.aip.sdk.result.R;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,6 +31,13 @@ public class MemberLedgerController {
     private final OpsMemberLedgerMapper mapper;
     private final DataScopeService dataScopeService;
     private final JdbcTemplate jdbcTemplate;
+    private final ImportTaskService importTaskService;
+    private final OrgRoleService orgRoleService;
+    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final ObjectMapper objectMapper;
+
+    /** 安检设备台账创建 — 任务类型标识（与 StoveLedgerCreateHandler 对应）。 */
+    private static final String STOVE_LEDGER_TASK_TYPE = "member_ledger_stoves";
 
     /** Paginated list with filters and resolved names. */
     @GetMapping
@@ -39,7 +51,9 @@ public class MemberLedgerController {
                      @RequestParam(required = false) String usageDateStart,
                      @RequestParam(required = false) String usageDateEnd,
                      @RequestParam(required = false) String receiptDateStart,
-                     @RequestParam(required = false) String receiptDateEnd) {
+                     @RequestParam(required = false) String receiptDateEnd,
+                     @RequestParam(required = false) String createTimeStart,
+                     @RequestParam(required = false) String createTimeEnd) {
 
         Set<Long> visible = dataScopeService.getVisibleCorpIds();
 
@@ -61,6 +75,8 @@ public class MemberLedgerController {
         if (usageDateEnd != null && !usageDateEnd.isBlank()) qw.le(OpsMemberLedger::getUsageDate, LocalDate.parse(usageDateEnd));
         if (receiptDateStart != null && !receiptDateStart.isBlank()) qw.ge(OpsMemberLedger::getReceiptDate, LocalDate.parse(receiptDateStart));
         if (receiptDateEnd != null && !receiptDateEnd.isBlank()) qw.le(OpsMemberLedger::getReceiptDate, LocalDate.parse(receiptDateEnd));
+        if (createTimeStart != null && !createTimeStart.isBlank()) qw.ge(OpsMemberLedger::getCreateTime, LocalDate.parse(createTimeStart).atStartOfDay());
+        if (createTimeEnd != null && !createTimeEnd.isBlank()) qw.le(OpsMemberLedger::getCreateTime, LocalDate.parse(createTimeEnd).plusDays(1).atStartOfDay());
         qw.orderByDesc(OpsMemberLedger::getCreateTime);
 
         Page<OpsMemberLedger> result = mapper.selectPage(new Page<>(pageNum, pageSize), qw);
@@ -108,6 +124,64 @@ public class MemberLedgerController {
         rec.setCorpId(resolveCorpId());
         mapper.insert(rec);
         return R.ok(Map.of("id", rec.getId()));
+    }
+
+    /**
+     * 安检设备创建台账 — 提交异步任务。
+     * 权限：仅超管/运营商；城市合伙人不可见、不可调（403）。
+     */
+    @OperationLog(module = "增值业务", action = "安检设备创建台账", targetTable = "ops_member_ledger")
+    @PostMapping("/from-stoves/submit")
+    public R<?> submitFromStoves() {
+        if (!orgRoleService.isOperatorOrSuperAdmin()) return R.forbidden();
+        if (importTaskService.hasPendingTask(STOVE_LEDGER_TASK_TYPE)) {
+            return R.fail("已有安检设备创建任务正在执行中，请等待完成后再试");
+        }
+        // 可见组织集合写入 remark，供 Handler 做数据范围过滤（超管=全量）
+        Set<Long> visible = dataScopeService.getVisibleCorpIds();
+        String scopeCsv = (visible == null || visible.isEmpty()) ? ""
+                : visible.stream().map(String::valueOf).collect(Collectors.joining(","));
+        SysImportTask task = importTaskService.createTaskWithoutFile(
+                STOVE_LEDGER_TASK_TYPE, "安检设备创建会员台账", scopeCsv);
+        try {
+            kafkaTemplate.send("async-import-task",
+                    objectMapper.writeValueAsString(Map.of("taskId", task.getId())));
+        } catch (Exception e) {
+            log.error("Failed to send Kafka message for stove-ledger task {}", task.getId(), e);
+            importTaskService.markFailed(task.getId(), "KAFKA",
+                    "消息队列不可用，请稍后重试", 0, 0);
+            return R.fail("创建任务提交失败，请稍后重试");
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("taskId", task.getId());
+        data.put("status", task.getStatus());
+        data.put("async", true);
+        data.put("message", "安检设备创建任务已提交，正在后台处理中...");
+        return R.ok(data);
+    }
+
+    /** 安检设备创建台账 — 任务状态轮询。 */
+    @GetMapping("/from-stoves/{taskId}/status")
+    public R<?> stovesTaskStatus(@PathVariable Long taskId) {
+        SysImportTask task = importTaskService.getById(taskId);
+        if (task == null) return R.fail("任务不存在");
+        Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIds();
+        if (task.getCorpId() != null && visibleCorpIds != null
+                && !visibleCorpIds.contains(task.getCorpId())
+                && !visibleCorpIds.contains(0L)) {
+            return R.fail("无权限查看该任务");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("taskId", task.getId());
+        result.put("status", task.getStatus());
+        result.put("phase", task.getPhase());
+        result.put("totalRows", task.getTotalRows());
+        result.put("successRows", task.getSuccessRows());
+        result.put("failRows", task.getFailRows());
+        result.put("progressMsg", task.getProgressMsg());
+        result.put("errorMsg", task.getErrorMsg());
+        result.put("message", task.getProgressMsg());
+        return R.ok(result);
     }
 
     @OperationLog(module = "增值业务", action = "修改", targetTable = "ops_member_ledger")
@@ -218,7 +292,7 @@ public class MemberLedgerController {
             // Step 2: Fallback — direct gas_user search
             jdbcTemplate.query(
                 "SELECT id FROM ops_gas_user WHERE delete_flag=0 AND " +
-                "(user_name LIKE '%" + k + "%' OR phone LIKE '%" + k + "%') LIMIT 500",
+                "(full_name LIKE '%" + k + "%' OR phone LIKE '%" + k + "%') LIMIT 500",
                 (org.springframework.jdbc.core.RowCallbackHandler) rs -> ids.add(rs.getLong("id")));
         } catch (Exception e) { log.warn("gasUser search failed: {}", e.getMessage()); }
         return ids;

@@ -20,6 +20,10 @@ public class OpsMemberLedger extends BaseEntity {
 
     private Long corpId;
     private Long memberId;
+    /** 平台会员ID（ai_platform.sys_member.id），安检设备台账自动填充 */
+    private Long platformMemberId;
+    /** 来源安检设备ID（ops_gas_stoves_info.id），去重键 */
+    private String gasStovesId;
     private Long activityId;
     private Long communityId;
     private String category;

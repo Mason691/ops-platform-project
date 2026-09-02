@@ -196,7 +196,7 @@ ops-platform-project/
 | `GasUserController` | `/api/ops/admin/gas-user` | **燃气用户**：分页查询/批量导入/小区关联 |
 | `GasStovesController` | `/api/ops/admin/gas-stoves` | **燃具信息**：分页查询（用户号/种类/品牌筛选）/迁移预览/异步迁移导入/任务状态 |
 | `GridManagerController` | `/api/ops/admin/grid-manager` | **网格员管理**：CRUD + 小区分配 |
-| `MemberLedgerController` | `/api/ops/admin/member-ledger` | **会员台账**：分页查询/按小区+品类+经办人筛选/批量导入 |
+| `MemberLedgerController` | `/api/ops/admin/member-ledger` | **会员台账**：分页查询/按小区+品类+经办人+创建时间筛选/批量导入/安检设备创建（异步） |
 | `CategoryLifecycleRuleController` | `/api/ops/admin/category-lifecycle-rules` | **品类使用年限规则**：CRUD + 品类下拉选项 + 按品类查询 |
 | **员工通道** | | |
 | `EmployeeAuthController` | `/api/ops/auth/employee` | **员工** 登录（手机号+密码+验证码），独立于会员认证 |
@@ -415,6 +415,23 @@ battle-map:
 - **燃气用户**（`GasUserController` `/api/ops/admin/gas-user`）：`ops_gas_user` 表，按小区筛选 + 关键字搜索
 - **网格员管理**（`GridManagerController` `/api/ops/admin/grid-manager`）：`ops_grid_manager` + `ops_grid_manager_community` 关联表，网格员可分配多个小区
 - **会员台账**（`MemberLedgerController` `/api/ops/admin/member-ledger`）：`ops_member_ledger` 表，增值业务销售记录，按小区/品类/经办人多维筛选，是作战地图和提成计算的数据源
+
+### 安检设备创建会员台账（Stove Ledger）
+
+会员台账页顶部「安检设备创建」按钮（仅超管/运营商可见可操作，城市合伙人不可见，后端 `OrgRoleService.isOperatorOrSuperAdmin()` 守卫）：按 设备→燃气用户→平台会员 链路，将每台安检设备异步生成一条台账明细。同一会员多台设备 → 多行。
+
+**数据链路**：`ops_gas_stoves_info.gas_user_id` → `ops_gas_user.platform_member_id` → `ai_platform.sys_member`。
+
+**API**（`MemberLedgerController` `/api/ops/admin/member-ledger`）：
+- `POST /from-stoves/submit` — 提交异步任务（Kafka `async-import-task`，taskType=`member_ledger_stoves`），可见 corp CSV 写入 task.remark 供 Handler 做数据范围过滤（未关联用户的设备只有 s.corp_id，故范围子句为 `s.corp_id OR gu.corp_id` 双匹配）
+- `GET /from-stoves/{taskId}/status` — 任务轮询；progressMsg 为 `JSON|人话` 双格式（前端解析 JSON 精确计数 + 原因）
+- `GET /` — 分页列表新增 createTimeStart/createTimeEnd 筛选；memberKeyword 搜索链路：sys_member（昵称/手机号）→ gas_user.phone 匹配 + 兜底 gas_user.full_name/phone 直搜
+
+**处理器**：`StoveLedgerCreateHandler` — 单条 INSERT...SELECT + NOT EXISTS（gas_stoves_id 去重）+ 唯一索引 `(gas_stoves_id, delete_flag)` 兜底，逻辑删除后可重建。计数：created/skipped/failed（未关联燃气用户/未转化会员/未知燃具种类，附原因文本）。品类映射 `gas_stoves_class` 1→燃气灶 2→热水器 3→挂壁炉→壁挂炉（PRODUCT_CATEGORY itemKey 1/3/4）；usage_date 取 installation_time→buy_time→startup_time 首个非空；community_id 取燃气用户所属小区。
+
+**迁移**：`sql/migrate_member_ledger_stoves.sql`（platform_member_id/gas_stoves_id 列 + uk_ledger_stoves 唯一键 + idx_platform_member 索引）。
+
+**前端**（平台主站 `~/ai-native-platform/frontend/src/views/ops/`）：`MemberLedgerList.vue` 按钮（`canEdit` 由 `/ops/admin/permission/profile` 的 canEditProducts 控制）+ `MemberLedgerStovesDialog.vue` 三态弹窗（确认/轮询 2s/结果手动关闭），关闭时 `@done` 刷新列表。
 
 ### 微信手机号授权（WechatPhoneService）
 
@@ -706,7 +723,7 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-09-01 | 负责人：架构师（2026-09-01 补录燃具信息模块 GasStovesController/迁移流程/重建注意事项 + mysql 客户端 latin1 陷阱；此前 2026-08-18 作战地图看板文档校准：6 张 ETL 表、经办人/品类 TOP5 数据源改为 ops_business_data + calc_status 过滤、新增网格员/品类/小区 TOP5 端点；修正控制器/服务层/操作日志覆盖/前端 API 计数；补充销售统计收据号+品类+型号去重规则）
+最后更新：2026-09-02 | 负责人：架构师（2026-09-02 补录安检设备创建会员台账模块：数据链路/API/处理器/迁移/前端弹窗 + memberKeyword 兜底搜索列名修复；此前 2026-09-01 补录燃具信息模块 GasStovesController/迁移流程/重建注意事项 + mysql 客户端 latin1 陷阱；2026-08-18 作战地图看板文档校准：6 张 ETL 表、经办人/品类 TOP5 数据源改为 ops_business_data + calc_status 过滤、新增网格员/品类/小区 TOP5 端点；修正控制器/服务层/操作日志覆盖/前端 API 计数；补充销售统计收据号+品类+型号去重规则）
 
 ### 自定义 Claude 命令
 
