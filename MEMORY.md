@@ -20,6 +20,14 @@
 - 表前缀: `ops_`（运营平台业务表），`biz_`（跨子系统共享业务表），`sys_`（系统级配置表）
 - 前端路由: `/ops/`（生产环境 hash 模式）
 
+### 1.4 SQL 执行字符集（强制）
+- **任何含中文的 SQL（DDL 注释、INSERT、LIKE 等）通过 `docker exec mysql mysql` 执行时，必须加 `--default-character-set=utf8mb4`**
+- **原因（2026-08-29 事故）**：mysql 客户端默认连接字符集是 **latin1**（`character_set_client/connection/results=latin1`），而服务器默认 utf8mb4。两种后果：
+  1. **写操作**：DDL/INSERT 中的中文被 latin1 解释后双重编码写入 → **存储层真实乱码**（字节损坏，不可逆，只能重写）
+  2. **读操作**：`character_set_results=latin1` 导致所有中文列/注释**显示为乱码**（数据无损，加标志即恢复）
+- **已发生**：`ai_platform.sys_corp.gas_company_id` 列注释曾被写坏为 `ç‡ƒæ°”…`，当日已用带标志的 `MODIFY COLUMN` 修复
+- **判别**：数据是否真损坏 → `HEX(LEFT(column,6))` 看字节；UTF-8 中文应出现 `E4`–`E9` 开头字节，出现 `C3A7E280A1`（ç‡ƒ）序列即为双重编码损坏
+
 ---
 
 ## 二、架构决策记录 (ADR)
