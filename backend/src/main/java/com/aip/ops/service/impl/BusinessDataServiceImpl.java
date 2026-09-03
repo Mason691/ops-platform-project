@@ -39,6 +39,8 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.HashSet;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import java.util.Objects;
 import java.util.*;
 
@@ -789,17 +791,19 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             loadValidCategories();
             Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
             List<Long> corpIds = (visibleIds == null || visibleIds.isEmpty()) ? null : new ArrayList<>(visibleIds);
-            List<Map<String, Object>> rows = mapper.categoryCompanyStats(
+            List<Map<String, Object>> allRows = mapper.categoryCompanyStats(
                     company, batchNo, agent, receiptNo, category, corpIds);
-            String xlsx = buildCommissionSummaryXlsx(rows);
-            String fileName = "品类提成汇总_" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + ".xlsx";
-            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            List<Map<String, Object>> monthRows = mapper.categoryCompanyStatsByMonth(
+                    company, batchNo, agent, receiptNo, category, corpIds);
+            String zipFile = buildCommissionSummaryZip(allRows, monthRows);
+            String fileName = "品类提成汇总_" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + ".zip";
+            response.setContentType("application/zip");
             response.setHeader("Content-Disposition", "attachment; filename=\"=?UTF-8?B?"
                     + Base64.getEncoder().encodeToString(fileName.getBytes(StandardCharsets.UTF_8))
                     + "?=\"; filename*=UTF-8''" + URLEncoder.encode(fileName, "UTF-8"));
-            Files.copy(Path.of(xlsx), response.getOutputStream());
+            Files.copy(Path.of(zipFile), response.getOutputStream());
             response.getOutputStream().flush();
-            Files.deleteIfExists(Path.of(xlsx));
+            Files.deleteIfExists(Path.of(zipFile));
         } catch (Exception e) {
             log.error("品类提成汇总导出失败", e);
             try {
@@ -810,16 +814,59 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         }
     }
 
-    /** 按模板格式生成双 sheet（提成金额/销售额）Excel：品类行 × 公司列 + 合计行列。返回 xlsx 临时文件路径。 */
-    private String buildCommissionSummaryXlsx(List<Map<String, Object>> rows) throws Exception {
-        List<String> categoryKeys = collectCategoryKeys(rows);
-        List<String> companies = collectCompanies(rows);
-        Map<String, BigDecimal[]> cell = buildCellMap(rows);
+    /** 双文件 ZIP：提成金额.xlsx + 销售金额.xlsx。每个文件 sheet 序 = 「全部汇总」+ 逐月
+     *  （数据起始月 → 末尾月，按月提成/销售金额各品类汇总）。两文件共用同一品类×公司轴
+     *  （取自全部汇总行），保证各 sheet 列对齐。返回 zip 临时文件路径。 */
+    private String buildCommissionSummaryZip(List<Map<String, Object>> allRows,
+                                             List<Map<String, Object>> monthRows) throws Exception {
+        List<String> categoryKeys = collectCategoryKeys(allRows);
+        List<String> companies = collectCompanies(allRows);
+        Map<String, BigDecimal[]> cellAll = buildCellMap(allRows);
+        List<String> months = collectMonths(monthRows);
+
+        // cell 数组索引：0=销售额，1=提成金额（见 buildCellMap），按文件名各取对应值
+        String commFile = writeSummaryXlsx(
+                buildMonthlySheets(categoryKeys, companies, cellAll, monthRows, months, 1));
+        String saleFile = writeSummaryXlsx(
+                buildMonthlySheets(categoryKeys, companies, cellAll, monthRows, months, 0));
+
+        String dateTag = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        Path zipPath = Files.createTempFile("commission_summary_", ".zip");
+        try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zipPath))) {
+            addZipEntry(zos, "提成金额汇总_" + dateTag + ".xlsx", commFile);
+            addZipEntry(zos, "销售金额汇总_" + dateTag + ".xlsx", saleFile);
+        } finally {
+            Files.deleteIfExists(Path.of(commFile));
+            Files.deleteIfExists(Path.of(saleFile));
+        }
+        return zipPath.toAbsolutePath().toString();
+    }
+
+    /** 数据中出现的销售月份（YYYY-MM），升序 = 起始月 → 末尾月。 */
+    private List<String> collectMonths(List<Map<String, Object>> monthRows) {
+        return monthRows.stream()
+                .map(r -> String.valueOf(r.get("saleMonth")))
+                .filter(m -> m != null && !m.isBlank() && !"null".equals(m))
+                .distinct().sorted().toList();
+    }
+
+    /** 组装单个文件的 sheet 列表：全部汇总 + 逐月（月矩阵轴与全部汇总一致，缺值补 0）。 */
+    private List<Map<String, Object>> buildMonthlySheets(List<String> categoryKeys, List<String> companies,
+                                                         Map<String, BigDecimal[]> cellAll,
+                                                         List<Map<String, Object>> monthRows,
+                                                         List<String> months, int metricIdx) {
         List<Map<String, Object>> sheets = new ArrayList<>();
-        // cell 数组索引：0=销售额，1=提成金额（见 buildCellMap），按表名各取对应值
-        sheets.add(buildSummarySheet("提成金额", categoryKeys, companies, cell, 1));
-        sheets.add(buildSummarySheet("销售额", categoryKeys, companies, cell, 0));
-        return writeSummaryXlsx(sheets);
+        sheets.add(buildSummarySheet("全部汇总", categoryKeys, companies, cellAll, metricIdx));
+        for (String m : months) {
+            sheets.add(buildSummarySheet(m, categoryKeys, companies, buildCellMap(monthRows, m), metricIdx));
+        }
+        return sheets;
+    }
+
+    private void addZipEntry(ZipOutputStream zos, String entryName, String filePath) throws Exception {
+        zos.putNextEntry(new ZipEntry(entryName));
+        Files.copy(Path.of(filePath), zos);
+        zos.closeEntry();
     }
 
     /** 品类行轴：模板固定 12 品类顺序（原始字典 key，DB 存储值）；未在映射中的品类追加在末尾。 */
@@ -859,6 +906,18 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private Map<String, BigDecimal[]> buildCellMap(List<Map<String, Object>> rows) {
         Map<String, BigDecimal[]> cell = new HashMap<>();
         for (Map<String, Object> r : rows) {
+            String key = String.valueOf(r.get("category")) + "::" + String.valueOf(r.get("company"));
+            cell.put(key, new BigDecimal[]{
+                    toDecimal(r.get("totalSale")), toDecimal(r.get("totalCommission"))});
+        }
+        return cell;
+    }
+
+    /** 单元格定位（按月过滤）：只取 saleMonth 等于指定月份的汇总行。 */
+    private Map<String, BigDecimal[]> buildCellMap(List<Map<String, Object>> rows, String month) {
+        Map<String, BigDecimal[]> cell = new HashMap<>();
+        for (Map<String, Object> r : rows) {
+            if (!month.equals(String.valueOf(r.get("saleMonth")))) continue;
             String key = String.valueOf(r.get("category")) + "::" + String.valueOf(r.get("company"));
             cell.put(key, new BigDecimal[]{
                     toDecimal(r.get("totalSale")), toDecimal(r.get("totalCommission"))});

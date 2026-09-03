@@ -183,7 +183,7 @@ ops-platform-project/
 | **管理后台** | | |
 | `AdminController` | `/api/ops/admin` | 活动/商品/直播室 CRUD、预约查询、首页统计、商家绑定 |
 | `AdminStationController` | `/api/ops/admin/station` | 站长审批/列表/统计 |
-| `BusinessDataController` | `/api/ops/admin/business-data` | 增值业务：Excel 导入（含收据号唯一性校验 + 原子写入）/提成计算（按批次选择）/销售统计（按收据号+品类+型号去重）/异步导出/模板下载/状态流转 + 经办人核对 |
+| `BusinessDataController` | `/api/ops/admin/business-data` | 增值业务：Excel 导入（含收据号唯一性校验 + 原子写入）/提成计算（按批次选择）/销售统计（按收据号+品类+型号去重）/异步导出/品类提成汇总（提成金额+销售金额双文件 × 全部汇总+逐月 sheet 打包 ZIP）/模板下载/状态流转 + 经办人核对 |
 | `CommissionRuleController` | `/api/ops/admin/commission` | 个人/公司提成规则 CRUD（支持组织层级继承） |
 | `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD |
 | `MemberController` | `/api/ops/admin/members` | 会员管理：分页查询/详情/启用禁用 |
@@ -723,7 +723,7 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-09-02 | 负责人：架构师（2026-09-02 补录安检设备创建会员台账模块：数据链路/API/处理器/迁移/前端弹窗 + memberKeyword 兜底搜索列名修复；此前 2026-09-01 补录燃具信息模块 GasStovesController/迁移流程/重建注意事项 + mysql 客户端 latin1 陷阱；2026-08-18 作战地图看板文档校准：6 张 ETL 表、经办人/品类 TOP5 数据源改为 ops_business_data + calc_status 过滤、新增网格员/品类/小区 TOP5 端点；修正控制器/服务层/操作日志覆盖/前端 API 计数；补充销售统计收据号+品类+型号去重规则）
+最后更新：2026-09-03 | 负责人：架构师（2026-09-03 品类提成汇总改双文件 ZIP：提成金额/销售金额各一文件 × 全部汇总+逐月 sheet，月度归组取去重组内 MAX(sale_date) 与全部汇总对账一致；此前 2026-09-02 补录安检设备创建会员台账模块：数据链路/API/处理器/迁移/前端弹窗 + memberKeyword 兜底搜索列名修复；2026-09-01 补录燃具信息模块 GasStovesController/迁移流程/重建注意事项 + mysql 客户端 latin1 陷阱；2026-08-18 作战地图看板文档校准：6 张 ETL 表、经办人/品类 TOP5 数据源改为 ops_business_data + calc_status 过滤、新增网格员/品类/小区 TOP5 端点；修正控制器/服务层/操作日志覆盖/前端 API 计数；补充销售统计收据号+品类+型号去重规则）
 
 ### 自定义 Claude 命令
 
