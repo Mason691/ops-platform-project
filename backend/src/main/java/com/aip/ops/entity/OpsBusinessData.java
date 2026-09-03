@@ -51,8 +51,17 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("sale_date")
     private String saleDate;
 
+    /** 市场收款日期（原"收款日期"，展示名变更，字段名保留） */
     @TableField("receipt_date")
     private String receiptDate;
+
+    /** 财务收款日期 */
+    @TableField("finance_receipt_date")
+    private LocalDate financeReceiptDate;
+
+    /** 资金动态表横排数 */
+    @TableField("fund_dynamic_rows")
+    private Integer fundDynamicRows;
 
     @TableField("receipt_no")
     private String receiptNo;

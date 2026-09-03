@@ -50,6 +50,10 @@ public class BusinessDataController {
     @Value("${app.import.upload-dir:#{systemProperties['user.home'] + '/data/imports'}}")
     private String importUploadDir;
 
+    /** 导入模板源文件路径（最新模板，多 sheet 工作簿）——生产容器需挂载该文件 */
+    @Value("${app.import.template-path:/home/jason/1.xlsx}")
+    private String templatePath;
+
     @PostConstruct
     void ensureImportDir() {
         try {
@@ -316,23 +320,32 @@ public class BusinessDataController {
         return R.ok(Map.of("checkedCount", count, "message", "已核对 " + count + " 条数据"));
     }
 
-    /** Download Excel import template. */
+    /** Download Excel import template. 优先读取配置的最新模板（默认 /home/jason/1.xlsx），
+     *  缺失时回退 classpath 内置模板；下载文件名固定为 增值业务数据模板.xlsx。 */
     @GetMapping("/template")
     public void downloadTemplate(HttpServletResponse response) throws IOException {
-        ClassPathResource resource = new ClassPathResource("templates/business_data_template.xlsx");
-        if (!resource.exists()) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            response.getWriter().write("{\"code\":404,\"msg\":\"模板文件不存在\"}");
-            return;
+        Path templateFile = Path.of(templatePath);
+        InputStream in = null;
+        if (Files.exists(templateFile)) {
+            log.info("Serve import template from configured path: {}", templateFile);
+            in = Files.newInputStream(templateFile);
+        } else {
+            log.warn("Configured template missing ({}), fallback to classpath", templateFile);
+            ClassPathResource resource = new ClassPathResource("templates/business_data_template.xlsx");
+            if (!resource.exists()) {
+                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                response.getWriter().write("{\"code\":404,\"msg\":\"模板文件不存在\"}");
+                return;
+            }
+            in = resource.getInputStream();
         }
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         response.setHeader("Content-Disposition",
-                "attachment; filename*=UTF-8''" + URLEncoder.encode("业务数据导入模板.xlsx", StandardCharsets.UTF_8));
-        try (InputStream in = resource.getInputStream();
-             OutputStream out = response.getOutputStream()) {
+                "attachment; filename*=UTF-8''" + URLEncoder.encode("增值业务数据模板.xlsx", StandardCharsets.UTF_8));
+        try (InputStream is = in; OutputStream out = response.getOutputStream()) {
             byte[] buf = new byte[8192];
             int n;
-            while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+            while ((n = is.read(buf)) != -1) out.write(buf, 0, n);
         }
     }
 }

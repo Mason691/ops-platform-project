@@ -726,7 +726,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             Path xlsFile = Path.of(tsvFile.toString().replace(".tsv", ".xlsx"));
             // Write header + rows as tab-separated
             StringBuilder sb = new StringBuilder();
-            sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t收款日期\t收据号\n");
+            sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\n");
             for (OpsBusinessData d : all) {
                 sb.append(fmt(d.getBatchNo())).append('\t')
                   .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
@@ -737,6 +737,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                   .append(fmt(d.getCalcStatus())).append('\t').append(fmt(d.getAgent())).append('\t')
                   .append(fmt(d.getAgentPhone())).append('\t')
                   .append(fmt(d.getSaleDate())).append('\t').append(fmt(d.getReceiptDate())).append('\t')
+                  .append(fmt(d.getFinanceReceiptDate())).append('\t').append(fmt(d.getFundDynamicRows())).append('\t')
                   .append(fmt(d.getReceiptNo())).append('\n');
             }
             Files.writeString(tsvFile, sb.toString());

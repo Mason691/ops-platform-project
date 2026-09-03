@@ -184,6 +184,16 @@ ops-platform-project/
 | `AdminController` | `/api/ops/admin` | 活动/商品/直播室 CRUD、预约查询、首页统计、商家绑定 |
 | `AdminStationController` | `/api/ops/admin/station` | 站长审批/列表/统计 |
 | `BusinessDataController` | `/api/ops/admin/business-data` | 增值业务：Excel 导入（含收据号唯一性校验 + 原子写入）/提成计算（按批次选择）/销售统计（按收据号+品类+型号去重）/异步导出/品类提成汇总（提成金额+销售金额双文件 × 全部汇总+逐月 sheet 打包 ZIP）/模板下载/状态流转 + 经办人核对 |
+
+### 增值业务数据（Business Data）
+
+`ops_business_data` 表 2026-09-03 起字段结构：`receipt_date` 展示名改为**市场收款日期**（字段名保留 varchar(50)），其后新增 `finance_receipt_date`（DATE 财务收款日期，可空）与 `fund_dynamic_rows`（INT 资金动态表横排数，可空）。迁移脚本 `sql/migrate_business_data_finance_fields.sql`（已执行）。
+
+- **导入**：必填列含 市场收款日期/财务收款日期/资金动态表横排数（表头 contains 匹配——旧模板缺列直接 HEADER_CHECK 拒绝）。市场收款日期**必填**（空→行错误）；财务收款日期/横排数可空，但格式错误拒绝该行（连带整文件拒绝）。横排数解析兼容 Excel 数字单元格 `12.0`。多 sheet 模板按「前 10 行含必填列名最多」自动选 sheet + 自动定位表头行。
+- **模板下载**：`GET /template` 优先读配置路径 `app.import.template-path`（默认 `/home/jason/1.xlsx`；生产为 volume 挂载 `/app/templates/1.xlsx` + 环境变量 `APP_IMPORT_TEMPLATE_PATH`，便于不改 JAR 更新模板），缺失回退 classpath `templates/business_data_template.xlsx`；下载文件名固定 **增值业务数据模板.xlsx**。
+- **模板源文件**：`/home/jason/1.xlsx`（12 sheet 工作簿，业务数据 sheet 为导入源）。修改该模板必须**手术式 XML 补丁**——openpyxl 重存会丢弃其它 sheet 的图片（27 个 media/drawing 条目，2026-09-03 曾踩坑）。
+- **导出**：异步/同步两条导出路径表头均含 市场收款日期/财务收款日期/资金动态表横排数（紧跟 收据号 之后）。
+- 列表 API 直接返回实体，新增字段自动序列化给前端展示。
 | `CommissionRuleController` | `/api/ops/admin/commission` | 个人/公司提成规则 CRUD（支持组织层级继承） |
 | `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD |
 | `MemberController` | `/api/ops/admin/members` | 会员管理：分页查询/详情/启用禁用 |
@@ -723,7 +733,7 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-09-03 | 负责人：架构师（2026-09-03 品类提成汇总改双文件 ZIP：提成金额/销售金额各一文件 × 全部汇总+逐月 sheet，月度归组取去重组内 MAX(sale_date) 与全部汇总对账一致；此前 2026-09-02 补录安检设备创建会员台账模块：数据链路/API/处理器/迁移/前端弹窗 + memberKeyword 兜底搜索列名修复；2026-09-01 补录燃具信息模块 GasStovesController/迁移流程/重建注意事项 + mysql 客户端 latin1 陷阱；2026-08-18 作战地图看板文档校准：6 张 ETL 表、经办人/品类 TOP5 数据源改为 ops_business_data + calc_status 过滤、新增网格员/品类/小区 TOP5 端点；修正控制器/服务层/操作日志覆盖/前端 API 计数；补充销售统计收据号+品类+型号去重规则）
+最后更新：2026-09-03 | 负责人：架构师（2026-09-03 增值业务数据字段结构调整：市场收款日期改名 + 新增财务收款日期/资金动态表横排数，导入必填校验/多 sheet 模板识别/模板下载配置路径 + 固定文件名/导出含新列/模板手术式 XML 补丁陷阱；同日品类提成汇总改双文件 ZIP：提成金额/销售金额各一文件 × 全部汇总+逐月 sheet，月度归组取去重组内 MAX(sale_date) 与全部汇总对账一致；此前 2026-09-02 补录安检设备创建会员台账模块：数据链路/API/处理器/迁移/前端弹窗 + memberKeyword 兜底搜索列名修复；2026-09-01 补录燃具信息模块 GasStovesController/迁移流程/重建注意事项 + mysql 客户端 latin1 陷阱；2026-08-18 作战地图看板文档校准：6 张 ETL 表、经办人/品类 TOP5 数据源改为 ops_business_data + calc_status 过滤、新增网格员/品类/小区 TOP5 端点；修正控制器/服务层/操作日志覆盖/前端 API 计数；补充销售统计收据号+品类+型号去重规则）
 
 ### 自定义 Claude 命令
 

@@ -72,7 +72,10 @@ public class BusinessDataImportHandler implements ImportHandler {
         BigDecimal salePrice;
         String agent, agentPhone, dept;
         String saleDate, receiptDate, receiptNo;
-        String receiptDateRaw; // raw value for validation (empty=ok, non-empty+null=error)
+        String receiptDateRaw; // raw value for validation (市场收款日期：空=错误)
+        String financeReceiptDateRaw, financeReceiptDate;
+        String fundDynamicRowsRaw;
+        Integer fundDynamicRows;
         OpsValueAddedProduct product;
     }
 
@@ -115,7 +118,8 @@ public class BusinessDataImportHandler implements ImportHandler {
         // ── HEADER_CHECK ──
         String[] headers = rows[0].split("\t");
         String[] requiredHeaders = {
-            "客户", "品类", "品牌", "型号", "销售价", "公司", "经办人", "经办人手机号"
+            "客户", "品类", "品牌", "型号", "销售价", "公司", "经办人", "经办人手机号",
+            "市场收款日期", "财务收款日期", "资金动态表横排数"
         };
         List<String> headerErrors = new ArrayList<>();
         for (String h : requiredHeaders) {
@@ -135,7 +139,9 @@ public class BusinessDataImportHandler implements ImportHandler {
         int agentIdx = indexOf(headers, "经办人");
         int agentPhoneIdx = indexOf(headers, "经办人手机号");
         int saleDateIdx = indexOf(headers, "销售日期");
-        int recDateIdx = indexOf(headers, "收款日期");
+        int recDateIdx = indexOf(headers, "市场收款日期");
+        int financeDateIdx = indexOf(headers, "财务收款日期");
+        int fundRowsIdx = indexOf(headers, "资金动态表横排数");
         int recNoIdx = indexOf(headers, "收据号");
 
         // Load categories from platform dict
@@ -165,7 +171,8 @@ public class BusinessDataImportHandler implements ImportHandler {
 
             ParsedRow pr = parseRow(cols, customerIdx, catIdx, brandIdx,
                     modelIdx, priceIdx, companyIdx, deptIdx, agentIdx,
-                    agentPhoneIdx, saleDateIdx, recDateIdx, recNoIdx);
+                    agentPhoneIdx, saleDateIdx, recDateIdx, financeDateIdx,
+                    fundRowsIdx, recNoIdx);
             if (pr != null) {
                 checkCategory(pr, i + 1, validCategories, errors);
                 // Resolve category key BEFORE validation (needed for tiered check)
@@ -222,9 +229,10 @@ public class BusinessDataImportHandler implements ImportHandler {
         String insertSql = "INSERT INTO ops_business_data "
                 + "(batch_no, company, customer, brand, category, model, "
                 + "sale_price, agent, agent_phone, sale_date, receipt_date, "
+                + "finance_receipt_date, fund_dynamic_rows, "
                 + "receipt_no, retail_floor_price, group_lowest_price, "
                 + "calc_status, remark, corp_id, operator_id) "
-                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
         int batchCount = 0;
         PreparedStatement ps = DataSourceUtils.getConnection(dataSource)
@@ -246,6 +254,8 @@ public class BusinessDataImportHandler implements ImportHandler {
                 ps.setString(idx++, pr.agentPhone);
                 ps.setString(idx++, pr.saleDate);
                 ps.setString(idx++, pr.receiptDate);
+                ps.setString(idx++, pr.financeReceiptDate);
+                ps.setObject(idx++, pr.fundDynamicRows);
                 ps.setString(idx++, pr.receiptNo);
                 ps.setBigDecimal(idx++, pr.product != null
                         ? pr.product.getRetailFloorPrice() : null);
@@ -403,8 +413,19 @@ public class BusinessDataImportHandler implements ImportHandler {
         // Date validation
         if (pr.saleDate == null)
             errors.add("第" + rowNum + "行: 销售日期格式不正确（支持: 2026-06-23 / 6月23日 / 2026年6月23日）");
-        if (pr.receiptDateRaw != null && !pr.receiptDateRaw.isEmpty() && pr.receiptDate == null)
-            errors.add("第" + rowNum + "行: 收款日期格式不正确（支持: 2026-06-23 / 6月23日 / 2026年6月23日）");
+        // 市场收款日期必填
+        if (pr.receiptDateRaw == null || pr.receiptDateRaw.isEmpty())
+            errors.add("第" + rowNum + "行: 市场收款日期为空");
+        else if (pr.receiptDate == null)
+            errors.add("第" + rowNum + "行: 市场收款日期格式不正确（支持: 2026-06-23 / 6月23日 / 2026年6月23日）");
+        // 财务收款日期可选，但格式错误时拒绝该行（连带整文件拒绝）
+        if (pr.financeReceiptDateRaw != null && !pr.financeReceiptDateRaw.isEmpty()
+                && pr.financeReceiptDate == null)
+            errors.add("第" + rowNum + "行: 财务收款日期格式不正确（支持: 2026-06-23 / 6月23日 / 2026年6月23日）");
+        // 资金动态表横排数可选，但必须为数字
+        if (pr.fundDynamicRowsRaw != null && !pr.fundDynamicRowsRaw.isEmpty()
+                && pr.fundDynamicRows == null)
+            errors.add("第" + rowNum + "行: 资金动态表横排数必须为数字");
     }
 
     // ═══════ Receipt group validation ═══════
@@ -457,7 +478,7 @@ public class BusinessDataImportHandler implements ImportHandler {
     private ParsedRow parseRow(String[] cols, int customerIdx, int catIdx,
             int brandIdx, int modelIdx, int priceIdx, int companyIdx,
             int deptIdx, int agentIdx, int agentPhoneIdx, int saleDateIdx,
-            int recDateIdx, int recNoIdx) {
+            int recDateIdx, int financeDateIdx, int fundRowsIdx, int recNoIdx) {
         String brand = val(cols, brandIdx);
         String model = val(cols, modelIdx);
         String cat = val(cols, catIdx);
@@ -492,6 +513,12 @@ public class BusinessDataImportHandler implements ImportHandler {
         String rawReceipt = val(cols, recDateIdx);
         pr.receiptDateRaw = rawReceipt;
         pr.receiptDate = normalizeDate(rawReceipt);
+        String rawFinance = val(cols, financeDateIdx);
+        pr.financeReceiptDateRaw = rawFinance;
+        pr.financeReceiptDate = normalizeDate(rawFinance);
+        String rawFundRows = val(cols, fundRowsIdx);
+        pr.fundDynamicRowsRaw = rawFundRows;
+        pr.fundDynamicRows = toInteger(rawFundRows);
         pr.receiptNo = val(cols, recNoIdx);
         return pr;
     }
@@ -503,7 +530,22 @@ public class BusinessDataImportHandler implements ImportHandler {
                 "import openpyxl\n"
                 + "wb = openpyxl.load_workbook('"
                 + file.toAbsolutePath() + "')\n"
-                + "ws = wb.active\n"
+                + "required = ['客户','品类','品牌','型号','销售价','收据号']\n"
+                + "# 多 sheet 模板（1.xlsx）：选前 10 行含必填列名最多的 sheet\n"
+                + "best_ws = None; best_score = -1\n"
+                + "for ws in wb.worksheets:\n"
+                + "    text = '|'.join(str(c.value) if c.value is not None else '' for row in ws.iter_rows(min_row=1, max_row=10) for c in row)\n"
+                + "    score = sum(1 for k in required if k in text)\n"
+                + "    if score > best_score:\n"
+                + "        best_ws = ws; best_score = score\n"
+                + "ws = best_ws\n"
+                + "# 定位表头行（含 3 个以上必填列名），非首行表头也能识别\n"
+                + "header_row = 1\n"
+                + "for r in range(1, 11):\n"
+                + "    rowvals = [str(ws.cell(r, c).value) if ws.cell(r, c).value is not None else '' for c in range(1, ws.max_column + 1)]\n"
+                + "    if sum(1 for k in required if k in '|'.join(rowvals)) >= 3:\n"
+                + "        header_row = r\n"
+                + "        break\n"
                 + "# Build fill map from merged cell ranges (MergedCell is read-only)\n"
                 + "fills = {}\n"
                 + "for mg in ws.merged_cells.ranges:\n"
@@ -511,7 +553,7 @@ public class BusinessDataImportHandler implements ImportHandler {
                 + "    for r in range(mg.min_row, mg.max_row + 1):\n"
                 + "        for c in range(mg.min_col, mg.max_col + 1):\n"
                 + "            fills[(r, c)] = val\n"
-                + "for row_idx, row in enumerate(ws.iter_rows(values_only=True), 1):\n"
+                + "for row_idx, row in enumerate(ws.iter_rows(min_row=header_row, values_only=True), header_row):\n"
                 + "    vals = []\n"
                 + "    for col_idx, v in enumerate(row, 1):\n"
                 + "        if v is None and (row_idx, col_idx) in fills:\n"
@@ -538,6 +580,15 @@ public class BusinessDataImportHandler implements ImportHandler {
     private BigDecimal toDecimal(String s) {
         if (s == null || s.isEmpty()) return null;
         try { return new BigDecimal(s); } catch (Exception e) { return null; }
+    }
+
+    /** 解析整数（资金动态表横排数）。空 → null（可选）；非整数 → null（配合 raw 判错）。 */
+    private Integer toInteger(String s) {
+        if (s == null || s.isEmpty()) return null;
+        String t = s.trim();
+        // Excel 数字单元格可能读作 "12.0"
+        if (t.matches("\\d+\\.0+")) t = t.substring(0, t.indexOf('.'));
+        try { return Integer.parseInt(t); } catch (Exception e) { return null; }
     }
 
     /**
