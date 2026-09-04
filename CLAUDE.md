@@ -683,6 +683,13 @@ cd frontend && npm run build:h5
 
 生产 Nginx：`/ops/` → `boss-ops-nginx:80`，`/api/ops/**` → `ops-backend:8082`
 
+### 生产数据库定时备份（2026-09-04 上线）
+
+- **任务**：root crontab `0 2 * * *` 每日凌晨 2:00 全量备份 `ai_platform` + `mall_db`（CST）
+- **脚本**：`/home/jason/data/db-backup.sh`（docker exec mysqldump，`--default-character-set=utf8mb4 --single-transaction --routines --triggers --events --set-gtid-purged=OFF`，gzip 压缩）
+- **产物**：`/home/jason/data/<db>_<YYYYmmdd_HHMMSS>.sql.gz`（约 5~7MB/库），保留 7 天自动清理；日志 `/home/jason/data/backup.log`
+- 修改备份策略直接编辑脚本；恢复方式 `zcat <file> | docker exec -i mysql mysql --default-character-set=utf8mb4 -uroot -p`
+
 ---
 
 ## 已知陷阱
