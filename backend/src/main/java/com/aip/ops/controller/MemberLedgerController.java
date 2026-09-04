@@ -88,15 +88,17 @@ public class MemberLedgerController {
             if (r.getCommunityId() != null) communityIds.add(r.getCommunityId());
             if (r.getActivityId() != null) activityIds.add(r.getActivityId());
         }
-        Map<Long, String> memberNames = resolveMemberNames(memberIds);
+        Map<Long, String[]> memberInfo = resolveMemberInfo(memberIds);
         Map<Long, String> commNames = resolveCommunityNames(communityIds);
+        Map<Long, String> regionNames = resolveRegionNames(communityIds);
         Map<Long, String> gridNames = resolveGridManagerNames(communityIds);
         Map<Long, String> activityNames = resolveActivityNames(activityIds);
 
         // Apply text filters on resolved names
         List<OpsMemberLedger> filtered = new ArrayList<>();
         for (OpsMemberLedger r : result.getRecords()) {
-            String mn = memberNames.getOrDefault(r.getMemberId(), "#" + r.getMemberId());
+            String[] np = memberInfo.get(r.getMemberId());
+            String mn = np != null && np[0] != null ? np[0] : "#" + r.getMemberId();
             String cn = r.getCommunityId() != null ? commNames.getOrDefault(r.getCommunityId(), "-") : "-";
             String gn = r.getCommunityId() != null ? gridNames.getOrDefault(r.getCommunityId(), "-") : "-";
 
@@ -104,7 +106,9 @@ public class MemberLedgerController {
             if (gridManagerName != null && !gridManagerName.isBlank() && !gn.contains(gridManagerName)) continue;
 
             r.setMemberName(mn);
+            r.setMemberPhone(np != null ? np[1] : null);
             r.setCommunityName(cn);
+            r.setRegionName(r.getCommunityId() != null ? regionNames.getOrDefault(r.getCommunityId(), "-") : "-");
             r.setGridManagerName(gn);
             r.setActivityTitle(r.getActivityId() != null ? activityNames.getOrDefault(r.getActivityId(), "-") : null);
             filtered.add(r);
@@ -251,19 +255,21 @@ public class MemberLedgerController {
         return ids.iterator().next();
     }
 
-    private Map<Long, String> resolveMemberNames(Set<Long> gasUserIds) {
+    /** member_id = ops_gas_user.id；解析 [显示名, 手机号]，手机号为会员唯一识别。 */
+    private Map<Long, String[]> resolveMemberInfo(Set<Long> gasUserIds) {
         if (gasUserIds.isEmpty()) return Map.of();
-        Map<Long, String> map = new LinkedHashMap<>();
+        Map<Long, String[]> map = new LinkedHashMap<>();
         try {
             String in = gasUserIds.stream().map(String::valueOf).collect(Collectors.joining(","));
-            // member_id = ops_gas_user.id; resolve via gas_user → sys_member chain
             jdbcTemplate.queryForList(
-                "SELECT gu.id, COALESCE(NULLIF(sm.nickname,''), NULLIF(gu.full_name,''), gu.phone) AS name " +
+                "SELECT gu.id, COALESCE(NULLIF(sm.nickname,''), NULLIF(gu.full_name,''), gu.phone) AS name, gu.phone AS phone " +
                 "FROM ops_gas_user gu LEFT JOIN ai_platform.sys_member sm ON sm.phone = gu.phone AND sm.delete_flag=0 " +
                 "WHERE gu.id IN (" + in + ")")
                 .forEach(row -> map.put(((Number)row.get("id")).longValue(),
-                    row.get("name") != null ? (String)row.get("name") : "#" + row.get("id")));
-        } catch (Exception e) { log.warn("memberNames failed: {}", e.getMessage()); }
+                    new String[]{
+                        row.get("name") != null ? (String)row.get("name") : "#" + row.get("id"),
+                        row.get("phone") != null ? (String)row.get("phone") : null}));
+        } catch (Exception e) { log.warn("memberInfo failed: {}", e.getMessage()); }
         return map;
     }
 
@@ -307,6 +313,21 @@ public class MemberLedgerController {
                 "SELECT id, community_name FROM ai_platform.sys_community WHERE id IN (" + in + ")")
                 .forEach(row -> map.put(((Number)row.get("id")).longValue(), (String)row.get("community_name")));
         } catch (Exception e) { log.warn("communityNames failed: {}", e.getMessage()); }
+        return map;
+    }
+
+    /** 小区 → 区县名（sys_region.region_name）；region 未配置时映射缺失，由调用方回退 "-"。 */
+    private Map<Long, String> resolveRegionNames(Set<Long> communityIds) {
+        if (communityIds.isEmpty()) return Map.of();
+        Map<Long, String> map = new LinkedHashMap<>();
+        try {
+            String in = communityIds.stream().map(String::valueOf).collect(Collectors.joining(","));
+            jdbcTemplate.queryForList(
+                "SELECT c.id, r.region_name FROM ai_platform.sys_community c " +
+                "LEFT JOIN ai_platform.sys_region r ON r.id = c.region_id " +
+                "WHERE c.id IN (" + in + ") AND r.region_name IS NOT NULL")
+                .forEach(row -> map.put(((Number)row.get("id")).longValue(), (String)row.get("region_name")));
+        } catch (Exception e) { log.warn("regionNames failed: {}", e.getMessage()); }
         return map;
     }
 

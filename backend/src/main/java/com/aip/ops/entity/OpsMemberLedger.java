@@ -41,8 +41,14 @@ public class OpsMemberLedger extends BaseEntity {
     /** Transient: resolved names for display */
     @TableField(exist = false)
     private String memberName;
+    /** 会员手机号（gas_user.phone，会员唯一识别） */
+    @TableField(exist = false)
+    private String memberPhone;
     @TableField(exist = false)
     private String communityName;
+    /** 区县地区（小区所属区县名，sys_region.region_name） */
+    @TableField(exist = false)
+    private String regionName;
     @TableField(exist = false)
     private String gridManagerName;
     @TableField(exist = false)
