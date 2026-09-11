@@ -643,6 +643,36 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     /**
+     * 判定同一订单拆分多行的「收款金额」显示：
+     * 分组口径与提成均分（{@link #splitCommissionByReceiptGroup}）一致 ——
+     * 收据号+客户+品类+型号相同、行数>1 且经办人不唯一时视为同一笔订单拆分，
+     * 仅导出顺序中第一行显示收款金额，其余行留空。
+     *
+     * @return 收款金额需留空的行 id 集合
+     */
+    public static Set<Long> computeSplitOrderNonFirstIds(List<OpsBusinessData> rows) {
+        Map<String, List<Long>> idGroups = new LinkedHashMap<>();
+        Map<String, Set<String>> agentSets = new HashMap<>();
+        for (OpsBusinessData d : rows) {
+            String rn = d.getReceiptNo();
+            if (rn == null || rn.isEmpty()) continue;
+            String key = rn + "|" + Objects.toString(d.getCustomer(), "")
+                    + "|" + Objects.toString(d.getCategory(), "")
+                    + "|" + Objects.toString(d.getModel(), "");
+            idGroups.computeIfAbsent(key, k -> new ArrayList<>()).add(d.getId());
+            agentSets.computeIfAbsent(key, k -> new HashSet<>()).add(Objects.toString(d.getAgent(), ""));
+        }
+        Set<Long> blankIds = new HashSet<>();
+        for (Map.Entry<String, List<Long>> e : idGroups.entrySet()) {
+            List<Long> ids = e.getValue();
+            if (ids.size() > 1 && agentSets.get(e.getKey()).size() > 1) {
+                blankIds.addAll(ids.subList(1, ids.size()));
+            }
+        }
+        return blankIds;
+    }
+
+    /**
      * Verify that no receipt group row has a negative or null amount
      * after splitting. Throws on data inconsistency to trigger rollback.
      */
@@ -721,17 +751,20 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             applyCorpScope(qw);
             qw.orderByDesc(OpsBusinessData::getId);
             List<OpsBusinessData> all = mapper.selectList(qw);
+            Set<Long> blankAmountIds = computeSplitOrderNonFirstIds(all);
 
             Path tsvFile = Files.createTempFile("export_", ".tsv");
             Path xlsFile = Path.of(tsvFile.toString().replace(".tsv", ".xlsx"));
             // Write header + rows as tab-separated
             StringBuilder sb = new StringBuilder();
-            sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\n");
+            sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t收款金额\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\n");
             for (OpsBusinessData d : all) {
                 sb.append(fmt(d.getBatchNo())).append('\t')
                   .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
                   .append(fmt(d.getBrand())).append('\t').append(getCategoryDisplayName(d.getCategory())).append('\t')
-                  .append(fmt(d.getModel())).append('\t').append(fmt(d.getSalePrice())).append('\t')
+                  .append(fmt(d.getModel())).append('\t')
+                  .append(blankAmountIds.contains(d.getId()) ? "" : fmt(d.getSalePrice())).append('\t')
+                  .append(fmt(d.getSalePrice())).append('\t')
                   .append(fmt(d.getRetailFloorPrice())).append('\t').append(fmt(d.getGroupLowestPrice())).append('\t')
                   .append(fmt(d.getCommissionRate())).append('\t').append(fmt(d.getCommissionAmount())).append('\t')
                   .append(fmt(d.getCalcStatus())).append('\t').append(fmt(d.getAgent())).append('\t')
