@@ -192,7 +192,7 @@ ops-platform-project/
 - **导入**：必填列含 市场收款日期/财务收款日期/资金动态表横排数（表头 contains 匹配——旧模板缺列直接 HEADER_CHECK 拒绝）。市场收款日期**必填**（空→行错误）；财务收款日期/横排数可空，但格式错误拒绝该行（连带整文件拒绝）。横排数解析兼容 Excel 数字单元格 `12.0`。多 sheet 模板按「前 10 行含必填列名最多」自动选 sheet + 自动定位表头行。
 - **模板下载**：`GET /template` 优先读配置路径 `app.import.template-path`（默认 `/home/jason/1.xlsx`；生产为 volume 挂载 `/app/templates/1.xlsx` + 环境变量 `APP_IMPORT_TEMPLATE_PATH`，便于不改 JAR 更新模板），缺失回退 classpath `templates/business_data_template.xlsx`；下载文件名固定 **增值业务数据模板.xlsx**。
 - **模板源文件**：`/home/jason/1.xlsx`（12 sheet 工作簿，业务数据 sheet 为导入源）。修改该模板必须**手术式 XML 补丁**——openpyxl 重存会丢弃其它 sheet 的图片（27 个 media/drawing 条目，2026-09-03 曾踩坑）。
-- **导出**：异步/同步两条导出路径表头均含 市场收款日期/财务收款日期/资金动态表横排数（紧跟 收据号 之后）。
+- **导出**：异步/同步两条导出路径表头均含 市场收款日期/财务收款日期/资金动态表横排数（紧跟 收据号 之后），并在 销售价 后含 零售底价/集团最低价（两字段由导入时从增值产品匹配落库，存量行导出为空单元格）。
 - 列表 API 直接返回实体，新增字段自动序列化给前端展示。
 | `CommissionRuleController` | `/api/ops/admin/commission` | 个人/公司提成规则 CRUD（支持组织层级继承） |
 | `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD |
@@ -683,12 +683,12 @@ cd frontend && npm run build:h5
 
 生产 Nginx：`/ops/` → `boss-ops-nginx:80`，`/api/ops/**` → `ops-backend:8082`
 
-### 生产数据库定时备份（2026-09-04 上线）
+### 生产数据库定时备份（2026-09-04 上线，落盘本机）
 
-- **任务**：root crontab `0 2 * * *` 每日凌晨 2:00 全量备份 `ai_platform` + `mall_db`（CST）
-- **脚本**：`/home/jason/data/db-backup.sh`（docker exec mysqldump，`--default-character-set=utf8mb4 --single-transaction --routines --triggers --events --set-gtid-purged=OFF`，gzip 压缩）
-- **产物**：`/home/jason/data/<db>_<YYYYmmdd_HHMMSS>.sql.gz`（约 5~7MB/库），保留 7 天自动清理；日志 `/home/jason/data/backup.log`
-- 修改备份策略直接编辑脚本；恢复方式 `zcat <file> | docker exec -i mysql mysql --default-character-set=utf8mb4 -uroot -p`
+- **任务**：**本机**（开发机 WSL）crontab `0 2 * * *` 每日凌晨 2:00 全量备份生产 `ai_platform` + `mall_db`（CST）。本机需开机且 cron 服务运行，否则当天无备份
+- **脚本**：本机 `/home/jason/data/db-backup.sh` — SSH 到生产 `docker exec mysqldump`（`--default-character-set=utf8mb4 --single-transaction --routines --triggers --events --set-gtid-purged=OFF`），管道回本机 gzip 落盘
+- **产物**：本机 `/home/jason/data/<db>_<YYYYmmdd_HHMMSS>.sql.gz`（约 5~7MB/库），保留 7 天自动清理；日志同目录 `backup.log`
+- 恢复方式（在生产服务器）：`gzip -dc <file> | docker exec -i mysql mysql --default-character-set=utf8mb4 -uroot -p`
 
 ---
 
@@ -740,7 +740,7 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-09-03 | 负责人：架构师（2026-09-03 增值业务数据字段结构调整：市场收款日期改名 + 新增财务收款日期/资金动态表横排数，导入必填校验/多 sheet 模板识别/模板下载配置路径 + 固定文件名/导出含新列/模板手术式 XML 补丁陷阱；同日品类提成汇总改双文件 ZIP：提成金额/销售金额各一文件 × 全部汇总+逐月 sheet，月度归组取去重组内 MAX(sale_date) 与全部汇总对账一致；此前 2026-09-02 补录安检设备创建会员台账模块：数据链路/API/处理器/迁移/前端弹窗 + memberKeyword 兜底搜索列名修复；2026-09-01 补录燃具信息模块 GasStovesController/迁移流程/重建注意事项 + mysql 客户端 latin1 陷阱；2026-08-18 作战地图看板文档校准：6 张 ETL 表、经办人/品类 TOP5 数据源改为 ops_business_data + calc_status 过滤、新增网格员/品类/小区 TOP5 端点；修正控制器/服务层/操作日志覆盖/前端 API 计数；补充销售统计收据号+品类+型号去重规则）
+最后更新：2026-09-11 | 负责人：架构师（2026-09-11 业务数据异步导出在 销售价 后新增 零售底价/集团最低价 两列，与同步导出路径对齐；2026-09-03 增值业务数据字段结构调整：市场收款日期改名 + 新增财务收款日期/资金动态表横排数，导入必填校验/多 sheet 模板识别/模板下载配置路径 + 固定文件名/导出含新列/模板手术式 XML 补丁陷阱；同日品类提成汇总改双文件 ZIP：提成金额/销售金额各一文件 × 全部汇总+逐月 sheet，月度归组取去重组内 MAX(sale_date) 与全部汇总对账一致；此前 2026-09-02 补录安检设备创建会员台账模块：数据链路/API/处理器/迁移/前端弹窗 + memberKeyword 兜底搜索列名修复；2026-09-01 补录燃具信息模块 GasStovesController/迁移流程/重建注意事项 + mysql 客户端 latin1 陷阱；2026-08-18 作战地图看板文档校准：6 张 ETL 表、经办人/品类 TOP5 数据源改为 ops_business_data + calc_status 过滤、新增网格员/品类/小区 TOP5 端点；修正控制器/服务层/操作日志覆盖/前端 API 计数；补充销售统计收据号+品类+型号去重规则）
 
 ### 自定义 Claude 命令
 
