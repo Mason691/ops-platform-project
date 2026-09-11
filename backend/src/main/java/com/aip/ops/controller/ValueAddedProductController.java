@@ -31,8 +31,9 @@ public class ValueAddedProductController {
                      @RequestParam(defaultValue = "10") int pageSize,
                      @RequestParam(required = false) String category,
                      @RequestParam(required = false) String brand,
+                     @RequestParam(required = false) String model,
                      @RequestParam(required = false) Integer status) {
-        return R.ok(service.page(pageNum, pageSize, category, brand, status));
+        return R.ok(service.page(pageNum, pageSize, category, brand, model, status));
     }
 
     @GetMapping("/{id}")

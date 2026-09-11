@@ -54,10 +54,11 @@ public class ValueAddedProductServiceImpl implements ValueAddedProductService {
     }
 
     @Override
-    public Map<String, Object> page(int pageNum, int pageSize, String category, String brand, Integer status) {
+    public Map<String, Object> page(int pageNum, int pageSize, String category, String brand, String model, Integer status) {
         LambdaQueryWrapper<OpsValueAddedProduct> qw = new LambdaQueryWrapper<>();
         if (category != null && !category.isEmpty()) qw.eq(OpsValueAddedProduct::getCategory, category);
         if (brand != null && !brand.isEmpty()) qw.eq(OpsValueAddedProduct::getBrand, brand);
+        if (model != null && !model.isEmpty()) qw.like(OpsValueAddedProduct::getModel, model.trim());
         if (status != null) qw.eq(OpsValueAddedProduct::getStatus, status);
         qw.orderByAsc(OpsValueAddedProduct::getCategory).orderByAsc(OpsValueAddedProduct::getId);
 

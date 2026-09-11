@@ -6,7 +6,7 @@ import java.util.Map;
 
 public interface ValueAddedProductService {
 
-    Map<String, Object> page(int pageNum, int pageSize, String category, String brand, Integer status);
+    Map<String, Object> page(int pageNum, int pageSize, String category, String brand, String model, Integer status);
 
     OpsValueAddedProduct getById(Long id);
 
