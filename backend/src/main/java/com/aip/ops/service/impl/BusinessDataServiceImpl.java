@@ -644,9 +644,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     /**
      * 判定同一订单拆分多行的「收款金额」显示：
-     * 分组口径与提成均分（{@link #splitCommissionByReceiptGroup}）一致 ——
-     * 收据号+客户+品类+型号相同、行数>1 且经办人不唯一时视为同一笔订单拆分，
-     * 仅导出顺序中第一行显示收款金额，其余行留空。
+     * 收据号+客户相同、且经办人不唯一（多经办人协作）即视为同一订单拆分
+     * ——不要求品类/型号相同，仅导出顺序中第一行显示收款金额，其余行留空。
      *
      * @return 收款金额需留空的行 id 集合
      */
@@ -656,9 +655,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         for (OpsBusinessData d : rows) {
             String rn = d.getReceiptNo();
             if (rn == null || rn.isEmpty()) continue;
-            String key = rn + "|" + Objects.toString(d.getCustomer(), "")
-                    + "|" + Objects.toString(d.getCategory(), "")
-                    + "|" + Objects.toString(d.getModel(), "");
+            String key = rn + "|" + Objects.toString(d.getCustomer(), "");
             idGroups.computeIfAbsent(key, k -> new ArrayList<>()).add(d.getId());
             agentSets.computeIfAbsent(key, k -> new HashSet<>()).add(Objects.toString(d.getAgent(), ""));
         }
