@@ -80,6 +80,8 @@ public class BusinessDataExportHandler implements ExportHandler {
         List<OpsBusinessData> rows = mapper.selectList(qw);
         log.info("BusinessData export query: {} rows", rows.size());
 
+        // 收据号相同的行相邻（空收据号沉底、组内 id 升序）
+        BusinessDataServiceImpl.sortByReceiptNo(rows);
         // 同一订单拆分多行的收款金额仅首行显示（口径与提成均分一致）
         Set<Long> blankAmountIds = BusinessDataServiceImpl.computeSplitOrderNonFirstIds(rows);
         // 型号关键字行（如武山）兜底填充 零售底价/集团最低价（仅导出文件）

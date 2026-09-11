@@ -122,6 +122,17 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     /**
+     * 导出排序：收据号相同的行相邻（空/无收据号沉底），同收据号内按 id 升序，
+     * 保证「收款金额首行显示」的首行 = 组内最早录入行。
+     */
+    public static void sortByReceiptNo(List<OpsBusinessData> rows) {
+        rows.sort(Comparator
+                .comparing((OpsBusinessData d) -> d.getReceiptNo() == null || d.getReceiptNo().isEmpty())
+                .thenComparing(d -> d.getReceiptNo() == null ? "" : d.getReceiptNo())
+                .thenComparing(OpsBusinessData::getId));
+    }
+
+    /**
      * 导出兜底：存量行型号只写关键字（如武山子公司）导入时无法精确匹配产品，
      * 价格为空。此处按「品牌+品类相同 + 产品型号含关键字」唯一命中产品后，
      * 内存填充零售底价/集团最低价——仅影响导出文件，不写库。
@@ -789,8 +800,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             if (batchNo != null && !batchNo.isEmpty()) qw.eq(OpsBusinessData::getBatchNo, batchNo);
             if (agent != null && !agent.isEmpty()) qw.eq(OpsBusinessData::getAgent, agent);
             applyCorpScope(qw);
-            qw.orderByDesc(OpsBusinessData::getId);
             List<OpsBusinessData> all = mapper.selectList(qw);
+            sortByReceiptNo(all);
             Set<Long> blankAmountIds = computeSplitOrderNonFirstIds(all);
             // 型号关键字行（如武山）兜底填充 零售底价/集团最低价（仅导出文件）
             fillExportPrices(all, productMapper.selectList(null));
