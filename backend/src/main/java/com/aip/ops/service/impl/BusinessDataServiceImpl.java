@@ -82,6 +82,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         cn2key.put("定尺波纹管", "7"); cn2key.put("户内美装工程", "8");
         cn2key.put("户内美装运维", "9"); cn2key.put("保险", "10");
         cn2key.put("美装管道整改", "11"); cn2key.put("美装安全评估", "12");
+        cn2key.put("气密性检测", "qimi");
         CN_TO_KEY = Collections.unmodifiableMap(cn2key);
         Map<String, String> key2cn = new HashMap<>();
         cn2key.forEach((cn, k) -> key2cn.put(k, cn));
@@ -94,7 +95,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             "燃气灶", "抽油烟机", "热水器", "壁挂炉",
             "壁挂炉以旧换新销售", "户内美装销售", "定尺波纹管",
             "户内美装工程", "户内美装运维", "保险",
-            "美装管道整改", "美装安全评估"
+            "美装管道整改", "美装安全评估", "气密性检测"
     );
 
     public BusinessDataServiceImpl(
@@ -118,6 +119,48 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     public static String getCategoryDisplayName(String key) {
         if (key == null || key.isEmpty()) return "";
         return KEY_TO_CN.getOrDefault(key, key);
+    }
+
+    /**
+     * 导出兜底：存量行型号只写关键字（如武山子公司）导入时无法精确匹配产品，
+     * 价格为空。此处按「品牌+品类相同 + 产品型号含关键字」唯一命中产品后，
+     * 内存填充零售底价/集团最低价——仅影响导出文件，不写库。
+     */
+    public static void fillExportPrices(List<OpsBusinessData> rows, List<OpsValueAddedProduct> products) {
+        if (rows == null || rows.isEmpty() || products == null || products.isEmpty()) return;
+        for (OpsBusinessData d : rows) {
+            if (d.getRetailFloorPrice() != null && d.getGroupLowestPrice() != null) continue;
+            OpsValueAddedProduct p = matchProductExactOrKeyword(d.getBrand(), d.getCategory(), d.getModel(), products);
+            if (p == null) continue;
+            if (d.getRetailFloorPrice() == null) d.setRetailFloorPrice(p.getRetailFloorPrice());
+            if (d.getGroupLowestPrice() == null) d.setGroupLowestPrice(p.getGroupLowestPrice());
+        }
+    }
+
+    /**
+     * 品牌+品类必须一致；型号先做归一化精确匹配（去空格/转小写），
+     * 否则退化关键字包含匹配。多个包含候选视为歧义 → 返回 null 不填充，避免错价。
+     */
+    public static OpsValueAddedProduct matchProductExactOrKeyword(
+            String brand, String category, String model, List<OpsValueAddedProduct> products) {
+        if (brand == null || brand.isBlank() || category == null || category.isBlank()
+                || model == null || model.isBlank() || products == null) return null;
+        String normModel = normalizeModel(model);
+        if (normModel.isEmpty()) return null;
+        List<OpsValueAddedProduct> containsMatches = new ArrayList<>();
+        for (OpsValueAddedProduct p : products) {
+            if (p == null || !brand.equals(p.getBrand()) || !category.equals(p.getCategory())) continue;
+            if (p.getModel() == null || p.getModel().isBlank()) continue;
+            String normPm = normalizeModel(p.getModel());
+            if (normPm.equals(normModel)) return p;
+            if (normPm.contains(normModel)) containsMatches.add(p);
+        }
+        return containsMatches.size() == 1 ? containsMatches.get(0) : null;
+    }
+
+    /** 型号归一化：去全部空白（含全角空格）并转小写，用于关键字包含匹配 */
+    private static String normalizeModel(String s) {
+        return s.replaceAll("[\\s\\u3000]+", "").toLowerCase();
     }
 
     @Override
@@ -749,6 +792,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             qw.orderByDesc(OpsBusinessData::getId);
             List<OpsBusinessData> all = mapper.selectList(qw);
             Set<Long> blankAmountIds = computeSplitOrderNonFirstIds(all);
+            // 型号关键字行（如武山）兜底填充 零售底价/集团最低价（仅导出文件）
+            fillExportPrices(all, productMapper.selectList(null));
 
             Path tsvFile = Files.createTempFile("export_", ".tsv");
             Path xlsFile = Path.of(tsvFile.toString().replace(".tsv", ".xlsx"));

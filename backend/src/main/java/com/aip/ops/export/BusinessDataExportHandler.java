@@ -1,8 +1,10 @@
 package com.aip.ops.export;
 
 import com.aip.ops.entity.OpsBusinessData;
+import com.aip.ops.entity.OpsValueAddedProduct;
 import com.aip.ops.entity.SysExportTask;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
+import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.impl.BusinessDataServiceImpl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -28,13 +30,16 @@ import java.util.Set;
 public class BusinessDataExportHandler implements ExportHandler {
 
     private final OpsBusinessDataMapper mapper;
+    private final OpsValueAddedProductMapper productMapper;
     private final DataScopeService dataScopeService;
     private final ObjectMapper objectMapper;
 
     public BusinessDataExportHandler(OpsBusinessDataMapper mapper,
+                                     OpsValueAddedProductMapper productMapper,
                                      DataScopeService dataScopeService,
                                      ObjectMapper objectMapper) {
         this.mapper = mapper;
+        this.productMapper = productMapper;
         this.dataScopeService = dataScopeService;
         this.objectMapper = objectMapper;
     }
@@ -77,6 +82,9 @@ public class BusinessDataExportHandler implements ExportHandler {
 
         // 同一订单拆分多行的收款金额仅首行显示（口径与提成均分一致）
         Set<Long> blankAmountIds = BusinessDataServiceImpl.computeSplitOrderNonFirstIds(rows);
+        // 型号关键字行（如武山）兜底填充 零售底价/集团最低价（仅导出文件）
+        List<OpsValueAddedProduct> products = productMapper.selectList(null);
+        BusinessDataServiceImpl.fillExportPrices(rows, products);
 
         // 写 TSV
         try (BufferedWriter writer = new BufferedWriter(
