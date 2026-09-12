@@ -66,6 +66,12 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private static final List<String> COMPANY_ORDER =
             List.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
 
+    /** 汇总 Excel 的品类行固定展示顺序（字典 itemKey）：户内美装三品类（销售/工程/运维）
+     *  6,8,9 连排相邻，定尺波纹管 7 后移至三元组之后，其余按 key 升序。
+     *  未在映射中的品类追加在末尾。 */
+    private static final List<String> CATEGORY_ORDER =
+            List.of("1", "2", "3", "4", "5", "6", "8", "9", "7", "10", "11", "12");
+
     private static final com.fasterxml.jackson.databind.ObjectMapper JSON_MAPPER =
             new com.fasterxml.jackson.databind.ObjectMapper();
 
@@ -956,11 +962,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         zos.closeEntry();
     }
 
-    /** 品类行轴：模板固定 12 品类顺序（原始字典 key，DB 存储值）；未在映射中的品类追加在末尾。 */
+    /** 品类行轴：CATEGORY_ORDER 固定顺序（户内美装三品类相邻）；未在映射中的品类追加在末尾。 */
     private List<String> collectCategoryKeys(List<Map<String, Object>> rows) {
         List<String> categoryKeys = new ArrayList<>();
-        for (int k = 1; k <= 12; k++) {
-            if (KEY_TO_CN.containsKey(String.valueOf(k))) categoryKeys.add(String.valueOf(k));
+        for (String k : CATEGORY_ORDER) {
+            if (KEY_TO_CN.containsKey(k)) categoryKeys.add(k);
         }
         Set<String> presentCategories = new HashSet<>();
         for (Map<String, Object> r : rows) {
