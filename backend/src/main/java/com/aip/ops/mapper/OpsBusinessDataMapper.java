@@ -97,17 +97,18 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
                                         @Param("corpId") Long corpId);
 
     /** Per-category × per-company totals for commission summary (品类提成汇总) —
-     *  same (receipt_no, category, model) dedup rule as aggregateStats, grouped by
-     *  category+company, excluding rows already reported to group (已上报集团). */
+     *  销售金额按（收据号+公司）去重：同一订单只取组内首行（id 最小）的 sale_price 计一次，
+     *  提成金额仍按每条明细全量汇总（提成按明细独立计算）。排除已上报集团行。 */
     @Select("<script>"
-            + "SELECT t.category as category, t.company as company, "
-            + "COALESCE(SUM(t.sale_price),0) as totalSale, "
-            + "COALESCE(SUM(t.commission_amount),0) as totalCommission "
+            + "SELECT r.category as category, r.company as company, "
+            + "COALESCE(SUM(CASE WHEN r.rn = 1 THEN r.sale_price ELSE 0 END),0) as totalSale, "
+            + "COALESCE(SUM(r.commission_amount),0) as totalCommission "
             + "FROM ("
-            + "SELECT COALESCE(receipt_no, CONCAT('__NULL__', id)) as receipt_no, "
-            + "category, model, company, "
-            + "MAX(sale_price) as sale_price, "
-            + "SUM(commission_amount) as commission_amount "
+            + "SELECT b.category, b.company, b.sale_price, b.commission_amount, "
+            + "ROW_NUMBER() OVER (PARTITION BY b.grp, b.company ORDER BY b.id) as rn "
+            + "FROM ("
+            + "SELECT id, category, company, sale_price, commission_amount, "
+            + "COALESCE(receipt_no, CONCAT('__NULL__', id)) as grp "
             + "FROM ops_business_data WHERE delete_flag=0 "
             + "AND calc_status != '已上报集团' "   // != 而非 <>：<script> XML 解析器中 <> 会破坏标签解析
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
@@ -116,8 +117,8 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "<if test='receiptNo != null and receiptNo != \"\"'>AND receipt_no = #{receiptNo}</if> "
             + "<if test='category != null and category != \"\"'>AND category = #{category}</if> "
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
-            + "GROUP BY 1, category, model, company"
-            + ") t GROUP BY t.category, t.company"
+            + ") b"
+            + ") r GROUP BY r.category, r.company"
             + "</script>")
     List<Map<String, Object>> categoryCompanyStats(@Param("company") String company,
                                                    @Param("batchNo") String batchNo,
@@ -126,19 +127,20 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
                                                    @Param("category") String category,
                                                    @Param("corpIds") List<Long> corpIds);
 
-    /** 品类提成汇总（按月）— 与 categoryCompanyStats 相同的去重口径，附加销售月份维度。
-     *  去重组的月份取组内 MAX(sale_date)（与 MAX(sale_price) 同源行），
+    /** 品类提成汇总（按月）— 与 categoryCompanyStats 相同的收据号去重口径，附加销售月份维度。
+     *  订单月份 = 组内首行（id 最小）的 sale_date 月份，销售/提成同归该月，
      *  保证各月合计与全部汇总对账一致。返回行含 saleMonth（YYYY-MM）。 */
     @Select("<script>"
-            + "SELECT t.category as category, t.company as company, t.saleMonth as saleMonth, "
-            + "COALESCE(SUM(t.sale_price),0) as totalSale, "
-            + "COALESCE(SUM(t.commission_amount),0) as totalCommission "
+            + "SELECT r.category as category, r.company as company, r.saleMonth as saleMonth, "
+            + "COALESCE(SUM(CASE WHEN r.rn = 1 THEN r.sale_price ELSE 0 END),0) as totalSale, "
+            + "COALESCE(SUM(r.commission_amount),0) as totalCommission "
             + "FROM ("
-            + "SELECT COALESCE(receipt_no, CONCAT('__NULL__', id)) as receipt_no, "
-            + "category, model, company, "
-            + "DATE_FORMAT(MAX(sale_date), '%Y-%m') as saleMonth, "
-            + "MAX(sale_price) as sale_price, "
-            + "SUM(commission_amount) as commission_amount "
+            + "SELECT b.category, b.company, b.sale_price, b.commission_amount, "
+            + "ROW_NUMBER() OVER (PARTITION BY b.grp, b.company ORDER BY b.id) as rn, "
+            + "DATE_FORMAT(FIRST_VALUE(b.sale_date) OVER (PARTITION BY b.grp, b.company ORDER BY b.id), '%Y-%m') as saleMonth "
+            + "FROM ("
+            + "SELECT id, category, company, sale_price, sale_date, commission_amount, "
+            + "COALESCE(receipt_no, CONCAT('__NULL__', id)) as grp "
             + "FROM ops_business_data WHERE delete_flag=0 "
             + "AND calc_status != '已上报集团' "
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
@@ -147,8 +149,8 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "<if test='receiptNo != null and receiptNo != \"\"'>AND receipt_no = #{receiptNo}</if> "
             + "<if test='category != null and category != \"\"'>AND category = #{category}</if> "
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
-            + "GROUP BY 1, category, model, company"
-            + ") t GROUP BY t.category, t.company, t.saleMonth"
+            + ") b"
+            + ") r GROUP BY r.category, r.company, r.saleMonth"
             + "</script>")
     List<Map<String, Object>> categoryCompanyStatsByMonth(@Param("company") String company,
                                                           @Param("batchNo") String batchNo,
