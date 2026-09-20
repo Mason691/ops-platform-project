@@ -6,10 +6,12 @@ import com.aip.ops.service.OrgRoleService;
 import com.aip.ops.service.ValueAddedProductService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.util.Map;
 
 /**
@@ -34,6 +36,17 @@ public class ValueAddedProductController {
                      @RequestParam(required = false) String model,
                      @RequestParam(required = false) Integer status) {
         return R.ok(service.page(pageNum, pageSize, category, brand, model, status));
+    }
+
+    /** 导出产品信息（与列表同筛选条件），同步生成 Excel 并返回文件。 */
+    @OperationLog(module = "增值业务", action = "导出", targetTable = "ops_value_added_product")
+    @GetMapping("/export")
+    public void export(@RequestParam(required = false) String category,
+                       @RequestParam(required = false) String brand,
+                       @RequestParam(required = false) String model,
+                       @RequestParam(required = false) Integer status,
+                       HttpServletResponse response) throws IOException {
+        service.export(category, brand, model, status, response);
     }
 
     @GetMapping("/{id}")
