@@ -110,8 +110,8 @@ public class ValueAddedProductServiceImpl implements ValueAddedProductService {
     }
 
     @Override
-    public void export(String brand, String model, Integer status, HttpServletResponse response) {
-        List<OpsValueAddedProduct> rows = mapper.selectList(buildCoreQuery(brand, model, status));
+    public void export(HttpServletResponse response) {
+        List<OpsValueAddedProduct> rows = mapper.selectList(buildCoreQuery());
         String baseName = "增值产品信息_" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         Path tmpDir = null;
         try {
@@ -187,39 +187,50 @@ public class ValueAddedProductServiceImpl implements ValueAddedProductService {
         return qw;
     }
 
-    /** 导出专用：恒为核心四品类（itemKey 1燃气灶/2抽油烟机/3热水器/4壁挂炉），
-     *  品牌/型号/状态筛选与列表一致；排序=品类 itemKey 升序（即四品类业务顺序）+ id 升序。 */
-    private LambdaQueryWrapper<OpsValueAddedProduct> buildCoreQuery(String brand, String model, Integer status) {
+    /** 导出专用：恒为核心四品类全量（itemKey 1燃气灶/2抽油烟机/3热水器/4壁挂炉），
+     *  不受列表筛选影响（历史教训：型号筛选残留导致只导出 12 条，用户视为"记录不完整"）；
+     *  排序=品类 itemKey 升序（即四品类业务顺序）+ id 升序。 */
+    private LambdaQueryWrapper<OpsValueAddedProduct> buildCoreQuery() {
         LambdaQueryWrapper<OpsValueAddedProduct> qw = new LambdaQueryWrapper<>();
         qw.in(OpsValueAddedProduct::getCategory, CORE_EXPORT_CATEGORY_KEYS);
-        if (brand != null && !brand.isEmpty()) qw.eq(OpsValueAddedProduct::getBrand, brand);
-        if (model != null && !model.isEmpty()) qw.like(OpsValueAddedProduct::getModel, model.trim());
-        if (status != null) qw.eq(OpsValueAddedProduct::getStatus, status);
         qw.orderByAsc(OpsValueAddedProduct::getCategory).orderByAsc(OpsValueAddedProduct::getId);
         return qw;
     }
 
     private String buildTsv(List<OpsValueAddedProduct> rows, Map<String, String> keyToCn) {
         StringBuilder sb = new StringBuilder();
-        sb.append("品牌\t品类\t型号\t销售价\t零售底价\t集团最低价\t状态\t描述\t备注\n");
+        sb.append("品牌\t品类\t型号\t销售价\t零售底价\t集团最低价\t状态\t备注\n");
         for (OpsValueAddedProduct p : rows) {
-            sb.append(fmt(p.getBrand())).append('\t')
-              .append(keyToCn.getOrDefault(p.getCategory(), fmt(p.getCategory()))).append('\t')
-              .append(fmt(p.getModel())).append('\t')
+            sb.append(clean(p.getBrand())).append('\t')
+              .append(clean(keyToCn.getOrDefault(p.getCategory(), fmt(p.getCategory())))).append('\t')
+              .append(clean(p.getModel())).append('\t')
               .append(fmt(p.getSalePrice())).append('\t')
               .append(fmt(p.getRetailFloorPrice())).append('\t')
               .append(fmt(p.getGroupLowestPrice())).append('\t')
               .append(p.getStatus() != null && p.getStatus() == 1 ? "上架" : "下架").append('\t')
-              .append(fmt(p.getDescription())).append('\t')
-              .append(fmt(p.getRemark())).append('\n');
+              .append(mergedNote(p)).append('\n');
         }
         return sb.toString();
+    }
+
+    /** 描述文字并入备注列导出：备注为空时取描述，两者都有时用"；"连接。
+     *  字段消毒：换行/制表符会撑裂 TSV（曾导致描述碎片窜入品牌列），统一替换为空格并压缩连续空白。 */
+    private String mergedNote(OpsValueAddedProduct p) {
+        String desc = clean(p.getDescription());
+        String remark = clean(p.getRemark());
+        if (desc.isEmpty()) return remark;
+        return remark.isEmpty() ? desc : desc + "；" + remark;
+    }
+
+    private String clean(String s) {
+        if (s == null) return "";
+        return s.replaceAll("[\\r\\n\\t]+", " ").replaceAll(" {2,}", " ").trim();
     }
 
     private String fmt(Object o) { return o == null ? "" : String.valueOf(o); }
 
     /** 产品导出 XLSX 生成脚本：表头白字蓝底加粗、细边框、冻结首行、斑马纹、
-     *  价格列数值化 + 千分位、列宽按内容自适应（中文按 2 字符计，钳制上下限）。 */
+     *  价格列数值化 + 千分位、备注列左对齐自动换行、列宽按内容自适应（中文按 2 字符计，钳制上下限）。 */
     private static final String PRODUCT_EXPORT_PYTHON_SCRIPT = """
             import openpyxl
             from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
@@ -235,8 +246,8 @@ public class ValueAddedProductServiceImpl implements ValueAddedProductService {
             center = Alignment(horizontal='center', vertical='center')
             left = Alignment(horizontal='left', vertical='center', wrap_text=True)
             PRICE_COLS = {4, 5, 6}
-            TEXT_COLS = {8, 9}
-            MIN_W = {1: 10, 2: 12, 3: 18, 4: 12, 5: 12, 6: 14, 7: 8, 8: 26, 9: 16}
+            TEXT_COLS = {8}
+            MIN_W = {1: 10, 2: 12, 3: 18, 4: 12, 5: 12, 6: 14, 7: 8, 8: 30}
             lines = open('__TSV__', encoding='utf-8').read().rstrip('\\n').split('\\n')
             rows = [line.split('\\t') for line in lines]
             ws.append(rows[0])

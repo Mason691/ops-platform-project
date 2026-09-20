@@ -38,15 +38,12 @@ public class ValueAddedProductController {
         return R.ok(service.page(pageNum, pageSize, category, brand, model, status));
     }
 
-    /** 导出核心四品类（燃气灶/抽油烟机/热水器/壁挂炉）产品信息，
-     *  品牌/型号/状态筛选生效；品类筛选不适用。同步生成样式化 Excel 并返回文件。 */
+    /** 导出核心四品类（燃气灶/抽油烟机/热水器/壁挂炉）全量产品信息，
+     *  不受列表筛选影响（筛选仅作用于列表查询）。同步生成样式化 Excel 并返回文件。 */
     @OperationLog(module = "增值业务", action = "导出", targetTable = "ops_value_added_product")
     @GetMapping("/export")
-    public void export(@RequestParam(required = false) String brand,
-                       @RequestParam(required = false) String model,
-                       @RequestParam(required = false) Integer status,
-                       HttpServletResponse response) throws IOException {
-        service.export(brand, model, status, response);
+    public void export(HttpServletResponse response) throws IOException {
+        service.export(response);
     }
 
     @GetMapping("/{id}")
