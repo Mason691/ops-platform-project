@@ -52,7 +52,7 @@ public class BusinessDataExportHandler implements ExportHandler {
     @Override
     public void export(SysExportTask task, OutputStream out) throws Exception {
         // 解析筛选条件
-        String company = null, batchNo = null, agent = null, brand = null, category = null;
+        String company = null, batchNo = null, agent = null, brand = null, category = null, model = null;
         if (task.getFilters() != null && !task.getFilters().isEmpty()) {
             @SuppressWarnings("unchecked")
             Map<String, String> filters = objectMapper.readValue(task.getFilters(), Map.class);
@@ -61,6 +61,7 @@ public class BusinessDataExportHandler implements ExportHandler {
             agent = filters.get("agent");
             brand = filters.get("brand");
             category = filters.get("category");
+            model = filters.get("model");
         }
 
         // 构建查询
@@ -70,6 +71,7 @@ public class BusinessDataExportHandler implements ExportHandler {
         if (agent != null && !agent.isEmpty()) qw.eq(OpsBusinessData::getAgent, agent);
         if (brand != null && !brand.isEmpty()) qw.eq(OpsBusinessData::getBrand, brand);
         if (category != null && !category.isEmpty()) qw.eq(OpsBusinessData::getCategory, category);
+        if (model != null && !model.isEmpty()) qw.eq(OpsBusinessData::getModel, model);
 
         // 组织级数据隔离
         Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIdsForCorp(task.getCorpId());

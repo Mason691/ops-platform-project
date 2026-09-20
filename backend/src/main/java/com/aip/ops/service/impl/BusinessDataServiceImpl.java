@@ -178,16 +178,16 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
-    public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial) {
+    public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial, String brand, String model) {
         // Build visible corp IDs once
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
         List<Long> corpIdList = (visibleIds != null && !visibleIds.isEmpty())
                 ? new ArrayList<>(visibleIds) : null;
 
         // ── COUNT + STATS: single-row aggregate queries (no full table scan) ──
-        long total = mapper.countFiltered(company, batchNo, agent, receiptNo, category, isSpecial, corpIdList);
+        long total = mapper.countFiltered(company, batchNo, agent, receiptNo, category, isSpecial, brand, model, corpIdList);
         java.util.Map<String, java.math.BigDecimal> stats =
-                mapper.aggregateStats(company, batchNo, agent, receiptNo, category, isSpecial, corpIdList);
+                mapper.aggregateStats(company, batchNo, agent, receiptNo, category, isSpecial, brand, model, corpIdList);
         BigDecimal totalSale = stats != null && stats.get("totalSale") != null
                 ? stats.get("totalSale") : BigDecimal.ZERO;
         BigDecimal totalCommission = stats != null && stats.get("totalCommission") != null
@@ -195,7 +195,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
         // Per-category totals (same dedup rule as overall stats)
         List<Map<String, Object>> categoryStats =
-                mapper.categoryStats(company, batchNo, agent, receiptNo, category, isSpecial, corpIdList);
+                mapper.categoryStats(company, batchNo, agent, receiptNo, category, isSpecial, brand, model, corpIdList);
         normalizeCategoryStats(categoryStats);
 
         // ── DATA: only fetch the requested page ──
@@ -207,6 +207,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         if (receiptNo != null && !receiptNo.isEmpty()) qw.eq(OpsBusinessData::getReceiptNo, receiptNo);
         if (category != null && !category.isEmpty()) qw.eq(OpsBusinessData::getCategory, category);
         if (isSpecial != null && !isSpecial.isEmpty()) qw.eq(OpsBusinessData::getIsSpecial, isSpecial);
+        if (brand != null && !brand.isEmpty()) qw.eq(OpsBusinessData::getBrand, brand);
+        if (model != null && !model.isEmpty()) qw.eq(OpsBusinessData::getModel, model);
         if (corpIdList != null) qw.in(OpsBusinessData::getCorpId, corpIdList);
         qw.orderByDesc(OpsBusinessData::getId);
         qw.last("LIMIT " + offset + "," + pageSize);
@@ -702,44 +704,29 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
-    public void exportExcel(String company, String batchNo, String agent, HttpServletResponse response) {
+    public void exportExcel(String company, String batchNo, String agent, String category,
+                            String brand, String model, Path outFile) {
         try {
             LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
             if (company != null && !company.isEmpty()) qw.eq(OpsBusinessData::getCompany, company);
             if (batchNo != null && !batchNo.isEmpty()) qw.eq(OpsBusinessData::getBatchNo, batchNo);
             if (agent != null && !agent.isEmpty()) qw.eq(OpsBusinessData::getAgent, agent);
+            if (category != null && !category.isEmpty()) qw.eq(OpsBusinessData::getCategory, category);
+            if (brand != null && !brand.isEmpty()) qw.eq(OpsBusinessData::getBrand, brand);
+            if (model != null && !model.isEmpty()) qw.eq(OpsBusinessData::getModel, model);
             applyCorpScope(qw);
             List<OpsBusinessData> all = mapper.selectList(qw);
             sortByReceiptNo(all);
+            // 同一订单拆分多行的收款金额仅首行显示（口径与提成均分一致）
             Set<Long> blankAmountIds = computeSplitOrderNonFirstIds(all);
             // 型号关键字行（如武山）兜底填充 零售底价/集团最低价（仅导出文件）
             fillExportPrices(all, productMapper.selectList(null));
 
             Path tsvFile = Files.createTempFile("export_", ".tsv");
-            Path xlsFile = Path.of(tsvFile.toString().replace(".tsv", ".xlsx"));
-            // Write header + rows as tab-separated
-            StringBuilder sb = new StringBuilder();
-            sb.append("批次\t公司\t客户\t部门\t品牌\t品类\t型号\t收款金额\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\t备注\t是否特批\n");
-            for (OpsBusinessData d : all) {
-                sb.append(fmt(d.getBatchNo())).append('\t')
-                  .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
-                  .append(fmt(d.getDepartment())).append('\t')
-                  .append(fmt(d.getBrand())).append('\t').append(getCategoryDisplayName(d.getCategory())).append('\t')
-                  .append(fmt(d.getModel())).append('\t')
-                  .append(blankAmountIds.contains(d.getId()) ? "" : fmt(d.getSalePrice())).append('\t')
-                  .append(fmt(d.getSalePrice())).append('\t')
-                  .append(fmt(d.getRetailFloorPrice())).append('\t').append(fmt(d.getGroupLowestPrice())).append('\t')
-                  .append(fmt(d.getCommissionRate())).append('\t').append(fmt(d.getCommissionAmount())).append('\t')
-                  .append(fmt(d.getCalcStatus())).append('\t').append(fmt(d.getAgent())).append('\t')
-                  .append(fmt(d.getAgentPhone())).append('\t')
-                  .append(fmt(d.getSaleDate())).append('\t').append(fmt(d.getReceiptDate())).append('\t')
-                  .append(fmt(d.getFinanceReceiptDate())).append('\t').append(fmt(d.getFundDynamicRows())).append('\t')
-                  .append(fmt(d.getReceiptNo())).append('\t')
-                  .append(fmt(d.getRemark())).append('\t')
-                  .append(fmt(d.getIsSpecial())).append('\n');
-            }
+            StringBuilder sb = new StringBuilder(EXPORT_HEADER);
+            for (OpsBusinessData d : all) appendExportRow(sb, d, blankAmountIds);
             Files.writeString(tsvFile, sb.toString());
-
+            Files.createDirectories(outFile.toAbsolutePath().getParent());
             // Convert TSV → XLSX using Python
             new ProcessBuilder("python3", "-c",
                 "import openpyxl,sys\n"
@@ -747,17 +734,33 @@ public class BusinessDataServiceImpl implements BusinessDataService {
               + "ws=wb.active\n"
               + "lines=open('" + tsvFile.toAbsolutePath() + "').read().strip().split('\\n')\n"
               + "for line in lines:\n  ws.append(line.split('\\t'))\n"
-              + "wb.save('" + xlsFile.toAbsolutePath() + "')\n"
+              + "wb.save('" + outFile.toAbsolutePath() + "')\n"
             ).redirectErrorStream(true).start().waitFor();
-
-            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            response.setHeader("Content-Disposition", "attachment; filename=\"=?UTF-8?B?"
-                    + Base64.getEncoder().encodeToString("业务数据导出.xlsx".getBytes(StandardCharsets.UTF_8))
-                    + "?=\"; filename*=UTF-8''" + java.net.URLEncoder.encode("业务数据导出.xlsx", "UTF-8"));
-            Files.copy(xlsFile, response.getOutputStream());
-            response.getOutputStream().flush();
-            Files.deleteIfExists(tsvFile); Files.deleteIfExists(xlsFile);
+            Files.deleteIfExists(tsvFile);
         } catch (Exception e) { log.error("导出失败", e); }
+    }
+
+    private static final String EXPORT_HEADER =
+            "批次\t公司\t客户\t部门\t品牌\t品类\t型号\t收款金额\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\t备注\t是否特批\n";
+
+    /** 单行 23 列 TSV 输出（与 EXPORT_HEADER 列序一致） */
+    private void appendExportRow(StringBuilder sb, OpsBusinessData d, Set<Long> blankAmountIds) {
+        sb.append(fmt(d.getBatchNo())).append('\t')
+          .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
+          .append(fmt(d.getDepartment())).append('\t')
+          .append(fmt(d.getBrand())).append('\t').append(getCategoryDisplayName(d.getCategory())).append('\t')
+          .append(fmt(d.getModel())).append('\t')
+          .append(blankAmountIds.contains(d.getId()) ? "" : fmt(d.getSalePrice())).append('\t')
+          .append(fmt(d.getSalePrice())).append('\t')
+          .append(fmt(d.getRetailFloorPrice())).append('\t').append(fmt(d.getGroupLowestPrice())).append('\t')
+          .append(fmt(d.getCommissionRate())).append('\t').append(fmt(d.getCommissionAmount())).append('\t')
+          .append(fmt(d.getCalcStatus())).append('\t').append(fmt(d.getAgent())).append('\t')
+          .append(fmt(d.getAgentPhone())).append('\t')
+          .append(fmt(d.getSaleDate())).append('\t').append(fmt(d.getReceiptDate())).append('\t')
+          .append(fmt(d.getFinanceReceiptDate())).append('\t').append(fmt(d.getFundDynamicRows())).append('\t')
+          .append(fmt(d.getReceiptNo())).append('\t')
+          .append(fmt(d.getRemark())).append('\t')
+          .append(fmt(d.getIsSpecial())).append('\n');
     }
 
     private String fmt(Object o) { return o == null ? "" : String.valueOf(o); }

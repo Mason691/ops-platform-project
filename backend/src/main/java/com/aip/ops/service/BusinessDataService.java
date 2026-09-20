@@ -3,11 +3,12 @@ package com.aip.ops.service;
 import com.aip.ops.dto.ModelConfirmDecision;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.multipart.MultipartFile;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
 public interface BusinessDataService {
-    Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial);
+    Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial, String brand, String model);
     List<String> getBatches();
     /** 导入阶段一：文件校验 + 品牌型号匹配解析。返回 status: fail / confirm / ready */
     Map<String, Object> checkImport(MultipartFile file, Long corpId);
@@ -22,7 +23,9 @@ public interface BusinessDataService {
     List<String> getUncalcBatches();
     /** 个人提成计算（按指定批次），batchNo 为 null 时计算所有未计算批次 */
     Map<String, Object> calcCommission(String batchNo);
-    void exportExcel(String company, String batchNo, String agent, HttpServletResponse response);
+    /** 同步导出：按筛选条件查询并生成 XLSX 文件到 outFile（Kafka 不可用时的降级路径） */
+    void exportExcel(String company, String batchNo, String agent, String category,
+                     String brand, String model, Path outFile);
     /** 提成上报集团：将当前筛选条件下非"已上报集团"的数据锁定为"已上报集团"，返回受影响行数 */
     int reportToGroup(String company, String batchNo, String agent, String receiptNo, String category);
     /** 品类提成汇总：按品类×公司汇总非已上报数据（提成金额+销售额），按模板格式生成 Excel 流式输出 */

@@ -55,6 +55,10 @@ public class BusinessDataController {
     @Value("${app.import.template-path:/home/jason/1.xlsx}")
     private String templatePath;
 
+    /** 上传根目录——同步导出（Kafka 降级）的 XLSX 落盘在 {uploadBaseDir}/exports/ 下 */
+    @Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
+    private String uploadBaseDir;
+
     @PostConstruct
     void ensureImportDir() {
         try {
@@ -83,8 +87,10 @@ public class BusinessDataController {
                      @RequestParam(required = false) String agent,
                      @RequestParam(required = false) String receiptNo,
                      @RequestParam(required = false) String category,
-                     @RequestParam(required = false) String isSpecial) {
-        return R.ok(service.page(pageNum, pageSize, company, batchNo, agent, receiptNo, category, isSpecial));
+                     @RequestParam(required = false) String isSpecial,
+                     @RequestParam(required = false) String brand,
+                     @RequestParam(required = false) String model) {
+        return R.ok(service.page(pageNum, pageSize, company, batchNo, agent, receiptNo, category, isSpecial, brand, model));
     }
 
     @GetMapping("/batches")
@@ -198,15 +204,19 @@ public class BusinessDataController {
         String batchNo = params.get("batchNo");
         String agent = params.get("agent");
         String category = params.get("category");
+        String brand = params.get("brand");
+        String model = params.get("model");
 
         String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
         String fileName = "业务数据_" + ts + ".xlsx";
 
         Map<String, String> filters = new LinkedHashMap<>();
-        if (company != null) filters.put("company", company);
-        if (batchNo != null) filters.put("batchNo", batchNo);
-        if (agent != null) filters.put("agent", agent);
-        if (category != null) filters.put("category", category);
+        if (company != null && !company.isBlank()) filters.put("company", company);
+        if (batchNo != null && !batchNo.isBlank()) filters.put("batchNo", batchNo);
+        if (agent != null && !agent.isBlank()) filters.put("agent", agent);
+        if (category != null && !category.isBlank()) filters.put("category", category);
+        if (brand != null && !brand.isBlank()) filters.put("brand", brand);
+        if (model != null && !model.isBlank()) filters.put("model", model);
         String filtersJson;
         try { filtersJson = objectMapper.writeValueAsString(filters); } catch (Exception e) { filtersJson = "{}"; }
 
@@ -221,18 +231,31 @@ public class BusinessDataController {
             log.info("Export task submitted: id={} type=business_data kafka=sent", task.getId());
         } catch (Exception e) {
             log.warn("Kafka unavailable, fallback to sync export for taskId={}", task.getId());
-            try {
-                taskService.updateStatus(task.getId(), "PROCESSING", "Kafka不可用，同步导出中...");
-                service.exportExcel(company, batchNo, agent, null);
-                taskService.markDone(task.getId(), "/home/jason/exports/" + fileName, 0L);
-                return R.ok(Map.of("taskId", task.getId(), "status", "DONE", "fallback", true));
-            } catch (Exception ex) {
-                taskService.markFailed(task.getId(), ex.getMessage());
-                return R.ok(Map.of("taskId", task.getId(), "status", "FAILED", "error", ex.getMessage()));
-            }
+            return syncExportFallback(task, company, batchNo, agent, category, brand, model);
         }
 
         return R.ok(Map.of("taskId", task.getId(), "status", "PENDING"));
+    }
+
+    /** Kafka 不可用时的同步导出：直接生成 XLSX 落盘并复用下载链路（真实路径+真实大小） */
+    private R<Map<String, Object>> syncExportFallback(SysExportTask task, String company, String batchNo,
+                                                      String agent, String category, String brand, String model) {
+        Path outFile = null;
+        try {
+            taskService.updateStatus(task.getId(), "PROCESSING", "Kafka不可用，同步导出中...");
+            String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+            outFile = Path.of(uploadBaseDir, "exports", "业务数据_" + ts + "_" + task.getId() + ".xlsx");
+            service.exportExcel(company, batchNo, agent, category, brand, model, outFile);
+            if (!Files.exists(outFile) || Files.size(outFile) == 0) {
+                throw new IOException("导出文件生成失败: " + outFile);
+            }
+            taskService.markDone(task.getId(), outFile.toAbsolutePath().toString(), Files.size(outFile));
+            return R.ok(Map.of("taskId", task.getId(), "status", "DONE", "fallback", true));
+        } catch (Exception ex) {
+            log.error("Sync export fallback failed for taskId={}", task.getId(), ex);
+            taskService.markFailed(task.getId(), ex.getMessage());
+            return R.ok(Map.of("taskId", task.getId(), "status", "FAILED", "error", ex.getMessage()));
+        }
     }
 
     /** Poll task status — delegates to generic ExportTaskService. */
