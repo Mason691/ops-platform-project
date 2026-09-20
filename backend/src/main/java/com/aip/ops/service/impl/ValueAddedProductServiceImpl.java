@@ -34,6 +34,9 @@ public class ValueAddedProductServiceImpl implements ValueAddedProductService {
     private static final Set<String> DEFAULT_CATEGORIES =
             Set.of("燃气灶", "抽油烟机", "壁挂炉", "热水器");
 
+    /** 导出限定核心四品类 itemKey（1燃气灶/2抽油烟机/3热水器/4壁挂炉） */
+    private static final List<String> CORE_EXPORT_CATEGORY_KEYS = List.of("1", "2", "3", "4");
+
     /** 品类 itemKey→中文名 兜底映射（字典 API 不可达时使用），与 BusinessDataServiceImpl 静态字典一致 */
     private static final Map<String, String> DEFAULT_KEY_TO_CN = Map.ofEntries(
             Map.entry("1", "燃气灶"), Map.entry("2", "抽油烟机"),
@@ -107,8 +110,8 @@ public class ValueAddedProductServiceImpl implements ValueAddedProductService {
     }
 
     @Override
-    public void export(String category, String brand, String model, Integer status, HttpServletResponse response) {
-        List<OpsValueAddedProduct> rows = mapper.selectList(buildQuery(category, brand, model, status));
+    public void export(String brand, String model, Integer status, HttpServletResponse response) {
+        List<OpsValueAddedProduct> rows = mapper.selectList(buildCoreQuery(brand, model, status));
         String baseName = "增值产品信息_" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         Path tmpDir = null;
         try {
@@ -134,21 +137,25 @@ public class ValueAddedProductServiceImpl implements ValueAddedProductService {
         }
     }
 
-    /** TSV → XLSX（生产 Docker 内置 openpyxl）；环境缺失时返回 false 降级输出 TSV。 */
+    /** TSV → 样式化 XLSX（生产 Docker 内置 openpyxl）；
+     *  环境缺失或执行失败时返回 false 降级输出 TSV。 */
     private boolean convertToXlsx(Path tsvFile, Path xlsxFile) {
+        Path pyFile = null;
         try {
-            int exit = new ProcessBuilder("python3", "-c",
-                    "import openpyxl,sys\n"
-                  + "wb=openpyxl.Workbook()\n"
-                  + "ws=wb.active\n"
-                  + "lines=open('" + tsvFile.toAbsolutePath() + "').read().strip().split('\\n')\n"
-                  + "for line in lines:\n  ws.append(line.split('\\t'))\n"
-                  + "wb.save('" + xlsxFile.toAbsolutePath() + "')\n"
-            ).redirectErrorStream(true).start().waitFor();
+            pyFile = Files.createTempFile("product_export_", ".py");
+            Files.writeString(pyFile, PRODUCT_EXPORT_PYTHON_SCRIPT
+                    .replace("__TSV__", tsvFile.toAbsolutePath().toString())
+                    .replace("__XLSX__", xlsxFile.toAbsolutePath().toString()));
+            int exit = new ProcessBuilder("python3", pyFile.toAbsolutePath().toString())
+                    .redirectErrorStream(true).start().waitFor();
             return exit == 0 && Files.exists(xlsxFile);
         } catch (Exception e) {
             log.warn("python3 openpyxl 转换失败，降级 TSV 导出", e);
             return false;
+        } finally {
+            if (pyFile != null) {
+                try { Files.deleteIfExists(pyFile); } catch (Exception ignored) { }
+            }
         }
     }
 
@@ -180,6 +187,18 @@ public class ValueAddedProductServiceImpl implements ValueAddedProductService {
         return qw;
     }
 
+    /** 导出专用：恒为核心四品类（itemKey 1燃气灶/2抽油烟机/3热水器/4壁挂炉），
+     *  品牌/型号/状态筛选与列表一致；排序=品类 itemKey 升序（即四品类业务顺序）+ id 升序。 */
+    private LambdaQueryWrapper<OpsValueAddedProduct> buildCoreQuery(String brand, String model, Integer status) {
+        LambdaQueryWrapper<OpsValueAddedProduct> qw = new LambdaQueryWrapper<>();
+        qw.in(OpsValueAddedProduct::getCategory, CORE_EXPORT_CATEGORY_KEYS);
+        if (brand != null && !brand.isEmpty()) qw.eq(OpsValueAddedProduct::getBrand, brand);
+        if (model != null && !model.isEmpty()) qw.like(OpsValueAddedProduct::getModel, model.trim());
+        if (status != null) qw.eq(OpsValueAddedProduct::getStatus, status);
+        qw.orderByAsc(OpsValueAddedProduct::getCategory).orderByAsc(OpsValueAddedProduct::getId);
+        return qw;
+    }
+
     private String buildTsv(List<OpsValueAddedProduct> rows, Map<String, String> keyToCn) {
         StringBuilder sb = new StringBuilder();
         sb.append("品牌\t品类\t型号\t销售价\t零售底价\t集团最低价\t状态\t描述\t备注\n");
@@ -198,6 +217,65 @@ public class ValueAddedProductServiceImpl implements ValueAddedProductService {
     }
 
     private String fmt(Object o) { return o == null ? "" : String.valueOf(o); }
+
+    /** 产品导出 XLSX 生成脚本：表头白字蓝底加粗、细边框、冻结首行、斑马纹、
+     *  价格列数值化 + 千分位、列宽按内容自适应（中文按 2 字符计，钳制上下限）。 */
+    private static final String PRODUCT_EXPORT_PYTHON_SCRIPT = """
+            import openpyxl
+            from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+            from openpyxl.utils import get_column_letter
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = '产品信息'
+            thin = Side(style='thin', color='BFBFBF')
+            border = Border(left=thin, right=thin, top=thin, bottom=thin)
+            header_font = Font(bold=True, color='FFFFFF', size=11)
+            header_fill = PatternFill(start_color='305496', end_color='305496', fill_type='solid')
+            zebra_fill = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
+            center = Alignment(horizontal='center', vertical='center')
+            left = Alignment(horizontal='left', vertical='center', wrap_text=True)
+            PRICE_COLS = {4, 5, 6}
+            TEXT_COLS = {8, 9}
+            MIN_W = {1: 10, 2: 12, 3: 18, 4: 12, 5: 12, 6: 14, 7: 8, 8: 26, 9: 16}
+            lines = open('__TSV__', encoding='utf-8').read().rstrip('\\n').split('\\n')
+            rows = [line.split('\\t') for line in lines]
+            ws.append(rows[0])
+            for c in ws[1]:
+                c.font = header_font
+                c.fill = header_fill
+                c.border = border
+                c.alignment = center
+            ws.row_dimensions[1].height = 24
+            for i, r in enumerate(rows[1:], start=2):
+                for j, v in enumerate(r, start=1):
+                    if j in PRICE_COLS and v.strip():
+                        ws.cell(row=i, column=j, value=float(v))
+                    else:
+                        ws.cell(row=i, column=j, value=v)
+            for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+                striped = row[0].row % 2 == 0
+                for c in row:
+                    c.border = border
+                    c.alignment = left if c.column in TEXT_COLS else center
+                    if striped:
+                        c.fill = zebra_fill
+                    if c.column in PRICE_COLS and isinstance(c.value, float):
+                        c.number_format = '#,##0.00'
+            def disp_len(v):
+                if v is None:
+                    return 0
+                return sum(2 if ord(ch) > 127 else 1 for ch in str(v))
+            widths = {}
+            for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+                for c in row:
+                    w = disp_len(c.value) + 2
+                    if w > widths.get(c.column, 0):
+                        widths[c.column] = w
+            for col, w in widths.items():
+                ws.column_dimensions[get_column_letter(col)].width = max(MIN_W.get(col, 10), min(w, 40))
+            ws.freeze_panes = 'A2'
+            wb.save('__XLSX__')
+            """;
 
     @Override
     public OpsValueAddedProduct getById(Long id) {
