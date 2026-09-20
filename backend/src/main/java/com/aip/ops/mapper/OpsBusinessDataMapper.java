@@ -31,6 +31,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "
             + "<if test='receiptNo != null and receiptNo != \"\"'>AND receipt_no = #{receiptNo}</if> "
             + "<if test='category != null and category != \"\"'>AND category = #{category}</if> "
+            +  "<if test='isSpecial != null and isSpecial != \"\"'>AND is_special = #{isSpecial}</if> "
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
             + "GROUP BY 1, category, model"
             + ") t"
@@ -40,6 +41,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
                                            @Param("agent") String agent,
                                            @Param("receiptNo") String receiptNo,
                                            @Param("category") String category,
+                                           @Param("isSpecial") String isSpecial,
                                            @Param("corpIds") List<Long> corpIds);
 
     /** Per-category totals for current filter — same (receipt_no, category, model)
@@ -59,6 +61,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "
             + "<if test='receiptNo != null and receiptNo != \"\"'>AND receipt_no = #{receiptNo}</if> "
             + "<if test='category != null and category != \"\"'>AND category = #{category}</if> "
+            +  "<if test='isSpecial != null and isSpecial != \"\"'>AND is_special = #{isSpecial}</if> "
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
             + "GROUP BY 1, category, model"
             + ") t GROUP BY t.category ORDER BY SUM(t.sale_price) DESC"
@@ -68,6 +71,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
                                             @Param("agent") String agent,
                                             @Param("receiptNo") String receiptNo,
                                             @Param("category") String category,
+                                            @Param("isSpecial") String isSpecial,
                                             @Param("corpIds") List<Long> corpIds);
 
     /** Count only — delegates to COUNT(*) for speed. */
@@ -78,6 +82,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "
             + "<if test='receiptNo != null and receiptNo != \"\"'>AND receipt_no = #{receiptNo}</if> "
             + "<if test='category != null and category != \"\"'>AND category = #{category}</if> "
+            +  "<if test='isSpecial != null and isSpecial != \"\"'>AND is_special = #{isSpecial}</if> "
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
             + "</script>")
     long countFiltered(@Param("company") String company,
@@ -85,6 +90,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
                        @Param("agent") String agent,
                        @Param("receiptNo") String receiptNo,
                        @Param("category") String category,
+                       @Param("isSpecial") String isSpecial,
                        @Param("corpIds") List<Long> corpIds);
 
     /** Find which receipt numbers from the given set already exist in DB (within corp scope). */

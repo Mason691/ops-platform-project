@@ -24,7 +24,6 @@ import javax.sql.DataSource;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 
-import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.servlet.http.HttpServletResponse;
@@ -56,8 +55,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final PlatformInternalClient platformInternalClient;
     private final BusinessDataImportHandler importHandler;
     private final ImportTaskService importTaskService;
-
-    private static final Set<String> VALID_COMPANIES = Set.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
 
     /** 锁定状态：已上报集团的数据禁止删除/修改/重新计算（所有组织一致） */
     public static final String REPORTED_STATUS = "已上报集团";
@@ -181,16 +178,16 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
-    public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category) {
+    public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial) {
         // Build visible corp IDs once
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
         List<Long> corpIdList = (visibleIds != null && !visibleIds.isEmpty())
                 ? new ArrayList<>(visibleIds) : null;
 
         // ── COUNT + STATS: single-row aggregate queries (no full table scan) ──
-        long total = mapper.countFiltered(company, batchNo, agent, receiptNo, category, corpIdList);
+        long total = mapper.countFiltered(company, batchNo, agent, receiptNo, category, isSpecial, corpIdList);
         java.util.Map<String, java.math.BigDecimal> stats =
-                mapper.aggregateStats(company, batchNo, agent, receiptNo, category, corpIdList);
+                mapper.aggregateStats(company, batchNo, agent, receiptNo, category, isSpecial, corpIdList);
         BigDecimal totalSale = stats != null && stats.get("totalSale") != null
                 ? stats.get("totalSale") : BigDecimal.ZERO;
         BigDecimal totalCommission = stats != null && stats.get("totalCommission") != null
@@ -198,7 +195,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
         // Per-category totals (same dedup rule as overall stats)
         List<Map<String, Object>> categoryStats =
-                mapper.categoryStats(company, batchNo, agent, receiptNo, category, corpIdList);
+                mapper.categoryStats(company, batchNo, agent, receiptNo, category, isSpecial, corpIdList);
         normalizeCategoryStats(categoryStats);
 
         // ── DATA: only fetch the requested page ──
@@ -209,6 +206,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         if (agent != null && !agent.isEmpty()) qw.eq(OpsBusinessData::getAgent, agent);
         if (receiptNo != null && !receiptNo.isEmpty()) qw.eq(OpsBusinessData::getReceiptNo, receiptNo);
         if (category != null && !category.isEmpty()) qw.eq(OpsBusinessData::getCategory, category);
+        if (isSpecial != null && !isSpecial.isEmpty()) qw.eq(OpsBusinessData::getIsSpecial, isSpecial);
         if (corpIdList != null) qw.in(OpsBusinessData::getCorpId, corpIdList);
         qw.orderByDesc(OpsBusinessData::getId);
         qw.last("LIMIT " + offset + "," + pageSize);
@@ -240,17 +238,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         Set<String> set = new LinkedHashSet<>();
         for (OpsBusinessData d : all) if (d.getBatchNo() != null) set.add(d.getBatchNo());
         return new ArrayList<>(set);
-    }
-
-    /**
-     * Parsed row holder — holds parsed cell values before validation and insertion.
-     */
-    private static class ParsedRow {
-        String company, customer, brand, model, catCn, catKey;
-        BigDecimal salePrice;
-        String agent, agentPhone, dept;
-        String saleDate, receiptDate, receiptNo;
-        OpsValueAddedProduct product;
     }
 
     @Override
@@ -286,133 +273,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                     "errors", List.of("导入失败: " + e.getMessage()));
         } finally {
             if (tmpFile != null) try { Files.deleteIfExists(tmpFile); } catch (Exception ignored) {}
-        }
-    }
-
-    /** Parse a single row into a ParsedRow. Only skip completely empty rows. */
-    private ParsedRow parseRow(String[] cols, int customerIdx, int catIdx, int brandIdx,
-            int modelIdx, int priceIdx, int companyIdx, int deptIdx, int agentIdx,
-            int agentPhoneIdx, int saleDateIdx, int recDateIdx, int recNoIdx,
-            Map<String, OpsValueAddedProduct> productMap) {
-        String brand = val(cols, brandIdx), model = val(cols, modelIdx);
-        String cat = val(cols, catIdx);
-        // Only skip completely empty rows; non-appliance categories can lack brand/model
-        if (cat.isEmpty() && brand.isEmpty() && model.isEmpty()) return null;
-
-        ParsedRow pr = new ParsedRow();
-        pr.company = val(cols, companyIdx);
-        pr.customer = val(cols, customerIdx);
-        pr.brand = brand;
-        pr.model = model;
-        pr.catCn = val(cols, catIdx);
-        pr.salePrice = toDecimal(val(cols, priceIdx));
-        pr.agent = val(cols, agentIdx);
-        pr.agentPhone = val(cols, agentPhoneIdx);
-        pr.dept = val(cols, deptIdx);
-        pr.saleDate = normalizeDate(val(cols, saleDateIdx));
-        pr.receiptDate = normalizeDate(val(cols, recDateIdx));
-        pr.receiptNo = val(cols, recNoIdx);
-        return pr;
-    }
-
-    /** Validate a parsed row and add any errors. */
-    private void validateRow(ParsedRow pr, int rowNum, List<String> errors, Set<String> tieredCategories) {
-        if (pr == null) return; // silently skip null rows (brand/model empty)
-        // Category dict check
-        String cat = pr.catCn;
-        if (cat.isEmpty()) {
-            errors.add("第" + rowNum + "行: 品类为空");
-        } else {
-            Set<String> valid = loadValidCategories();
-            if (!valid.contains(cat)) {
-                errors.add("第" + rowNum + "行: 品类'" + cat + "'不在字典范围内");
-            }
-        }
-        if (pr.company.isEmpty())
-            errors.add("第" + rowNum + "行: 公司为空");
-        else if (!VALID_COMPANIES.contains(pr.company))
-            errors.add("第" + rowNum + "行: 无效公司 \"" + pr.company + "\"");
-        // Brand/model required only for tiered commission categories
-        if (pr.catKey != null && tieredCategories.contains(pr.catKey)) {
-            if (pr.brand.isEmpty())
-                errors.add("第" + rowNum + "行: 该品类存在阶梯提成规则，品牌不能为空");
-            if (pr.model.isEmpty())
-                errors.add("第" + rowNum + "行: 该品类存在阶梯提成规则，型号不能为空");
-        }
-        if (pr.agent.isEmpty() || pr.agent.isBlank())
-            errors.add("第" + rowNum + "行: 经办人为空");
-        if (pr.salePrice == null)
-            errors.add("第" + rowNum + "行: 销售价为空或格式不正确");
-        else if (pr.salePrice.compareTo(java.math.BigDecimal.ZERO) < 0)
-            errors.add("第" + rowNum + "行: 销售价不能为负数");
-        String ap = pr.agentPhone;
-        if (ap.isEmpty())
-            errors.add("第" + rowNum + "行: 经办人手机号为空");
-        else if (!ap.matches("\\d{11}"))
-            errors.add("第" + rowNum + "行: 经办人手机号格式不正确");
-    }
-
-    /**
-     * Validate only customer name consistency within the same receipt number.
-     * Multiple products of different categories/brands/models/prices on one
-     * receipt is normal business practice; we only flag genuinely conflicting
-     * customer names.
-     */
-    private void validateReceiptGroups(List<ParsedRow> rows, List<String> errors) {
-        Map<String, List<Integer>> groups = new LinkedHashMap<>();
-        for (int i = 0; i < rows.size(); i++) {
-            ParsedRow pr = rows.get(i);
-            if (pr.receiptNo != null && !pr.receiptNo.isEmpty()) {
-                groups.computeIfAbsent(pr.receiptNo, k -> new ArrayList<>()).add(i);
-            }
-        }
-
-        for (Map.Entry<String, List<Integer>> entry : groups.entrySet()) {
-            String receiptNo = entry.getKey();
-            List<Integer> indices = entry.getValue();
-            if (indices.size() <= 1) continue;
-
-            int baseIdx = indices.get(0);
-            ParsedRow base = rows.get(baseIdx);
-            int baseRowNum = baseIdx + 2;
-
-            for (int j = 1; j < indices.size(); j++) {
-                int compIdx = indices.get(j);
-                ParsedRow comp = rows.get(compIdx);
-                int compRowNum = compIdx + 2;
-
-                if (!Objects.equals(base.customer, comp.customer)) {
-                    errors.add("收据号" + receiptNo + "：第" + baseRowNum
-                            + "行与第" + compRowNum + "行的客户名称不一致");
-                }
-            }
-        }
-    }
-
-    private int compareBigDecimal(BigDecimal a, BigDecimal b) {
-        if (a == null && b == null) return 0;
-        if (a == null || b == null) return -1;
-        return a.compareTo(b);
-    }
-
-    /** Load categories with "阶梯" commission type from ops_personal_commission_rule. */
-    private Set<String> loadTieredCommissionCategories(Long corpId) {
-        try {
-            List<OpsPersonalCommissionRule> rules = ruleMapper.selectList(
-                    new LambdaQueryWrapper<OpsPersonalCommissionRule>()
-                            .eq(OpsPersonalCommissionRule::getCorpId, corpId)
-                            .eq(OpsPersonalCommissionRule::getCommissionType, "阶梯")
-                            .eq(OpsPersonalCommissionRule::getStatus, 1));
-            if (rules.isEmpty()) return Set.of();
-            Set<String> cats = new HashSet<>();
-            for (OpsPersonalCommissionRule r : rules) {
-                if (r.getCategory() != null && !r.getCategory().isBlank())
-                    cats.add(r.getCategory());
-            }
-            return cats;
-        } catch (Exception e) {
-            log.warn("Failed to load tiered commission categories for corpId={}", corpId, e);
-            return Set.of();
         }
     }
 
@@ -573,6 +433,16 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         // ── Phase 1: Compute per-row commission (in-memory, per-corp rule matching) ──
         Map<Long, BigDecimal[]> results = new LinkedHashMap<>();
         for (OpsBusinessData d : uncalcs) {
+            if (isSpecial(d)) {
+                // 特批行：提成 = 销售价 × 提成比例 / 100，跳过个人提成规则匹配
+                BigDecimal rate = d.getCommissionRate() != null
+                        ? d.getCommissionRate() : BigDecimal.ZERO;
+                BigDecimal amt = d.getSalePrice() == null ? BigDecimal.ZERO
+                        : d.getSalePrice().multiply(rate)
+                                .divide(HUNDRED, 2, RoundingMode.HALF_UP);
+                results.put(d.getId(), new BigDecimal[]{rate, amt});
+                continue;
+            }
             Long dCorpId = d.getCorpId() != null ? d.getCorpId() : 0L;
             Map<String, OpsPersonalCommissionRule> corpRuleMap = ruleMapByCorp.getOrDefault(dCorpId,
                     ruleMapByCorp.getOrDefault(0L, Collections.emptyMap()));
@@ -665,20 +535,23 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         int splitGroups = 0;
         for (Map.Entry<String, List<OpsBusinessData>> entry : groups.entrySet()) {
             List<OpsBusinessData> group = entry.getValue();
-            if (group.size() <= 1) continue;
+            // 特批行不参与均分（提成按提成比例独立计算），仅对组内非特批行均分
+            List<OpsBusinessData> splittable = group.stream()
+                    .filter(d -> !isSpecial(d)).toList();
+            if (splittable.size() <= 1) continue;
             splitGroups++;
 
             // Within a (receiptNo, customer, category, model) group, all rows
             // represent the same product sold to the same customer, so every row
             // should match the same commission rule and yield the same amount.
             // We pick the first row's result as the reference for splitting.
-            BigDecimal[] firstResult = results.get(group.get(0).getId());
+            BigDecimal[] firstResult = results.get(splittable.get(0).getId());
             BigDecimal totalAmount = (firstResult != null && firstResult[1] != null)
                     ? firstResult[1] : BigDecimal.ZERO;
             BigDecimal originalRate = (firstResult != null && firstResult[0] != null)
                     ? firstResult[0] : BigDecimal.ZERO;
 
-            int n = group.size();
+            int n = splittable.size();
             // Rate per row = rule rate ÷ N (spec §2.4)
             BigDecimal perRowRate = originalRate.divide(
                     BigDecimal.valueOf(n), 2, RoundingMode.HALF_UP);
@@ -694,7 +567,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                     originalRate, perRowRate);
 
             for (int i = 0; i < n; i++) {
-                OpsBusinessData d = group.get(i);
+                OpsBusinessData d = splittable.get(i);
                 BigDecimal finalAmount = (i < n - 1) ? baseAmount : remainder;
                 results.put(d.getId(), new BigDecimal[]{perRowRate, finalAmount});
             }
@@ -767,6 +640,13 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         }
     }
 
+    private static final BigDecimal HUNDRED = new BigDecimal("100");
+
+    /** 是否特比行：特批行提成直接按提成比例计算，不参与规则匹配与均分。 */
+    private boolean isSpecial(OpsBusinessData d) {
+        return "是".equals(d.getIsSpecial());
+    }
+
     private BigDecimal[] calcCommissionAmount(BigDecimal salePrice, BigDecimal floorPrice,
                                                BigDecimal groupPrice, OpsPersonalCommissionRule rule) {
         BigDecimal zero = BigDecimal.ZERO;
@@ -816,7 +696,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             Path xlsFile = Path.of(tsvFile.toString().replace(".tsv", ".xlsx"));
             // Write header + rows as tab-separated
             StringBuilder sb = new StringBuilder();
-            sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t收款金额\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\n");
+            sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t收款金额\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t是否特比\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\n");
             for (OpsBusinessData d : all) {
                 sb.append(fmt(d.getBatchNo())).append('\t')
                   .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
@@ -828,6 +708,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                   .append(fmt(d.getCommissionRate())).append('\t').append(fmt(d.getCommissionAmount())).append('\t')
                   .append(fmt(d.getCalcStatus())).append('\t').append(fmt(d.getAgent())).append('\t')
                   .append(fmt(d.getAgentPhone())).append('\t')
+                  .append(fmt(d.getIsSpecial())).append('\t')
                   .append(fmt(d.getSaleDate())).append('\t').append(fmt(d.getReceiptDate())).append('\t')
                   .append(fmt(d.getFinanceReceiptDate())).append('\t').append(fmt(d.getFundDynamicRows())).append('\t')
                   .append(fmt(d.getReceiptNo())).append('\n');
@@ -1295,32 +1176,4 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         return out;
     }
 
-    private int indexOf(String[] arr, String key) {
-        for (int i = 0; i < arr.length; i++) if (arr[i].contains(key)) return i;
-        return -1;
-    }
-
-    private String val(String[] arr, int idx) {
-        return idx >= 0 && idx < arr.length ? arr[idx].trim() : "";
-    }
-
-    private BigDecimal toDecimal(String s) {
-        if (s == null || s.isEmpty()) return null;
-        try { return new BigDecimal(s); } catch (Exception e) { return null; }
-    }
-
-    /**
-     * Normalize a date string from openpyxl to YYYY-MM-DD.
-     * openpyxl outputs datetime objects as "2026-06-30 00:00:00".
-     * Returns empty string if input is blank.
-     */
-    private String normalizeDate(String raw) {
-        if (raw == null || raw.isBlank()) return "";
-        // openpyxl: "2026-06-30 00:00:00" → extract date part
-        if (raw.contains(" ") && raw.length() >= 10) {
-            String datePart = raw.substring(0, 10);
-            if (datePart.matches("\\d{4}-\\d{2}-\\d{2}")) return datePart;
-        }
-        return raw.trim();
-    }
 }

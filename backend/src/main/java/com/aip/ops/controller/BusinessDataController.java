@@ -81,8 +81,9 @@ public class BusinessDataController {
                      @RequestParam(required = false) String batchNo,
                      @RequestParam(required = false) String agent,
                      @RequestParam(required = false) String receiptNo,
-                     @RequestParam(required = false) String category) {
-        return R.ok(service.page(pageNum, pageSize, company, batchNo, agent, receiptNo, category));
+                     @RequestParam(required = false) String category,
+                     @RequestParam(required = false) String isSpecial) {
+        return R.ok(service.page(pageNum, pageSize, company, batchNo, agent, receiptNo, category, isSpecial));
     }
 
     @GetMapping("/batches")

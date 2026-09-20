@@ -77,6 +77,9 @@ public class BusinessDataImportHandler implements ImportHandler {
         String fundDynamicRowsRaw;
         Integer fundDynamicRows;
         OpsValueAddedProduct product;
+        int rowNum;                 // 文件行号（表头=1，数据行从 2 起）
+        boolean special;            // 是否特比 = "是"
+        BigDecimal commissionRate;  // 提成比例（%），特批行导入时落库 commission_rate
     }
 
     @Override
@@ -143,6 +146,9 @@ public class BusinessDataImportHandler implements ImportHandler {
         int financeDateIdx = indexOf(headers, "财务收款日期");
         int fundRowsIdx = indexOf(headers, "资金动态表横排数");
         int recNoIdx = indexOf(headers, "收据号");
+        // 特批两列必须精确匹配：contains 匹配会先命中"是否特比"列
+        int specialIdx = indexOfExact(headers, "是否特比");
+        int ratioIdx = indexOfExact(headers, "提成比例");
 
         // Load categories from platform dict
         Set<String> validCategories = loadValidCategories();
@@ -172,8 +178,9 @@ public class BusinessDataImportHandler implements ImportHandler {
             ParsedRow pr = parseRow(cols, customerIdx, catIdx, brandIdx,
                     modelIdx, priceIdx, companyIdx, deptIdx, agentIdx,
                     agentPhoneIdx, saleDateIdx, recDateIdx, financeDateIdx,
-                    fundRowsIdx, recNoIdx);
+                    fundRowsIdx, recNoIdx, specialIdx, ratioIdx);
             if (pr != null) {
+                pr.rowNum = i + 1;
                 checkCategory(pr, i + 1, validCategories, errors);
                 // Resolve category key BEFORE validation (needed for tiered check)
                 pr.catKey = mapCategoryKey(pr.catCn);
@@ -188,6 +195,13 @@ public class BusinessDataImportHandler implements ImportHandler {
         // If ANY row failed validation → reject entire file
         if (!errors.isEmpty()) {
             return ImportResult.fail("ROW_CHECK", errors, totalRows);
+        }
+
+        // ── Phase 1a: 品牌型号校验（非特批 + 核心四品类必须与产品信息表精确匹配）──
+        List<String> productErrors = new ArrayList<>();
+        validateProductBrandModel(parsedRows, prods, productErrors);
+        if (!productErrors.isEmpty()) {
+            return ImportResult.fail("ROW_CHECK", productErrors, totalRows);
         }
 
         // ── Phase 1b: Receipt number group validation ──
@@ -228,11 +242,12 @@ public class BusinessDataImportHandler implements ImportHandler {
 
         String insertSql = "INSERT INTO ops_business_data "
                 + "(batch_no, company, customer, brand, category, model, "
-                + "sale_price, agent, agent_phone, sale_date, receipt_date, "
+                + "sale_price, agent, agent_phone, is_special, commission_rate, "
+                + "sale_date, receipt_date, "
                 + "finance_receipt_date, fund_dynamic_rows, "
                 + "receipt_no, retail_floor_price, group_lowest_price, "
                 + "calc_status, remark, corp_id, operator_id) "
-                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
         int batchCount = 0;
         PreparedStatement ps = DataSourceUtils.getConnection(dataSource)
@@ -252,6 +267,9 @@ public class BusinessDataImportHandler implements ImportHandler {
                 ps.setBigDecimal(idx++, pr.salePrice);
                 ps.setString(idx++, pr.agent);
                 ps.setString(idx++, pr.agentPhone);
+                ps.setString(idx++, pr.special ? "是" : "否");
+                // 特批行的提成比例直接落库 commission_rate；非特批行留空，由提成计算按规则填充
+                ps.setBigDecimal(idx++, pr.special ? pr.commissionRate : null);
                 ps.setString(idx++, pr.saleDate);
                 ps.setString(idx++, pr.receiptDate);
                 ps.setString(idx++, pr.financeReceiptDate);
@@ -392,13 +410,15 @@ public class BusinessDataImportHandler implements ImportHandler {
             errors.add("第" + rowNum + "行: 公司为空");
         else if (!VALID_COMPANIES.contains(pr.company))
             errors.add("第" + rowNum + "行: 无效公司 \"" + pr.company + "\"");
-        // Brand/model required only for tiered commission categories (by category key)
-        if (pr.catKey != null && tieredCategories.contains(pr.catKey)) {
+        // Brand/model required only for tiered commission categories (by category key).
+        // 特批行按提成比例直接计算提成、不参与规则匹配，品牌/型号不作此限制
+        if (!pr.special && pr.catKey != null && tieredCategories.contains(pr.catKey)) {
             if (pr.brand.isEmpty())
                 errors.add("第" + rowNum + "行: 该品类存在阶梯提成规则，品牌不能为空");
             if (pr.model.isEmpty())
                 errors.add("第" + rowNum + "行: 该品类存在阶梯提成规则，型号不能为空");
         }
+        validateSpecialRatio(pr, rowNum, errors);
         if (pr.agent == null || pr.agent.isBlank())
             errors.add("第" + rowNum + "行: 经办人为空");
         if (pr.salePrice == null)
@@ -426,6 +446,61 @@ public class BusinessDataImportHandler implements ImportHandler {
         if (pr.fundDynamicRowsRaw != null && !pr.fundDynamicRowsRaw.isEmpty()
                 && pr.fundDynamicRows == null)
             errors.add("第" + rowNum + "行: 资金动态表横排数必须为数字");
+    }
+
+    /** 提成比例：特批=是 → 必填且大于 0；特批=否/空 → 可空（按默认"否"处理） */
+    private void validateSpecialRatio(ParsedRow pr, int rowNum, List<String> errors) {
+        if (pr.special && (pr.commissionRate == null
+                || pr.commissionRate.compareTo(BigDecimal.ZERO) <= 0)) {
+            errors.add("第" + rowNum + "行: 是否特比为'是'时，提成比例必填且必须大于0");
+        }
+    }
+
+    // ═══════ 品牌型号校验（核心四品类） ═══════
+
+    /** 核心四品类 itemKey：燃气灶(1)、抽油烟机(2)、热水器(3)、壁挂炉(4) */
+    private static final Set<String> CORE_FOUR_CATEGORIES = Set.of("1", "2", "3", "4");
+
+    /**
+     * 非特批 + 核心四品类行：品牌+型号必须与增值产品信息表精确匹配。
+     * 任一不匹配 → 整文件拒绝；错误列表含所有失败行（行号/品类/品牌/型号）
+     * + 每个失败品类在信息表中的可用品牌型号参考（同一品类只列一次）。
+     */
+    private void validateProductBrandModel(List<ParsedRow> rows,
+            List<OpsValueAddedProduct> prods, List<String> errors) {
+        List<ParsedRow> failed = new ArrayList<>();
+        for (ParsedRow pr : rows) {
+            if (!pr.special && pr.catKey != null
+                    && CORE_FOUR_CATEGORIES.contains(pr.catKey)
+                    && pr.product == null) {
+                failed.add(pr);
+            }
+        }
+        if (failed.isEmpty()) return;
+
+        errors.add("以下数据的品牌型号在增值产品信息表中不存在，请修正后重新导入：");
+        for (ParsedRow pr : failed) {
+            errors.add("第" + pr.rowNum + "行：品类=" + pr.catCn + "，品牌="
+                    + pr.brand + "，型号=" + pr.model);
+        }
+        Set<String> emittedCats = new LinkedHashSet<>();
+        for (ParsedRow pr : failed) {
+            if (!emittedCats.add(pr.catKey)) continue;
+            Map<String, List<String>> byBrand = new LinkedHashMap<>();
+            for (OpsValueAddedProduct p : prods) {
+                if (pr.catKey.equals(p.getCategory())) {
+                    byBrand.computeIfAbsent(p.getBrand(), k -> new ArrayList<>())
+                            .add(p.getModel());
+                }
+            }
+            List<String> parts = new ArrayList<>();
+            for (Map.Entry<String, List<String>> e : byBrand.entrySet()) {
+                parts.add(e.getKey() + "：" + String.join("、", e.getValue()));
+            }
+            errors.add("增值产品信息表中【" + pr.catCn + "】可用的品牌型号如下："
+                    + (parts.isEmpty() ? "（该品类暂无可用产品）"
+                            : String.join("；", parts)));
+        }
     }
 
     // ═══════ Receipt group validation ═══════
@@ -478,7 +553,8 @@ public class BusinessDataImportHandler implements ImportHandler {
     private ParsedRow parseRow(String[] cols, int customerIdx, int catIdx,
             int brandIdx, int modelIdx, int priceIdx, int companyIdx,
             int deptIdx, int agentIdx, int agentPhoneIdx, int saleDateIdx,
-            int recDateIdx, int financeDateIdx, int fundRowsIdx, int recNoIdx) {
+            int recDateIdx, int financeDateIdx, int fundRowsIdx, int recNoIdx,
+            int specialIdx, int ratioIdx) {
         String brand = val(cols, brandIdx);
         String model = val(cols, modelIdx);
         String cat = val(cols, catIdx);
@@ -520,6 +596,10 @@ public class BusinessDataImportHandler implements ImportHandler {
         pr.fundDynamicRowsRaw = rawFundRows;
         pr.fundDynamicRows = toInteger(rawFundRows);
         pr.receiptNo = val(cols, recNoIdx);
+        // 是否特比：仅精确"是"视为特批，空/其它一律按"否"
+        String rawSpecial = val(cols, specialIdx);
+        pr.special = "是".equals(rawSpecial);
+        pr.commissionRate = parseRatio(val(cols, ratioIdx));
         return pr;
     }
 
@@ -571,6 +651,22 @@ public class BusinessDataImportHandler implements ImportHandler {
         for (int i = 0; i < arr.length; i++)
             if (arr[i].contains(key)) return i;
         return -1;
+    }
+
+    /** 精确表头匹配——contains 匹配会先命中"是否特比"导致"提成比例"取错列 */
+    private int indexOfExact(String[] arr, String key) {
+        for (int i = 0; i < arr.length; i++)
+            if (arr[i] != null && arr[i].trim().equals(key)) return i;
+        return -1;
+    }
+
+    /** 解析提成比例：去除末尾 % 后转数字；空/非法 → null（配合特批必填校验） */
+    private BigDecimal parseRatio(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        if (t.isEmpty()) return null;
+        if (t.endsWith("%")) t = t.substring(0, t.length() - 1).trim();
+        return toDecimal(t);
     }
 
     private String val(String[] arr, int idx) {
