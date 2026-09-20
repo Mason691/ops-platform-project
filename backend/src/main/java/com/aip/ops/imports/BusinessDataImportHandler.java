@@ -90,7 +90,7 @@ public class BusinessDataImportHandler implements ImportHandler {
     private static class ParsedRow {
         String company, customer, brand, model, catCn, catKey;
         BigDecimal salePrice;
-        String agent, agentPhone, dept;
+        String agent, agentPhone, dept, remark;
         String saleDate, receiptDate, receiptNo;
         String receiptDateRaw; // raw value for validation (市场收款日期：空=错误)
         String financeReceiptDateRaw, financeReceiptDate;
@@ -582,9 +582,9 @@ public class BusinessDataImportHandler implements ImportHandler {
                 + "(batch_no, company, customer, brand, category, model, "
                 + "sale_price, agent, agent_phone, is_special, commission_rate, "
                 + "sale_date, receipt_date, finance_receipt_date, fund_dynamic_rows, "
-                + "receipt_no, retail_floor_price, group_lowest_price, "
+                + "receipt_no, department, retail_floor_price, group_lowest_price, "
                 + "calc_status, remark, corp_id, operator_id) "
-                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
         int batchCount = 0;
         PreparedStatement ps = DataSourceUtils.getConnection(dataSource)
@@ -610,7 +610,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         }
     }
 
-    /** 绑定 22 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
+    /** 绑定 23 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
     private void bindRow(PreparedStatement ps, ParsedRow pr, String batchNo, Long corpId)
             throws SQLException {
         int idx = 1;
@@ -631,12 +631,14 @@ public class BusinessDataImportHandler implements ImportHandler {
         ps.setString(idx++, pr.financeReceiptDate);
         ps.setObject(idx++, pr.fundDynamicRows);
         ps.setString(idx++, pr.receiptNo);
+        // 部门落库 department 列；备注直接映射 remark（不再拼「部门: 」前缀）
+        ps.setString(idx++, pr.dept.isEmpty() ? null : pr.dept);
         ps.setBigDecimal(idx++, pr.product != null
                 ? pr.product.getRetailFloorPrice() : null);
         ps.setBigDecimal(idx++, pr.product != null
                 ? pr.product.getGroupLowestPrice() : null);
         ps.setString(idx++, "未计算");
-        ps.setString(idx++, pr.dept.isEmpty() ? null : "部门: " + pr.dept);
+        ps.setString(idx++, pr.remark.isEmpty() ? null : pr.remark);
         ps.setLong(idx++, corpId);
         ps.setLong(idx++, corpId);
     }
@@ -719,6 +721,7 @@ public class BusinessDataImportHandler implements ImportHandler {
     private static final int I_RECEIPT_NO = 13;
     private static final int I_SPECIAL = 14;
     private static final int I_RATIO = 15;
+    private static final int I_REMARK = 16;
 
     /** 表头校验 + 定位各列下标；任一必填列缺失 → 错误并返回 null。 */
     private int[] headerIndices(String[] headers, List<String> errors) {
@@ -730,7 +733,7 @@ public class BusinessDataImportHandler implements ImportHandler {
             if (indexOf(headers, h) < 0) errors.add("缺少列: " + h);
         }
         if (!errors.isEmpty()) return null;
-        int[] idx = new int[16];
+        int[] idx = new int[17];
         idx[I_CUSTOMER] = indexOf(headers, "客户");
         idx[I_CATEGORY] = indexOf(headers, "品类");
         idx[I_BRAND] = indexOf(headers, "品牌");
@@ -751,6 +754,8 @@ public class BusinessDataImportHandler implements ImportHandler {
         if (idx[I_SPECIAL] < 0) idx[I_SPECIAL] = indexOfExact(headers, "是否特比");
         if (idx[I_SPECIAL] < 0) idx[I_SPECIAL] = indexOfExact(headers, "是否特批比例");
         idx[I_RATIO] = indexOfExact(headers, "提成比例");
+        // 备注为可选列：模板含该列时映射 remark，缺失时置空
+        idx[I_REMARK] = indexOf(headers, "备注");
         return idx;
     }
 
@@ -928,6 +933,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         String rawSpecial = val(cols, idx[I_SPECIAL]);
         pr.special = "是".equals(rawSpecial);
         pr.commissionRate = parseRatio(val(cols, idx[I_RATIO]));
+        pr.remark = val(cols, idx[I_REMARK]);
         return pr;
     }
 

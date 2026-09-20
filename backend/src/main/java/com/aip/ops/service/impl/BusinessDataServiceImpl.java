@@ -719,10 +719,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             Path xlsFile = Path.of(tsvFile.toString().replace(".tsv", ".xlsx"));
             // Write header + rows as tab-separated
             StringBuilder sb = new StringBuilder();
-            sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t收款金额\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t是否特批\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\n");
+            sb.append("批次\t公司\t客户\t部门\t品牌\t品类\t型号\t收款金额\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\t备注\t是否特批\n");
             for (OpsBusinessData d : all) {
                 sb.append(fmt(d.getBatchNo())).append('\t')
                   .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
+                  .append(fmt(d.getDepartment())).append('\t')
                   .append(fmt(d.getBrand())).append('\t').append(getCategoryDisplayName(d.getCategory())).append('\t')
                   .append(fmt(d.getModel())).append('\t')
                   .append(blankAmountIds.contains(d.getId()) ? "" : fmt(d.getSalePrice())).append('\t')
@@ -731,10 +732,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                   .append(fmt(d.getCommissionRate())).append('\t').append(fmt(d.getCommissionAmount())).append('\t')
                   .append(fmt(d.getCalcStatus())).append('\t').append(fmt(d.getAgent())).append('\t')
                   .append(fmt(d.getAgentPhone())).append('\t')
-                  .append(fmt(d.getIsSpecial())).append('\t')
                   .append(fmt(d.getSaleDate())).append('\t').append(fmt(d.getReceiptDate())).append('\t')
                   .append(fmt(d.getFinanceReceiptDate())).append('\t').append(fmt(d.getFundDynamicRows())).append('\t')
-                  .append(fmt(d.getReceiptNo())).append('\n');
+                  .append(fmt(d.getReceiptNo())).append('\t')
+                  .append(fmt(d.getRemark())).append('\t')
+                  .append(fmt(d.getIsSpecial())).append('\n');
             }
             Files.writeString(tsvFile, sb.toString());
 

@@ -91,14 +91,14 @@ public class BusinessDataExportHandler implements ExportHandler {
         // 写 TSV
         try (BufferedWriter writer = new BufferedWriter(
                 new OutputStreamWriter(out, StandardCharsets.UTF_8))) {
-            writer.write("公司\t批次号\t客户\t经办人\t是否特批\t品牌\t品类\t型号\t收款金额\t销售价\t零售底价\t集团最低价\t销售日期\t收据号\t市场收款日期\t财务收款日期\t资金动态表横排数\t返利比例\t返利金额\t状态\n");
+            writer.write("公司\t批次号\t客户\t部门\t经办人\t品牌\t品类\t型号\t收款金额\t销售价\t零售底价\t集团最低价\t销售日期\t收据号\t市场收款日期\t财务收款日期\t资金动态表横排数\t返利比例\t返利金额\t状态\t备注\t是否特批\n");
             for (OpsBusinessData row : rows) {
                 writer.write(String.join("\t",
                         nvl(row.getCompany()),
                         nvl(row.getBatchNo()),
                         nvl(row.getCustomer()),
+                        nvl(row.getDepartment()),
                         nvl(row.getAgent()),
-                        nvl(row.getIsSpecial()),
                         nvl(row.getBrand()),
                         nvl(BusinessDataServiceImpl.getCategoryDisplayName(row.getCategory())),
                         nvl(row.getModel()),
@@ -114,7 +114,9 @@ public class BusinessDataExportHandler implements ExportHandler {
                         row.getFundDynamicRows() != null ? row.getFundDynamicRows().toString() : "",
                         row.getCommissionRate() != null ? row.getCommissionRate().toString() : "",
                         row.getCommissionAmount() != null ? row.getCommissionAmount().toString() : "",
-                        nvl(row.getCalcStatus())));
+                        nvl(row.getCalcStatus()),
+                        nvl(row.getRemark()),
+                        nvl(row.getIsSpecial())));
                 writer.newLine();
             }
         }

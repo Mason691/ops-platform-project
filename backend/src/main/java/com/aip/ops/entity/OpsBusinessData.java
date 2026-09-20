@@ -66,6 +66,10 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("receipt_no")
     private String receiptNo;
 
+    /** 部门 */
+    @TableField("department")
+    private String department;
+
     @TableField("agent")
     private String agent;
 
@@ -90,6 +94,10 @@ public class OpsBusinessData extends BaseEntity {
 
     @TableField("calc_status")
     private String calcStatus;
+
+    /** 备注（Excel 备注列直接映射） */
+    @TableField("remark")
+    private String remark;
 
     @TableField("usage_date")
     private LocalDate usageDate;

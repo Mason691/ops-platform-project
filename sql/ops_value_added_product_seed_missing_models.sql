@@ -12,6 +12,15 @@ FROM DUAL WHERE NOT EXISTS (
     SELECT 1 FROM ops_value_added_product
     WHERE brand='万和' AND category='1' AND model='B1B08XG' AND delete_flag=0);
 
+-- 万和 Q1L16111：武山特批行（ID=134749）导出底价兜底匹配需要，成交价唯一观测值 800 → 底价 720
+INSERT INTO ops_value_added_product
+    (brand, category, model, sale_price, retail_floor_price, group_lowest_price,
+     operator_id, status, corp_id, delete_flag, remark)
+SELECT '万和', '1', 'Q1L16111', 800.00, 720.00, 720.00, 4, 1, 4, 0, '920.xlsx 导入验证补录'
+FROM DUAL WHERE NOT EXISTS (
+    SELECT 1 FROM ops_value_added_product
+    WHERE brand='万和' AND category='1' AND model='Q1L16111' AND delete_flag=0);
+
 INSERT INTO ops_value_added_product
     (brand, category, model, sale_price, retail_floor_price, group_lowest_price,
      operator_id, status, corp_id, delete_flag, remark)
