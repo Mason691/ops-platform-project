@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -97,7 +98,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         Integer fundDynamicRows;
         OpsValueAddedProduct product;
         int rowNum;                 // 文件行号（表头=1，数据行从 2 起）
-        boolean special;            // 是否特比 = "是"
+        boolean special;            // 是否特批 = "是"
         BigDecimal commissionRate;  // 提成比例（%），特批行导入时落库 commission_rate
     }
 
@@ -362,7 +363,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         return it;
     }
 
-    /** 同品牌同品类的模糊候选：归一化产品型号包含关键词（精确相等已在前面处理）。 */
+    /** 同品牌同品类的模糊候选：归一化产品型号包含关键词（原始精确相等已在前面处理）。 */
     private List<OpsValueAddedProduct> fuzzyCandidates(List<OpsValueAddedProduct> prods,
             String brand, String catKey, String kw) {
         List<OpsValueAddedProduct> cands = new ArrayList<>();
@@ -372,17 +373,20 @@ public class BusinessDataImportHandler implements ImportHandler {
             if (!prod.getBrand().equals(brand)
                     || !prod.getCategory().equals(catKey)) continue;
             String pm = normalizeModel(prod.getModel());
-            if (pm.equals(kw)) continue;
-            if (pm.contains(kw)) cands.add(prod);
+            if (pm.isEmpty()) continue;
+            // 归一化相等也是候选（如 "JZT Q08" 与 "JZT-Q08"），多候选时由操作人员确认
+            if (pm.equals(kw) || pm.contains(kw)) cands.add(prod);
         }
         cands.sort(Comparator.comparing(OpsValueAddedProduct::getId));
         return cands;
     }
 
-    /** 型号归一化：去全部空白 + 转小写（与导出关键字兜底匹配口径一致）。 */
+    /** 型号归一化：NFKC 折叠全角 → 去空白/标点等特殊字符 → 转小写（与导出关键字兜底匹配口径一致）。 */
     private String normalizeModel(String s) {
         if (s == null) return "";
-        return s.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        return Normalizer.normalize(s, Normalizer.Form.NFKC)
+                .replaceAll("[^\\p{L}\\p{N}]", "")
+                .toLowerCase(Locale.ROOT);
     }
 
     private String exactKey(String brand, String catKey, String model) {
@@ -741,8 +745,11 @@ public class BusinessDataImportHandler implements ImportHandler {
         idx[I_FINANCE_DATE] = indexOf(headers, "财务收款日期");
         idx[I_FUND_ROWS] = indexOf(headers, "资金动态表横排数");
         idx[I_RECEIPT_NO] = indexOf(headers, "收据号");
-        // 特批两列必须精确匹配：contains 匹配会先命中"是否特比"列
-        idx[I_SPECIAL] = indexOfExact(headers, "是否特比");
+        // 特批两列必须精确匹配：contains 匹配会先命中"是否特批"列
+        idx[I_SPECIAL] = indexOfExact(headers, "是否特批");
+        // 旧模板曾用"是否特比"（笔误）与"是否特批比例"，向下兼容存量文件
+        if (idx[I_SPECIAL] < 0) idx[I_SPECIAL] = indexOfExact(headers, "是否特比");
+        if (idx[I_SPECIAL] < 0) idx[I_SPECIAL] = indexOfExact(headers, "是否特批比例");
         idx[I_RATIO] = indexOfExact(headers, "提成比例");
         return idx;
     }
@@ -828,9 +835,11 @@ public class BusinessDataImportHandler implements ImportHandler {
 
     /** 提成比例：特批=是 → 必填且大于 0；特批=否/空 → 可空（按默认"否"处理） */
     private void validateSpecialRatio(ParsedRow pr, int rowNum, List<String> errors) {
-        if (pr.special && (pr.commissionRate == null
-                || pr.commissionRate.compareTo(BigDecimal.ZERO) <= 0)) {
-            errors.add("第" + rowNum + "行: 是否特比为'是'时，提成比例必填且必须大于0");
+        if (!pr.special) return;
+        if (pr.commissionRate == null) {
+            errors.add("第" + rowNum + "行：特批数据提成比例不能为空");
+        } else if (pr.commissionRate.compareTo(BigDecimal.ZERO) <= 0) {
+            errors.add("第" + rowNum + "行：特批数据提成比例必须大于0");
         }
     }
 
@@ -915,7 +924,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         pr.fundDynamicRowsRaw = rawFundRows;
         pr.fundDynamicRows = toInteger(rawFundRows);
         pr.receiptNo = val(cols, idx[I_RECEIPT_NO]);
-        // 是否特比：仅精确"是"视为特批，空/其它一律按"否"
+        // 是否特批：仅精确"是"视为特批，空/其它一律按"否"
         String rawSpecial = val(cols, idx[I_SPECIAL]);
         pr.special = "是".equals(rawSpecial);
         pr.commissionRate = parseRatio(val(cols, idx[I_RATIO]));
@@ -988,7 +997,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         return -1;
     }
 
-    /** 精确表头匹配——contains 匹配会先命中"是否特比"导致"提成比例"取错列 */
+    /** 精确表头匹配——contains 匹配会先命中"是否特批"导致"提成比例"取错列 */
     private int indexOfExact(String[] arr, String key) {
         for (int i = 0; i < arr.length; i++)
             if (arr[i] != null && arr[i].trim().equals(key)) return i;

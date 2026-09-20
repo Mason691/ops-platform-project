@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.sql.DataSource;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.text.Normalizer;
 
 import org.springframework.web.multipart.MultipartFile;
 
@@ -168,9 +169,12 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         return containsMatches.size() == 1 ? containsMatches.get(0) : null;
     }
 
-    /** 型号归一化：去全部空白（含全角空格）并转小写，用于关键字包含匹配 */
+    /** 型号归一化：NFKC 折叠全角 → 去空白/标点等特殊字符 → 转小写（与导入匹配口径一致） */
     private static String normalizeModel(String s) {
-        return s.replaceAll("[\\s\\u3000]+", "").toLowerCase();
+        if (s == null) return "";
+        return Normalizer.normalize(s, Normalizer.Form.NFKC)
+                .replaceAll("[^\\p{L}\\p{N}]", "")
+                .toLowerCase(Locale.ROOT);
     }
 
     @Override
@@ -661,7 +665,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     private static final BigDecimal HUNDRED = new BigDecimal("100");
 
-    /** 是否特比行：特批行提成直接按提成比例计算，不参与规则匹配与均分。 */
+    /** 是否特批行：特批行提成直接按提成比例计算，不参与规则匹配与均分。 */
     private boolean isSpecial(OpsBusinessData d) {
         return "是".equals(d.getIsSpecial());
     }
@@ -715,7 +719,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             Path xlsFile = Path.of(tsvFile.toString().replace(".tsv", ".xlsx"));
             // Write header + rows as tab-separated
             StringBuilder sb = new StringBuilder();
-            sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t收款金额\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t是否特比\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\n");
+            sb.append("批次\t公司\t客户\t品牌\t品类\t型号\t收款金额\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t是否特批\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\n");
             for (OpsBusinessData d : all) {
                 sb.append(fmt(d.getBatchNo())).append('\t')
                   .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')

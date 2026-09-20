@@ -78,7 +78,7 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("group_lowest_price")
     private BigDecimal groupLowestPrice;
 
-    /** 是否特比（是/否）——"是"时提成按提成比例字段直接计算，跳过个人提成规则匹配 */
+    /** 是否特批（是/否）——"是"时提成按提成比例字段直接计算，跳过个人提成规则匹配 */
     @TableField("is_special")
     private String isSpecial;
 
