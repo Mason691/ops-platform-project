@@ -1,5 +1,6 @@
 package com.aip.ops.service;
 
+import com.aip.ops.dto.ModelConfirmDecision;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.multipart.MultipartFile;
 import java.util.List;
@@ -8,7 +9,11 @@ import java.util.Map;
 public interface BusinessDataService {
     Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial);
     List<String> getBatches();
-    Map<String, Object> importExcel(MultipartFile file, String batchNo, Long corpId);
+    /** 导入阶段一：文件校验 + 品牌型号匹配解析。返回 status: fail / confirm / ready */
+    Map<String, Object> checkImport(MultipartFile file, Long corpId);
+    /** 导入阶段二：应用型号确认决策后入库。返回 status: success / fail（与历史响应格式一致） */
+    Map<String, Object> confirmImport(MultipartFile file, Long corpId,
+            List<ModelConfirmDecision> decisions, String fileMd5);
     void batchDelete(List<Long> ids);
 
     /** 经办人核对：将指定批次下已计算数据标记为已核对 */

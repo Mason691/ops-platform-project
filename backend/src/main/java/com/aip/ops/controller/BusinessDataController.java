@@ -1,6 +1,7 @@
 package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
+import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.entity.SysExportTask;
 import com.aip.ops.service.BusinessDataService;
@@ -89,29 +90,42 @@ public class BusinessDataController {
     @GetMapping("/batches")
     public R<?> batches() { return R.ok(service.getBatches()); }
 
-    @PostMapping("/import")
-    public R<?> importExcel(@RequestParam("file") MultipartFile file) {
-        String batchNo = "金厨美家" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+    /**
+     * 导入阶段一：上传文件校验 + 品牌型号匹配解析（不写库）。
+     * status: fail（校验失败，errors 列出原因）/ confirm（有模糊型号待人工确认，
+     * pendingItems 列出待确认项与候选产品）/ ready（无需确认，可直接导入）。
+     * confirm 时前端携带本响应中的 fileMd5 以防御两阶段文件不一致。
+     */
+    @OperationLog(module = "增值业务", action = "导入校验", targetTable = "ops_business_data")
+    @PostMapping("/import/check")
+    public R<Map<String, Object>> importCheck(@RequestParam("file") MultipartFile file) {
         Long corpId = SecurityUtils.getCurrentCorpId();
-        return R.ok(service.importExcel(file, batchNo, corpId));
+        return R.ok(service.checkImport(file, corpId));
     }
 
     /**
-     * Import business data synchronously.
-     * Processes the Excel file in the request thread and returns the result
-     * immediately. This avoids the Kafka async pipeline's dependency on
-     * shared consumer groups and ephemeral file storage.
-     * <p>
-     * Response format matches the async style so the frontend works unchanged:
+     * 导入阶段二：携带型号确认决策入库。
+     * confirmations 为 JSON 数组 [{key, productId}]，productId 为 null 表示拒绝该匹配。
+     * 成功/失败响应格式与历史 /import/submit 一致：
      * success → { status: "success", count: N }
      * failure → { status: "fail", totalErrors: N, errors: [...] }
      */
     @OperationLog(module = "增值业务", action = "导入", targetTable = "ops_business_data")
-    @PostMapping("/import/submit")
-    public R<Map<String, Object>> importSubmit(@RequestParam("file") MultipartFile file) {
-        String batchNo = "金厨美家" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+    @PostMapping("/import/confirm")
+    public R<Map<String, Object>> importConfirm(@RequestParam("file") MultipartFile file,
+            @RequestParam("confirmations") String confirmationsJson,
+            @RequestParam(value = "fileMd5", required = false) String fileMd5) {
         Long corpId = SecurityUtils.getCurrentCorpId();
-        Map<String, Object> result = service.importExcel(file, batchNo, corpId);
+        List<ModelConfirmDecision> decisions;
+        try {
+            decisions = objectMapper.readValue(confirmationsJson,
+                    objectMapper.getTypeFactory().constructCollectionType(
+                            List.class, ModelConfirmDecision.class));
+        } catch (Exception e) {
+            log.warn("确认决策 JSON 解析失败: {}", confirmationsJson, e);
+            return R.fail("确认决策数据格式不正确，请重新确认后提交");
+        }
+        Map<String, Object> result = service.confirmImport(file, corpId, decisions, fileMd5);
 
         // Save a task record for audit/history (non-blocking, best-effort)
         try {

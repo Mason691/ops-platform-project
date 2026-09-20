@@ -1,10 +1,10 @@
 package com.aip.ops.service.impl;
 
 import com.aip.sdk.exception.BusinessException;
+import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsPersonalCommissionRule;
 import com.aip.ops.entity.OpsValueAddedProduct;
-import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.imports.BusinessDataImportHandler;
 import com.aip.ops.imports.ImportResult;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
@@ -12,7 +12,6 @@ import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.DataScopeService;
-import com.aip.ops.service.ImportTaskService;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -54,7 +53,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final DataSource dataSource;
     private final PlatformInternalClient platformInternalClient;
     private final BusinessDataImportHandler importHandler;
-    private final ImportTaskService importTaskService;
 
     /** 锁定状态：已上报集团的数据禁止删除/修改/重新计算（所有组织一致） */
     public static final String REPORTED_STATUS = "已上报集团";
@@ -108,8 +106,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             DataScopeService dataScopeService,
             DataSource dataSource,
             PlatformInternalClient platformInternalClient,
-            BusinessDataImportHandler importHandler,
-            ImportTaskService importTaskService) {
+            BusinessDataImportHandler importHandler) {
         this.mapper = mapper;
         this.productMapper = productMapper;
         this.ruleMapper = ruleMapper;
@@ -117,7 +114,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         this.dataSource = dataSource;
         this.platformInternalClient = platformInternalClient;
         this.importHandler = importHandler;
-        this.importTaskService = importTaskService;
     }
     public static String getCategoryDisplayName(String key) {
         if (key == null || key.isEmpty()) return "";
@@ -241,32 +237,35 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
-    @Transactional
-    public Map<String, Object> importExcel(MultipartFile file, String batchNo, Long corpId) {
+    public Map<String, Object> checkImport(MultipartFile file, Long corpId) {
         Path tmpFile = null;
         try {
-            // Save uploaded file to temp path
             tmpFile = Files.createTempFile("import_", ".xlsx");
             file.transferTo(tmpFile);
+            Map<String, Object> extError = checkFileExtension(file);
+            if (extError != null) return extError;
+            return importHandler.check(tmpFile, corpId);
+        } catch (Exception e) {
+            log.error("导入校验失败", e);
+            return Map.of("status", "fail", "totalErrors", 1,
+                    "errors", List.of("导入校验失败: " + e.getMessage()));
+        } finally {
+            if (tmpFile != null) try { Files.deleteIfExists(tmpFile); } catch (Exception ignored) {}
+        }
+    }
 
-            // Create task record and delegate to unified import handler
-            String originalName = file.getOriginalFilename() != null
-                    ? file.getOriginalFilename() : "import.xlsx";
-            SysImportTask task = importTaskService.createTask("business_data",
-                    originalName, tmpFile.toAbsolutePath().toString(), file.getSize());
-            ImportResult result = importHandler.execute(task);
-
-            // Map ImportResult → controller response format
-            Map<String, Object> response = new LinkedHashMap<>();
-            if ("success".equals(result.getStatus())) {
-                response.put("status", "success");
-                response.put("count", result.getCount());
-            } else {
-                response.put("status", "fail");
-                response.put("totalErrors", result.getFailRows());
-                response.put("errors", result.getErrors());
-            }
-            return response;
+    @Override
+    @Transactional
+    public Map<String, Object> confirmImport(MultipartFile file, Long corpId,
+            List<ModelConfirmDecision> decisions, String fileMd5) {
+        Path tmpFile = null;
+        try {
+            tmpFile = Files.createTempFile("import_", ".xlsx");
+            file.transferTo(tmpFile);
+            Map<String, Object> extError = checkFileExtension(file);
+            if (extError != null) return extError;
+            return mapImportResult(
+                    importHandler.confirm(tmpFile, corpId, decisions, fileMd5));
         } catch (Exception e) {
             log.error("导入Excel失败", e);
             return Map.of("status", "fail", "totalErrors", 1,
@@ -274,6 +273,26 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         } finally {
             if (tmpFile != null) try { Files.deleteIfExists(tmpFile); } catch (Exception ignored) {}
         }
+    }
+
+    /** 原 handler FILE_CHECK 的扩展名校验，两段式入口下移到此处（check/confirm 共用） */
+    private Map<String, Object> checkFileExtension(MultipartFile file) {
+        String name = file.getOriginalFilename() != null
+                ? file.getOriginalFilename().toLowerCase() : "";
+        if (!name.endsWith(".xlsx") && !name.endsWith(".xls")) {
+            return Map.of("status", "fail", "totalErrors", 1,
+                    "errors", List.of("文件格式不正确，仅支持 .xlsx / .xls"));
+        }
+        return null;
+    }
+
+    /** ImportResult → 前端响应格式（与历史 /import/submit 一致） */
+    private Map<String, Object> mapImportResult(ImportResult result) {
+        if ("success".equals(result.getStatus())) {
+            return Map.of("status", "success", "count", result.getCount());
+        }
+        return Map.of("status", "fail", "totalErrors", result.getFailRows(),
+                "errors", result.getErrors());
     }
 
     /** Load valid category names + name↔key maps from platform dict. Falls back to defaults on failure. */
