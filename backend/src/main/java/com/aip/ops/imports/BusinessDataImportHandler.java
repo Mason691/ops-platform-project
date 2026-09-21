@@ -94,7 +94,6 @@ public class BusinessDataImportHandler implements ImportHandler {
         String saleDate, receiptDate, receiptNo;
         String receiptDateRaw; // raw value for validation (市场收款日期：空=错误)
         String financeReceiptDateRaw, financeReceiptDate;
-        String fundDynamicRowsRaw;
         Integer fundDynamicRows;
         OpsValueAddedProduct product;
         int rowNum;                 // 文件行号（表头=1，数据行从 2 起）
@@ -822,20 +821,17 @@ public class BusinessDataImportHandler implements ImportHandler {
             errors.add("第" + rowNum + "行: 经办人手机号格式不正确");
         // Date validation
         if (pr.saleDate == null)
-            errors.add("第" + rowNum + "行: 销售日期格式不正确（支持: 2026-06-23 / 6月23日 / 2026年6月23日）");
+            errors.add("第" + rowNum + "行: 销售日期格式不正确（支持: 2026-06-23 / 2026.1.2 / 6月23日 / 2026年6月23日）");
         // 市场收款日期必填
         if (pr.receiptDateRaw == null || pr.receiptDateRaw.isEmpty())
             errors.add("第" + rowNum + "行: 市场收款日期为空");
         else if (pr.receiptDate == null)
-            errors.add("第" + rowNum + "行: 市场收款日期格式不正确（支持: 2026-06-23 / 6月23日 / 2026年6月23日）");
+            errors.add("第" + rowNum + "行: 市场收款日期格式不正确（支持: 2026-06-23 / 2026.1.2 / 6月23日 / 2026年6月23日）");
         // 财务收款日期可选，但格式错误时拒绝该行（连带整文件拒绝）
         if (pr.financeReceiptDateRaw != null && !pr.financeReceiptDateRaw.isEmpty()
                 && pr.financeReceiptDate == null)
-            errors.add("第" + rowNum + "行: 财务收款日期格式不正确（支持: 2026-06-23 / 6月23日 / 2026年6月23日）");
-        // 资金动态表横排数可选，但必须为数字
-        if (pr.fundDynamicRowsRaw != null && !pr.fundDynamicRowsRaw.isEmpty()
-                && pr.fundDynamicRows == null)
-            errors.add("第" + rowNum + "行: 资金动态表横排数必须为数字");
+            errors.add("第" + rowNum + "行: 财务收款日期格式不正确（支持: 2026-06-23 / 2026.1.2 / 6月23日 / 2026年6月23日）");
+        // 资金动态表横排数可选、允许文字（模板该列为文字格式）——数字解析失败不报错，落库空
     }
 
     /** 提成比例：特批=是 → 必填且大于 0；特批=否/空 → 可空（按默认"否"处理） */
@@ -925,9 +921,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         String rawFinance = val(cols, idx[I_FINANCE_DATE]);
         pr.financeReceiptDateRaw = rawFinance;
         pr.financeReceiptDate = normalizeDate(rawFinance);
-        String rawFundRows = val(cols, idx[I_FUND_ROWS]);
-        pr.fundDynamicRowsRaw = rawFundRows;
-        pr.fundDynamicRows = toInteger(rawFundRows);
+        pr.fundDynamicRows = toInteger(val(cols, idx[I_FUND_ROWS]));
         pr.receiptNo = val(cols, idx[I_RECEIPT_NO]);
         // 是否特批：仅精确"是"视为特批，空/其它一律按"否"
         String rawSpecial = val(cols, idx[I_SPECIAL]);
@@ -1028,13 +1022,20 @@ public class BusinessDataImportHandler implements ImportHandler {
         try { return new BigDecimal(s); } catch (Exception e) { return null; }
     }
 
-    /** 解析整数（资金动态表横排数）。空 → null（可选）；非整数 → null（配合 raw 判错）。 */
+    /**
+     * 解析整数（资金动态表横排数）。空 → null（可选）。
+     * 模板该列为文字格式：纯整数文本（"260"）、Excel 数字单元格（"12.0"）均正常解析；
+     * 带其它文字时提取首个整数（"12排" → 12）；无任何数字 → null（不报错，落库空）。
+     */
     private Integer toInteger(String s) {
         if (s == null || s.isEmpty()) return null;
-        String t = s.trim();
+        // 全角数字/空格（IME 输入）归一化为半角："２６０" → "260"
+        String t = java.text.Normalizer.normalize(s.trim(), java.text.Normalizer.Form.NFKC);
         // Excel 数字单元格可能读作 "12.0"
         if (t.matches("\\d+\\.0+")) t = t.substring(0, t.indexOf('.'));
-        try { return Integer.parseInt(t); } catch (Exception e) { return null; }
+        try { return Integer.parseInt(t); } catch (NumberFormatException e) { /* 非纯整数 → 提取 */ }
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\d+").matcher(t);
+        return m.find() ? Integer.valueOf(m.group()) : null;
     }
 
     /**
@@ -1043,7 +1044,7 @@ public class BusinessDataImportHandler implements ImportHandler {
      * <p>
      * Supported formats:
      * <ul>
-     *   <li>ISO: 2026-06-23 / 2026/06/23 / 2026.06.23</li>
+     *   <li>ISO digits: 2026-06-23 / 2026/06/23 / 2026.06.23 / 2026.1.2（月/日单数字）</li>
      *   <li>Chinese: 2026年6月23日 / 6月23日</li>
      *   <li>Excel serial number (days since 1899-12-30)</li>
      *   <li>openpyxl datetime: 2026-06-23 00:00:00</li>
@@ -1052,31 +1053,16 @@ public class BusinessDataImportHandler implements ImportHandler {
      */
     private String normalizeDate(String raw) {
         if (raw == null || raw.isBlank()) return null;
-        raw = raw.trim();
+        // 全角数字/标点归一化为半角："２０２６.１.２" → "2026.1.2"（中文年月日不受影响）
+        raw = java.text.Normalizer.normalize(raw.trim(), java.text.Normalizer.Form.NFKC);
 
-        // 1. Excel serial number (days since 1899-12-30)
-        try {
-            double serial = Double.parseDouble(raw);
-            if (serial > 1 && serial < 100000) {
-                long epochDay = (long) serial - 2; // 1900-01-01 = serial 1 for Excel
-                return java.time.LocalDate.of(1900, 1, 1)
-                        .plusDays(epochDay)
-                        .format(DateTimeFormatter.ISO_LOCAL_DATE);
-            }
-        } catch (NumberFormatException ignored) {}
+        String excel = parseExcelSerial(raw);
+        if (excel != null) return excel;
 
-        // 2. openpyxl datetime: "2026-06-23 00:00:00"
-        if (raw.contains(" ") && raw.length() >= 10) {
-            String datePart = raw.substring(0, 10);
-            if (datePart.matches("\\d{4}-\\d{2}-\\d{2}")) return datePart;
-        }
+        String iso = parseIsoDigits(raw);
+        if (iso != null) return iso;
 
-        // 3. ISO: 2026-06-23 / 2026/06/23 / 2026.06.23
-        if (raw.matches("\\d{4}[-/.](0[1-9]|1[0-2])[-/.](0[1-9]|[12]\\d|3[01])")) {
-            return raw.replace('/', '-').replace('.', '-');
-        }
-
-        // 4. Chinese with year: "2026年6月23日" or "2026年06月23日"
+        // Chinese with year: "2026年6月23日" or "2026年06月23日"
         java.util.regex.Matcher ym = java.util.regex.Pattern.compile(
                 "(\\d{4})\\s*年\\s*(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日").matcher(raw);
         if (ym.matches()) {
@@ -1086,7 +1072,7 @@ public class BusinessDataImportHandler implements ImportHandler {
                     Integer.parseInt(ym.group(3)));
         }
 
-        // 5. Chinese without year: "6月23日" or "06月23日"
+        // Chinese without year: "6月23日" or "06月23日"
         java.util.regex.Matcher m = java.util.regex.Pattern.compile(
                 "^(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日$").matcher(raw);
         if (m.matches()) {
@@ -1098,5 +1084,34 @@ public class BusinessDataImportHandler implements ImportHandler {
         }
 
         return null; // unparseable
+    }
+
+    /** Excel 引擎产生的日期值：序列号（46026）或 openpyxl datetime（"2026-06-23 00:00:00"）。 */
+    private String parseExcelSerial(String raw) {
+        try {
+            double serial = Double.parseDouble(raw);
+            if (serial > 1 && serial < 100000) {
+                long epochDay = (long) serial - 2; // 1900-01-01 = serial 1 for Excel
+                return java.time.LocalDate.of(1900, 1, 1)
+                        .plusDays(epochDay)
+                        .format(DateTimeFormatter.ISO_LOCAL_DATE);
+            }
+        } catch (NumberFormatException ignored) {}
+        if (raw.contains(" ") && raw.length() >= 10) {
+            String datePart = raw.substring(0, 10);
+            if (datePart.matches("\\d{4}-\\d{2}-\\d{2}")) return datePart;
+        }
+        return null;
+    }
+
+    /** ISO 数字日期：2026-06-23 / 2026/06/23 / 2026.06.23 / 2026.1.2（月/日允许单数字）。 */
+    private String parseIsoDigits(String raw) {
+        java.util.regex.Matcher iso = java.util.regex.Pattern.compile(
+                "(\\d{4})[-/.](\\d{1,2})[-/.](\\d{1,2})").matcher(raw);
+        if (!iso.matches()) return null;
+        int mm = Integer.parseInt(iso.group(2));
+        int dd = Integer.parseInt(iso.group(3));
+        if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+        return String.format("%s-%02d-%02d", iso.group(1), mm, dd);
     }
 }
