@@ -5,6 +5,7 @@ import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsPersonalCommissionRule;
 import com.aip.ops.entity.OpsValueAddedProduct;
+import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.imports.BusinessDataImportHandler;
 import com.aip.ops.imports.ImportResult;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
@@ -12,10 +13,14 @@ import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.DataScopeService;
+import com.aip.ops.service.ImportTaskService;
 import com.aip.sdk.client.PlatformInternalClient;
+import com.aip.sdk.security.LoginUser;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,8 +28,6 @@ import javax.sql.DataSource;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.text.Normalizer;
-
-import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.servlet.http.HttpServletResponse;
 import java.math.BigDecimal;
@@ -54,6 +57,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final DataSource dataSource;
     private final PlatformInternalClient platformInternalClient;
     private final BusinessDataImportHandler importHandler;
+    private final ImportTaskService importTaskService;
 
     /** 锁定状态：已上报集团的数据禁止删除/修改/重新计算（所有组织一致） */
     public static final String REPORTED_STATUS = "已上报集团";
@@ -107,7 +111,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             DataScopeService dataScopeService,
             DataSource dataSource,
             PlatformInternalClient platformInternalClient,
-            BusinessDataImportHandler importHandler) {
+            BusinessDataImportHandler importHandler,
+            ImportTaskService importTaskService) {
         this.mapper = mapper;
         this.productMapper = productMapper;
         this.ruleMapper = ruleMapper;
@@ -115,6 +120,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         this.dataSource = dataSource;
         this.platformInternalClient = platformInternalClient;
         this.importHandler = importHandler;
+        this.importTaskService = importTaskService;
     }
     public static String getCategoryDisplayName(String key) {
         if (key == null || key.isEmpty()) return "";
@@ -243,53 +249,60 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
-    public Map<String, Object> checkImport(MultipartFile file, Long corpId) {
-        Path tmpFile = null;
+    public void runAsyncCheck(SysImportTask task) {
+        Long taskId = task.getId();
         try {
-            tmpFile = Files.createTempFile("import_", ".xlsx");
-            file.transferTo(tmpFile);
-            Map<String, Object> extError = checkFileExtension(file);
-            if (extError != null) return extError;
-            return importHandler.check(tmpFile, corpId);
+            withSecurityContext(task);
+            importTaskService.updateStatus(taskId, "PROCESSING", "CHECK", "正在解析校验文件...");
+            Map<String, Object> result = importHandler.check(
+                    Path.of(task.getFilePath()), task.getCorpId());
+            String json = JSON_MAPPER.writeValueAsString(result);
+            int totalRows = result.get("totalRows") instanceof Number n ? n.intValue() : 0;
+            importTaskService.markDone(taskId, totalRows, 0, json);
         } catch (Exception e) {
-            log.error("导入校验失败", e);
-            return Map.of("status", "fail", "totalErrors", 1,
-                    "errors", List.of("导入校验失败: " + e.getMessage()));
+            log.error("异步导入校验失败 taskId={}", taskId, e);
+            importTaskService.markFailed(taskId, "CHECK", e.getMessage(), 0, 0);
         } finally {
-            if (tmpFile != null) try { Files.deleteIfExists(tmpFile); } catch (Exception ignored) {}
+            SecurityContextHolder.clearContext();
         }
     }
 
     @Override
-    @Transactional
-    public Map<String, Object> confirmImport(MultipartFile file, Long corpId,
-            List<ModelConfirmDecision> decisions, String fileMd5) {
-        Path tmpFile = null;
+    public void runAsyncConfirm(SysImportTask task, List<ModelConfirmDecision> decisions) {
+        Long taskId = task.getId();
         try {
-            tmpFile = Files.createTempFile("import_", ".xlsx");
-            file.transferTo(tmpFile);
-            Map<String, Object> extError = checkFileExtension(file);
-            if (extError != null) return extError;
-            return mapImportResult(
-                    importHandler.confirm(tmpFile, corpId, decisions, fileMd5));
+            withSecurityContext(task);
+            importTaskService.updateStatus(taskId, "PROCESSING", "ROW_CHECK", "正在导入数据...");
+            // 事务边界在 importHandler.confirm（单事务原子入库）；本方法不持事务，
+            // 保证任务状态更新（markDone/markFailed）不受业务回滚影响、独立提交
+            ImportResult r = importHandler.confirm(
+                    Path.of(task.getFilePath()), task.getCorpId(), decisions, null);
+            String json = JSON_MAPPER.writeValueAsString(mapImportResult(r));
+            importTaskService.markDone(taskId, r.getTotalRows(),
+                    "success".equals(r.getStatus()) ? r.getCount() : 0, json);
         } catch (Exception e) {
-            log.error("导入Excel失败", e);
-            return Map.of("status", "fail", "totalErrors", 1,
-                    "errors", List.of("导入失败: " + e.getMessage()));
+            log.error("异步导入失败 taskId={}", taskId, e);
+            importTaskService.markFailed(taskId, "ROW_CHECK", e.getMessage(), 0, 0);
         } finally {
-            if (tmpFile != null) try { Files.deleteIfExists(tmpFile); } catch (Exception ignored) {}
+            SecurityContextHolder.clearContext();
+            // 两阶段结束，暂存文件不再需要（重试=重新上传校验，防目录无限膨胀）
+            if (task.getFilePath() != null) {
+                try { Files.deleteIfExists(Path.of(task.getFilePath())); } catch (Exception ignored) {}
+            }
         }
     }
 
-    /** 原 handler FILE_CHECK 的扩展名校验，两段式入口下移到此处（check/confirm 共用） */
-    private Map<String, Object> checkFileExtension(MultipartFile file) {
-        String name = file.getOriginalFilename() != null
-                ? file.getOriginalFilename().toLowerCase() : "";
-        if (!name.endsWith(".xlsx") && !name.endsWith(".xls")) {
-            return Map.of("status", "fail", "totalErrors", 1,
-                    "errors", List.of("文件格式不正确，仅支持 .xlsx / .xls"));
-        }
-        return null;
+    /** 异步工作线程无请求级 SecurityContext —— 从任务记录重建，
+     *  保证租户过滤（TenantLineHandler）与操作归属与请求线程一致 */
+    private void withSecurityContext(SysImportTask task) {
+        LoginUser lu = new LoginUser();
+        lu.setUserId(task.getUserId());
+        lu.setCorpId(task.getCorpId() != null ? task.getCorpId() : 0L);
+        lu.setUsername(task.getUserName());
+        lu.setAdmin(false);
+        lu.setPermissions(List.of());
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(lu, null, lu.getAuthorities()));
     }
 
     /** ImportResult → 前端响应格式（与历史 /import/submit 一致） */

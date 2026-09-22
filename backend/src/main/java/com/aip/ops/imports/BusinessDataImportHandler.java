@@ -175,7 +175,9 @@ public class BusinessDataImportHandler implements ImportHandler {
         return resp;
     }
 
-    /** 阶段二：应用确认决策 → 全量校验（收据组/唯一性）→ 单事务原子入库。 */
+    /** 阶段二：应用确认决策 → 全量校验（收据组/唯一性）→ 单事务原子入库。
+     *  事务边界在本方法（异步工作线程无外层事务，须由本方法保证全量或全不）。 */
+    @Transactional(rollbackFor = Exception.class)
     public ImportResult confirm(Path filePath, Long corpId,
             List<ModelConfirmDecision> decisions, String expectedMd5) throws Exception {
         Prepared p = prepare(filePath, corpId);

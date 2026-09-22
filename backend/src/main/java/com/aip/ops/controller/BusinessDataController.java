@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -27,6 +28,8 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 
 import org.springframework.core.io.ClassPathResource;
 
@@ -41,6 +44,10 @@ public class BusinessDataController {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final OrgRoleService orgRoleService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ExecutorService importExecutor;
+
+    /** confirm 互斥锁：hasPendingTask 检查 + 建任务必须在锁内，防并发双请求竞态重复入库 */
+    private final Object confirmLock = new Object();
 
     private static final String TOPIC_EXPORT_TASK = "async-export-task";
     private static final String TOPIC_IMPORT_TASK = "async-import-task";
@@ -69,14 +76,49 @@ public class BusinessDataController {
         }
     }
 
+    /** 原始文件名 → 纯文件名（去路径），缺省补默认名 */
+    private String fileNameOf(String originalName) {
+        if (originalName == null || originalName.isBlank()) return "import.xlsx";
+        String base = originalName.replace('\\', '/');
+        int idx = base.lastIndexOf('/');
+        return idx >= 0 ? base.substring(idx + 1) : base;
+    }
+
+    /** 扩展名校验（与历史 FILE_CHECK 阶段一致）：非法格式直接返回 fail 结果，不落盘不建任务 */
+    private Map<String, Object> checkFileExtension(MultipartFile file) {
+        String name = fileNameOf(file.getOriginalFilename()).toLowerCase();
+        if (!name.endsWith(".xlsx") && !name.endsWith(".xls")) {
+            return Map.of("status", "fail", "totalErrors", 1,
+                    "errors", List.of("文件格式不正确，仅支持 .xlsx / .xls"));
+        }
+        return null;
+    }
+
+    /** 上传文件落盘暂存（UUID 前缀防重名 + 文件名清洗防路径穿越），供两阶段异步任务复用 */
+    private Path saveImportFile(MultipartFile file) throws IOException {
+        String base = fileNameOf(file.getOriginalFilename());
+        String name = UUID.randomUUID().toString().replace("-", "")
+                + "-" + base.replaceAll("[^0-9A-Za-z.\\-\\u4e00-\\u9fa5]", "_");
+        Path target = Path.of(importUploadDir, name);
+        file.transferTo(target);
+        return target;
+    }
+
+    /** 文件大小（文件缺失时返回 null，仅用于任务记录展示） */
+    private Long sizeOf(String filePath) {
+        try { return Files.size(Path.of(filePath)); } catch (IOException e) { return null; }
+    }
+
     public BusinessDataController(BusinessDataService service, ExportTaskService taskService,
                                   ImportTaskService importTaskService, KafkaTemplate<String, String> kafkaTemplate,
-                                  OrgRoleService orgRoleService) {
+                                  OrgRoleService orgRoleService,
+                                  @Qualifier("importExecutor") ExecutorService importExecutor) {
         this.service = service;
         this.taskService = taskService;
         this.importTaskService = importTaskService;
         this.kafkaTemplate = kafkaTemplate;
         this.orgRoleService = orgRoleService;
+        this.importExecutor = importExecutor;
     }
 
     @GetMapping
@@ -97,72 +139,111 @@ public class BusinessDataController {
     public R<?> batches() { return R.ok(service.getBatches()); }
 
     /**
-     * 导入阶段一：上传文件校验 + 品牌型号匹配解析（不写库）。
-     * status: fail（校验失败，errors 列出原因）/ confirm（有模糊型号待人工确认，
-     * pendingItems 列出待确认项与候选产品）/ ready（无需确认，可直接导入）。
-     * confirm 时前端携带本响应中的 fileMd5 以防御两阶段文件不一致。
+     * 导入阶段一（异步）：上传文件校验 + 品牌型号匹配解析（不写库）。
+     * 文件落盘暂存 + 创建校验任务提交线程池，立即返回 taskId，前端轮询 /import/{taskId}/status。
+     * 校验完成（DONE）时 progressMsg 为结果 JSON：status=fail（errors 列出原因）/
+     * confirm（pendingItems 列出待确认项与候选产品）/ready（可直接导入）。
+     * 大文件解析不再占用请求线程——超时问题由此根治。
      */
     @OperationLog(module = "增值业务", action = "导入校验", targetTable = "ops_business_data")
     @PostMapping("/import/check")
     public R<Map<String, Object>> importCheck(@RequestParam("file") MultipartFile file) {
-        Long corpId = SecurityUtils.getCurrentCorpId();
-        return R.ok(service.checkImport(file, corpId));
+        Map<String, Object> extError = checkFileExtension(file);
+        if (extError != null) return R.ok(extError);
+        try {
+            Path saved = saveImportFile(file);
+            SysImportTask task = importTaskService.createTask("business_data_check",
+                    fileNameOf(file.getOriginalFilename()),
+                    saved.toAbsolutePath().toString(), file.getSize());
+            try {
+                importExecutor.submit(() -> service.runAsyncCheck(task));
+            } catch (RejectedExecutionException e) {
+                importTaskService.markFailed(task.getId(), "QUEUE", "系统繁忙，请稍后重试", 0, 0);
+                return R.fail("系统繁忙，请稍后重试");
+            }
+            return R.ok(Map.of("taskId", task.getId(), "status", "PENDING"));
+        } catch (IOException e) {
+            log.error("导入文件保存失败", e);
+            return R.ok(Map.of("status", "fail", "totalErrors", 1,
+                    "errors", List.of("文件保存失败: " + e.getMessage())));
+        }
     }
 
     /**
-     * 导入阶段二：携带型号确认决策入库。
+     * 导入阶段二（异步）：应用型号确认决策后入库。不二次上传文件——
+     * 复用校验任务落盘的文件，校验成功即保证两阶段文件一致。
      * confirmations 为 JSON 数组 [{key, productId}]，productId 为 null 表示拒绝该匹配。
-     * 成功/失败响应格式与历史 /import/submit 一致：
-     * success → { status: "success", count: N }
-     * failure → { status: "fail", totalErrors: N, errors: [...] }
+     * 立即返回 taskId，前端轮询 /import/{taskId}/status；结果格式与历史 /import/submit 一致：
+     * success → { status: "success", count: N } / failure → { status: "fail", totalErrors, errors }。
      */
     @OperationLog(module = "增值业务", action = "导入", targetTable = "ops_business_data")
     @PostMapping("/import/confirm")
-    public R<Map<String, Object>> importConfirm(@RequestParam("file") MultipartFile file,
-            @RequestParam("confirmations") String confirmationsJson,
-            @RequestParam(value = "fileMd5", required = false) String fileMd5) {
+    public R<Map<String, Object>> importConfirm(@RequestParam("checkTaskId") Long checkTaskId,
+            @RequestParam("confirmations") String confirmationsJson) {
         Long corpId = SecurityUtils.getCurrentCorpId();
-        List<ModelConfirmDecision> decisions;
+        List<ModelConfirmDecision> decisions = parseDecisions(confirmationsJson);
+        if (decisions == null) {
+            return R.fail("确认决策数据格式不正确，请重新确认后提交");
+        }
+        SysImportTask checkTask = importTaskService.getById(checkTaskId);
+        String invalid = checkTaskError(checkTask, corpId);
+        if (invalid != null) return R.fail(invalid);
+
+        // 同类型导入互斥（防并发重复入库）；检查+建任务+提交须在同一锁内避免双请求竞态
+        synchronized (confirmLock) {
+            if (importTaskService.hasPendingTask("business_data_confirm")) {
+                return R.fail("已有导入任务正在进行，请稍后再试");
+            }
+            SysImportTask task = importTaskService.createTask("business_data_confirm",
+                    checkTask.getFileName(), checkTask.getFilePath(), sizeOf(checkTask.getFilePath()));
+            try {
+                importExecutor.submit(() -> service.runAsyncConfirm(task, decisions));
+            } catch (RejectedExecutionException e) {
+                importTaskService.markFailed(task.getId(), "QUEUE", "系统繁忙，请稍后重试", 0, 0);
+                return R.fail("系统繁忙，请稍后重试");
+            }
+            return R.ok(Map.of("taskId", task.getId(), "status", "PENDING"));
+        }
+    }
+
+    /** 解析确认决策 JSON；解析失败返回 null */
+    private List<ModelConfirmDecision> parseDecisions(String json) {
         try {
-            decisions = objectMapper.readValue(confirmationsJson,
+            return objectMapper.readValue(json,
                     objectMapper.getTypeFactory().constructCollectionType(
                             List.class, ModelConfirmDecision.class));
         } catch (Exception e) {
-            log.warn("确认决策 JSON 解析失败: {}", confirmationsJson, e);
-            return R.fail("确认决策数据格式不正确，请重新确认后提交");
+            log.warn("确认决策 JSON 解析失败: {}", json, e);
+            return null;
         }
-        Map<String, Object> result = service.confirmImport(file, corpId, decisions, fileMd5);
-
-        // Save a task record for audit/history (non-blocking, best-effort)
-        try {
-            String originalName = file.getOriginalFilename();
-            if (originalName == null) originalName = "import.xlsx";
-            SysImportTask task = importTaskService.createTask("business_data",
-                    originalName, "sync://memory", file.getSize());
-            if ("success".equals(result.get("status"))) {
-                importTaskService.markDone(task.getId(),
-                        (int) result.getOrDefault("count", 0),
-                        (int) result.getOrDefault("count", 0));
-            } else {
-                @SuppressWarnings("unchecked")
-                List<String> errors = (List<String>) result.getOrDefault("errors", List.of());
-                importTaskService.markFailed(task.getId(), "SYNC",
-                        String.join("; ", errors),
-                        (int) result.getOrDefault("totalErrors", 0),
-                        (int) result.getOrDefault("totalErrors", 0));
-            }
-        } catch (Exception e) {
-            log.warn("Failed to save import audit record", e);
-        }
-
-        return R.ok(result);
     }
 
-    /** Poll import task status. */
+    /** 校验任务合法性检查：返回错误提示文本，合法返回 null */
+    private String checkTaskError(SysImportTask checkTask, Long corpId) {
+        if (checkTask == null || !"business_data_check".equals(checkTask.getTaskType())) {
+            return "校验任务不存在，请重新上传文件";
+        }
+        if (!"DONE".equals(checkTask.getStatus())) {
+            return "文件校验尚未完成，请稍后再试";
+        }
+        if (corpId != 0 && !corpId.equals(checkTask.getCorpId())) {
+            return "校验任务不存在，请重新上传文件";
+        }
+        if (checkTask.getFilePath() == null || !Files.exists(Path.of(checkTask.getFilePath()))) {
+            return "文件已过期，请重新上传";
+        }
+        return null;
+    }
+
+    /** Poll import task status. DONE 任务的业务结果 JSON 解析进 result 字段。 */
     @GetMapping("/import/{taskId}/status")
     public R<Map<String, Object>> importStatus(@PathVariable Long taskId) {
         SysImportTask task = importTaskService.getById(taskId);
-        if (task == null) return R.fail("任务不存在");
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        if (task == null || (corpId != 0 && task.getCorpId() != null
+                && !corpId.equals(task.getCorpId()))) {
+            return R.fail("任务不存在");
+        }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("taskId", task.getId());
         result.put("status", task.getStatus());
@@ -172,6 +253,14 @@ public class BusinessDataController {
         result.put("totalRows", task.getTotalRows());
         result.put("successRows", task.getSuccessRows());
         result.put("failRows", task.getFailRows());
+        if ("DONE".equals(task.getStatus()) && task.getProgressMsg() != null
+                && task.getProgressMsg().startsWith("{")) {
+            try {
+                result.put("result", objectMapper.readValue(task.getProgressMsg(), Map.class));
+            } catch (Exception e) {
+                log.warn("导入任务结果 JSON 解析失败 taskId={}", taskId, e);
+            }
+        }
         return R.ok(result);
     }
 

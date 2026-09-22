@@ -1,8 +1,8 @@
 package com.aip.ops.service;
 
 import com.aip.ops.dto.ModelConfirmDecision;
+import com.aip.ops.entity.SysImportTask;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.web.multipart.MultipartFile;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -10,11 +10,10 @@ import java.util.Map;
 public interface BusinessDataService {
     Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial, String brand, String model);
     List<String> getBatches();
-    /** 导入阶段一：文件校验 + 品牌型号匹配解析。返回 status: fail / confirm / ready */
-    Map<String, Object> checkImport(MultipartFile file, Long corpId);
-    /** 导入阶段二：应用型号确认决策后入库。返回 status: success / fail（与历史响应格式一致） */
-    Map<String, Object> confirmImport(MultipartFile file, Long corpId,
-            List<ModelConfirmDecision> decisions, String fileMd5);
+    /** 导入阶段一（异步工作线程）：文件校验 + 品牌型号匹配解析，结果 JSON（fail/confirm/ready）写入任务 progressMsg */
+    void runAsyncCheck(SysImportTask task);
+    /** 导入阶段二（异步工作线程）：应用型号确认决策后入库，结果 JSON（success/fail）写入任务 progressMsg */
+    void runAsyncConfirm(SysImportTask task, List<ModelConfirmDecision> decisions);
     void batchDelete(List<Long> ids);
 
     /** 经办人核对：将指定批次下已计算数据标记为已核对 */
