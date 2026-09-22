@@ -178,9 +178,17 @@ public class BusinessDataController {
      */
     @OperationLog(module = "增值业务", action = "导入", targetTable = "ops_business_data")
     @PostMapping("/import/confirm")
-    public R<Map<String, Object>> importConfirm(@RequestParam("checkTaskId") Long checkTaskId,
-            @RequestParam("confirmations") String confirmationsJson) {
+    public R<Map<String, Object>> importConfirm(
+            @RequestParam(value = "checkTaskId", required = false) Long checkTaskId,
+            @RequestParam(value = "confirmations", required = false) String confirmationsJson) {
         Long corpId = SecurityUtils.getCurrentCorpId();
+        // 缺参多为页面还跑着旧版前端（旧 confirm 为 multipart 重传文件）——给可操作的提示而非 500 内部错误
+        if (checkTaskId == null) {
+            return R.fail("导入校验任务已失效，请刷新页面后重新导入");
+        }
+        if (confirmationsJson == null) {
+            return R.fail("确认决策数据缺失，请重新确认后提交");
+        }
         List<ModelConfirmDecision> decisions = parseDecisions(confirmationsJson);
         if (decisions == null) {
             return R.fail("确认决策数据格式不正确，请重新确认后提交");

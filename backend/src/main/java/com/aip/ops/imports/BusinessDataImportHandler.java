@@ -823,16 +823,16 @@ public class BusinessDataImportHandler implements ImportHandler {
             errors.add("第" + rowNum + "行: 经办人手机号格式不正确");
         // Date validation
         if (pr.saleDate == null)
-            errors.add("第" + rowNum + "行: 销售日期格式不正确（支持: 2026-06-23 / 2026.1.2 / 6月23日 / 2026年6月23日）");
+            errors.add("第" + rowNum + "行: 销售日期格式不正确（支持: 2026-06-23 / 2026.1.2 / 2026/2/13 / 6月23日 / 2026年6月23日，日期区间取首日）");
         // 市场收款日期必填
         if (pr.receiptDateRaw == null || pr.receiptDateRaw.isEmpty())
             errors.add("第" + rowNum + "行: 市场收款日期为空");
         else if (pr.receiptDate == null)
-            errors.add("第" + rowNum + "行: 市场收款日期格式不正确（支持: 2026-06-23 / 2026.1.2 / 6月23日 / 2026年6月23日）");
+            errors.add("第" + rowNum + "行: 市场收款日期格式不正确（支持: 2026-06-23 / 2026.1.2 / 2026/2/13 / 6月23日 / 2026年6月23日，日期区间取首日）");
         // 财务收款日期可选，但格式错误时拒绝该行（连带整文件拒绝）
         if (pr.financeReceiptDateRaw != null && !pr.financeReceiptDateRaw.isEmpty()
                 && pr.financeReceiptDate == null)
-            errors.add("第" + rowNum + "行: 财务收款日期格式不正确（支持: 2026-06-23 / 2026.1.2 / 6月23日 / 2026年6月23日）");
+            errors.add("第" + rowNum + "行: 财务收款日期格式不正确（支持: 2026-06-23 / 2026.1.2 / 2026/2/13 / 6月23日 / 2026年6月23日，日期区间取首日）");
         // 资金动态表横排数可选、允许文字（模板该列为文字格式）——数字解析失败不报错，落库空
     }
 
@@ -1050,14 +1050,26 @@ public class BusinessDataImportHandler implements ImportHandler {
      *   <li>Chinese: 2026年6月23日 / 6月23日</li>
      *   <li>Excel serial number (days since 1899-12-30)</li>
      *   <li>openpyxl datetime: 2026-06-23 00:00:00</li>
+     *   <li>Date range: 2026/2/13-2026/2/12 takes the first date</li>
      * </ul>
      * For formats without a year (e.g. 6月23日), the current year is used.
      */
     private String normalizeDate(String raw) {
         if (raw == null || raw.isBlank()) return null;
         // 全角数字/标点归一化为半角："２０２６.１.２" → "2026.1.2"（中文年月日不受影响）
-        raw = java.text.Normalizer.normalize(raw.trim(), java.text.Normalizer.Form.NFKC);
+        String normalized = java.text.Normalizer.normalize(
+                raw.trim(), java.text.Normalizer.Form.NFKC);
 
+        String parsed = parseDateLiteral(normalized);
+        if (parsed != null) return parsed;
+
+        // 日期区间（如 2026/2/13-2026/2/12）：取第一段日期入库
+        String first = firstSegmentOfDateRange(normalized);
+        return first == null ? null : parseDateLiteral(first);
+    }
+
+    /** 单值日期解析：Excel 序列号/datetime → ISO 数字 → 中文年月日；解析失败返回 null。 */
+    private String parseDateLiteral(String raw) {
         String excel = parseExcelSerial(raw);
         if (excel != null) return excel;
 
@@ -1086,6 +1098,16 @@ public class BusinessDataImportHandler implements ImportHandler {
         }
 
         return null; // unparseable
+    }
+
+    /** 日期区间取第一段：在首个区间分隔符（- ~ — 至）处截断；无分隔符返回 null。 */
+    private String firstSegmentOfDateRange(String raw) {
+        int cut = -1;
+        for (char sep : new char[] {'-', '~', '—', '至'}) {
+            int p = raw.indexOf(sep);
+            if (p > 0 && (cut < 0 || p < cut)) cut = p;
+        }
+        return cut < 0 ? null : raw.substring(0, cut).trim();
     }
 
     /** Excel 引擎产生的日期值：序列号（46026）或 openpyxl datetime（"2026-06-23 00:00:00"）。 */
