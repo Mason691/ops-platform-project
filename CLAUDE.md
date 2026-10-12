@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > **工程文件索引**  
-> 编码规范 + ADR → `MEMORY.md`（⚠️ 第四节合规状态表为 2026-06-22 改前快照，已全部过时，以本文件为准）| 用户画像 → `user.md` | 产品理念 → `soul.md` | 功能规格 → `Specs/`
+> 编码规范 + ADR → `MEMORY.md`（⚠️ 第四节合规状态表为 2026-06-22 改前快照，已全部过时，以本文件为准）| 用户画像 → `user.md` | 产品理念 → `soul.md` | 功能规格 → `Specs/` | 变更历史 → `docs/CHANGELOG.md`
 
 ---
 
@@ -31,6 +31,9 @@ cd frontend && npm run dev:h5
 
 # 前端 H5 生产构建（含 jweixin-1.6.0.js 复制 + static 路径替换）
 cd frontend && npm run build:h5        # 输出 dist/build/h5/
+
+# 前端小程序 dev server（微信开发者工具导入 dist/dev/mp-weixin）
+cd frontend && npm run dev:mp-weixin
 
 # 前端小程序构建
 cd frontend && npm run build:mp-weixin  # 输出 dist/build/mp-weixin/
@@ -132,8 +135,8 @@ ops-platform-project/
 │   │   ├── OpsApplication.java
 │   │   ├── config/          # SecurityConfig, AuthConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig, JacksonConfig, GasDataSourceConfig
 │   │   ├── controller/      # 29 controllers（见下方）
-│   │   ├── entity/          # 35 entities（全部继承 SDK BaseEntity，SysImportTask 例外；含 MerchantMiniappConfig, OperatorMerchant）
-│   │   ├── mapper/          # 36 MyBatis-Plus mappers
+│   │   ├── entity/          # 36 entities（全部继承 SDK BaseEntity，SysImportTask 例外；含 MerchantMiniappConfig, OperatorMerchant, OpsBusinessModelAlias）
+│   │   ├── mapper/          # 37 MyBatis-Plus mappers（含 OpsBusinessDataEmployeeMapper 员工业务数据专用）
 │   │   ├── service/         # 18 service interfaces + 9 standalone services + 18 impls
 │   │   ├── aspect/          # AOP 切面（OperationLogAspect）
 │   │   ├── client/          # 子系统间 HTTP 客户端（MemberSyncClient, ProductBatchClient）
@@ -183,7 +186,7 @@ ops-platform-project/
 | **管理后台** | | |
 | `AdminController` | `/api/ops/admin` | 活动/商品/直播室 CRUD、预约查询、首页统计、商家绑定 |
 | `AdminStationController` | `/api/ops/admin/station` | 站长审批/列表/统计 |
-| `BusinessDataController` | `/api/ops/admin/business-data` | 增值业务：Excel 两段式**异步**导入（`/import/check` 上传落盘+校验任务线程池解析+品牌型号匹配 → `/import/confirm` 携带 checkTaskId+确认决策复用落盘文件入库（不二次上传），双端点立即返回 taskId 前端轮询 `/import/{taskId}/status`，含收据号唯一性校验）/提成计算（按批次选择）/销售统计（按收据号+品类+型号去重）/异步导出（筛选含 品牌/型号）/品类提成汇总（提成金额+销售金额双文件 × 全部汇总+逐月 sheet 打包 ZIP，**销售金额按（收据号+公司）去重且归属规则明确**：含户内美装销售(itemKey 6)则归销售品类、否则按品类中文名排序取首品类（SQL 内 itemKey→中文名 CASE 映射，ROW_NUMBER 排序 salePri→catName→id）、提成全明细汇总）/模板下载/状态流转 + 经办人核对 |
+| `BusinessDataController` | `/api/ops/admin/business-data` | 增值业务：两段式异步导入/提成计算/销售统计/异步导出/品类提成汇总/模板下载/状态流转 + 经办人核对——详见下方「增值业务数据」节 |
 
 ### 增值业务数据（Business Data）
 
@@ -196,7 +199,7 @@ ops-platform-project/
 - **导出**：异步/同步两条导出路径表头均含 市场收款日期/财务收款日期/资金动态表横排数（紧跟 收据号 之后），销售价 前含 **收款金额**、销售价 后含 零售底价/集团最低价。2026-09-20 起表头 22 列：公司 批次号 客户 **部门** 经办人 品牌 品类 型号 收款金额 销售价 零售底价 集团最低价 销售日期 收据号 市场收款日期 财务收款日期 资金动态表横排数 返利比例 返利金额 状态 **备注 是否特批**（是否特批在 备注 后，取 is_special 原始值）。**筛选条件 2026-09-20 起含 品牌/型号**：/export 请求体 brand/model 写入 filters JSON → BusinessDataExportHandler 解析并 qw.eq 过滤；列表 API 同条件精确匹配（countFiltered/aggregateStats/categoryStats 三个注解 SQL 均含 brand/model `<if>` 条件，统计与行数一致）。主站筛选栏在 品类 后新增 品牌/型号 输入框。**Kafka 不可用时的同步降级已修复**：`syncExportFallback` 调 `service.exportExcel(...)`（写文件版本，支持全部 6 个筛选）落盘 `{upload.base-dir}/exports/` 后 `markDone(真实路径, Files.size)`——旧实现传 null response + 假路径 "/home/jason/exports/" + 0 字节必坏，且丢 category 参数。行序按 **收据号分组相邻**（`sortByReceiptNo`：空/无收据号沉底、组内 id 升序）。收款金额默认=该行销售价；同一订单拆分多行（收据号+客户相同、多经办人，不要求品类/型号相同）仅导出顺序首行显示（=组内最早录入行）、其余留空，判定逻辑 `BusinessDataServiceImpl.computeSplitOrderNonFirstIds`。零售底价/集团最低价由导入时从增值产品精确匹配落库；存量空值行（如武山型号只写关键字）导出时**关键字兜底匹配**——品牌+品类相同、产品型号归一化（去空格/转小写）后包含业务型号关键字、**唯一命中才填充**（歧义留空），仅内存填充导出文件不写库，逻辑 `BusinessDataServiceImpl.fillExportPrices/matchProductExactOrKeyword`（生产模拟：武山 285 行命中、0 歧义；壁挂炉类产品表无记录仍为空）。品类 `qimi` 是 PRODUCT_CATEGORY 字典 itemKey（item_value=气密性检测），静态兜底字典含映射，导出显示中文。
 - 列表 API 直接返回实体，新增字段自动序列化给前端展示。
 | `CommissionRuleController` | `/api/ops/admin/commission` | 个人/公司提成规则 CRUD（支持组织层级继承） |
-| `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD + 列表按品类/品牌/型号(like)/状态筛选 |
+| `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD + 列表按品类/品牌/型号(like)/状态筛选；2026-09-20 补录 15 个壁挂炉/热水器缺失型号（`sql/ops_value_added_product_seed_missing_models.sql`，众数价+90%底价口径） |
 | `MemberController` | `/api/ops/admin/members` | 会员管理：分页查询/详情/启用禁用 |
 | `ExportTaskController` | `/api/ops/admin/export` | 通用异步导出：提交/状态轮询/下载/历史 |
 | `PermissionController` | `/api/ops/admin/permission` | 权限概要查询 |
@@ -741,7 +744,7 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-09-22 | 负责人：架构师（2026-09-22 晚 业务数据导入两处缺陷修复（用户报「校验时还是报内部错误」——生产日志定位：彭阳 corp11 用户 19:58/19:59 两次 `import/confirm` 缺 `checkTaskId` 参数 → `MissingServletRequestParameterException` → SDK 兜底返回「系统内部错误，请联系管理员」；根因=用户浏览器缓存了旧版前端（旧 confirm 为 multipart 重传文件，慢上行链路 3.7MB 传完才被新后端参数绑定拒绝），check 任务 517/518 本身 DONE 且正确报出该文件唯一错误「第19行: 财务收款日期格式不正确」——用户文件财务收款日期含**斜杠日期区间** `2026/2/13-2026/2/12` 不被 normalizeDate 支持）：①confirm 的 checkTaskId/confirmations 改 `required=false` + 手动校验返回「导入校验任务已失效，请刷新页面后重新导入」，旧缓存页面也能得到可操作提示；②normalizeDate 支持日期区间取首段（分隔符 -/~/—/至，NFKC 已归一全角～－）与单值斜杠日期，错误文案补斜杠示例与区间说明；③前端 doImport/submitConfirm 加 taskId 缺失守卫。已部署生产（后端 JAR+容器重建、前端 rm -rf assets/* 后上传+nginx 容器 reload、新 chunk BusinessData-Kx8upuSn.js 200），E2E：故障单元格复刻（菊花A007+`2026/2/13-2026/2/12`+`173/404` 文字横排数，corp11 上下文）check 通过、四写法日期区间（斜杠区间/斜杠单值/中文至区间/全角波浪线区间）corp12 全流程落库首日验证、缺参 confirm 返回友好提示——E2ETEST 行/任务/文件全部清理；2026-09-22 业务数据导入异步化（用户报"城市合伙人导入 EXCEL 报超时，要求异步处理"——生产日志定位：corp12 合伙人 14:35:34 /import/check 服务端 125s（python 解析+主机 CPU 争用），前端 axios 全局 30s 超时先中断，前端报"timeout of 30000ms exceeded"；同类文件 14:37:40 重试服务端 7s、corp4 同文件 57ms 对比证实为瞬时争用放大）：两段式全异步任务化——check/confirm 双端点落盘+建 `sys_import_task`（taskType business_data_check/confirm）+ 提交 importExecutor 线程池立即返回 taskId，前端 2s 轮询 /import/{taskId}/status（DONE 时 result 字段=业务结果 JSON），confirm 复用 check 落盘文件不二次上传（慢上行链路只传一次）；AsyncImportSupport 线程池+启动清扫（遗留 PENDING/PROCESSING 标 FAILED 防并发守卫死锁）；工作线程 withSecurityContext 重建租户上下文（空上下文 TenantLineHandler 跳过滤→跨租户泄漏）；事务边界移至 handler.confirm（worker markDone/markFailed 独立提交）；progress_msg 扩 MEDIUMTEXT（迁移已执行）；confirm 并发互斥（hasPendingTask+confirmLock）；前端 importCheck timeout 放宽 600000、确认弹窗流程保持。已部署生产（后端 JAR+容器重建、前端 rm -rf assets/* 后上传+nginx reload、迁移执行），E2E 四场景全过：corp12 15 行 happy（check 1.42s vs 旧 125s、文字横排数、DB corp_id=12 验证）、坏日期 fail 路径（错误 JSON 轮询返回）、超管模糊匹配 confirm 路径（8 候选 JSON 往返+决策确认+别名记忆 product_id=131+底价 5670 落库）、双确认拒绝（文件已过期）——E2ETEST 行/别名/任务记录/临时文件全部清理；2026-09-22 业务数据导入异步化（用户报"城市合伙人导入 EXCEL 报超时，要求异步处理"——生产日志定位：corp12 合伙人 14:35:34 /import/check 服务端 125s（python 解析+主机 CPU 争用），前端 axios 全局 30s 超时先中断，前端报"timeout of 30000ms exceeded"；同类文件 14:37:40 重试服务端 7s、corp4 同文件 57ms 对比证实为瞬时争用放大）：两段式全异步任务化——check/confirm 双端点落盘+建 `sys_import_task`（taskType business_data_check/confirm）+ 提交 importExecutor 线程池立即返回 taskId，前端 2s 轮询 /import/{taskId}/status（DONE 时 result 字段=业务结果 JSON），confirm 复用 check 落盘文件不二次上传（慢上行链路只传一次）；AsyncImportSupport 线程池+启动清扫（遗留 PENDING/PROCESSING 标 FAILED 防并发守卫死锁）；工作线程 withSecurityContext 重建租户上下文（空上下文 TenantLineHandler 跳过滤→跨租户泄漏）；事务边界移至 handler.confirm（worker markDone/markFailed 独立提交）；progress_msg 扩 MEDIUMTEXT（迁移已执行）；confirm 并发互斥（hasPendingTask+confirmLock）；前端 importCheck timeout 放宽 600000、确认弹窗流程保持。已部署生产（后端 JAR+容器重建、前端 rm -rf assets/* 后上传+nginx reload、迁移执行），E2E 四场景全过：corp12 15 行 happy（check 1.42s vs 旧 125s、文字横排数、DB corp_id=12 验证）、坏日期 fail 路径（错误 JSON 轮询返回）、超管模糊匹配 confirm 路径（8 候选 JSON 往返+决策确认+别名记忆 product_id=131+底价 5670 落库）、双确认拒绝（文件已过期）——E2ETEST 行/别名/任务记录/临时文件全部清理；2026-09-21 增值业务导入模板「资金动态表横排数」列改文字格式：手术式 XML 补丁（新 cellXf numFmtId=49 + P2/P3 改 s= + 列样式，仅 2 条目变更 27 图片字节一致），已部署生产 host 挂载路径 /data2/boss-platform/templates/1.xlsx（备份 .bak-20260921）、本地 1.xlsx 同步、API 下载 E2E md5 一致 + openpyxl 验证 P 列 number_format=@；2026-09-20 晚 业务数据列表/导出新增品牌+型号精确筛选（用户报"品牌=万和 型号=Q1L16111 导出文件没有该数据"——前端筛选栏本无品牌/型号输入框、后端 /export 静默丢弃 brand/model、Kafka 降级路径假路径必坏三重缺陷一并修复），E2E 验证：brand+model 导出含该行、brand+category 118 行全匹配、全量 598 行=列表 total；2026-09-20 业务数据导入改两段式：/import/check 校验+品牌型号匹配解析（特批/非核心四品类跳过匹配、精确→别名→模糊候选→失败）+ /import/confirm 应用确认决策原子写入；确认关系落库 ops_business_model_alias 记忆（迁移 sql/migrate_business_model_alias.sql，部署前必须执行）；零售底价/集团最低价自确认产品落库、销售价保留 Excel 值；旧 /import、/import/submit 删除；主站前端新增型号匹配确认弹窗 BusinessDataModelConfirmDialog.vue；2026-09-12 品类提成汇总品类行序调整：户内美装三品类（销售/工程/运维）key 6,8,9 连排相邻、定尺波纹管 7 后移至三元组之后（CATEGORY_ORDER 常量，两文件全部 sheet 行序一致）；同日早前 品类提成汇总销售金额归属规则：含户内美装销售(itemKey 6)的订单销售金额归销售品类、无销售则按品类中文名排序取首品类（ROW_NUMBER 排序 salePri→catName→id，逐月 FIRST_VALUE 同排序），提成全明细不变（8 个收据号归属变化：总销售 5,376,742→5,405,446，+28,704 为胜者行金额差异、提成 344,299.60 不变、逐月对账一致）；同日早前 品类提成汇总销售金额按（收据号+公司）去重：ROW_NUMBER 窗口函数取组内首行（id 最小）sale_price 只计一次，提成全明细汇总不变；逐月 sheet 订单月份=组内首行 sale_date 月份，与全部汇总对账一致（生产数据对比：销售总额 5,938,205→5,376,742 消除重复 561,463，提成 344,299.60 完全不变，133 个收据号受影响，收据号 0039852 手验 5358→1786）；2026-09-11 业务数据导出按收据号分组排序（空收据号沉底、组内 id 升序，首行=组内最早录入行）；同日早前 增值产品管理列表增加型号模糊查询参数 model（前端早已发送、后端补接收）；同日早前 业务数据导出增加型号关键字兜底匹配：品牌+品类相同+产品型号含业务关键字、唯一命中填充零售底价/集团最低价（武山 285 行命中 0 歧义，仅导出文件不落库）+ qimi 品类字典兜底显示气密性检测；同日早前 收款金额拆分口径修正：收据号+客户相同+多经办人即拆分，不再要求品类/型号相同（收据号 0039852 案例）；同日再早 业务数据导出在 销售价 前新增 收款金额 列：默认=销售价，同一订单拆分多行仅首行显示；同日再早 业务数据异步导出在 销售价 后新增 零售底价/集团最低价 两列，与同步导出路径对齐；2026-09-03 增值业务数据字段结构调整：市场收款日期改名 + 新增财务收款日期/资金动态表横排数，导入必填校验/多 sheet 模板识别/模板下载配置路径 + 固定文件名/导出含新列/模板手术式 XML 补丁陷阱；同日品类提成汇总改双文件 ZIP：提成金额/销售金额各一文件 × 全部汇总+逐月 sheet，月度归组与全部汇总对账一致（2026-09-12 起口径改为按收据号+公司去重，见句首）；此前 2026-09-02 补录安检设备创建会员台账模块：数据链路/API/处理器/迁移/前端弹窗 + memberKeyword 兜底搜索列名修复；2026-09-01 补录燃具信息模块 GasStovesController/迁移流程/重建注意事项 + mysql 客户端 latin1 陷阱；2026-08-18 作战地图看板文档校准：6 张 ETL 表、经办人/品类 TOP5 数据源改为 ops_business_data + calc_status 过滤、新增网格员/品类/小区 TOP5 端点；修正控制器/服务层/操作日志覆盖/前端 API 计数；补充销售统计收据号+品类+型号去重规则）
+最后更新：2026-09-22 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
 
 ### 自定义 Claude 命令
 
