@@ -192,11 +192,12 @@ ops-platform-project/
 
 `ops_business_data` 表 2026-09-03 起字段结构：`receipt_date` 展示名改为**市场收款日期**（字段名保留 varchar(50)），其后新增 `finance_receipt_date`（DATE 财务收款日期，可空）与 `fund_dynamic_rows`（INT 资金动态表横排数，可空）。迁移脚本 `sql/migrate_business_data_finance_fields.sql`（已执行）。
 
-- **导入（2026-09-20 起两段式，2026-09-22 起全异步任务化）**：`POST /import/check`（multipart 上传→落盘 `{app.import.upload-dir}` UUID 文件名→创建 `sys_import_task`（taskType=`business_data_check`）→提交 `importExecutor` 线程池→**立即返回 taskId**；工作线程重建 SecurityContext 后解析+校验+匹配，结果 JSON 写入 progress_msg）→ 前端轮询 `GET /import/{taskId}/status`（2s 间隔，DONE 时 `result` 字段=业务结果 JSON）→ `POST /import/confirm`（`checkTaskId`+`confirmations` 表单参数，**复用校验任务落盘文件不二次上传**——合伙人慢上行链路只需传一次；校验任务类型/状态/归属/文件在盘→并发互斥（`business_data_confirm` PENDING/PROCESSING 计数+confirmLock 锁内检查建任务）→ 创建 `business_data_confirm` 任务提交线程池→立即返回 taskId→轮询）。**线程池**：`AsyncImportSupport.importExecutor`（2~4 线程+有界队列100+AbortPolicy，满载返回"系统繁忙"）；**启动清扫**：`sweepInterruptedTasks` 将遗留 PENDING/PROCESSING 的两类任务标记 FAILED（重启中断+并发守卫解锁）。**工作线程租户上下文**：`withSecurityContext` 用任务记录重建 LoginUser+UsernamePasswordAuthenticationToken（无上下文时 TenantLineHandler 会跳过租户过滤→跨租户泄漏）；**事务边界**在 `BusinessDataImportHandler.confirm()`（`@Transactional`，异步工作线程无外层事务，须由本方法保证全量或全不），worker 的 markDone/markFailed 独立提交不受业务回滚影响；confirm 完成后 worker 删除暂存文件（重试=重新上传）。**confirm 缺 `checkTaskId`/`confirmations` 参数**（页面还跑着旧版前端——旧 confirm 为 multipart 重传文件——时必然发生）由手动校验返回友好提示「请刷新页面后重新导入」，不再触发 SDK 兜底的「系统内部错误，请联系管理员」。`sys_import_task.progress_msg` 已扩为 MEDIUMTEXT（迁移 `sql/migrate_import_task_progress_msg_mediumtext.sql`，大文件错误列表/候选产品 JSON 超 500 字符）。旧 `/import`、`/import/submit` 已删除，Kafka 兜底路径 `execute()` = 零决策 confirm（不使用本线程池）。**品牌型号校验顺序**：是否特比="是"或非核心四品类（燃气灶/抽油烟机/热水器/壁挂炉以外）跳过匹配校验（仍做精确匹配提取底价）→ 精确匹配 → 已确认别名 → 模糊候选（同品牌+同品类 key+归一化产品型号包含关键词、按 id 排序）→ 失败「未找到匹配的品牌型号」。模糊匹配项在 check 结果中集中返回（`pendingItems`：品牌/品类/Excel 型号/涉及行号/候选产品含三价格），主站前端弹窗逐项确认（唯一匹配标注"最接近的完整型号"）；确认关系落库 `ops_business_model_alias`（唯一键 `(corp_id, brand, category, model_keyword, delete_flag)`，迁移 `sql/migrate_business_model_alias.sql` 已执行——**新库部署必须先执行**），同型号免重复确认；确认后文件内相同 品牌+品类+关键词 的行批量套用该产品（零售底价/集团最低价落库，销售价保留 Excel 值）。必填列含 市场收款日期/财务收款日期/资金动态表横排数（表头 contains 匹配——旧模板缺列直接拒绝）。市场收款日期**必填**（空→行错误）；财务收款日期可空，但格式错误拒绝该行（连带整文件拒绝）；**横排数可空、允许文字**（模板该列为文字格式）——纯整数/`12.0`/文字中首个整数（`12排`→12）解析入库，全角数字经 NFKC 归一化（`２６０`→260），无数字文字不报错落库空。日期解析（销售/市场/财务三处共用 `normalizeDate`）支持 `2026.1.2`（点分）、`2026/2/13`（斜杠，月/日单数字）、**日期区间取首日**（`2026/2/13-2026/2/12`→`2026-02-13`，分隔符 `-`/`~`/`—`/`至`）与全角输入。多 sheet 模板按「前 10 行含必填列名最多」自动选 sheet + 自动定位表头行。
-- **模板下载**：`GET /template` 优先读配置路径 `app.import.template-path`（默认 `/home/jason/1.xlsx`；生产为 volume 挂载 `/app/templates/1.xlsx` + 环境变量 `APP_IMPORT_TEMPLATE_PATH`，便于不改 JAR 更新模板），缺失回退 classpath `templates/business_data_template.xlsx`；下载文件名固定 **增值业务数据模板.xlsx**。
-- **模板源文件**：`/home/jason/1.xlsx`（12 sheet 工作簿，业务数据 sheet 为导入源）。修改该模板必须**手术式 XML 补丁**——openpyxl 重存会丢弃其它 sheet 的图片（27 个 media/drawing 条目，2026-09-03 曾踩坑）。2026-09-20 补丁新增 **备注** 列（Q1，表头 17 列：收据号 客户 品类 品牌 型号 销售价 公司 部门 经办人 经办人手机号 是否特批 提成比例 销售日期 市场收款日期 财务收款日期 资金动态表横排数 备注），补丁文件已部署到生产容器 `/app/templates/1.xlsx`。2026-09-21 补丁将 **资金动态表横排数** 列（P 列）格式改为**文字**（numFmtId=49 "@"）：styles.xml 末尾追加新 cellXf（index 558，复制原样式 47 的 font/border 但 numFmtId=49——样式 47 与 F 列共享不能原地改）、sheet10.xml 中 P2/P3 单元格 s= 改 558、`<cols>` 拆分 min15-16 为 min15-max15 + min16-max16(style=558) 使新行继承文字格式；仅 2 个 XML 条目变更、27 个 media/drawing 条目字节一致；导入 Handler `toInteger` 已兼容文字单元格纯整数与数字单元格 "12.0"，无需改代码。注意：**本地 `/home/jason/1.xlsx` 已同步为生产 17 列版本（md5 ed7902e2…）**，生产 host 备份 `/data2/boss-platform/templates/1.xlsx.bak-20260921`。
-- **部门/备注字段（2026-09-20）**：`ops_business_data` 新增 `department VARCHAR(100) 部门`（位于 agent 前，迁移 `sql/migrate_business_data_department.sql` 已执行，存量 remark 的「部门: X」前缀回填到 department 并清空）。Excel 部门列 → department、备注列 → remark **直接映射**（旧「部门: 」前缀 hack 已删除）；无 备注 列的旧文件兼容（列索引 -1 守卫，remark 落 NULL）。
-- **导出**：异步/同步两条导出路径表头均含 市场收款日期/财务收款日期/资金动态表横排数（紧跟 收据号 之后），销售价 前含 **收款金额**、销售价 后含 零售底价/集团最低价。2026-09-20 起表头 22 列：公司 批次号 客户 **部门** 经办人 品牌 品类 型号 收款金额 销售价 零售底价 集团最低价 销售日期 收据号 市场收款日期 财务收款日期 资金动态表横排数 返利比例 返利金额 状态 **备注 是否特批**（是否特批在 备注 后，取 is_special 原始值）。**筛选条件 2026-09-20 起含 品牌/型号**：/export 请求体 brand/model 写入 filters JSON → BusinessDataExportHandler 解析并 qw.eq 过滤；列表 API 同条件精确匹配（countFiltered/aggregateStats/categoryStats 三个注解 SQL 均含 brand/model `<if>` 条件，统计与行数一致）。主站筛选栏在 品类 后新增 品牌/型号 输入框。**Kafka 不可用时的同步降级已修复**：`syncExportFallback` 调 `service.exportExcel(...)`（写文件版本，支持全部 6 个筛选）落盘 `{upload.base-dir}/exports/` 后 `markDone(真实路径, Files.size)`——旧实现传 null response + 假路径 "/home/jason/exports/" + 0 字节必坏，且丢 category 参数。行序按 **收据号分组相邻**（`sortByReceiptNo`：空/无收据号沉底、组内 id 升序）。收款金额默认=该行销售价；同一订单拆分多行（收据号+客户相同、多经办人，不要求品类/型号相同）仅导出顺序首行显示（=组内最早录入行）、其余留空，判定逻辑 `BusinessDataServiceImpl.computeSplitOrderNonFirstIds`。零售底价/集团最低价由导入时从增值产品精确匹配落库；存量空值行（如武山型号只写关键字）导出时**关键字兜底匹配**——品牌+品类相同、产品型号归一化（去空格/转小写）后包含业务型号关键字、**唯一命中才填充**（歧义留空），仅内存填充导出文件不写库，逻辑 `BusinessDataServiceImpl.fillExportPrices/matchProductExactOrKeyword`（生产模拟：武山 285 行命中、0 歧义；壁挂炉类产品表无记录仍为空）。品类 `qimi` 是 PRODUCT_CATEGORY 字典 itemKey（item_value=气密性检测），静态兜底字典含映射，导出显示中文。
+- **导入（两段式全异步，2026-09-20 起）**：`POST /import/check`（multipart 上传→落盘 `{app.import.upload-dir}` UUID 文件→建 `sys_import_task`（`business_data_check`）→提交 `AsyncImportSupport.importExecutor`（2~4 线程+队列100+AbortPolicy，满载"系统繁忙"）→立即返回 taskId；工作线程重建 SecurityContext 后解析+校验+匹配，结果 JSON 写 progress_msg）→ 前端 2s 轮询 `GET /import/{taskId}/status`（DONE 时 `result`=业务结果 JSON）→ `POST /import/confirm`（`checkTaskId`+`confirmations`，**复用落盘文件不二次上传**——合伙人慢上行链路只传一次；校验任务类型/状态/归属/文件在盘→并发互斥（PENDING/PROCESSING 计数+confirmLock）→建 `business_data_confirm` 任务→立即返回 taskId→轮询）。**启动清扫** `sweepInterruptedTasks`：遗留 PENDING/PROCESSING 标 FAILED。**租户上下文**：`withSecurityContext` 用任务记录重建 LoginUser（否则 TenantLineHandler 跳过滤→跨租户泄漏）。**事务边界**：`BusinessDataImportHandler.confirm()` `@Transactional` 保证全量或全不（异步线程无外层事务）；worker markDone/markFailed 独立提交；完成后删暂存文件（重试=重新上传）。confirm 缺 `checkTaskId`/`confirmations`（旧版前端缓存）手动校验返回「请刷新页面后重新导入」。`progress_msg` 已扩 MEDIUMTEXT。旧 `/import`、`/import/submit` 已删除，Kafka 兜底 `execute()`=零决策 confirm（不用本线程池）。
+- **品牌型号校验顺序**：是否特批="是"或非核心四品类（燃气灶/抽油烟机/热水器/壁挂炉以外）跳过匹配（仍精确匹配提取底价）→ 精确匹配 → 已确认别名 → 模糊候选（同品牌+同品类 key+归一化型号包含关键词、按 id 排序）→ 失败「未找到匹配的品牌型号」。模糊项集中返回 `pendingItems`（品牌/品类/Excel 型号/行号/候选产品含三价格），主站弹窗逐项确认（唯一匹配标注"最接近的完整型号"）；确认关系落库 `ops_business_model_alias`（唯一键 `(corp_id, brand, category, model_keyword, delete_flag)`，迁移 `sql/migrate_business_model_alias.sql`——**新库部署必须先执行**），同型号免重复确认；确认后同 品牌+品类+关键词 行批量套用（零售底价/集团最低价落库，销售价保留 Excel 值）。
+- **必填列**：市场收款日期/财务收款日期/资金动态表横排数（表头 contains 匹配，旧模板缺列直接拒绝）。市场收款日期**必填**；财务收款日期可空但格式错拒行（连带整文件）；横排数可空允许文字（纯整数/`12.0`/文字中首个整数，全角数字 NFKC 归一化，无数字落库空）。日期解析 `normalizeDate`（销售/市场/财务共用）：点分 `2026.1.2`、斜杠、**区间取首日**（分隔符 `-`/`~`/`—`/`至`）、全角。多 sheet 按「前 10 行含必填列名最多」自动选 sheet + 定位表头行。
+- **模板**：`GET /template` 优先读 `app.import.template-path`（默认 `/home/jason/1.xlsx`；生产 volume 挂载 `/app/templates/1.xlsx` + `APP_IMPORT_TEMPLATE_PATH` 环境变量），缺失回退 classpath `templates/business_data_template.xlsx`；文件名固定 **增值业务数据模板.xlsx**。源文件 `/home/jason/1.xlsx`（12 sheet，17 列表头：收据号 客户 品类 品牌 型号 销售价 公司 部门 经办人 经办人手机号 是否特批 提成比例 销售日期 市场收款日期 财务收款日期 资金动态表横排数 备注）。**修改必须手术式 XML 补丁**——openpyxl 重存会丢其它 sheet 图片（27 个 media/drawing 条目）。本地与生产 `/app/templates/1.xlsx` 已同步（md5 ed7902e2…），host 备份 `1.xlsx.bak-20260921`。
+- **部门/备注字段**：`department VARCHAR(100)`（迁移 `sql/migrate_business_data_department.sql` 已执行，存量 remark「部门: X」前缀回填并清空）。Excel 部门列→department、备注列→remark 直接映射（旧前缀 hack 已删除）；无备注列旧文件兼容（列索引 -1 守卫）。
+- **导出**：异步/同步两路径表头统一 22 列：公司 批次号 客户 **部门** 经办人 品牌 品类 型号 收款金额 销售价 零售底价 集团最低价 销售日期 收据号 市场收款日期 财务收款日期 资金动态表横排数 返利比例 返利金额 状态 **备注 是否特批**。筛选含 品牌/型号（请求体 brand/model → filters JSON → ExportHandler qw.eq；列表 countFiltered/aggregateStats/categoryStats 三个注解 SQL 同步 `<if>` 条件）。**Kafka 降级已修复**：`syncExportFallback` 调 `service.exportExcel(...)`（写文件版，支持全部 6 筛选）落盘 `{upload.base-dir}/exports/` 后 `markDone(真实路径, Files.size)`。行序按**收据号分组相邻**（`sortByReceiptNo`：空沉底、组内 id 升序）。收款金额默认=销售价；同订单拆分多行（收据号+客户相同、多经办人）仅首行显示（`computeSplitOrderNonFirstIds`）。底价存量空值行导出时**关键字兜底匹配**（品牌+品类相同+归一化型号包含关键字、唯一命中才填充、歧义留空、仅内存不写库，`fillExportPrices/matchProductExactOrKeyword`）。品类 `qimi`=气密性检测（静态兜底字典）。
 - 列表 API 直接返回实体，新增字段自动序列化给前端展示。
 | `CommissionRuleController` | `/api/ops/admin/commission` | 个人/公司提成规则 CRUD（支持组织层级继承） |
 | `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD + 列表按品类/品牌/型号(like)/状态筛选；2026-09-20 补录 15 个壁挂炉/热水器缺失型号（`sql/ops_value_added_product_seed_missing_models.sql`，众数价+90%底价口径） |
@@ -275,7 +276,7 @@ ops-platform-project/
 
 **日志存储**：`OperationLogService` — 按月分文件写入 `/home/jason/data/logs/operation/operation_YYYYMM.log`，每条日志一行 JSON，包含 `traceId`、`userId`、`corpId`、`ip`、`operation`、`params`、`result`、`timestamp`。
 
-**覆盖范围**：截至 2026-08，已覆盖 18 个管理后台 Controller（`AdminController`、`CommissionRuleController`、`AnnualPlanController`、`BusinessDataController`、`CategoryLifecycleRuleController`、`GasUserController`、`GridManagerController`、`MemberLedgerController`、`HomeConfigController`、`ValueAddedProductController`、`ActivityReviewController`、`AdminStationController`、`StationController`、`EmployeeController`、`MemberController`、`PartnerController`、`PublicAccountController`、`BattleMapController`）。
+**覆盖范围**：截至 2026-08 已覆盖全部 18 个管理后台 Controller（见上方 Controller 表）。
 
 ### AI 助手架构（双通道：会员 + 员工）
 
@@ -598,7 +599,7 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 
 项目**无自动化测试**（无单元测试/集成测试）。所有验证依赖手动检查：
 
-- **编译验证**：`JAVA_HOME=/home/jason/jdk17 /home/jason/apache-maven-3.9.9/bin/mvn -f backend/pom.xml compile -o`
+- **编译验证**：`mvn -f backend/pom.xml compile -o`（完整命令见「快速命令」）
 - **后端 API**：`curl` 测试端点，查看日志 `tail -f /tmp/ops-backend.log`
 - **前端 H5**：`npm run build:h5` → 部署到测试服务器 → 微信开发者工具打开 `https://a.15891589.xyz/ops/`
 - **前端管理页**：平台主站 `https://a.15891589.xyz` 加载 `/ops/` 路由组件（非微前端，是 componentMap 直接加载）
@@ -690,7 +691,7 @@ cd frontend && npm run build:h5
 ### 生产数据库定时备份（2026-09-04 上线，落盘本机）
 
 - **任务**：**本机**（开发机 WSL）crontab `0 2 * * *` 每日凌晨 2:00 全量备份生产 `ai_platform` + `mall_db`（CST）。本机需开机且 cron 服务运行，否则当天无备份
-- **脚本**：本机 `/home/jason/data/db-backup.sh` — SSH 到生产 `docker exec mysqldump`（`--default-character-set=utf8mb4 --single-transaction --routines --triggers --events --set-gtid-purged=OFF`），管道回本机 gzip 落盘
+- **脚本**：本机 `/home/jason/data/db-backup.sh` — SSH 到生产 `docker exec mysqldump`（utf8mb4 + single-transaction + routines/triggers/events），管道回本机 gzip 落盘
 - **产物**：本机 `/home/jason/data/<db>_<YYYYmmdd_HHMMSS>.sql.gz`（约 5~7MB/库），保留 7 天自动清理；日志同目录 `backup.log`
 - 恢复方式（在生产服务器）：`gzip -dc <file> | docker exec -i mysql mysql --default-character-set=utf8mb4 -uroot -p`
 
@@ -700,7 +701,7 @@ cd frontend && npm run build:h5
 
 | 陷阱 | 说明 |
 |------|------|
-| **服务器 JDK** | 测试服务器默认 JDK 8，运行 JAR 必须用绝对路径；本地 JDK 17（Temurin 17.0.20.1）统一在 `/home/jason/jdk17`，Maven 在 `/home/jason/apache-maven-3.9.9/bin/mvn`（均不在 PATH，必须绝对路径）；Maven 本地仓库 `/home/jason/m2_local`（`~/.m2/settings.xml` 已配置 `localRepository`，离线编译必须 `-o`） |
+| **服务器 JDK** | 测试服务器默认 JDK 8，运行 JAR 必须用绝对路径；本地 JDK 17 在 `/home/jason/jdk17`、Maven 在 `/home/jason/apache-maven-3.9.9/bin/mvn`（均不在 PATH，必须绝对路径）；本地仓库 `/home/jason/m2_local`，离线编译必须 `-o` |
 | **Maven offline** | 手动编译必须 `-o`（离线模式），本地仓库 `/home/jason/m2_local`。`restart.sh` 不使用离线模式 |
 | **生产 base 路径** | 生产 base 是 `/ops/`（`.env.production` `VITE_BASE=/ops/`），manifest.json 已同步为 `/ops/` |
 | **H5 图片 URL** | uni-app `<image>` 渲染为 CSS `background-image`，根相对路径被解析到 `/ops/` → 必须用完整 HTTPS 路径 |
@@ -711,7 +712,7 @@ cd frontend && npm run build:h5
 | **BaseEntity 字段命名** | SDK 使用 `modifyTime`（不是 `updateTime`） |
 | **增值业务物理删除** | `ops_business_data` 的 `batchDelete()` 用原始 JDBC 物理删除，不走 `@TableLogic` |
 | **SysImportTask 未继承 BaseEntity** | 自行声明所有审计字段，是唯一例外 |
-| **数据库环境隔离** | 生产与测试共享同一 MySQL 实例但使用不同数据库（生产 `mall_db` / 测试 `mall_db_test`），极易混淆。**部署时必须确认 `SPRING_DATASOURCE_URL` 指向正确的库**。历史事故：生产容器曾错误使用 `mall_db_test`，导致 17,745 条数据写入测试库而非生产库 |
+| **数据库环境隔离** | 生产 `mall_db` / 测试 `mall_db_test` 同实例不同库，极易混淆。**部署时必须确认 `SPRING_DATASOURCE_URL` 指向正确库**（历史事故：生产容器误用测试库，17,745 条数据写错库） |
 | **无自动化测试** | 所有验证依赖手动检查和生产监控 |
 | **首页配置 corpId** | `/api/ops/home-data` 公开接口（无 JWT），必须传 `?corpId=` 参数 |
 | **Kafka 条件加载** | Consumer 仅在 `spring.kafka.enabled=true` 时加载，测试环境无 Kafka 降级同步 |
@@ -722,13 +723,13 @@ cd frontend && npm run build:h5
 | **CaptchaService 单实例** | 验证码存储在内存 `ConcurrentHashMap` 中，仅适用于单实例部署。多实例需替换为 Redis |
 | **双 Token 隔离** | 会员 token（`ops_token`）和员工 token（`ops_employee_token`）是独立的存储 key。`request.js` 按优先级发送（会员优先），但两个 token 不能混用——员工 token 不能访问会员接口，反之亦然 |
 | **ops-platform vs 平台主站** | `boss.jdzn99.com` 有两套前端：平台主站（`~/ai-native-platform/frontend`）和 ops H5（本项目）。`/ops/xxx` 路由在主站中通过 `componentMap` 直接加载 Vue 组件，不是微前端。改 ops H5 页面不影响主站 |
-| **Kafka 消费者组冲突** | 同一 consumer group 内分区独占。多容器共享 `ai-platform-group` 时，旧容器（如 `determined_lehmann`）抢到 `async-export-task` 分区但连错数据库 → 任务僵死 PENDING → 新容器永远收不到消息。**部署新容器前必须 `docker stop/rm` 旧容器**，部署后 `docker ps` 确认无僵尸容器残留。参见 `[[kafka-consumer-group-conflict]]` |
+| **Kafka 消费者组冲突** | 同一 group 内分区独占。多容器共享 `ai-platform-group` 时旧容器抢分区但连错库 → 任务僵死 PENDING、新容器收不到消息。**部署新容器前必须 `docker stop/rm` 旧容器**，部署后 `docker ps` 确认无残留。参见 `[[kafka-consumer-group-conflict]]` |
 | **旧容器/代码不留存** | **铁律**：新容器部署后旧容器必须立即清理（`docker stop + rm`）。旧代码、旧容器、旧配置不留存——git history 可随时恢复。参见 `[[no-legacy-code-retention]]`、`[[kafka-consumer-group-conflict]]` |
 | **作战地图跨库查询** | `BattleMapController.summary()` 和 `region` 解析方法直读 `ai_platform.sys_corp` 和 `ai_platform.sys_region`（跨库）。这是仅有的例外——组织区域信息无法通过 API 获取。维护时注意表结构变更 |
 | **作战地图数据源仅生产** | 作战地图源表（`ops_business_data`/`ops_gas_user`/`ops_member_ledger`/`ops_grid_manager`）仅在**生产库**有数据。测试 `mall_db` 无这些表的记录，ETL 只能在生产环境跑。参见 `[[battle-map-data-only-on-prod]]` |
 | **ops_activity_review_cost 无 delete_flag** | 此表缺少逻辑删除字段，`costMapper.delete()` 走物理删除。重构时需注意 |
 | **company-select 未注册路由** | `frontend/src/pages/employee/company-select.vue` 文件存在但**未在 pages.json 中注册路由**。该页面通过其他方式引用（如 `uni.navigateTo` 直接跳转），不要误删 |
-| **mysql 客户端默认 latin1** | `docker exec mysql mysql` 不指定字符集时 `character_set_client/connection/results=latin1`（服务器为 utf8mb4）。含中文的 SQL（DDL 注释/INSERT/LIKE）必须加 `--default-character-set=utf8mb4`：不加则**写操作双重编码损坏数据**（2026-08-29 `sys_corp.gas_company_id` 注释被写坏已修复），读操作则**显示乱码**（数据无损）。判别：`HEX()` 看字节，`C3A7E280A1`（ç‡ƒ）序列=损坏，`E4`-`E9` 开头=正常。详见 `MEMORY.md` 1.4 节 |
+| **mysql 客户端默认 latin1** | `docker exec mysql mysql` 不指定字符集时 client/connection/results=latin1（服务器 utf8mb4）。含中文 SQL 必须加 `--default-character-set=utf8mb4`：否则写操作双重编码损坏数据（2026-08-29 `sys_corp.gas_company_id` 注释损坏已修复）、读操作显示乱码（数据无损）。判别：`HEX()` 看字节，`C3A7E280A1`=损坏。详见 `MEMORY.md` 1.4 节 |
 
 ### UI/UX 质量规范（强制）
 
@@ -744,24 +745,9 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-09-22 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
+最后更新：2026-10-12 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
 
 ### 自定义 Claude 命令
 
-项目 `.claude/commands/` 目录提供两个自定义命令，定义在 `.claude/commands/pr.md` 和 `.claude/commands/loop.md`。
-
-**`/pr`** — 基于当前 git diff 生成结构化 PR 描述，包含：
-1. 标题（一句话概括）
-2. 动机（为什么做、解决什么问题）
-3. 模块级变更列表（按模块/文件分类）
-4. 影响范围（受影响的模块/接口/页面/数据流）
-5. 测试建议（reviewer 应重点测试的功能点/边界条件）
-6. 风险提示（已知风险/未解决问题/潜在副作用）
-
-**`/loop`** — 严格开发闭环，自动完成以下步骤，非极特殊情况不中断：
-1. **plan** — 列出受影响文件、接口/数据流变更、潜在风险点；修改接口时列出所有引用方
-2. **implement** — 按 plan 分步编写代码，每次只做最小原子改动
-3. **verify** — 运行编译检查（`mvn compile`），失败立即修复，不通过不继续（项目无自动化测试，verify 仅验证编译通过）
-4. **code-review** — 多角度审查（逻辑/安全/性能/规范/删除影响）；严重问题自动修复并跳回步骤3；风格建议记录但不阻塞
-5. **PR** — 生成结构化 PR 描述
-6. **结束** — 报告闭环完成，等待用户确认是否提交
+- **`/pr`** — 基于 git diff 生成结构化 PR 描述（标题/动机/模块级变更/影响范围/测试建议/风险提示）。定义见 `.claude/commands/pr.md`
+- **`/loop`** — 严格开发闭环：plan → implement → verify（编译）→ code-review → PR → 结束，非极特殊情况不中断。定义见 `.claude/commands/loop.md`
