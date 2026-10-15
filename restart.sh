@@ -1,10 +1,14 @@
 #!/bin/bash
 # 金地燃气聚合展示引流平台 重启脚本
 # 用法：
-#   ./restart.sh              重启后端
-#   ./restart.sh rebuild       重新打包后重启后端
-#   ./restart.sh dev           重启后端 + 启动前端 dev server (:3035)
-#   ./restart.sh stop          停止所有服务
+#   ./restart.sh              停止后端 + 编译打包 + 启动后端（默认，等同 all）
+#   ./restart.sh backend       仅重启后端（stop + start，JAR 不存在时自动编译）
+#   ./restart.sh frontend      仅重启前端 Vite dev server (:3035)
+#   ./restart.sh all           停止后端 + 编译 + 启动后端（默认行为）
+#   ./restart.sh rebuild       强制重编译后端 + 重启
+#   ./restart.sh dev           停止前后端 + 编译后端 + 启动后端 + 启动前端 dev server
+#   ./restart.sh stop          停止所有服务（后端 8084 + 前端 3035）
+#   ./restart.sh build         构建前端 H5 生产包 + 后端 JAR
 #
 # 后端：Spring Boot 3.2.5 / JDK 17 / 端口 8084
 # 前端：uni-app H5 / Vite dev :3035

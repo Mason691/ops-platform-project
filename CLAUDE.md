@@ -154,7 +154,7 @@ ops-platform-project/
 │   ├── src/manifest.json    # uni-app 配置（H5 base 路径等）
 │   ├── src/pages/           # uni-app 页面（29 个路由，含 Tab/C 端/员工/管理）
 │   ├── src/components/      # 跨页面复用组件（ImageCropperModal, LiveStatusCard, EmployeeTabBar, Pager）
-│   ├── src/api/index.js     # 集中 API 注册（148 个方法）
+│   ├── src/api/index.js     # 集中 API 注册（约 150 个方法）
 │   ├── src/utils/           # request.js, image.js, config.js, jssdk.js, auth-bridge.js
 │   ├── src/config.js        # BASE_URL + DEFAULT_CORP_ID
 │   ├── src/static/          # 静态资源（jweixin-1.6.0.js 等）
@@ -562,7 +562,7 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 - **双 Token 体系**：`request.js` 优先使用 `ops_token`（会员），fallback 使用 `ops_employee_token`（员工）。401 时清除两者
 - **iframe SSO**：`auth-bridge.js` 监听 `postMessage`（`AIP_AUTH` / `AIP_NAVIGATE`），信任同源和 `boss.jdzn99.com`
 - **公众号深链**：`App.vue` 支持 `?route=pages/employee/login` 和 `?from=employee` 查询参数跳转（公众号自定义菜单不支持 hash fragment）
-- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（148 个方法），统一使用 `request` 实例
+- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（约 150 个方法），统一使用 `request` 实例
 - **H5 hash 路由**：实际 base 由构建时 `VITE_BASE` 环境变量控制
 
 ### 前端页面路由（pages.json）
