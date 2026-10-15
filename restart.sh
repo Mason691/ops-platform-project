@@ -40,9 +40,9 @@ build_frontend_h5() {
     log "重新打包前端 H5..."
     cd "$PROJECT_DIR/frontend"
     [ -d node_modules ] || npm install --silent
-    npx uni build
-    curl -sL 'https://res.wx.qq.com/open/js/jweixin-1.6.0.js' \
-        -o "$PROJECT_DIR/frontend/dist/build/h5/jweixin-1.6.0.js"
+    # 必须走 npm run build:h5 —— 含 jweixin-1.6.0.js 复制 + 产物 "/static/ → /ops/static/ 路径重写，
+    # 裸跑 npx uni build 会漏掉重写导致 /ops/ 下静态资源 404
+    npm run build:h5
     log "H5 打包完成 → $PROJECT_DIR/frontend/dist/build/h5/"
 }
 
@@ -150,8 +150,8 @@ esac
 echo ""
 echo "===== 重启完成 ====="
 echo "后端健康: http://localhost:8084/actuator/health"
-echo "H5 移动端: https://a.15891589.xyz/subsystem/ops/index.html"
-echo "管理后台: https://a.15891589.xyz"
+echo "H5 移动端: https://boss.jdzn99.com/ops/"
+echo "管理后台: https://boss.jdzn99.com"
 echo "日志:"
 echo "  tail -f $BACKEND_LOG"
 echo "  tail -f $FRONTEND_LOG"

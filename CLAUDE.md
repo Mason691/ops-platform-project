@@ -38,16 +38,7 @@ cd frontend && npm run dev:mp-weixin
 # 前端小程序构建
 cd frontend && npm run build:mp-weixin  # 输出 dist/build/mp-weixin/
 
-# 部署到测试环境（104.238.165.57）
-cd frontend && npm run build:h5
-ssh jason@104.238.165.57 "mkdir -p /home/jason/aa-platform/html/aa/ops"
-scp -r dist/build/h5/* jason@104.238.165.57:/home/jason/aa-platform/html/aa/ops/
-
-# 后端部署到测试环境
-cd backend && JAVA_HOME=/home/jason/jdk17 /home/jason/apache-maven-3.9.9/bin/mvn clean package -DskipTests -o
-scp target/ops-platform-1.0.0-SNAPSHOT.jar jason@104.238.165.57:~/ops-platform-project/backend/target/
-ssh jason@104.238.165.57 "kill \$(lsof -ti:8084) 2>/dev/null; sleep 1; \
-  nohup /home/jason/jdk17/bin/java -jar ~/ops-platform-project/backend/target/ops-platform-1.0.0-SNAPSHOT.jar > /tmp/ops.log 2>&1 &"
+# 部署：测试环境 104.238.165.57 已于 2026-08-18 退役，所有发布直接上生产 → 见「生产部署」
 ```
 
 **无自动化测试**：项目当前无单元测试或集成测试，所有验证依赖手动检查和生产监控。
@@ -85,10 +76,11 @@ ssh jason@104.238.165.57 "kill \$(lsof -ti:8084) 2>/dev/null; sleep 1; \
 
 | 环境 | IP | 用户/密码 | 域名 | 部署方式 |
 |------|-----|---------|------|---------|
-| 测试 | `104.238.165.57` | jason / aB740602 | `a.15891589.xyz` | JAR 直接运行 + host nginx |
 | 生产 | `113.250.60.41` | root / `j_ly[4=2Gh1?9]` | `boss.jdzn99.com` | Docker compose（`/data2/boss-platform/`） |
+| ~~测试~~ | ~~`104.238.165.57`~~ | — | ~~`a.15891589.xyz`~~ | **已退役（2026-08-18）**，勿再部署 |
 
-- 数据库：`mall_db @ 104.238.165.57`（root / aB740602，Docker 容器中）
+- 数据库：生产 `mall_db @ 113.250.60.41`（Docker 容器 `mysql`，root / `admin.2026`）；同实例另有 `ai_platform` 库
+- ⚠️ `application.yml` 里 `spring.datasource.url` 与 `platform.base-url` 的**签入默认值仍指向已退役的 104.238.165.57**（3306 已封禁）。本地起后端必须用环境变量覆盖，生产由 compose 注入 `SPRING_DATASOURCE_URL` / `PLATFORM_BASE_URL`
 - Maven 本地仓库：`/home/jason/m2_local`（离线模式必须 `-o`）
 
 ---
@@ -135,7 +127,7 @@ ops-platform-project/
 │   │   ├── OpsApplication.java
 │   │   ├── config/          # SecurityConfig, AuthConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig, JacksonConfig, GasDataSourceConfig
 │   │   ├── controller/      # 29 controllers（见下方）
-│   │   ├── entity/          # 36 entities（全部继承 SDK BaseEntity，SysImportTask 例外；含 MerchantMiniappConfig, OperatorMerchant, OpsBusinessModelAlias）
+│   │   ├── entity/          # 36 entities（31 个继承 SDK BaseEntity；5 个例外见「已知陷阱」；含 MerchantMiniappConfig, OperatorMerchant, OpsBusinessModelAlias）
 │   │   ├── mapper/          # 37 MyBatis-Plus mappers（含 OpsBusinessDataEmployeeMapper 员工业务数据专用）
 │   │   ├── service/         # 18 service interfaces + 9 standalone services + 18 impls
 │   │   ├── aspect/          # AOP 切面（OperationLogAspect）
@@ -155,7 +147,7 @@ ops-platform-project/
 │   ├── src/pages/           # uni-app 页面（29 个路由，含 Tab/C 端/员工/管理）
 │   ├── src/components/      # 跨页面复用组件（ImageCropperModal, LiveStatusCard, EmployeeTabBar, Pager）
 │   ├── src/api/index.js     # 集中 API 注册（约 150 个方法）
-│   ├── src/utils/           # request.js, image.js, config.js, jssdk.js, auth-bridge.js
+│   ├── src/utils/           # request.js, image.js, jssdk.js, auth-bridge.js
 │   ├── src/config.js        # BASE_URL + DEFAULT_CORP_ID
 │   ├── src/static/          # 静态资源（jweixin-1.6.0.js 等）
 │   ├── index.html           # 入口 HTML（含内联微信 JSSDK 初始化脚本）
@@ -200,7 +192,7 @@ ops-platform-project/
 - **导出**：异步/同步两路径表头统一 22 列：公司 批次号 客户 **部门** 经办人 品牌 品类 型号 收款金额 销售价 零售底价 集团最低价 销售日期 收据号 市场收款日期 财务收款日期 资金动态表横排数 返利比例 返利金额 状态 **备注 是否特批**。筛选含 品牌/型号（请求体 brand/model → filters JSON → ExportHandler qw.eq；列表 countFiltered/aggregateStats/categoryStats 三个注解 SQL 同步 `<if>` 条件）。**Kafka 降级已修复**：`syncExportFallback` 调 `service.exportExcel(...)`（写文件版，支持全部 6 筛选）落盘 `{upload.base-dir}/exports/` 后 `markDone(真实路径, Files.size)`。行序按**收据号分组相邻**（`sortByReceiptNo`：空沉底、组内 id 升序）。收款金额默认=销售价；同订单拆分多行（收据号+客户相同、多经办人）仅首行显示（`computeSplitOrderNonFirstIds`）。底价存量空值行导出时**关键字兜底匹配**（品牌+品类相同+归一化型号包含关键字、唯一命中才填充、歧义留空、仅内存不写库，`fillExportPrices/matchProductExactOrKeyword`）。品类 `qimi`=气密性检测（静态兜底字典）。
 - 列表 API 直接返回实体，新增字段自动序列化给前端展示。
 | `CommissionRuleController` | `/api/ops/admin/commission` | 个人/公司提成规则 CRUD（支持组织层级继承） |
-| `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD + 列表按品类/品牌/型号(like)/状态筛选；2026-09-20 补录 15 个壁挂炉/热水器缺失型号（`sql/ops_value_added_product_seed_missing_models.sql`，众数价+90%底价口径） |
+| `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD + 列表按品类/品牌/型号(like)/状态筛选；2026-10-15 整表清空后重建为 95 个型号（万和15/万家乐21/美的18/小松鼠41，id 144-238，`sql/ops_value_added_product_import_20261015*.sql`）；万和壁挂炉 87 行业务数据仍无产品覆盖（`sql/ops_value_added_product_seed_missing_models.sql`，众数价+90%底价口径） |
 | `MemberController` | `/api/ops/admin/members` | 会员管理：分页查询/详情/启用禁用 |
 | `ExportTaskController` | `/api/ops/admin/export` | 通用异步导出：提交/状态轮询/下载/历史 |
 | `PermissionController` | `/api/ops/admin/permission` | 权限概要查询 |
@@ -487,13 +479,13 @@ battle-map:
 
 ### 微信小程序跳转（H5）
 
-H5 端使用 `wx-open-launch-weapp` 开放标签跳转小程序，经多次迭代后最终方案：
+H5 端跳转第三方小程序统一走 **JSSDK `wx.navigateToMiniProgram`**（不是 `wx-open-launch-weapp` 开放标签）：
 
-**核心组件**：`frontend/src/components/MpLauncher.vue` — 动态创建微信开放标签，每次点击重建 DOM 元素以绕过微信标签复用限制
+- `pages/product/detail.vue` — 详情页「进入小程序」按钮 + 兑换成功后延时自动跳转，参数取 `product.miniappConfig`（appId/path）
+- `pages/activity/detail.vue` — `WeixinJSBridge.invoke('navigateToMiniProgram', ...)`，取 `activity.miniapp_app_id`
+- `pages/index/index.vue` — banner `jumpPath` 跳转
 
-**关键演化**：`weixin://` scheme（不可用）→ `finder-preview` URL → `wx-open-launch-weapp` 标签（innerHTML 注入绕过 Vue 编译器）→ 微信 URL Link API → 最终回到 `wx-open-launch-weapp` + 每次点击动态重建
-
-**独立测试页**：`frontend/src/static/mp-test.html`（用于微信 URL Link 功能测试）
+**注意**：`wx-open-launch-weapp` 仅在 `main.js` 注册为自定义元素（`isCustomElement`，消除编译告警），**无业务使用**；历史方案（`weixin://` / URL Link / 开放标签 + `MpLauncher.vue`）均已废弃，`components/` 下**不存在** MpLauncher.vue，勿照旧文档复原。
 
 ### 直播室管理（Live Room）
 
@@ -587,7 +579,6 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 
 | 组件 | 文件 | 说明 |
 |------|------|------|
-| `MpLauncher` | `components/MpLauncher.vue` | 微信开放标签跳转小程序 — 每次点击动态重建 DOM 绕过微信标签复用限制 |
 | `EmployeeTabBar` | `components/EmployeeTabBar.vue` | 员工端底部导航栏（AI助手/业务数据/我的） |
 | `ImageCropperModal` | `components/ImageCropperModal.vue` | 图片裁剪上传弹窗，uni-app `<image>` 的 `mode` 裁剪封装 |
 | `LiveStatusCard` | `components/LiveStatusCard.vue` | 直播状态卡片（预告/直播中/结束 + 开播倒计时） |
@@ -601,10 +592,10 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 
 - **编译验证**：`mvn -f backend/pom.xml compile -o`（完整命令见「快速命令」）
 - **后端 API**：`curl` 测试端点，查看日志 `tail -f /tmp/ops-backend.log`
-- **前端 H5**：`npm run build:h5` → 部署到测试服务器 → 微信开发者工具打开 `https://a.15891589.xyz/ops/`
-- **前端管理页**：平台主站 `https://a.15891589.xyz` 加载 `/ops/` 路由组件（非微前端，是 componentMap 直接加载）
+- **前端 H5**：`npm run build:h5` → 部署生产 → 微信开发者工具打开 `https://boss.jdzn99.com/ops/`（测试环境已退役）
+- **前端管理页**：平台主站 `https://boss.jdzn99.com` 加载 `/ops/` 路由组件（非微前端，是 componentMap 直接加载）
 - **微信 JSSDK**：必须在微信环境中测试，普通浏览器不可用（详见 `docs/testing.md`）
-- **Kafka 功能**：仅在 `spring.kafka.enabled=true` 时可用（生产环境），测试环境 Kafka 禁用时自动降级为同步调用
+- **Kafka 功能**：仅在 `spring.kafka.enabled=true` 时可用（生产）；本地或无 Kafka 环境自动降级为同步调用
 
 ---
 
@@ -615,8 +606,8 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 | 配置键 | 说明 | 默认值 |
 |---|---|---|
 | `server.port` | 后端端口 | `8084` |
-| `spring.datasource.url` | MySQL 连接 | `jdbc:mysql://104.238.165.57:3306/mall_db` |
-| `platform.base-url` | 底座平台地址 | `http://104.238.165.57:8080` |
+| `spring.datasource.url` | MySQL 连接 | `jdbc:mysql://104.238.165.57:3306/mall_db` ⚠️ 已退役主机，本地需覆盖 |
+| `platform.base-url` | 底座平台地址 | `http://104.238.165.57:8080` ⚠️ 同上，生产由 `PLATFORM_BASE_URL` 覆盖 |
 | `platform.subsystem-code` | 子系统标识 | `ops-platform` |
 | `platform.internal-token` | 内部调用 Token | `aip-internal-svc-token-2026` |
 | `platform.jwt-secret` | JWT 签名验证密钥（不自签） | 32+ 字节 |
@@ -627,7 +618,7 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 | `app.upload.base-dir` | 上传根目录 | `/app/uploads`（Docker） |
 | `app.import.upload-dir` | 异步导入文件暂存目录 | `${user.home}/data/imports`（Docker 环境变量覆盖） |
 | `app.resource.base-url` | 静态资源域名 | `https://boss.jdzn99.com` |
-| `spring.kafka.enabled` | Kafka 开关 | `true`（生产）/ `false`（测试） |
+| `spring.kafka.enabled` | Kafka 开关 | yml 签入 `true`；无 Kafka 环境自动降级同步 |
 | `battle-map.etl.auto-refresh` | 作战地图定时 ETL | `true` |
 | `battle-map.etl.init-on-startup` | 启动时全量 ETL | `true` |
 | `battle-map.etl.cron` | ETL 刷新间隔 | `0 */30 * * * *`（每 30 分钟） |
@@ -641,7 +632,7 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 | `management.endpoints.web.exposure.include` | Actuator 暴露端点 | `health,info` |
 | `platform.sdk-permit-paths` | SDK 安全过滤器放行路径 | 6 个路径（`/actuator/**`, `/uploads/**` 等）。SecurityConfig 另有 5 个公开端点（`/api/ops/home-data`, `/api/ops/coupon/list`, `/api/ops/ai/config`, `/api/ops/live-rooms/**`, `/api/ops/admin/business-data/template`），合计 11 个免认证路径 |
 
-**生产 Kafka 配置**：使用 SASL_PLAINTEXT 认证（`admin/admin123.`），bootstrap-server `113.250.60.41:9092`。测试环境 Kafka 禁用。
+**生产 Kafka 配置**：使用 SASL_PLAINTEXT 认证（`admin/admin123.`），bootstrap-server `113.250.60.41:9092`。
 
 ### RestTemplate Beans
 
@@ -675,10 +666,18 @@ cd backend && JAVA_HOME=/home/jason/jdk17 /home/jason/apache-maven-3.9.9/bin/mvn
 # docker compose up -d ops-backend
 # Dockerfile 包含 HEALTHCHECK（30s 间隔，GET /actuator/health），Python3 + openpyxl 用于 TSV→XLSX 转换
 
-# 前端
-cd frontend && npm run build:h5
-# 上传到 /data2/boss-platform/html/ops/
+# 前端 —— 两套前端独立，改哪边就部署哪边（见下表）
+cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/ops/
 ```
+
+**前端部署目标（勿混）**：
+
+| 改动位置 | 上传目标 | 生效方式 |
+|---|---|---|
+| `~/ops-platform-project/frontend/`（C 端/员工端 H5，hash 路由） | `/data2/boss-platform/html/ops/` | `boss-ops-nginx`(9083) |
+| `~/ai-native-platform/frontend/src/views/ops/`（管理后台页） | `/data2/boss-platform/html/platform/` | `docker exec boss-platform-nginx nginx -s reload` |
+
+**新增 `/ops/xxx` 管理页必须同步加 host nginx 白名单**：两套前端共用 `/ops/` 前缀，host nginx（`/data2/nginx/conf/conf.d/boss.conf`）以**逐路由白名单**把管理页路由到主站 9081，未列入者落入 catch-all 被送到 Ops H5 —— 用户刷新管理页会看到公众号移动端（URL 出现 `#/` 即已中招；2026-08-27 在 `/ops/gas-stoves`、`/ops/category-lifecycle-rules` 上踩过）。加一行 `location ^~ /ops/新路径 { proxy_pass http://172.17.0.1:9081; proxy_http_version 1.1; proxy_set_header Host $host; proxy_read_timeout 300s; proxy_buffering off; }` 后执行 `docker exec nginx nginx -t && docker exec nginx nginx -s reload`。校验：`curl -s https://boss.jdzn99.com/ops/新路径 | grep -o '<title>[^<]*</title>'` → 主站=「协同平台」，H5=「金地燃气」。
 
 生产 Docker 关键参数：
 - ops-backend: `SERVER_PORT=8082`, `network_mode: host`
@@ -690,9 +689,9 @@ cd frontend && npm run build:h5
 
 ### 生产数据库定时备份（2026-09-04 上线，落盘本机）
 
-- **任务**：**本机**（开发机 WSL）crontab `0 2 * * *` 每日凌晨 2:00 全量备份生产 `ai_platform` + `mall_db`（CST）。本机需开机且 cron 服务运行，否则当天无备份
+- **任务**：**本机**（开发机 WSL）crontab `0 2 * * *` 每日凌晨 2:00 全量备份生产 `ai_platform` + `mall_db`（CST）。本机需开机且 cron 服务运行，否则当天无备份。2026-10-15 起增 `@reboot` 补跑（`db-backup-if-stale.sh`：超 20h 未备份即补，幂等）
 - **脚本**：本机 `/home/jason/data/db-backup.sh` — SSH 到生产 `docker exec mysqldump`（utf8mb4 + single-transaction + routines/triggers/events），管道回本机 gzip 落盘
-- **产物**：本机 `/home/jason/data/<db>_<YYYYmmdd_HHMMSS>.sql.gz`（约 5~7MB/库），保留 7 天自动清理；日志同目录 `backup.log`
+- **产物**：本机 `/home/jason/data/<db>_<YYYYmmdd_HHMMSS>.sql.gz`（约 5~7MB/库），保留 7 天自动清理；日志同目录 `backup.log`。手工单表导出放 `manual/` 子目录可免被清理
 - 恢复方式（在生产服务器）：`gzip -dc <file> | docker exec -i mysql mysql --default-character-set=utf8mb4 -uroot -p`
 
 ---
@@ -701,33 +700,33 @@ cd frontend && npm run build:h5
 
 | 陷阱 | 说明 |
 |------|------|
-| **服务器 JDK** | 测试服务器默认 JDK 8，运行 JAR 必须用绝对路径；本地 JDK 17 在 `/home/jason/jdk17`、Maven 在 `/home/jason/apache-maven-3.9.9/bin/mvn`（均不在 PATH，必须绝对路径）；本地仓库 `/home/jason/m2_local`，离线编译必须 `-o` |
+| **本地 JDK/Maven 路径** | JDK 17 在 `/home/jason/jdk17`、Maven 在 `/home/jason/apache-maven-3.9.9/bin/mvn`（均不在 PATH，必须绝对路径）；本地仓库 `/home/jason/m2_local`，离线编译必须 `-o`。生产跑在 Docker（`eclipse-temurin:17-jre`）内，无此问题 |
 | **Maven offline** | 手动编译必须 `-o`（离线模式），本地仓库 `/home/jason/m2_local`。`restart.sh` 不使用离线模式 |
-| **生产 base 路径** | 生产 base 是 `/ops/`（`.env.production` `VITE_BASE=/ops/`），manifest.json 已同步为 `/ops/` |
+| **生产 base 路径** | 生产 base 是 `/ops/`，实际由 `vite.config.js` 的 `mode === 'production'` 兜底给出。⚠️ `.env.production` 里的 `VITE_BASE=/ops/` **不生效**——代码读 `process.env.VITE_BASE`，而 Vite 的 `loadEnv` 不写入 `process.env`（改 `.env` 无效，除非 shell 里 export）。manifest.json 已同步为 `/ops/` |
 | **H5 图片 URL** | uni-app `<image>` 渲染为 CSS `background-image`，根相对路径被解析到 `/ops/` → 必须用完整 HTTPS 路径 |
 | **文件上传目录** | `app.upload.base-dir` 用绝对路径配置，不是 `user.dir`，否则 JAR 从不同目录启动时文件错位 |
 | **ASR multipart** | 转发 ASR 请求时**不要手动设置 `Content-Type`**（不含 boundary 导致 422），让 Spring 自动生成 |
 | **前端部署清理** | 每次部署前端必须 `rm -rf assets/*` 再上传，否则旧 chunk 残留导致新功能不生效 |
-| **jweixin-1.6.0.js** | 必须用 `npm run build:h5`（含 `cp static/jweixin-1.6.0.js dist/build/h5/`），不能用 `npx uni build` |
+| **jweixin-1.6.0.js** | 必须用 `npm run build:h5`（= `uni build` + 复制 `static/jweixin-1.6.0.js` + 把产物里的 `"/static/` 重写为 `"/ops/static/`）。裸跑 `npx uni build` 会**漏掉静态路径重写**（`/ops/` 下静态资源 404），且 jweixin 版本不受控 |
 | **BaseEntity 字段命名** | SDK 使用 `modifyTime`（不是 `updateTime`） |
 | **增值业务物理删除** | `ops_business_data` 的 `batchDelete()` 用原始 JDBC 物理删除，不走 `@TableLogic` |
-| **SysImportTask 未继承 BaseEntity** | 自行声明所有审计字段，是唯一例外 |
-| **数据库环境隔离** | 生产 `mall_db` / 测试 `mall_db_test` 同实例不同库，极易混淆。**部署时必须确认 `SPRING_DATASOURCE_URL` 指向正确库**（历史事故：生产容器误用测试库，17,745 条数据写错库） |
+| **5 个实体未继承 BaseEntity** | `SysImportTask`、`SysExportTask`、`AiChatTask`、`OpsActivityReviewCost`、`OpsGridManagerCommunity` 自行声明审计字段；其余 31 个均继承。其中 `OpsActivityReviewCost` 无 `delete_flag`，`costMapper.delete()` 走物理删除 |
+| **数据库环境隔离** | 生产同实例并置 `mall_db`（业务）与 `ai_platform`（底座）两库，极易混淆。**部署时必须确认 `SPRING_DATASOURCE_URL` 指向 `mall_db`**（历史事故：生产容器误用测试库，17,745 条数据写错库） |
 | **无自动化测试** | 所有验证依赖手动检查和生产监控 |
 | **首页配置 corpId** | `/api/ops/home-data` 公开接口（无 JWT），必须传 `?corpId=` 参数 |
-| **Kafka 条件加载** | Consumer 仅在 `spring.kafka.enabled=true` 时加载，测试环境无 Kafka 降级同步 |
+| **Kafka 条件加载** | Consumer 仅在 `spring.kafka.enabled=true` 时加载，无 Kafka 环境自动降级为同步调用 |
 | **nimbus-jose-jwt** | 依赖保留用于 JWT 签名验证（PlatformAuthenticationFilter），不自签但需验签 |
 | **平台缓存层** | 底座菜单/字典/地区/组织配置已有 Caffeine 缓存。子系统通过 PlatformInternalClient 调平台 API 自动命中缓存，**禁止**子系统侧再缓存或直查 DB |
 | **AiChatProxyController vs EmployeeAiController** | 会员和员工是两个独立 AI 通道，不要混用。员工通道自动注入员工身份上下文 |
 | **SseEmitterManager** | SSE 连接持有限时（默认 120s），超时自动关闭。前端需处理重连 |
 | **CaptchaService 单实例** | 验证码存储在内存 `ConcurrentHashMap` 中，仅适用于单实例部署。多实例需替换为 Redis |
 | **双 Token 隔离** | 会员 token（`ops_token`）和员工 token（`ops_employee_token`）是独立的存储 key。`request.js` 按优先级发送（会员优先），但两个 token 不能混用——员工 token 不能访问会员接口，反之亦然 |
-| **ops-platform vs 平台主站** | `boss.jdzn99.com` 有两套前端：平台主站（`~/ai-native-platform/frontend`）和 ops H5（本项目）。`/ops/xxx` 路由在主站中通过 `componentMap` 直接加载 Vue 组件，不是微前端。改 ops H5 页面不影响主站 |
+| **ops-platform vs 平台主站** | 两套前端详见「生产部署 → 前端部署目标」。主站 `/ops/xxx` 是 `componentMap` 直接加载 Vue 组件（非微前端），改 H5 不影响主站 |
 | **Kafka 消费者组冲突** | 同一 group 内分区独占。多容器共享 `ai-platform-group` 时旧容器抢分区但连错库 → 任务僵死 PENDING、新容器收不到消息。**部署新容器前必须 `docker stop/rm` 旧容器**，部署后 `docker ps` 确认无残留。参见 `[[kafka-consumer-group-conflict]]` |
 | **旧容器/代码不留存** | **铁律**：新容器部署后旧容器必须立即清理（`docker stop + rm`）。旧代码、旧容器、旧配置不留存——git history 可随时恢复。参见 `[[no-legacy-code-retention]]`、`[[kafka-consumer-group-conflict]]` |
 | **作战地图跨库查询** | `BattleMapController.summary()` 和 `region` 解析方法直读 `ai_platform.sys_corp` 和 `ai_platform.sys_region`（跨库）。这是仅有的例外——组织区域信息无法通过 API 获取。维护时注意表结构变更 |
-| **作战地图数据源仅生产** | 作战地图源表（`ops_business_data`/`ops_gas_user`/`ops_member_ledger`/`ops_grid_manager`）仅在**生产库**有数据。测试 `mall_db` 无这些表的记录，ETL 只能在生产环境跑。参见 `[[battle-map-data-only-on-prod]]` |
-| **ops_activity_review_cost 无 delete_flag** | 此表缺少逻辑删除字段，`costMapper.delete()` 走物理删除。重构时需注意 |
+| **作战地图数据源仅生产** | 作战地图源表（`ops_business_data`/`ops_gas_user`/`ops_member_ledger`/`ops_grid_manager`）仅在**生产库**有数据，ETL 只能在生产环境跑。参见 `[[battle-map-data-only-on-prod]]` |
+| **新增 /ops/xxx 管理页未加 nginx 白名单** | host nginx 逐路由白名单未列入的新管理页会被 catch-all 送到 Ops H5，刷新后看到公众号移动端（URL 出现 `#/`）。步骤见「生产部署 → 前端部署目标」 |
 | **company-select 未注册路由** | `frontend/src/pages/employee/company-select.vue` 文件存在但**未在 pages.json 中注册路由**。该页面通过其他方式引用（如 `uni.navigateTo` 直接跳转），不要误删 |
 | **mysql 客户端默认 latin1** | `docker exec mysql mysql` 不指定字符集时 client/connection/results=latin1（服务器 utf8mb4）。含中文 SQL 必须加 `--default-character-set=utf8mb4`：否则写操作双重编码损坏数据（2026-08-29 `sys_corp.gas_company_id` 注释损坏已修复）、读操作显示乱码（数据无损）。判别：`HEX()` 看字节，`C3A7E280A1`=损坏。详见 `MEMORY.md` 1.4 节 |
 
@@ -745,7 +744,7 @@ cd frontend && npm run build:h5
 
 ---
 
-最后更新：2026-10-12 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
+最后更新：2026-10-15 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
 
 ### 自定义 Claude 命令
 
