@@ -36,6 +36,21 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("customer")
     private String customer;
 
+    /**
+     * 客户手机号（新模板必填列）。与 sys_member.phone 一致（uk_phone 全局唯一），
+     * 是平台会员归属的唯一依据；存量行无来源为 NULL。
+     */
+    @TableField("customer_phone")
+    private String customerPhone;
+
+    /**
+     * 平台会员ID（= ai_platform.sys_member.id）——销售设备归属会员。
+     * 归属规则：新导入按 customer_phone ↔ sys_member.phone 匹配（无歧义，必填）；
+     * 存量行由 sql/migrate_business_data_platform_member.sql 按姓名一次性回填。
+     */
+    @TableField("platform_member_id")
+    private Long platformMemberId;
+
     @TableField("brand")
     private String brand;
 

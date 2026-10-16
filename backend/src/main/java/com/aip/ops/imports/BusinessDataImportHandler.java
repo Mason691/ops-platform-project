@@ -13,6 +13,7 @@ import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.sdk.client.PlatformInternalClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,12 +52,16 @@ public class BusinessDataImportHandler implements ImportHandler {
     private final OpsPersonalCommissionRuleMapper commissionRuleMapper;
     private final PlatformInternalClient platformInternalClient;
     private final DataSource dataSource;
+    private final JdbcTemplate jdbcTemplate;
 
     private static final String CATEGORY_TYPE_CODE = "PRODUCT_CATEGORY";
     private static final Set<String> VALID_COMPANIES =
             Set.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
     /** 核心四品类 itemKey：燃气灶(1)、抽油烟机(2)、热水器(3)、壁挂炉(4) */
     private static final Set<String> CORE_FOUR_CATEGORIES = Set.of("1", "2", "3", "4");
+    /** 大陆手机号：1 开头、第二位 3-9、共 11 位 */
+    private static final java.util.regex.Pattern PHONE_PATTERN =
+            java.util.regex.Pattern.compile("^1[3-9]\\d{9}$");
     /** 确认项 key 分隔符（品牌/品类/关键词不含该字符） */
     private static final String KEY_SEP = "\u0001";
 
@@ -74,13 +79,15 @@ public class BusinessDataImportHandler implements ImportHandler {
                                      OpsBusinessModelAliasMapper aliasMapper,
                                      OpsPersonalCommissionRuleMapper commissionRuleMapper,
                                      PlatformInternalClient platformInternalClient,
-                                     DataSource dataSource) {
+                                     DataSource dataSource,
+                                     JdbcTemplate jdbcTemplate) {
         this.mapper = mapper;
         this.productMapper = productMapper;
         this.aliasMapper = aliasMapper;
         this.commissionRuleMapper = commissionRuleMapper;
         this.platformInternalClient = platformInternalClient;
         this.dataSource = dataSource;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Override
@@ -89,6 +96,8 @@ public class BusinessDataImportHandler implements ImportHandler {
     // ── ParsedRow holder ──
     private static class ParsedRow {
         String company, customer, brand, model, catCn, catKey;
+        String customerPhone;       // 客户手机号（归一化后；必填，未关联会员时整文件拒绝）
+        Long platformMemberId;      // = ai_platform.sys_member.id（按客户手机号解析）
         BigDecimal salePrice;
         String agent, agentPhone, dept, remark;
         String saleDate, receiptDate, receiptNo;
@@ -216,6 +225,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         loadLookups(p);
         parseRows(p, rows, idx, loadValidCategories(),
                 loadTieredCommissionCategories(corpId != null ? corpId : 4L));
+        resolveMemberIdsByPhone(p);
         return p;
     }
 
@@ -580,12 +590,13 @@ public class BusinessDataImportHandler implements ImportHandler {
                 DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         Map<String, String> batchNoMap = new HashMap<>();
         String insertSql = "INSERT INTO ops_business_data "
-                + "(batch_no, company, customer, brand, category, model, "
+                + "(batch_no, company, customer, customer_phone, platform_member_id, "
+                + "brand, category, model, "
                 + "sale_price, agent, agent_phone, is_special, commission_rate, "
                 + "sale_date, receipt_date, finance_receipt_date, fund_dynamic_rows, "
                 + "receipt_no, department, retail_floor_price, group_lowest_price, "
                 + "calc_status, remark, corp_id, operator_id) "
-                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
         int batchCount = 0;
         PreparedStatement ps = DataSourceUtils.getConnection(dataSource)
@@ -611,13 +622,16 @@ public class BusinessDataImportHandler implements ImportHandler {
         }
     }
 
-    /** 绑定 23 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
+    /** 绑定 25 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
     private void bindRow(PreparedStatement ps, ParsedRow pr, String batchNo, Long corpId)
             throws SQLException {
         int idx = 1;
         ps.setString(idx++, batchNo);
         ps.setString(idx++, pr.company);
         ps.setString(idx++, pr.customer);
+        ps.setString(idx++, pr.customerPhone);
+        // 会员归属按客户手机号解析（uk_phone 全局唯一），= ai_platform.sys_member.id
+        ps.setObject(idx++, pr.platformMemberId);
         ps.setString(idx++, pr.brand);
         ps.setString(idx++, pr.catKey);
         ps.setString(idx++, pr.model);
@@ -642,6 +656,41 @@ public class BusinessDataImportHandler implements ImportHandler {
         ps.setString(idx++, pr.remark.isEmpty() ? null : pr.remark);
         ps.setLong(idx++, corpId);
         ps.setLong(idx++, corpId);
+    }
+
+    /**
+     * 客户手机号 → 平台会员映射：uk_phone 全局唯一，匹配无歧义。
+     * 未关联会员的格式合法手机号行写入 p.errors（整文件拒绝）；
+     * 命中行回填 ParsedRow.platformMemberId（= sys_member.id）供 INSERT 落库。
+     * 格式非法/为空的手机号不在此重复报错（validateFields 已提示）。
+     */
+    private void resolveMemberIdsByPhone(Prepared p) {
+        List<String> phones = p.rows.stream()
+                .map(r -> r.customerPhone)
+                .filter(ph -> ph != null && PHONE_PATTERN.matcher(ph).matches())
+                .distinct()
+                .collect(Collectors.toList());
+        Map<String, Long> idByPhone = new HashMap<>();
+        for (int i = 0; i < phones.size(); i += 500) {
+            List<String> chunk = phones.subList(i, Math.min(i + 500, phones.size()));
+            String sql = "SELECT id, phone FROM ai_platform.sys_member "
+                    + "WHERE delete_flag = 0 AND phone IN ("
+                    + String.join(",", Collections.nCopies(chunk.size(), "?")) + ")";
+            for (Map<String, Object> row : jdbcTemplate.queryForList(sql, chunk.toArray())) {
+                idByPhone.put((String) row.get("phone"),
+                        ((Number) row.get("id")).longValue());
+            }
+        }
+        for (ParsedRow pr : p.rows) {
+            if (pr.customerPhone == null
+                    || !PHONE_PATTERN.matcher(pr.customerPhone).matches()) continue;
+            Long id = idByPhone.get(pr.customerPhone);
+            if (id == null) {
+                p.errors.add("第" + pr.rowNum + "行：客户手机号未关联平台会员，请先完成会员转化");
+            } else {
+                pr.platformMemberId = id;
+            }
+        }
     }
 
     // ═══════ Category dict ═══════
@@ -707,6 +756,7 @@ public class BusinessDataImportHandler implements ImportHandler {
 
     // header index slots（headerIndices 返回数组的下标）
     private static final int I_CUSTOMER = 0;
+    private static final int I_CUSTOMER_PHONE = 17;
     private static final int I_CATEGORY = 1;
     private static final int I_BRAND = 2;
     private static final int I_MODEL = 3;
@@ -727,15 +777,16 @@ public class BusinessDataImportHandler implements ImportHandler {
     /** 表头校验 + 定位各列下标；任一必填列缺失 → 错误并返回 null。 */
     private int[] headerIndices(String[] headers, List<String> errors) {
         String[] requiredHeaders = {
-            "客户", "品类", "品牌", "型号", "销售价", "公司", "经办人", "经办人手机号",
+            "客户", "客户手机", "品类", "品牌", "型号", "销售价", "公司", "经办人", "经办人手机号",
             "市场收款日期", "财务收款日期", "资金动态表横排数"
         };
         for (String h : requiredHeaders) {
             if (indexOf(headers, h) < 0) errors.add("缺少列: " + h);
         }
         if (!errors.isEmpty()) return null;
-        int[] idx = new int[17];
+        int[] idx = new int[18];
         idx[I_CUSTOMER] = indexOf(headers, "客户");
+        idx[I_CUSTOMER_PHONE] = indexOf(headers, "客户手机");
         idx[I_CATEGORY] = indexOf(headers, "品类");
         idx[I_BRAND] = indexOf(headers, "品牌");
         idx[I_MODEL] = indexOf(headers, "型号");
@@ -821,6 +872,11 @@ public class BusinessDataImportHandler implements ImportHandler {
             errors.add("第" + rowNum + "行: 经办人手机号为空");
         else if (!ap.matches("\\d{11}"))
             errors.add("第" + rowNum + "行: 经办人手机号格式不正确");
+        // 客户手机号：必填 + 11 位大陆手机号；会员归属解析在 resolveMemberIdsByPhone
+        if (pr.customerPhone == null || pr.customerPhone.isEmpty())
+            errors.add("第" + rowNum + "行：客户手机号为空");
+        else if (!PHONE_PATTERN.matcher(pr.customerPhone).matches())
+            errors.add("第" + rowNum + "行：客户手机号格式不正确（须为11位大陆手机号）");
         // Date validation
         if (pr.saleDate == null)
             errors.add("第" + rowNum + "行: 销售日期格式不正确（支持: 2026-06-23 / 2026.1.2 / 2026/2/13 / 6月23日 / 2026年6月23日，日期区间取首日）");
@@ -892,6 +948,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         String model = val(cols, idx[I_MODEL]);
         String cat = val(cols, idx[I_CATEGORY]);
         String customer = val(cols, idx[I_CUSTOMER]);
+        String customerPhone = normalizePhone(val(cols, idx[I_CUSTOMER_PHONE]));
         String company = val(cols, idx[I_COMPANY]);
         String agent = val(cols, idx[I_AGENT]);
         String agentPhone = val(cols, idx[I_AGENT_PHONE]);
@@ -900,7 +957,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         // Skip only TRULY blank rows: ALL meaningful fields empty.
         // Any row with partial data must go through validation —
         // if validation fails, the ENTIRE file is rejected (all-or-nothing).
-        if (isBlankRow(cat, brand, model, customer, company,
+        if (isBlankRow(cat, brand, model, customer, customerPhone, company,
                 agent, agentPhone, priceStr)) {
             return null;
         }
@@ -908,6 +965,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         ParsedRow pr = new ParsedRow();
         pr.company = company;
         pr.customer = customer;
+        pr.customerPhone = customerPhone;
         pr.brand = brand;
         pr.model = model;
         pr.catCn = cat;
@@ -934,9 +992,11 @@ public class BusinessDataImportHandler implements ImportHandler {
     }
 
     private boolean isBlankRow(String cat, String brand, String model, String customer,
-            String company, String agent, String agentPhone, String priceStr) {
+            String customerPhone, String company, String agent, String agentPhone,
+            String priceStr) {
         return cat.isEmpty() && brand.isEmpty() && model.isEmpty()
-                && customer.isEmpty() && company.isEmpty()
+                && customer.isEmpty() && customerPhone == null
+                && company.isEmpty()
                 && agent.isEmpty() && agentPhone.isEmpty()
                 && priceStr.isEmpty();
     }
@@ -1038,6 +1098,19 @@ public class BusinessDataImportHandler implements ImportHandler {
         try { return Integer.parseInt(t); } catch (NumberFormatException e) { /* 非纯整数 → 提取 */ }
         java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\d+").matcher(t);
         return m.find() ? Integer.valueOf(m.group()) : null;
+    }
+
+    /**
+     * 手机号归一化：全角转半角（NFKC）→ 去首尾空白 → 剥离 Excel 数字单元格的
+     * 尾 ".0"（"13800138000.0" → "13800138000"）→ 空串归 null。
+     * 格式校验由 PHONE_PATTERN 在 validateFields 完成。
+     */
+    private String normalizePhone(String s) {
+        if (s == null) return null;
+        String t = Normalizer.normalize(s.trim(), Normalizer.Form.NFKC);
+        if (t.isEmpty()) return null;
+        if (t.matches("\\d+\\.0+")) t = t.substring(0, t.indexOf('.'));
+        return t;
     }
 
     /**

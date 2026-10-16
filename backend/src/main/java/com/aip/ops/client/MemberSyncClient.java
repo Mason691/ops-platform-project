@@ -30,7 +30,7 @@ public class MemberSyncClient {
     /**
      * 向底座注册或查询会员，返回底座会员信息。
      * 调用失败时抛出异常，由上层决定如何处理。
-     * @return map with memberDbId, memberId, nickname, isNew 等
+     * @return map with memberDbId, nickname, isNew 等
      */
     public Map<String, Object> sync(String phone, String nickname, String avatar) {
         HttpHeaders headers = new HttpHeaders();
@@ -55,7 +55,7 @@ public class MemberSyncClient {
         if (data != null && Integer.valueOf(200).equals(data.get("code"))) {
             @SuppressWarnings("unchecked")
             Map<String, Object> result = (Map<String, Object>) data.get("data");
-            log.info("底座会员同步成功: memberId={}, isNew={}", result.get("memberId"), result.get("isNew"));
+            log.info("底座会员同步成功: memberDbId={}, isNew={}", result.get("memberDbId"), result.get("isNew"));
             return result;
         }
 

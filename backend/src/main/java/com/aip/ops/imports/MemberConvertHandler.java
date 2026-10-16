@@ -4,9 +4,12 @@ import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.service.ImportTaskService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Component;
 
-import java.text.SimpleDateFormat;
+import java.sql.PreparedStatement;
+import java.sql.Statement;
 import java.time.LocalDate;
 import java.util.*;
 
@@ -65,7 +68,6 @@ public class MemberConvertHandler implements ImportHandler {
             updated = matched[1];
 
             // ── Phase 2+3: 分批处理未匹配手机号，直到全量转化完成 ──
-            int[] seqHolder = {0};
             int batches = 0;
             while (batches < MAX_BATCHES) {
                 List<Map<String, Object>> uniquePhones = fetchUnlinkedPhones(scopeClause);
@@ -74,7 +76,7 @@ public class MemberConvertHandler implements ImportHandler {
                 log.info("MemberConvert: taskId={} batch {} unique phones: {}",
                         taskId, batches, uniquePhones.size());
                 BatchResult r = processBatch(taskId, uniquePhones,
-                        buildRegionPathCache(uniquePhones), seqHolder);
+                        buildRegionPathCache(uniquePhones));
                 created += r.created;
                 skipped += r.skipped;
                 failed += r.failed;
@@ -167,18 +169,14 @@ public class MemberConvertHandler implements ImportHandler {
 
     /** 处理一批手机号：逐号建会员（已有则更新画像），并回写该号下所有燃气用户。 */
     private BatchResult processBatch(Long taskId, List<Map<String, Object>> uniquePhones,
-                                     Map<String, String> regionPathCache, int[] seqHolder) {
+                                     Map<String, String> regionPathCache) {
         BatchResult result = new BatchResult();
-        SimpleDateFormat sdf = new SimpleDateFormat("yyMMddHHmmss");
         int total = uniquePhones.size();
         int done = 0;
 
         for (Map<String, Object> row : uniquePhones) {
             done++;
-            String memberIdSuffix = String.format("%s%03d",
-                    sdf.format(new java.util.Date()), seqHolder[0] % 1000);
-            seqHolder[0]++;
-            handleOnePhone(result, row, regionPathCache, memberIdSuffix);
+            handleOnePhone(result, row, regionPathCache);
 
             if (done % 100 == 0) {
                 taskService.updateStatus(taskId, "PROCESSING", "CREATING_MEMBER",
@@ -191,7 +189,7 @@ public class MemberConvertHandler implements ImportHandler {
 
     /** 单个手机号：解析字段 → 建会员或更新已有会员 → 回写该号全部燃气用户。 */
     private void handleOnePhone(BatchResult result, Map<String, Object> row,
-                                Map<String, String> regionPathCache, String memberIdSuffix) {
+                                Map<String, String> regionPathCache) {
         String phone = (String) row.get("phone");
         String name = (String) row.getOrDefault("name", "");
         if (name == null || name.isBlank()) name = phone.substring(0, 3) + "****" + phone.substring(7);
@@ -211,7 +209,7 @@ public class MemberConvertHandler implements ImportHandler {
 
         try {
             Long memberDbId = createOrUpdateMember(phone, name, genderInt, birthDate,
-                    fullAddress, communityId, rowCorpId, memberIdSuffix, result);
+                    fullAddress, communityId, rowCorpId, result);
             backfillMemberId(memberDbId, phone, result);
         } catch (Exception e) {
             log.warn("MemberConvert: failed for phone={}: {}", phone, e.getMessage());
@@ -225,7 +223,7 @@ public class MemberConvertHandler implements ImportHandler {
     /** Step A: sys_member 中已有该手机号则更新画像，否则新建会员。返回会员主键 id。 */
     private Long createOrUpdateMember(String phone, String name, Integer genderInt, LocalDate birthDate,
                                       String fullAddress, Long communityId, Long rowCorpId,
-                                      String memberIdSuffix, BatchResult result) {
+                                      BatchResult result) {
         Long existingId = null;
         try {
             existingId = jdbcTemplate.queryForObject(
@@ -244,15 +242,27 @@ public class MemberConvertHandler implements ImportHandler {
             return existingId;
         }
 
-        String memberId = "M" + memberIdSuffix;
-        jdbcTemplate.update(
-            "INSERT INTO ai_platform.sys_member " +
-            "(member_id, phone, nickname, real_name, status, gender, birthday, address, community_id, corp_id) " +
-            "VALUES (?,?,?,?,1,?,?,?,?,?)",
-            memberId, phone, name, name, genderInt, birthDate, fullAddress, communityId, rowCorpId);
+        // 会员标识统一为自增主键 id（sys_member.member_id 已废除）：
+        // GeneratedKeyHolder 直接取回新行 id，免去插入后的回查。
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(con -> {
+            PreparedStatement ps = con.prepareStatement(
+                "INSERT INTO ai_platform.sys_member " +
+                "(phone, nickname, real_name, status, gender, birthday, address, community_id, corp_id) " +
+                "VALUES (?,?,?,1,?,?,?,?,?)",
+                Statement.RETURN_GENERATED_KEYS);
+            ps.setString(1, phone);
+            ps.setString(2, name);
+            ps.setString(3, name);
+            ps.setObject(4, genderInt);
+            ps.setObject(5, birthDate);
+            ps.setString(6, fullAddress);
+            ps.setObject(7, communityId);
+            ps.setLong(8, rowCorpId);
+            return ps;
+        }, keyHolder);
         result.created++;
-        return jdbcTemplate.queryForObject(
-            "SELECT id FROM ai_platform.sys_member WHERE member_id = ?", Long.class, memberId);
+        return keyHolder.getKey().longValue();
     }
 
     /** Step B: 回写 platform_member_id 到所有同手机号、尚未转化的燃气用户。 */

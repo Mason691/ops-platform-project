@@ -92,7 +92,6 @@
           </view>
           <view v-if="detail.platformMember" class="detail-platform">
             <text class="detail-section-title">底座平台会员信息</text>
-            <view class="detail-row"><text class="detail-key">统一会员ID</text><text class="detail-val">{{ detail.platformMember.memberId || '-' }}</text></view>
             <view class="detail-row"><text class="detail-key">平台昵称</text><text class="detail-val">{{ detail.platformMember.nickname || '-' }}</text></view>
           </view>
         </view>
