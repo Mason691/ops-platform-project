@@ -70,9 +70,18 @@ public class MemberLedgerController {
                 LEFT JOIN ai_platform.sys_region r ON r.id = sc.region_id
                 WHERE s.delete_flag = 0 AND gu.platform_member_id IS NOT NULL{scopeStove}
                 UNION ALL
-                SELECT bd.platform_member_id, 0, 1, NULL, NULL, bd.create_time
-                FROM ops_business_data bd
-                WHERE bd.delete_flag = 0 AND bd.platform_member_id IS NOT NULL{scopeBiz}
+                -- 业务腿按收据号分组计数：同收据号 distinct 非空经办人>1 → 计 1（多经办人同订单），
+                -- 否则逐行计（同经办人多商品）；口径与 mergeBusinessDevices 一致（__row_ 前缀 key 同构），改动须两侧同步
+                SELECT g.pid, 0, g.cnt, NULL, NULL, g.active_ts
+                FROM (
+                    SELECT bd.platform_member_id AS pid,
+                           MAX(bd.create_time) AS active_ts,
+                           CASE WHEN COUNT(DISTINCT NULLIF(bd.agent,'')) > 1 THEN 1 ELSE COUNT(*) END AS cnt
+                    FROM ops_business_data bd
+                    WHERE bd.delete_flag = 0 AND bd.platform_member_id IS NOT NULL{scopeBiz}
+                    GROUP BY bd.platform_member_id,
+                             COALESCE(NULLIF(bd.receipt_no,''), CONCAT('__row_', bd.id))
+                ) g
             ) t
             JOIN ai_platform.sys_member m ON m.id = t.pid AND m.delete_flag = 0
             WHERE 1=1{kwClause}{commClause}
@@ -137,8 +146,8 @@ public class MemberLedgerController {
         try {
             List<Map<String, Object>> stoveRows = queryStoveDevices(
                     platformMemberId, buildScopeStoveClause(visible));
-            List<Map<String, Object>> bizRows = queryBusinessDevices(
-                    platformMemberId, buildScopeBizClause(visible));
+            List<Map<String, Object>> bizRows = mergeBusinessDevices(queryBusinessDevices(
+                    platformMemberId, buildScopeBizClause(visible)));
             Map<String, String> catLabels =
                     loadCategoryLabels(collectCategoryKeys(stoveRows, bizRows));
             Map<String, Object> data = new LinkedHashMap<>();
@@ -317,20 +326,64 @@ public class MemberLedgerController {
         return jdbcTemplate.queryForList(sql, platformMemberId);
     }
 
-    /** 销售设备：ops_business_data 按 platform_member_id 归属（回填规则见迁移脚本）。 */
+    /** 销售设备：ops_business_data 按 platform_member_id 归属（回填规则见迁移脚本）；
+     *  全量拉取（单会员行数有限）供 mergeBusinessDevices 按收据号合并，合并后再截断 500。 */
     private List<Map<String, Object>> queryBusinessDevices(Long platformMemberId, String scopeBiz) {
         String sql = """
                 SELECT bd.id AS device_id, bd.category AS category_key, bd.brand, bd.model,
                        bd.sale_price, bd.sale_date, bd.receipt_date, bd.receipt_no,
-                       bd.agent, bd.remark,
+                       bd.agent, bd.remark, bd.customer,
                        DATE_FORMAT(bd.usage_date, '%Y-%m-%d') AS usage_date
                 FROM ops_business_data bd
                 WHERE bd.delete_flag = 0 AND bd.platform_member_id = ?""" + scopeBiz + """
                  ORDER BY (bd.usage_date IS NULL), bd.usage_date DESC, bd.id DESC
-                -- 501=500+1 探测超限截断
-                LIMIT 501
                 """;
         return jdbcTemplate.queryForList(sql, platformMemberId);
+    }
+
+    /**
+     * 销售设备按收据号合并（场景A/B 区分）：
+     * 收据号 NULL/空串 → 逐行独立组；组内 distinct 非空经办人 >1（多经办人同订单）→
+     * 仅保留 id 最小行（"第一条"，与导出 sortByReceiptNo 首行口径一致），
+     * 经办人替换为全员名单并打多人参与标记；经办人唯一 → 全部保留（同经办人多商品逐条展示）。
+     * 口径与 AGG_SQL 业务腿一致（__row_ 前缀分组 key 同构），改动须两侧同步。
+     */
+    private List<Map<String, Object>> mergeBusinessDevices(List<Map<String, Object>> rows) {
+        Map<String, List<Map<String, Object>>> groups = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            String receiptNo = (String) row.get("receipt_no");
+            String key = (receiptNo == null || receiptNo.isEmpty())
+                    ? "__row_" + row.get("device_id") : receiptNo;
+            groups.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
+        }
+        List<Map<String, Object>> merged = new ArrayList<>();
+        for (List<Map<String, Object>> group : groups.values()) {
+            group.sort(Comparator.comparing(r -> ((Number) r.get("device_id")).longValue()));
+            Map<String, Object> rep = group.get(0);
+            LinkedHashSet<String> agents = new LinkedHashSet<>();
+            for (Map<String, Object> row : group) {
+                Object agent = row.get("agent");
+                if (agent != null && !agent.toString().trim().isEmpty()) {
+                    agents.add(agent.toString().trim());
+                }
+            }
+            if (agents.size() > 1) {
+                String joined = String.join("、", agents);
+                rep.put("agent", joined);
+                rep.put("__multi_agent", Boolean.TRUE);
+                rep.put("__agent_names", joined);
+                merged.add(rep);
+            } else {
+                merged.addAll(group);
+            }
+        }
+        // 显示序与 SQL 一致：usage_date NULL 沉底 → 降序（DATE_FORMAT 字典序=时间序）→ id 降序
+        merged.sort(Comparator
+                .comparing((Map<String, Object> r) -> (String) r.get("usage_date"),
+                        Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(r -> ((Number) r.get("device_id")).longValue(),
+                        Comparator.reverseOrder()));
+        return merged;
     }
 
     /** 品类 key 集合：安检侧来自 class 映射常量，业务侧来自 category 列（均为字典 item_key）。 */
@@ -364,7 +417,7 @@ public class MemberLedgerController {
         return map;
     }
 
-    /** 超 500 行截断（SQL 取 501 探测），前端展示「仅展示前 500 台」提示。 */
+    /** 超 500 行截断，前端展示「仅展示前 500 台」提示（业务侧在合并后截断；安检侧 SQL 取 501 探测）。 */
     private List<Map<String, Object>> sliceDeviceRows(List<Map<String, Object>> rows) {
         return rows.size() > 500 ? new ArrayList<>(rows.subList(0, 500)) : rows;
     }
@@ -393,9 +446,16 @@ public class MemberLedgerController {
         putAttr(attrs, "销售日期", row.get("sale_date"));
         putAttr(attrs, "市场收款日期", row.get("receipt_date"));
         putAttr(attrs, "收据号", row.get("receipt_no"));
+        putAttr(attrs, "客户", row.get("customer"));
+        // 合并代表行的 agent 已被 mergeBusinessDevices 替换为全员名单，此处直接展示
         putAttr(attrs, "经办人", row.get("agent"));
         putAttr(attrs, "备注", row.get("remark"));
-        return device(row, "business", label, label, attrs);
+        Map<String, Object> d = device(row, "business", label, label, attrs);
+        if (Boolean.TRUE.equals(row.get("__multi_agent"))) {
+            d.put("multiAgent", Boolean.TRUE);
+            d.put("agentNames", row.get("__agent_names"));
+        }
+        return d;
     }
 
     /** 字典 label 兜底：key 为空 → "-"；未命中 → key 本身（Map.of 空 map + null key 会 NPE，须守卫）。 */
