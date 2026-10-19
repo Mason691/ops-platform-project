@@ -34,6 +34,8 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             +  "<if test='isSpecial != null and isSpecial != \"\"'>AND is_special = #{isSpecial}</if> "
             + "<if test='brand != null and brand != \"\"'>AND brand = #{brand}</if> "
             + "<if test='model != null and model != \"\"'>AND model = #{model}</if> "
+            + "<if test='receiptDateStart != null and receiptDateStart != \"\"'>AND receipt_date >= #{receiptDateStart}</if> "
+            + "<if test='receiptDateEnd != null and receiptDateEnd != \"\"'>AND receipt_date &lt;= #{receiptDateEnd}</if> "   // &lt;= 而非 <=：<script> 注解 SQL 是 XML，< 会破坏标签解析（2026-10-19 生产启动崩溃回滚教训）
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
             + "GROUP BY 1, category, model"
             + ") t"
@@ -46,6 +48,8 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
                                            @Param("isSpecial") String isSpecial,
                                            @Param("brand") String brand,
                                            @Param("model") String model,
+                                           @Param("receiptDateStart") String receiptDateStart,
+                                           @Param("receiptDateEnd") String receiptDateEnd,
                                            @Param("corpIds") List<Long> corpIds);
 
     /** Per-category totals for current filter — same (receipt_no, category, model)
@@ -68,6 +72,8 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             +  "<if test='isSpecial != null and isSpecial != \"\"'>AND is_special = #{isSpecial}</if> "
             + "<if test='brand != null and brand != \"\"'>AND brand = #{brand}</if> "
             + "<if test='model != null and model != \"\"'>AND model = #{model}</if> "
+            + "<if test='receiptDateStart != null and receiptDateStart != \"\"'>AND receipt_date >= #{receiptDateStart}</if> "
+            + "<if test='receiptDateEnd != null and receiptDateEnd != \"\"'>AND receipt_date &lt;= #{receiptDateEnd}</if> "   // &lt;= 而非 <=：<script> 注解 SQL 是 XML，< 会破坏标签解析（2026-10-19 生产启动崩溃回滚教训）
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
             + "GROUP BY 1, category, model"
             + ") t GROUP BY t.category ORDER BY SUM(t.sale_price) DESC"
@@ -80,6 +86,8 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
                                             @Param("isSpecial") String isSpecial,
                                             @Param("brand") String brand,
                                             @Param("model") String model,
+                                            @Param("receiptDateStart") String receiptDateStart,
+                                            @Param("receiptDateEnd") String receiptDateEnd,
                                             @Param("corpIds") List<Long> corpIds);
 
     /** Count only — delegates to COUNT(*) for speed. */
@@ -93,6 +101,8 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             +  "<if test='isSpecial != null and isSpecial != \"\"'>AND is_special = #{isSpecial}</if> "
             + "<if test='brand != null and brand != \"\"'>AND brand = #{brand}</if> "
             + "<if test='model != null and model != \"\"'>AND model = #{model}</if> "
+            + "<if test='receiptDateStart != null and receiptDateStart != \"\"'>AND receipt_date >= #{receiptDateStart}</if> "
+            + "<if test='receiptDateEnd != null and receiptDateEnd != \"\"'>AND receipt_date &lt;= #{receiptDateEnd}</if> "   // &lt;= 而非 <=：<script> 注解 SQL 是 XML，< 会破坏标签解析（2026-10-19 生产启动崩溃回滚教训）
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
             + "</script>")
     long countFiltered(@Param("company") String company,
@@ -103,6 +113,8 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
                        @Param("isSpecial") String isSpecial,
                        @Param("brand") String brand,
                        @Param("model") String model,
+                       @Param("receiptDateStart") String receiptDateStart,
+                       @Param("receiptDateEnd") String receiptDateEnd,
                        @Param("corpIds") List<Long> corpIds);
 
     /** Find which receipt numbers from the given set already exist in DB (within corp scope). */

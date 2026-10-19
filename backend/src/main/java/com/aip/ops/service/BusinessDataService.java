@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Map;
 
 public interface BusinessDataService {
-    Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial, String brand, String model);
+    Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial, String brand, String model, String receiptDateStart, String receiptDateEnd);
     List<String> getBatches();
     /** 导入阶段一（异步工作线程）：文件校验 + 品牌型号匹配解析，结果 JSON（fail/confirm/ready）写入任务 progressMsg */
     void runAsyncCheck(SysImportTask task);
@@ -24,7 +24,7 @@ public interface BusinessDataService {
     Map<String, Object> calcCommission(String batchNo);
     /** 同步导出：按筛选条件查询并生成 XLSX 文件到 outFile（Kafka 不可用时的降级路径） */
     void exportExcel(String company, String batchNo, String agent, String category,
-                     String brand, String model, Path outFile);
+                     String brand, String model, String receiptDateStart, String receiptDateEnd, Path outFile);
     /** 提成上报集团：将当前筛选条件下非"已上报集团"的数据锁定为"已上报集团"，返回受影响行数 */
     int reportToGroup(String company, String batchNo, String agent, String receiptNo, String category);
     /** 品类提成汇总：按品类×公司汇总非已上报数据（提成金额+销售额），按模板格式生成 Excel 流式输出 */

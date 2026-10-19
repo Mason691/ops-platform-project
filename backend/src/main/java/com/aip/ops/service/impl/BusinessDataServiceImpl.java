@@ -184,16 +184,16 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
-    public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial, String brand, String model) {
+    public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial, String brand, String model, String receiptDateStart, String receiptDateEnd) {
         // Build visible corp IDs once
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
         List<Long> corpIdList = (visibleIds != null && !visibleIds.isEmpty())
                 ? new ArrayList<>(visibleIds) : null;
 
         // ── COUNT + STATS: single-row aggregate queries (no full table scan) ──
-        long total = mapper.countFiltered(company, batchNo, agent, receiptNo, category, isSpecial, brand, model, corpIdList);
+        long total = mapper.countFiltered(company, batchNo, agent, receiptNo, category, isSpecial, brand, model, receiptDateStart, receiptDateEnd, corpIdList);
         java.util.Map<String, java.math.BigDecimal> stats =
-                mapper.aggregateStats(company, batchNo, agent, receiptNo, category, isSpecial, brand, model, corpIdList);
+                mapper.aggregateStats(company, batchNo, agent, receiptNo, category, isSpecial, brand, model, receiptDateStart, receiptDateEnd, corpIdList);
         BigDecimal totalSale = stats != null && stats.get("totalSale") != null
                 ? stats.get("totalSale") : BigDecimal.ZERO;
         BigDecimal totalCommission = stats != null && stats.get("totalCommission") != null
@@ -201,7 +201,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
         // Per-category totals (same dedup rule as overall stats)
         List<Map<String, Object>> categoryStats =
-                mapper.categoryStats(company, batchNo, agent, receiptNo, category, isSpecial, brand, model, corpIdList);
+                mapper.categoryStats(company, batchNo, agent, receiptNo, category, isSpecial, brand, model, receiptDateStart, receiptDateEnd, corpIdList);
         normalizeCategoryStats(categoryStats);
 
         // ── DATA: only fetch the requested page ──
@@ -215,6 +215,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         if (isSpecial != null && !isSpecial.isEmpty()) qw.eq(OpsBusinessData::getIsSpecial, isSpecial);
         if (brand != null && !brand.isEmpty()) qw.eq(OpsBusinessData::getBrand, brand);
         if (model != null && !model.isEmpty()) qw.eq(OpsBusinessData::getModel, model);
+        if (receiptDateStart != null && !receiptDateStart.isEmpty()) qw.ge(OpsBusinessData::getReceiptDate, receiptDateStart);
+        if (receiptDateEnd != null && !receiptDateEnd.isEmpty()) qw.le(OpsBusinessData::getReceiptDate, receiptDateEnd);
         if (corpIdList != null) qw.in(OpsBusinessData::getCorpId, corpIdList);
         qw.orderByDesc(OpsBusinessData::getId);
         qw.last("LIMIT " + offset + "," + pageSize);
@@ -718,7 +720,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     @Override
     public void exportExcel(String company, String batchNo, String agent, String category,
-                            String brand, String model, Path outFile) {
+                            String brand, String model, String receiptDateStart, String receiptDateEnd, Path outFile) {
         try {
             LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
             if (company != null && !company.isEmpty()) qw.eq(OpsBusinessData::getCompany, company);
@@ -727,6 +729,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             if (category != null && !category.isEmpty()) qw.eq(OpsBusinessData::getCategory, category);
             if (brand != null && !brand.isEmpty()) qw.eq(OpsBusinessData::getBrand, brand);
             if (model != null && !model.isEmpty()) qw.eq(OpsBusinessData::getModel, model);
+            if (receiptDateStart != null && !receiptDateStart.isEmpty()) qw.ge(OpsBusinessData::getReceiptDate, receiptDateStart);
+            if (receiptDateEnd != null && !receiptDateEnd.isEmpty()) qw.le(OpsBusinessData::getReceiptDate, receiptDateEnd);
             applyCorpScope(qw);
             List<OpsBusinessData> all = mapper.selectList(qw);
             sortByReceiptNo(all);

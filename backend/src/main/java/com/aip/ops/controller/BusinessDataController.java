@@ -131,8 +131,10 @@ public class BusinessDataController {
                      @RequestParam(required = false) String category,
                      @RequestParam(required = false) String isSpecial,
                      @RequestParam(required = false) String brand,
-                     @RequestParam(required = false) String model) {
-        return R.ok(service.page(pageNum, pageSize, company, batchNo, agent, receiptNo, category, isSpecial, brand, model));
+                     @RequestParam(required = false) String model,
+                     @RequestParam(required = false) String receiptDateStart,
+                     @RequestParam(required = false) String receiptDateEnd) {
+        return R.ok(service.page(pageNum, pageSize, company, batchNo, agent, receiptNo, category, isSpecial, brand, model, receiptDateStart, receiptDateEnd));
     }
 
     @GetMapping("/batches")
@@ -303,6 +305,8 @@ public class BusinessDataController {
         String category = params.get("category");
         String brand = params.get("brand");
         String model = params.get("model");
+        String receiptDateStart = params.get("receiptDateStart");
+        String receiptDateEnd = params.get("receiptDateEnd");
 
         String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
         String fileName = "业务数据_" + ts + ".xlsx";
@@ -314,6 +318,8 @@ public class BusinessDataController {
         if (category != null && !category.isBlank()) filters.put("category", category);
         if (brand != null && !brand.isBlank()) filters.put("brand", brand);
         if (model != null && !model.isBlank()) filters.put("model", model);
+        if (receiptDateStart != null && !receiptDateStart.isBlank()) filters.put("receiptDateStart", receiptDateStart);
+        if (receiptDateEnd != null && !receiptDateEnd.isBlank()) filters.put("receiptDateEnd", receiptDateEnd);
         String filtersJson;
         try { filtersJson = objectMapper.writeValueAsString(filters); } catch (Exception e) { filtersJson = "{}"; }
 
@@ -328,7 +334,7 @@ public class BusinessDataController {
             log.info("Export task submitted: id={} type=business_data kafka=sent", task.getId());
         } catch (Exception e) {
             log.warn("Kafka unavailable, fallback to sync export for taskId={}", task.getId());
-            return syncExportFallback(task, company, batchNo, agent, category, brand, model);
+            return syncExportFallback(task, company, batchNo, agent, category, brand, model, receiptDateStart, receiptDateEnd);
         }
 
         return R.ok(Map.of("taskId", task.getId(), "status", "PENDING"));
@@ -336,13 +342,14 @@ public class BusinessDataController {
 
     /** Kafka 不可用时的同步导出：直接生成 XLSX 落盘并复用下载链路（真实路径+真实大小） */
     private R<Map<String, Object>> syncExportFallback(SysExportTask task, String company, String batchNo,
-                                                      String agent, String category, String brand, String model) {
+                                                      String agent, String category, String brand, String model,
+                                                      String receiptDateStart, String receiptDateEnd) {
         Path outFile = null;
         try {
             taskService.updateStatus(task.getId(), "PROCESSING", "Kafka不可用，同步导出中...");
             String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
             outFile = Path.of(uploadBaseDir, "exports", "业务数据_" + ts + "_" + task.getId() + ".xlsx");
-            service.exportExcel(company, batchNo, agent, category, brand, model, outFile);
+            service.exportExcel(company, batchNo, agent, category, brand, model, receiptDateStart, receiptDateEnd, outFile);
             if (!Files.exists(outFile) || Files.size(outFile) == 0) {
                 throw new IOException("导出文件生成失败: " + outFile);
             }
