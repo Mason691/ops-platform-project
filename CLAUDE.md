@@ -191,7 +191,7 @@ ops-platform-project/
 | `GasUserController` | `/api/ops/admin/gas-user` | **燃气用户**：分页查询/批量导入/小区关联 |
 | `GasStovesController` | `/api/ops/admin/gas-stoves` | **燃具信息**：分页查询（用户号/种类/品牌筛选）/迁移预览/异步迁移导入/任务状态 |
 | `GridManagerController` | `/api/ops/admin/grid-manager` | **网格员管理**：CRUD + 小区分配 |
-| `MemberLedgerController` | `/api/ops/admin/member-ledger` | **会员台账**：分页查询/按小区+品类+经办人+创建时间筛选/批量导入/安检设备创建（异步） |
+| `MemberLedgerController` | `/api/ops/admin/member-ledger` | **会员台账**：按平台会员聚合列表 + 关联设备弹窗 + 台账 CRUD + 安检设备创建（异步） |
 | `CategoryLifecycleRuleController` | `/api/ops/admin/category-lifecycle-rules` | **品类使用年限规则**：CRUD + 品类下拉选项 + 按品类查询 |
 | **员工通道** | | |
 | `EmployeeAuthController` | `/api/ops/auth/employee` | **员工** 登录（手机号+密码+验证码），独立于会员认证 |
@@ -206,14 +206,14 @@ ops-platform-project/
 
 ### 增值业务数据（Business Data）
 
-`ops_business_data` 表 2026-09-03 起字段结构：`receipt_date` 展示名改为**市场收款日期**（字段名保留 varchar(50)），其后新增 `finance_receipt_date`（DATE 财务收款日期，可空）与 `fund_dynamic_rows`（INT 资金动态表横排数，可空）。迁移脚本 `sql/migrate_business_data_finance_fields.sql`（已执行）。
+`ops_business_data` 表 2026-09-03 起字段结构：`receipt_date` 展示名改为**市场收款日期**（字段名保留 varchar(50)），其后新增 `finance_receipt_date`（DATE 财务收款日期，可空）与 `fund_dynamic_rows`（INT 资金动态表横排数，可空）。迁移脚本 `sql/migrate_business_data_finance_fields.sql`（已执行）。2026-10-16 再增 `customer_phone`（存量行 NULL）+ `platform_member_id`（= `ai_platform.sys_member.id`），迁移 `sql/migrate_business_data_platform_member.sql`（**必须先于新 JAR 执行**）。同日全平台废除 sys_member.member_id（M号 DROP），统一标识=memberDbId（sys_member.id），MemberConvertHandler 改 GeneratedKeyHolder。
 
-- **导入（两段式全异步，2026-09-20 起）**：`POST /import/check`（multipart 上传→落盘 `{app.import.upload-dir}` UUID 文件→建 `sys_import_task`（`business_data_check`）→提交 `AsyncImportSupport.importExecutor`（2~4 线程+队列100+AbortPolicy，满载"系统繁忙"）→立即返回 taskId；工作线程重建 SecurityContext 后解析+校验+匹配，结果 JSON 写 progress_msg）→ 前端 2s 轮询 `GET /import/{taskId}/status`（DONE 时 `result`=业务结果 JSON）→ `POST /import/confirm`（`checkTaskId`+`confirmations`，**复用落盘文件不二次上传**——合伙人慢上行链路只传一次；校验任务类型/状态/归属/文件在盘→并发互斥（PENDING/PROCESSING 计数+confirmLock）→建 `business_data_confirm` 任务→立即返回 taskId→轮询）。**启动清扫** `sweepInterruptedTasks`：遗留 PENDING/PROCESSING 标 FAILED。**租户上下文**：`withSecurityContext` 用任务记录重建 LoginUser（否则 TenantLineHandler 跳过滤→跨租户泄漏）。**事务边界**：`BusinessDataImportHandler.confirm()` `@Transactional` 保证全量或全不（异步线程无外层事务）；worker markDone/markFailed 独立提交；完成后删暂存文件（重试=重新上传）。confirm 缺 `checkTaskId`/`confirmations`（旧版前端缓存）手动校验返回「请刷新页面后重新导入」。`progress_msg` 已扩 MEDIUMTEXT。旧 `/import`、`/import/submit` 已删除，Kafka 兜底 `execute()`=零决策 confirm（不用本线程池）。
+- **导入（两段式全异步，2026-09-20 起）**：`POST /import/check`（multipart 上传→落盘 `{app.import.upload-dir}` UUID 文件→建 `sys_import_task`（`business_data_check`）→提交 `AsyncImportSupport.importExecutor`（2~4 线程+队列100+AbortPolicy）→立即返回 taskId；工作线程重建 SecurityContext 后解析+校验+匹配，结果 JSON 写 progress_msg）→ 前端 2s 轮询 `GET /import/{taskId}/status`（DONE 时 `result`=业务结果 JSON）→ `POST /import/confirm`（`checkTaskId`+`confirmations`，**复用落盘文件不二次上传**——合伙人慢上行链路只传一次；校验任务类型/状态/归属/文件在盘→并发互斥（PENDING/PROCESSING 计数+confirmLock）→建 `business_data_confirm` 任务→立即返回 taskId→轮询）。**启动清扫** `sweepInterruptedTasks`：遗留 PENDING/PROCESSING 标 FAILED。**租户上下文**：`withSecurityContext` 用任务记录重建 LoginUser（否则 TenantLineHandler 跳过滤→跨租户泄漏）。**事务边界**：`BusinessDataImportHandler.confirm()` `@Transactional` 保证全量或全不（异步线程无外层事务）；worker markDone/markFailed 独立提交；完成后删暂存文件（重试=重新上传）。confirm 缺 `checkTaskId`/`confirmations`（旧版前端缓存）手动校验返回「请刷新页面后重新导入」。`progress_msg` 已扩 MEDIUMTEXT。旧 `/import`、`/import/submit` 已删除，Kafka 兜底 `execute()`=零决策 confirm（不用本线程池）。
 - **品牌型号校验顺序**：是否特批="是"或非核心四品类（燃气灶/抽油烟机/热水器/壁挂炉以外）跳过匹配（仍精确匹配提取底价）→ 精确匹配 → 已确认别名 → 模糊候选（同品牌+同品类 key+归一化型号包含关键词、按 id 排序）→ 失败「未找到匹配的品牌型号」。模糊项集中返回 `pendingItems`（品牌/品类/Excel 型号/行号/候选产品含三价格），主站弹窗逐项确认（唯一匹配标注"最接近的完整型号"）；确认关系落库 `ops_business_model_alias`（唯一键 `(corp_id, brand, category, model_keyword, delete_flag)`，迁移 `sql/migrate_business_model_alias.sql`——**新库部署必须先执行**），同型号免重复确认；确认后同 品牌+品类+关键词 行批量套用（零售底价/集团最低价落库，销售价保留 Excel 值）。
-- **必填列**：市场收款日期/财务收款日期/资金动态表横排数（表头 contains 匹配，旧模板缺列直接拒绝）。市场收款日期**必填**；财务收款日期可空但格式错拒行（连带整文件）；横排数可空允许文字（纯整数/`12.0`/文字中首个整数，全角数字 NFKC 归一化，无数字落库空）。日期解析 `normalizeDate`（销售/市场/财务共用）：点分 `2026.1.2`、斜杠、**区间取首日**（分隔符 `-`/`~`/`—`/`至`）、全角。多 sheet 按「前 10 行含必填列名最多」自动选 sheet + 定位表头行。
-- **模板**：`GET /template` 优先读 `app.import.template-path`（默认 `/home/jason/1.xlsx`；生产 volume 挂载 `/app/templates/1.xlsx` + `APP_IMPORT_TEMPLATE_PATH` 环境变量），缺失回退 classpath `templates/business_data_template.xlsx`；文件名固定 **增值业务数据模板.xlsx**。源文件 `/home/jason/1.xlsx`（12 sheet，17 列表头：收据号 客户 品类 品牌 型号 销售价 公司 部门 经办人 经办人手机号 是否特批 提成比例 销售日期 市场收款日期 财务收款日期 资金动态表横排数 备注）。**修改必须手术式 XML 补丁**——openpyxl 重存会丢其它 sheet 图片（27 个 media/drawing 条目）。本地与生产 `/app/templates/1.xlsx` 已同步（md5 ed7902e2…），host 备份 `1.xlsx.bak-20260921`。
+- **必填列（12 个，精确匹配缺列拒）**：客户/客户手机/品类/品牌/型号/销售价/公司/经办人/经办人手机号/市场收款日期/财务收款日期/资金动态表横排数。**客户手机**必填 + 11 位大陆手机号，按手机号归属会员：命中 `ai_platform.sys_member`（uk_phone 唯一）写 platform_member_id，未命中报「客户手机号未关联平台会员，请先完成会员转化」。市场收款日期**必填**；财务收款日期可空但格式错拒行（连带整文件）；横排数可空允许文字（纯整数/`12.0`/文字中首个整数，全角数字 NFKC 归一化，无数字落库空）。日期解析 `normalizeDate`（销售/市场/财务共用）：点分 `2026.1.2`、斜杠、**区间取首日**（分隔符 `-`/`~`/`—`/`至`）、全角。多 sheet 按「前 10 行含必填列名最多」自动选 sheet + 定位表头行。
+- **模板**：`GET /template` 优先读 `app.import.template-path`（默认 `/home/jason/1.xlsx`；生产 volume 挂载 `/app/templates/1.xlsx` + `APP_IMPORT_TEMPLATE_PATH` 环境变量），缺失回退 classpath `templates/business_data_template.xlsx`；文件名固定 **增值业务数据模板.xlsx**。源文件 `/home/jason/1.xlsx`（12 sheet，18 列表头：收据号 客户 客户手机 品类 品牌 型号 销售价 公司 部门 经办人 经办人手机号 是否特批 提成比例 销售日期 市场收款日期 财务收款日期 资金动态表横排数 备注）。**修改必须手术式 XML 补丁**——openpyxl 重存会丢其它 sheet 图片（27 个 media/drawing 条目）。本地与生产 `/app/templates/1.xlsx` 已同步（md5 948cea25…），host 备份 `1.xlsx.bak-20261016`。
 - **部门/备注字段**：`department VARCHAR(100)`（迁移 `sql/migrate_business_data_department.sql` 已执行，存量 remark「部门: X」前缀回填并清空）。Excel 部门列→department、备注列→remark 直接映射（旧前缀 hack 已删除）；无备注列旧文件兼容（列索引 -1 守卫）。
-- **导出**：异步/同步两路径表头统一 22 列：公司 批次号 客户 **部门** 经办人 品牌 品类 型号 收款金额 销售价 零售底价 集团最低价 销售日期 收据号 市场收款日期 财务收款日期 资金动态表横排数 返利比例 返利金额 状态 **备注 是否特批**。筛选含 品牌/型号（请求体 brand/model → filters JSON → ExportHandler qw.eq；列表 countFiltered/aggregateStats/categoryStats 三个注解 SQL 同步 `<if>` 条件）。**Kafka 降级已修复**：`syncExportFallback` 调 `service.exportExcel(...)`（写文件版，支持全部 6 筛选）落盘 `{upload.base-dir}/exports/` 后 `markDone(真实路径, Files.size)`。行序按**收据号分组相邻**（`sortByReceiptNo`：空沉底、组内 id 升序）。收款金额默认=销售价；同订单拆分多行（收据号+客户相同、多经办人）仅首行显示（`computeSplitOrderNonFirstIds`）。底价存量空值行导出时**关键字兜底匹配**（品牌+品类相同+归一化型号包含关键字、唯一命中才填充、歧义留空、仅内存不写库，`fillExportPrices/matchProductExactOrKeyword`）。品类 `qimi`=气密性检测（静态兜底字典）。
+- **导出**：异步/同步两路径表头统一 22 列：公司 批次号 客户 **部门** 经办人 品牌 品类 型号 收款金额 销售价 零售底价 集团最低价 销售日期 收据号 市场收款日期 财务收款日期 资金动态表横排数 返利比例 返利金额 状态 **备注 是否特批**。筛选含 品牌/型号/市场收款日期起止（请求体 brand/model/receiptDateStart/receiptDateEnd → filters JSON → ExportHandler qw.eq/ge/le；列表 countFiltered/aggregateStats/categoryStats 三个注解 SQL 同步 `<if>` 条件，`receipt_date` 全量 ISO 可直接字符串区间比较）。**Kafka 降级已修复**：`syncExportFallback` 调 `service.exportExcel(...)`（写文件版，支持全部 8 筛选）落盘 `{upload.base-dir}/exports/` 后 `markDone(真实路径, Files.size)`。行序按**收据号分组相邻**（`sortByReceiptNo`：空沉底、组内 id 升序）。收款金额默认=销售价；同订单拆分多行（收据号+客户相同、多经办人）仅首行显示（`computeSplitOrderNonFirstIds`）。底价存量空值行导出时**关键字兜底匹配**（品牌+品类相同+归一化型号包含关键字、唯一命中才填充、歧义留空、仅内存不写库，`fillExportPrices/matchProductExactOrKeyword`）。品类 `qimi`=气密性检测（静态兜底字典）。
 - 列表 API 直接返回实体，新增字段自动序列化给前端展示。
 
 ---
@@ -231,7 +231,6 @@ ops-platform-project/
 **双通道认证**：会员和员工使用**独立**的认证体系：
 - **会员登录**：`AuthController` `/api/ops/auth/*` → 底座 SSO（PHONE 类型），token 存 `ops_token`
 - **员工登录**：`EmployeeAuthController` `/api/ops/auth/employee/*` → 手机号+密码+图形验证码，由 `EmployeeAuthServiceImpl` 委托底座 `POST /api/auth/employee/login`（平台 `sys_user` 表鉴权），子系统不存储员工账号/密码，token 存 `ops_employee_token`
-- 两个 token 在 `request.js` 中按优先级使用（`ops_token` 优先，fallback `ops_employee_token`）
 - 子系统只负责前置安全层：图形验证码校验、IP 频率限制（每分钟10次）、输入格式校验
 
 **图形验证码**（`CaptchaService`）：
@@ -287,15 +286,7 @@ ops-platform-project/
 - `GET /config` / `GET /profile` — 员工 AI 配置与个性化问候
 - 员工上下文通过 `employeeContext` 参数注入底座 Agent，底座据此激活员工专用工具（`ops_query_employee_business_data`）
 
-**Async AI Chat 基础设施**（`kafka/AiChatTaskProducer`, `kafka/AiChatResultConsumer`, `kafka/AiChatStatusConsumer`, `service/AiChatTaskService`, `service/SseEmitterManager`）：
-```
-前端 POST /api/ops/ai/employee/chat/async
-  → AiChatTaskProducer.publishTask() → Kafka topic "ai-chat-task"
-  → AiChatResultConsumer / AiChatStatusConsumer → 调用底座 AI → 更新 ai_chat_task 表
-  → 前端 SSE GET /chat/{taskId}/stream → SseEmitterManager 推送结果
-```
-- Kafka 不可用时自动降级为同步调用
-- 表 `ai_chat_task`（由 `migrate_ai_chat_task.sql` 创建）
+**Async AI Chat 基础设施**（`AiChatTaskProducer`/`AiChatResultConsumer`/`AiChatStatusConsumer`/`AiChatTaskService`/`SseEmitterManager`）：前端 POST /chat/async → Kafka topic `ai-chat-task` → Consumer 调底座 AI 更新 `ai_chat_task` 表（`migrate_ai_chat_task.sql` 创建）→ SSE stream 推送；Kafka 不可用自动降级同步
 
 ### MCP 工具 & Agent
 
@@ -323,14 +314,7 @@ ETL 预计算 + 缓存架构，将原始业务数据聚合为只读看板，按�
 - `BattleMapEtlService` — ETL 重算引擎：`refreshOrg(corpId)` 单组织全量重算，`refreshAllOrgs()` 全量重算所有活跃组织。每张表按 org_id 物理删除后重写。组织+下级聚合：运营商看板数据 = 自身 + 旗下所有合伙人数据。
 - `BattleMapCache` — 二级缓存：内存 `ConcurrentHashMap`（30min TTL）+ 前端 `localStorage`。
 
-**配置**（`application.yml`）：
-```yaml
-battle-map:
-  etl:
-    auto-refresh: true
-    init-on-startup: true        # 启动时全量初始化
-    cron: "0 */30 * * * *"      # 每 30 分钟增量刷新
-```
+**配置**：`battle-map.etl.*` 三项见「关键配置」表（auto-refresh / init-on-startup / cron，默认每 30 分钟增量刷新）。
 
 **API 端点**：
 - `POST /refresh-cache` — 单组织 ETL 刷新
@@ -421,7 +405,7 @@ battle-map:
 
 - **燃气用户**（`GasUserController` `/api/ops/admin/gas-user`）：`ops_gas_user` 表，按小区筛选 + 关键字搜索
 - **网格员管理**（`GridManagerController` `/api/ops/admin/grid-manager`）：`ops_grid_manager` + `ops_grid_manager_community` 关联表，网格员可分配多个小区
-- **会员台账**（`MemberLedgerController` `/api/ops/admin/member-ledger`）：`ops_member_ledger` 表，增值业务销售记录，按小区/品类/经办人多维筛选，是作战地图和提成计算的数据源。列表接口每行附带 transient 展示字段：memberName（gas_user→sys_member 链）、memberPhone（gas_user.phone，会员唯一识别，前端「会员」列名称下叠加手机号）、communityName、regionName（**区县地区**= 小区所属区县，链路 `sys_community.region_id → sys_region.region_name`，未配置时 "-"）、gridManagerName、activityTitle；前端主站 MemberLedgerList.vue 在「小区」列前展示「区县地区」列
+- **会员台账**（`MemberLedgerController` `/api/ops/admin/member-ledger`）：`ops_member_ledger` 表仍是作战地图 ETL 与提成计算数据源，但 2026-10-16 起**列表按平台会员聚合**（AGG_SQL 按会员聚合（仅展示有设备的会员）；字段 platformMemberId/memberName/memberPhone/communityNames/regionNames/stoveCount/businessCount；筛选项 memberKeyword/communityName/sources）。设备明细走 `GET /member/{platformMemberId}/devices`（两组）。**销售组按收据号合并**：同收据号 distinct 非空经办人>1 → 合并为一条计 1（经办人"、"连接、multiAgent=true），否则逐条计，空收据号各行独立（AGG_SQL 与 mergeBusinessDevices 同口径须同步改）。活动解耦：列表零活动字段，activity_id 列与 CRUD 保留（复盘页销售台账编辑器直写）；/members /categories /communities 三端点已删。跨库直读 sys_member/sys_community，不可达降级空列表。
 
 ### 安检设备创建会员台账（Stove Ledger）
 
@@ -432,13 +416,13 @@ battle-map:
 **API**（`MemberLedgerController` `/api/ops/admin/member-ledger`）：
 - `POST /from-stoves/submit` — 提交异步任务（Kafka `async-import-task`，taskType=`member_ledger_stoves`），可见 corp CSV 写入 task.remark 供 Handler 做数据范围过滤（未关联用户的设备只有 s.corp_id，故范围子句为 `s.corp_id OR gu.corp_id` 双匹配）
 - `GET /from-stoves/{taskId}/status` — 任务轮询；progressMsg 为 `JSON|人话` 双格式（前端解析 JSON 精确计数 + 原因）
-- `GET /` — 分页列表新增 createTimeStart/createTimeEnd 筛选；memberKeyword 搜索链路：sys_member（昵称/手机号）→ gas_user.phone 匹配 + 兜底 gas_user.full_name/phone 直搜
+- `GET /` — 会员聚合列表（口径见「燃气用户 / 网格员 / 会员台账」节）
 
 **处理器**：`StoveLedgerCreateHandler` — 单条 INSERT...SELECT + NOT EXISTS（gas_stoves_id 去重）+ 唯一索引 `(gas_stoves_id, delete_flag)` 兜底，逻辑删除后可重建。计数：created/skipped/failed（未关联燃气用户/未转化会员/未知燃具种类，附原因文本）。品类映射 `gas_stoves_class` 1→燃气灶 2→热水器 3→挂壁炉→壁挂炉（PRODUCT_CATEGORY itemKey 1/3/4）；usage_date 取 installation_time→buy_time→startup_time 首个非空；community_id 取燃气用户所属小区。
 
 **迁移**：`sql/migrate_member_ledger_stoves.sql`（platform_member_id/gas_stoves_id 列 + uk_ledger_stoves 唯一键 + idx_platform_member 索引）。
 
-**前端**（平台主站 `~/ai-native-platform/frontend/src/views/ops/`）：`MemberLedgerList.vue` 按钮（`canEdit` 由 `/ops/admin/permission/profile` 的 canEditProducts 控制）+ `MemberLedgerStovesDialog.vue` 三态弹窗（确认/轮询 2s/结果手动关闭），关闭时 `@done` 刷新列表。
+**前端**（平台主站 `~/ai-native-platform/frontend/src/views/ops/`）：`MemberLedgerList.vue` 按钮（`canEdit` 由 `/ops/admin/permission/profile` 的 canEditProducts 控制）+ `MemberLedgerStovesDialog.vue` 三态弹窗（确认/轮询 2s/结果手动关闭），关闭时 `@done` 刷新列表；关联设备弹窗 `MemberDevicesDialog.vue`（multiAgent 行前置「多人参与」tag）。
 
 ### 微信手机号授权（WechatPhoneService）
 
@@ -454,7 +438,6 @@ battle-map:
 - `POST /api/ops/admin/gas-user/gas-import/query` — 预览外部源记录数
 - `POST /api/ops/admin/gas-user/import-from-gas-platform` — 提交异步导入任务
 - `GasUserImportHandler`（taskType=`gas_user_import`）— 读取外部 Polardb `sb_gas_user` 表，按 `user_no` 去重，自动创建小区记录，调用高德地理编码
-- 导入参数 `company-filter`（默认 `德保`）过滤来源公司
 
 **会员转换**（Kafka 异步）：
 - `POST /api/ops/admin/gas-user/convert/submit` — 提交批量转换任务
@@ -485,7 +468,7 @@ H5 端跳转第三方小程序统一走 **JSSDK `wx.navigateToMiniProgram`**（�
 - `pages/activity/detail.vue` — `WeixinJSBridge.invoke('navigateToMiniProgram', ...)`，取 `activity.miniapp_app_id`
 - `pages/index/index.vue` — banner `jumpPath` 跳转
 
-**注意**：`wx-open-launch-weapp` 仅在 `main.js` 注册为自定义元素（`isCustomElement`，消除编译告警），**无业务使用**；历史方案（`weixin://` / URL Link / 开放标签 + `MpLauncher.vue`）均已废弃，`components/` 下**不存在** MpLauncher.vue，勿照旧文档复原。
+**注意**：`wx-open-launch-weapp` 仅在 `main.js` 注册为自定义元素，**无业务使用**；历史方案（`weixin://` / URL Link / 开放标签 + `MpLauncher.vue`）均已废弃，`components/` 下**不存在** MpLauncher.vue，勿照旧文档复原。
 
 ### 直播室管理（Live Room）
 
@@ -493,7 +476,7 @@ H5 端跳转第三方小程序统一走 **JSSDK `wx.navigateToMiniProgram`**（�
 
 **实体**：`OpsLiveRoom`（`ops_live_room` 表）— 标题、封面、开播时段、状态（0=预告 1=直播中 2=已结束）、回放 URL、观看人数、`live_link`（第三方直播链接，如腾讯云/阿里云等）
 
-**架构演进**：2026-07 从视频号专用（finderUsername/jumpUrl/schemeTicket）简化为**纯 `live_link` 字段**，支持任意第三方直播平台跳转。
+**纯 `live_link` 字段**（2026-07 起，支持任意第三方直播平台跳转）。
 
 **C 端 API**（`PlatformController` `/api/ops/live-rooms`）：
 - `GET /active` — 获取进行中 + 预告的直播间（公开，按状态+排序）
@@ -537,21 +520,14 @@ Controller → Service.createTask() → DB 记录
 
 ### 图片服务链路
 
-```
-DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
-  → 前端 assetUrl() + BASE_URL → 完整 HTTPS URL
-  → Nginx /uploads/ops/ → 磁盘文件
-```
-
 - `ImageUrlUtil`：规范化路径，完整 URL 提取相对路径，占位图 → null
 - 前端 `utils/image.js`：`assetUrl()` 空值 → 占位 SVG，相对路径 → `BASE_URL + path`
-- **H5 必须用完整 HTTPS 路径**：uni-app `<image>` 渲染为 CSS `background-image`，CSS `url()` 将根相对路径解析到页面 base `/ops/` → 404
+- **H5 必须用完整 HTTPS 路径**（原因见陷阱表「H5 图片 URL」）
 
 ### 前端架构
 
 - **无 Pinia/Vuex**：`uni.getStorageSync()` 持久化 token/user，页面 `ref()` 管理本地状态
 - **无 Vue Router**：uni-app 文件路由（`pages.json`），`uni.navigateTo()` + URL 参数
-- **双 Token 体系**：`request.js` 优先使用 `ops_token`（会员），fallback 使用 `ops_employee_token`（员工）。401 时清除两者
 - **iframe SSO**：`auth-bridge.js` 监听 `postMessage`（`AIP_AUTH` / `AIP_NAVIGATE`），信任同源和 `boss.jdzn99.com`
 - **公众号深链**：`App.vue` 支持 `?route=pages/employee/login` 和 `?from=employee` 查询参数跳转（公众号自定义菜单不支持 hash fragment）
 - **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（约 150 个方法），统一使用 `request` 实例
@@ -572,8 +548,8 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 管理页面（已注册，不在 Tab 中）：`pages/admin/commission-rules`, `pages/admin/gas-user`, `pages/admin/annual-plan`, `pages/admin/live-room-manage`  
 管理页面（文件存在，未注册到 pages.json，由平台主站 componentMap 加载）：`pages/admin/activity-form`, `pages/admin/home-config`, `pages/admin/business-data`, `pages/admin/members`  
 站长页面：`pages/station/apply`, `pages/station/center`  
-员工页面（已注册）：`pages/employee/login`（员工登录）、`pages/employee/ai-chat`（员工 AI 助手 H5）、`pages/employee/dashboard`、`pages/employee/business-data`、`pages/employee/profile`  
-员工页面（未注册）：`pages/employee/company-select`（文件存在但未在 pages.json 注册）
+员工页面（已注册）：`pages/employee/login`、`pages/employee/ai-chat`（AI 助手 H5）、`pages/employee/dashboard`、`pages/employee/business-data`、`pages/employee/profile`  
+员工页面（未注册）：`pages/employee/company-select`（见陷阱表）
 
 ### 关键前端组件
 
@@ -592,10 +568,9 @@ DB (相对路径) → ImageUrlUtil → API JSON (相对路径)
 
 - **编译验证**：`mvn -f backend/pom.xml compile -o`（完整命令见「快速命令」）
 - **后端 API**：`curl` 测试端点，查看日志 `tail -f /tmp/ops-backend.log`
-- **前端 H5**：`npm run build:h5` → 部署生产 → 微信开发者工具打开 `https://boss.jdzn99.com/ops/`（测试环境已退役）
+- **前端 H5**：`npm run build:h5` → 部署生产 → 微信开发者工具打开 `https://boss.jdzn99.com/ops/`
 - **前端管理页**：平台主站 `https://boss.jdzn99.com` 加载 `/ops/` 路由组件（非微前端，是 componentMap 直接加载）
 - **微信 JSSDK**：必须在微信环境中测试，普通浏览器不可用（详见 `docs/testing.md`）
-- **Kafka 功能**：仅在 `spring.kafka.enabled=true` 时可用（生产）；本地或无 Kafka 环境自动降级为同步调用
 
 ---
 
@@ -720,7 +695,7 @@ cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/op
 | **AiChatProxyController vs EmployeeAiController** | 会员和员工是两个独立 AI 通道，不要混用。员工通道自动注入员工身份上下文 |
 | **SseEmitterManager** | SSE 连接持有限时（默认 120s），超时自动关闭。前端需处理重连 |
 | **CaptchaService 单实例** | 验证码存储在内存 `ConcurrentHashMap` 中，仅适用于单实例部署。多实例需替换为 Redis |
-| **双 Token 隔离** | 会员 token（`ops_token`）和员工 token（`ops_employee_token`）是独立的存储 key。`request.js` 按优先级发送（会员优先），但两个 token 不能混用——员工 token 不能访问会员接口，反之亦然 |
+| **双 Token 隔离** | 会员 token（`ops_token`）和员工 token（`ops_employee_token`）是独立的存储 key。`request.js` 按优先级发送（会员优先），但两个 token 不能混用——员工 token 不能访问会员接口，反之亦然；401 时清除两者 |
 | **ops-platform vs 平台主站** | 两套前端详见「生产部署 → 前端部署目标」。主站 `/ops/xxx` 是 `componentMap` 直接加载 Vue 组件（非微前端），改 H5 不影响主站 |
 | **Kafka 消费者组冲突** | 同一 group 内分区独占。多容器共享 `ai-platform-group` 时旧容器抢分区但连错库 → 任务僵死 PENDING、新容器收不到消息。**部署新容器前必须 `docker stop/rm` 旧容器**，部署后 `docker ps` 确认无残留。参见 `[[kafka-consumer-group-conflict]]` |
 | **旧容器/代码不留存** | **铁律**：新容器部署后旧容器必须立即清理（`docker stop + rm`）。旧代码、旧容器、旧配置不留存——git history 可随时恢复。参见 `[[no-legacy-code-retention]]`、`[[kafka-consumer-group-conflict]]` |
@@ -729,6 +704,7 @@ cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/op
 | **新增 /ops/xxx 管理页未加 nginx 白名单** | host nginx 逐路由白名单未列入的新管理页会被 catch-all 送到 Ops H5，刷新后看到公众号移动端（URL 出现 `#/`）。步骤见「生产部署 → 前端部署目标」 |
 | **company-select 未注册路由** | `frontend/src/pages/employee/company-select.vue` 文件存在但**未在 pages.json 中注册路由**。该页面通过其他方式引用（如 `uni.navigateTo` 直接跳转），不要误删 |
 | **mysql 客户端默认 latin1** | `docker exec mysql mysql` 不指定字符集时 client/connection/results=latin1（服务器 utf8mb4）。含中文 SQL 必须加 `--default-character-set=utf8mb4`：否则写操作双重编码损坏数据（2026-08-29 `sys_corp.gas_company_id` 注释损坏已修复）、读操作显示乱码（数据无损）。判别：`HEX()` 看字节，`C3A7E280A1`=损坏。详见 `MEMORY.md` 1.4 节 |
+| **生产 MySQL 8.0.46 + 表间 COLLATE 不一致** | 生产 MySQL 实为 8.0.46，不支持 `ADD COLUMN IF NOT EXISTS` → 迁移 DDL 用 information_schema 条件化 PREPARE；`ops_business_data`=unicode_ci vs `ops_gas_user`/`ops_value_added_product`=0900_ai_ci，跨表 JOIN 须双侧显式 COLLATE，型号比对须 `COLLATE utf8mb4_bin` |
 
 ### UI/UX 质量规范（强制）
 
@@ -744,7 +720,7 @@ cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/op
 
 ---
 
-最后更新：2026-10-15 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
+最后更新：2026-10-19 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
 
 ### 自定义 Claude 命令
 
