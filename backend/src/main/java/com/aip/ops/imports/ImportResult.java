@@ -17,18 +17,35 @@ public class ImportResult {
     private int successRows;
     private int failRows;
     private int existingCount; // 已有用户数量（用于增量导入场景）
+    private int matchedCount;  // 已匹配现有会员行数（platform_member_id 来自存量会员）
+    private int unmatchedCount; // 未匹配会员行数（platform_member_id 留空，不阻断导入）
+    private int createdCount;  // 本次导入自动新建会员数
+    private List<String> createdList = new ArrayList<>(); // 新建会员清单（姓名 手机号）
     private List<String> errors = new ArrayList<>();
     private String message;     // human-readable summary, e.g. "已有用户 XXX，增量导入 XXXX"
 
     public ImportResult() {}
 
     public static ImportResult success(int count, int totalRows) {
+        return success(count, totalRows, 0, 0, 0, List.of());
+    }
+
+    public static ImportResult success(int count, int totalRows, int matchedCount, int unmatchedCount) {
+        return success(count, totalRows, matchedCount, unmatchedCount, 0, List.of());
+    }
+
+    public static ImportResult success(int count, int totalRows, int matchedCount,
+                                       int unmatchedCount, int createdCount, List<String> createdList) {
         ImportResult r = new ImportResult();
         r.status = "success";
         r.phase = "INSERT";
         r.count = count;
         r.totalRows = totalRows;
         r.successRows = count;
+        r.matchedCount = matchedCount;
+        r.unmatchedCount = unmatchedCount;
+        r.createdCount = createdCount;
+        r.createdList = createdList != null ? createdList : List.of();
         r.message = "文件业务数据为" + totalRows + "条，成功导入" + count + "条";
         return r;
     }
@@ -53,6 +70,10 @@ public class ImportResult {
         m.put("successRows", successRows);
         m.put("failRows", failRows);
         m.put("existingCount", existingCount);
+        m.put("matchedCount", matchedCount);
+        m.put("unmatchedCount", unmatchedCount);
+        m.put("createdCount", createdCount);
+        m.put("createdList", createdList);
         m.put("errors", errors);
         m.put("message", message);
         return m;
@@ -60,6 +81,14 @@ public class ImportResult {
 
     public int getExistingCount() { return existingCount; }
     public void setExistingCount(int v) { existingCount = v; }
+    public int getMatchedCount() { return matchedCount; }
+    public void setMatchedCount(int v) { matchedCount = v; }
+    public int getUnmatchedCount() { return unmatchedCount; }
+    public void setUnmatchedCount(int v) { unmatchedCount = v; }
+    public int getCreatedCount() { return createdCount; }
+    public void setCreatedCount(int v) { createdCount = v; }
+    public List<String> getCreatedList() { return createdList; }
+    public void setCreatedList(List<String> v) { createdList = v; }
     public String getMessage() { return message; }
     public void setMessage(String v) { message = v; }
     public String getStatus() { return status; }

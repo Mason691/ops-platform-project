@@ -462,6 +462,22 @@ public class BusinessDataController {
         return R.ok(Map.of("checkedCount", count, "message", "已核对 " + count + " 条数据"));
     }
 
+    /** 手工重匹配会员：对选定行按 客户手机→客户名称 在行所属燃气公司范围内重匹配并回写
+     *  platform_member_id（未匹配留空；已上报集团行跳过）。 */
+    @OperationLog(module = "增值业务", action = "重新匹配会员", targetTable = "ops_business_data")
+    @PostMapping("/rematch-members")
+    public R<?> rematchMembers(@RequestBody Map<String, List<Long>> params) {
+        return R.ok(service.rematchMembers(params != null ? params.get("ids") : null));
+    }
+
+    /** 按批次重匹配会员：批次内未关联行按 全局手机号→公司+姓名→自动创建 三级规则回写
+     *  platform_member_id（已上报集团行跳过；幂等可重跑）。 */
+    @OperationLog(module = "增值业务", action = "按批次重匹配会员", targetTable = "ops_business_data")
+    @PostMapping("/rematch-by-batch")
+    public R<?> rematchByBatch(@RequestBody Map<String, String> params) {
+        return R.ok(service.rematchMembersByBatch(params != null ? params.get("batchNo") : null));
+    }
+
     /** Download Excel import template. 优先读取配置的最新模板（默认 /home/jason/1.xlsx），
      *  缺失时回退 classpath 内置模板；下载文件名固定为 增值业务数据模板.xlsx。 */
     @GetMapping("/template")

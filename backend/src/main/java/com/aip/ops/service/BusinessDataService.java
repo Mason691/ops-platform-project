@@ -27,6 +27,10 @@ public interface BusinessDataService {
                      String brand, String model, String receiptDateStart, String receiptDateEnd, Path outFile);
     /** 提成上报集团：将当前筛选条件下非"已上报集团"的数据锁定为"已上报集团"，返回受影响行数 */
     int reportToGroup(String company, String batchNo, String agent, String receiptNo, String category);
+    /** 手工重匹配会员：按行 corp 的燃气公司范围，以 客户手机→客户名称 重匹配并回写 platform_member_id（已上报集团行跳过） */
+    Map<String, Object> rematchMembers(List<Long> ids);
+    /** 按批次重匹配会员：批次内未关联行按 全局手机号→公司+姓名→创建 三级规则回写 platform_member_id（已上报集团行跳过） */
+    Map<String, Object> rematchMembersByBatch(String batchNo);
     /** 品类提成汇总：按品类×公司汇总非已上报数据（提成金额+销售额），按模板格式生成 Excel 流式输出 */
     void exportCommissionSummary(String company, String batchNo, String agent, String receiptNo, String category,
                                  HttpServletResponse response);

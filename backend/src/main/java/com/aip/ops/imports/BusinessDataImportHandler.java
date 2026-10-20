@@ -10,6 +10,7 @@ import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsBusinessModelAliasMapper;
 import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
+import com.aip.ops.service.GasMemberMatcher;
 import com.aip.sdk.client.PlatformInternalClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -53,15 +54,15 @@ public class BusinessDataImportHandler implements ImportHandler {
     private final PlatformInternalClient platformInternalClient;
     private final DataSource dataSource;
     private final JdbcTemplate jdbcTemplate;
+    private final GasMemberMatcher memberMatcher;
 
     private static final String CATEGORY_TYPE_CODE = "PRODUCT_CATEGORY";
     private static final Set<String> VALID_COMPANIES =
             Set.of("临洮", "广河", "康乐", "武山", "彭阳", "德保");
     /** 核心四品类 itemKey：燃气灶(1)、抽油烟机(2)、热水器(3)、壁挂炉(4) */
     private static final Set<String> CORE_FOUR_CATEGORIES = Set.of("1", "2", "3", "4");
-    /** 大陆手机号：1 开头、第二位 3-9、共 11 位 */
-    private static final java.util.regex.Pattern PHONE_PATTERN =
-            java.util.regex.Pattern.compile("^1[3-9]\\d{9}$");
+    /** 大陆手机号格式（口径与 GasMemberMatcher.PHONE_PATTERN 一致） */
+    private static final java.util.regex.Pattern PHONE_PATTERN = GasMemberMatcher.PHONE_PATTERN;
     /** 确认项 key 分隔符（品牌/品类/关键词不含该字符） */
     private static final String KEY_SEP = "\u0001";
 
@@ -80,7 +81,8 @@ public class BusinessDataImportHandler implements ImportHandler {
                                      OpsPersonalCommissionRuleMapper commissionRuleMapper,
                                      PlatformInternalClient platformInternalClient,
                                      DataSource dataSource,
-                                     JdbcTemplate jdbcTemplate) {
+                                     JdbcTemplate jdbcTemplate,
+                                     GasMemberMatcher memberMatcher) {
         this.mapper = mapper;
         this.productMapper = productMapper;
         this.aliasMapper = aliasMapper;
@@ -88,6 +90,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         this.platformInternalClient = platformInternalClient;
         this.dataSource = dataSource;
         this.jdbcTemplate = jdbcTemplate;
+        this.memberMatcher = memberMatcher;
     }
 
     @Override
@@ -96,8 +99,8 @@ public class BusinessDataImportHandler implements ImportHandler {
     // ── ParsedRow holder ──
     private static class ParsedRow {
         String company, customer, brand, model, catCn, catKey;
-        String customerPhone;       // 客户手机号（归一化后；必填，未关联会员时整文件拒绝）
-        Long platformMemberId;      // = ai_platform.sys_member.id（按客户手机号解析）
+        String customerPhone;       // 客户手机号（归一化后；必填，仅校验格式，匹配不到会员时不阻断）
+        Long platformMemberId;      // = 燃气用户（ops_gas_user）的 platform_member_id；未匹配留空
         BigDecimal salePrice;
         String agent, agentPhone, dept, remark;
         String saleDate, receiptDate, receiptNo;
@@ -225,7 +228,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         loadLookups(p);
         parseRows(p, rows, idx, loadValidCategories(),
                 loadTieredCommissionCategories(corpId != null ? corpId : 4L));
-        resolveMemberIdsByPhone(p);
+        resolveMemberIds(p, corpId);
         return p;
     }
 
@@ -599,6 +602,9 @@ public class BusinessDataImportHandler implements ImportHandler {
                 + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
         int batchCount = 0;
+        // 会员兜底确保（confirm 事务内）：未匹配行 → 全局已有会员复用（uk_phone）→ 创建新会员；
+        // 同文件同手机号只创建一次（映射复用）。创建失败整体回滚，不留孤儿会员。
+        MemberEnsure ensure = ensureMembers(p.rows, corpId);
         PreparedStatement ps = DataSourceUtils.getConnection(dataSource)
                 .prepareStatement(insertSql);
         try {
@@ -615,11 +621,63 @@ public class BusinessDataImportHandler implements ImportHandler {
                 throw new RuntimeException("入库行数(" + batchCount
                         + ")与有效行数(" + p.rows.size() + ")不一致");
             }
-            log.info("Import done: {} rows, corpId={}", batchCount, corpId);
-            return ImportResult.success(batchCount, p.totalRows);
+            log.info("Import done: {} rows, corpId={}, createdMembers={}", batchCount, corpId, ensure.createdMembers.size());
+            return ImportResult.success(batchCount, p.totalRows,
+                    batchCount - ensure.createdRows - ensure.unmatchedRows,
+                    ensure.unmatchedRows,
+                    ensure.createdMembers.size(), ensure.createdMembers);
         } finally {
             ps.close();
         }
+    }
+
+    /**
+     * 会员兜底确保（confirm 事务内，先于业务数据 INSERT）：
+     * 燃气公司范围内未匹配到燃气用户的行，按文件顺序——全局查已有会员（uk_phone 复用，
+     * 已删除会员占用手机号则报错回滚）→ 创建新会员（remark=业务数据导入自动创建）。
+     * 同文件同手机号只创建一次：手机号→会员 id 映射在本次任务内复用（需求四去重）。
+     */
+    private MemberEnsure ensureMembers(List<ParsedRow> rows, Long corpId) {
+        MemberEnsure e = new MemberEnsure();
+        Map<String, Long> phoneToMember = new HashMap<>();
+        Map<String, Boolean> phoneCreated = new HashMap<>();
+        // 已匹配行先入映射：同手机号后续行直接复用同一会员
+        for (ParsedRow pr : rows) {
+            if (pr.platformMemberId != null && pr.customerPhone != null) {
+                phoneToMember.putIfAbsent(pr.customerPhone, pr.platformMemberId);
+            }
+        }
+        for (ParsedRow pr : rows) {
+            if (pr.platformMemberId != null) continue;
+            String phone = pr.customerPhone;
+            if (phone == null) { // 防御：validateFields 已保证手机号合法非空，正常不会到这里
+                e.unmatchedRows++;
+                continue;
+            }
+            Long id = phoneToMember.get(phone);
+            boolean created = Boolean.TRUE.equals(phoneCreated.get(phone));
+            if (id == null) {
+                id = memberMatcher.findMemberIdByPhone(phone);
+                if (id == null) {
+                    String name = pr.customer != null ? pr.customer.trim() : "";
+                    id = memberMatcher.createMember(phone, name, corpId);
+                    created = true;
+                    e.createdMembers.add(name + " " + phone);
+                }
+                phoneToMember.put(phone, id);
+                phoneCreated.put(phone, created);
+            }
+            pr.platformMemberId = id;
+            if (created) e.createdRows++;
+        }
+        return e;
+    }
+
+    /** 会员兜底确保结果：创建行数/新建会员清单/未关联行数（防御计数） */
+    private static class MemberEnsure {
+        int createdRows;        // 挂到本次新建会员的行数
+        int unmatchedRows;      // 仍未关联的行数（正常为 0）
+        final List<String> createdMembers = new ArrayList<>(); // 新建会员清单（姓名 手机号，每会员一条）
     }
 
     /** 绑定 25 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
@@ -630,7 +688,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         ps.setString(idx++, pr.company);
         ps.setString(idx++, pr.customer);
         ps.setString(idx++, pr.customerPhone);
-        // 会员归属按客户手机号解析（uk_phone 全局唯一），= ai_platform.sys_member.id
+        // 会员归属按客户手机/客户名称在燃气公司范围内解析（GasMemberMatcher），未匹配留空
         ps.setObject(idx++, pr.platformMemberId);
         ps.setString(idx++, pr.brand);
         ps.setString(idx++, pr.catKey);
@@ -659,37 +717,34 @@ public class BusinessDataImportHandler implements ImportHandler {
     }
 
     /**
-     * 客户手机号 → 平台会员映射：uk_phone 全局唯一，匹配无歧义。
-     * 未关联会员的格式合法手机号行写入 p.errors（整文件拒绝）；
-     * 命中行回填 ParsedRow.platformMemberId（= sys_member.id）供 INSERT 落库。
-     * 格式非法/为空的手机号不在此重复报错（validateFields 已提示）。
+     * 会员归属匹配（2026-10-19 起）：范围限定导入者组织的燃气公司（corp → sys_corp.gas_company_id，
+     * 组织无配置时回退全域），在燃气用户（ops_gas_user）中按 客户手机 → 客户名称 顺序匹配，
+     * 命中即回填 ParsedRow.platformMemberId（燃气用户未转化会员时为 null）；
+     * 均未命中则留空，不报错、不阻断导入。
+     * 格式非法/为空的手机号不在此处理（validateFields 已提示）。
      */
-    private void resolveMemberIdsByPhone(Prepared p) {
+    private void resolveMemberIds(Prepared p, Long corpId) {
+        String gasCompanyId = memberMatcher.resolveGasCompanyId(corpId);
         List<String> phones = p.rows.stream()
                 .map(r -> r.customerPhone)
                 .filter(ph -> ph != null && PHONE_PATTERN.matcher(ph).matches())
                 .distinct()
                 .collect(Collectors.toList());
-        Map<String, Long> idByPhone = new HashMap<>();
-        for (int i = 0; i < phones.size(); i += 500) {
-            List<String> chunk = phones.subList(i, Math.min(i + 500, phones.size()));
-            String sql = "SELECT id, phone FROM ai_platform.sys_member "
-                    + "WHERE delete_flag = 0 AND phone IN ("
-                    + String.join(",", Collections.nCopies(chunk.size(), "?")) + ")";
-            for (Map<String, Object> row : jdbcTemplate.queryForList(sql, chunk.toArray())) {
-                idByPhone.put((String) row.get("phone"),
-                        ((Number) row.get("id")).longValue());
-            }
-        }
+        Map<String, Long> byPhone = memberMatcher.memberIdByPhone(phones, gasCompanyId);
+        // 手机号未命中燃气用户的行才用姓名兜底（手机与名称指向不同用户时以手机为准）
+        List<String> names = p.rows.stream()
+                .map(r -> r.customer)
+                .filter(c -> c != null && !c.isBlank())
+                .map(String::trim)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<String, Long> byName = names.isEmpty()
+                ? Map.of() : memberMatcher.memberIdByName(names, gasCompanyId);
         for (ParsedRow pr : p.rows) {
             if (pr.customerPhone == null
                     || !PHONE_PATTERN.matcher(pr.customerPhone).matches()) continue;
-            Long id = idByPhone.get(pr.customerPhone);
-            if (id == null) {
-                p.errors.add("第" + pr.rowNum + "行：客户手机号未关联平台会员，请先完成会员转化");
-            } else {
-                pr.platformMemberId = id;
-            }
+            pr.platformMemberId = GasMemberMatcher.pickMember(
+                    pr.customerPhone, pr.customer, byPhone, byName);
         }
     }
 
@@ -872,11 +927,14 @@ public class BusinessDataImportHandler implements ImportHandler {
             errors.add("第" + rowNum + "行: 经办人手机号为空");
         else if (!ap.matches("\\d{11}"))
             errors.add("第" + rowNum + "行: 经办人手机号格式不正确");
-        // 客户手机号：必填 + 11 位大陆手机号；会员归属解析在 resolveMemberIdsByPhone
+        // 客户手机号：必填 + 11 位大陆手机号；会员归属解析在 resolveMemberIds（未匹配不阻断）
         if (pr.customerPhone == null || pr.customerPhone.isEmpty())
             errors.add("第" + rowNum + "行：客户手机号为空");
         else if (!PHONE_PATTERN.matcher(pr.customerPhone).matches())
             errors.add("第" + rowNum + "行：客户手机号格式不正确（须为11位大陆手机号）");
+        // 客户名称：自动创建会员的必要字段（real_name/nickname），必填
+        if (pr.customer == null || pr.customer.isBlank())
+            errors.add("第" + rowNum + "行：客户名称为空（自动创建会员需要客户名称）");
         // Date validation
         if (pr.saleDate == null)
             errors.add("第" + rowNum + "行: 销售日期格式不正确（支持: 2026-06-23 / 2026.1.2 / 2026/2/13 / 6月23日 / 2026年6月23日，日期区间取首日）");

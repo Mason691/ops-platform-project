@@ -13,6 +13,7 @@ import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.DataScopeService;
+import com.aip.ops.service.GasMemberMatcher;
 import com.aip.ops.service.ImportTaskService;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.security.LoginUser;
@@ -45,6 +46,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import java.util.Objects;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -58,6 +60,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final PlatformInternalClient platformInternalClient;
     private final BusinessDataImportHandler importHandler;
     private final ImportTaskService importTaskService;
+    private final GasMemberMatcher memberMatcher;
 
     /** 锁定状态：已上报集团的数据禁止删除/修改/重新计算（所有组织一致） */
     public static final String REPORTED_STATUS = "已上报集团";
@@ -112,7 +115,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             DataSource dataSource,
             PlatformInternalClient platformInternalClient,
             BusinessDataImportHandler importHandler,
-            ImportTaskService importTaskService) {
+            ImportTaskService importTaskService,
+            GasMemberMatcher memberMatcher) {
         this.mapper = mapper;
         this.productMapper = productMapper;
         this.ruleMapper = ruleMapper;
@@ -121,6 +125,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         this.platformInternalClient = platformInternalClient;
         this.importHandler = importHandler;
         this.importTaskService = importTaskService;
+        this.memberMatcher = memberMatcher;
     }
     public static String getCategoryDisplayName(String key) {
         if (key == null || key.isEmpty()) return "";
@@ -238,6 +243,133 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
+    public Map<String, Object> rematchMembers(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Map.of("total", 0, "matched", 0, "unmatched", 0,
+                    "updated", 0, "skippedReported", 0);
+        }
+        // 数据范围：仅可见组织内的行（超管无限制），写回同样按 corp 限定
+        Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
+        qw.in(OpsBusinessData::getId, ids);
+        if (visibleIds != null && !visibleIds.isEmpty()) {
+            qw.in(OpsBusinessData::getCorpId, visibleIds);
+        }
+        List<OpsBusinessData> rows = mapper.selectList(qw);
+
+        int matched = 0, unmatched = 0, updated = 0, skippedReported = 0;
+        // 按行 corp 分组解析燃气公司范围（同一导入批次的行 corp 一致，分组查询避免逐行跨库）
+        Map<Long, List<OpsBusinessData>> byCorp = rows.stream()
+                .collect(Collectors.groupingBy(OpsBusinessData::getCorpId));
+        for (Map.Entry<Long, List<OpsBusinessData>> e : byCorp.entrySet()) {
+            List<OpsBusinessData> group = e.getValue();
+            String gasCompanyId = memberMatcher.resolveGasCompanyId(e.getKey());
+            List<String> phones = group.stream()
+                    .map(OpsBusinessData::getCustomerPhone)
+                    .filter(ph -> ph != null && GasMemberMatcher.PHONE_PATTERN.matcher(ph).matches())
+                    .distinct().collect(Collectors.toList());
+            Map<String, Long> byPhone = memberMatcher.memberIdByPhone(phones, gasCompanyId);
+            List<String> names = group.stream()
+                    .map(OpsBusinessData::getCustomer)
+                    .filter(c -> c != null && !c.isBlank())
+                    .map(String::trim).distinct().collect(Collectors.toList());
+            Map<String, Long> byName = names.isEmpty()
+                    ? Map.of() : memberMatcher.memberIdByName(names, gasCompanyId);
+            for (OpsBusinessData row : group) {
+                if (REPORTED_STATUS.equals(row.getCalcStatus())) { skippedReported++; continue; }
+                Long memberId = GasMemberMatcher.pickMember(
+                        row.getCustomerPhone(), row.getCustomer(), byPhone, byName);
+                if (memberId != null) matched++; else unmatched++;
+                if (!Objects.equals(memberId, row.getPlatformMemberId())) {
+                    mapper.update(null, new LambdaUpdateWrapper<OpsBusinessData>()
+                            .eq(OpsBusinessData::getId, row.getId())
+                            .eq(OpsBusinessData::getCorpId, row.getCorpId())
+                            .set(OpsBusinessData::getPlatformMemberId, memberId));
+                    updated++;
+                }
+            }
+        }
+        return Map.of("total", rows.size(), "matched", matched, "unmatched", unmatched,
+                "updated", updated, "skippedReported", skippedReported);
+    }
+
+    @Override
+    public Map<String, Object> rematchMembersByBatch(String batchNo) {
+        if (batchNo == null || batchNo.isBlank()) {
+            return Map.of("total", 0, "matchedExisting", 0, "created", 0,
+                    "updated", 0, "skippedReported", 0, "createdList", List.of());
+        }
+        // 数据范围：仅可见组织内的行（超管无限制）；只处理未关联行（幂等可重跑）
+        Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<OpsBusinessData>()
+                .eq(OpsBusinessData::getBatchNo, batchNo)
+                .isNull(OpsBusinessData::getPlatformMemberId);
+        if (visibleIds != null && !visibleIds.isEmpty()) {
+            qw.in(OpsBusinessData::getCorpId, visibleIds);
+        }
+        List<OpsBusinessData> rows = mapper.selectList(qw);
+
+        int matchedExisting = 0, createdRows = 0, updated = 0, skippedReported = 0;
+        List<String> createdList = new ArrayList<>();
+        // 全局手机号匹配（uk_phone 唯一，跨组织）
+        List<String> phones = rows.stream()
+                .map(OpsBusinessData::getCustomerPhone)
+                .filter(ph -> ph != null && !ph.isBlank())
+                .distinct().collect(Collectors.toList());
+        Map<String, Long> byPhone = memberMatcher.memberIdByPhoneGlobal(phones);
+        // 按行 corp 分组：公司+姓名 匹配与创建均按组织归属
+        Map<Long, List<OpsBusinessData>> byCorp = rows.stream()
+                .collect(Collectors.groupingBy(OpsBusinessData::getCorpId));
+        Map<String, Long> phoneToMember = new HashMap<>(byPhone);
+        Map<String, Boolean> phoneCreated = new HashMap<>();
+        for (Map.Entry<Long, List<OpsBusinessData>> e : byCorp.entrySet()) {
+            Long corpId = e.getKey();
+            List<OpsBusinessData> group = e.getValue();
+            List<String> names = group.stream()
+                    .map(OpsBusinessData::getCustomer)
+                    .filter(c -> c != null && !c.isBlank())
+                    .map(String::trim).distinct().collect(Collectors.toList());
+            Map<String, Long> byName = memberMatcher.memberIdByNameInCorp(names, corpId);
+            for (OpsBusinessData row : group) {
+                if (REPORTED_STATUS.equals(row.getCalcStatus())) { skippedReported++; continue; }
+                String phone = row.getCustomerPhone();
+                String name = row.getCustomer() != null ? row.getCustomer().trim() : "";
+                Long memberId = null;
+                boolean created = false;
+                if (phone != null && !phone.isBlank()) {
+                    memberId = phoneToMember.get(phone);
+                    created = Boolean.TRUE.equals(phoneCreated.get(phone));
+                    if (memberId == null) {
+                        memberId = byName.get(name);
+                        if (memberId == null) {
+                            memberId = memberMatcher.createMember(phone, name, corpId);
+                            created = true;
+                            createdList.add(name + " " + phone);
+                        }
+                        phoneToMember.put(phone, memberId);
+                        phoneCreated.put(phone, created);
+                    }
+                } else {
+                    memberId = byName.get(name);   // 无手机行仅按公司+姓名匹配（不创建）
+                }
+                if (memberId == null) continue;    // 无手机且姓名未命中：保持 NULL
+                if (created) createdRows++; else matchedExisting++;
+                if (!Objects.equals(memberId, row.getPlatformMemberId())) {
+                    mapper.update(null, new LambdaUpdateWrapper<OpsBusinessData>()
+                            .eq(OpsBusinessData::getId, row.getId())
+                            .eq(OpsBusinessData::getCorpId, row.getCorpId())
+                            .set(OpsBusinessData::getPlatformMemberId, memberId));
+                    updated++;
+                }
+            }
+        }
+        return Map.of("total", rows.size(), "matchedExisting", matchedExisting,
+                "created", createdList.size(), "createdRows", createdRows,
+                "updated", updated, "skippedReported", skippedReported,
+                "createdList", createdList);
+    }
+
+    @Override
     public List<String> getBatches() {
         LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<OpsBusinessData>()
                 .select(OpsBusinessData::getBatchNo)
@@ -307,10 +439,14 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 new UsernamePasswordAuthenticationToken(lu, null, lu.getAuthorities()));
     }
 
-    /** ImportResult → 前端响应格式（与历史 /import/submit 一致） */
+    /** ImportResult → 前端响应格式（与历史 /import/submit 一致；success 附会员匹配/新建统计与清单） */
     private Map<String, Object> mapImportResult(ImportResult result) {
         if ("success".equals(result.getStatus())) {
-            return Map.of("status", "success", "count", result.getCount());
+            return Map.of("status", "success", "count", result.getCount(),
+                    "matchedCount", result.getMatchedCount(),
+                    "unmatchedCount", result.getUnmatchedCount(),
+                    "createdCount", result.getCreatedCount(),
+                    "createdList", result.getCreatedList());
         }
         return Map.of("status", "fail", "totalErrors", result.getFailRows(),
                 "errors", result.getErrors());
@@ -1045,17 +1181,22 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     @Transactional
     public void batchDelete(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return;
-        // 锁定守卫：已上报集团的数据禁止删除（所有组织一致）
-        long reported = mapper.selectCount(new LambdaQueryWrapper<OpsBusinessData>()
+        Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        // 锁定守卫：已上报集团的数据禁止删除（所有组织一致）；与删除同口径做 corp 范围限定，
+        // 防止他组织不可见的已上报行误阻断本组织的删除请求
+        LambdaQueryWrapper<OpsBusinessData> guardQw = new LambdaQueryWrapper<OpsBusinessData>()
                 .in(OpsBusinessData::getId, ids)
-                .eq(OpsBusinessData::getCalcStatus, REPORTED_STATUS));
+                .eq(OpsBusinessData::getCalcStatus, REPORTED_STATUS);
+        if (visibleIds != null && !visibleIds.isEmpty()) {
+            guardQw.in(OpsBusinessData::getCorpId, visibleIds);
+        }
+        long reported = mapper.selectCount(guardQw);
         if (reported > 0) {
             throw BusinessException.of("所选数据包含" + reported + "条已上报集团记录，已上报数据禁止删除");
         }
         // physical DELETE bypassing @TableLogic, but enforce corp_id scope
         String in = ids.stream().map(Object::toString).reduce((a, b) -> a + "," + b).orElse("");
         StringBuilder sql = new StringBuilder("DELETE FROM ops_business_data WHERE id IN (").append(in).append(")");
-        Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
         if (visibleIds != null && !visibleIds.isEmpty()) {
             String corpIn = visibleIds.stream().map(Object::toString).reduce((a, b) -> a + "," + b).orElse("");
             sql.append(" AND corp_id IN (").append(corpIn).append(")");
