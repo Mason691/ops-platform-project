@@ -38,10 +38,8 @@ cd frontend && npm run dev:mp-weixin
 # 前端小程序构建
 cd frontend && npm run build:mp-weixin  # 输出 dist/build/mp-weixin/
 
-# 部署：测试环境 104.238.165.57 已于 2026-08-18 退役，所有发布直接上生产 → 见「生产部署」
 ```
 
-**无自动化测试**：项目当前无单元测试或集成测试，所有验证依赖手动检查和生产监控。
 
 ---
 
@@ -178,7 +176,7 @@ ops-platform-project/
 | **管理后台** | | |
 | `AdminController` | `/api/ops/admin` | 活动/商品/直播室 CRUD、预约查询、首页统计、商家绑定 |
 | `AdminStationController` | `/api/ops/admin/station` | 站长审批/列表/统计 |
-| `BusinessDataController` | `/api/ops/admin/business-data` | 增值业务：两段式异步导入/提成计算/销售统计/异步导出/品类提成汇总/模板下载/状态流转 + 经办人核对——详见下方「增值业务数据」节 |
+| `BusinessDataController` | `/api/ops/admin/business-data` | 增值业务：两段式异步导入/提成计算/销售统计/异步导出/品类提成汇总/模板下载/状态流转 + 经办人核对 + 重新匹配会员/按批次重匹配——详见下方「增值业务数据」节 |
 | `CommissionRuleController` | `/api/ops/admin/commission` | 个人/公司提成规则 CRUD（支持组织层级继承） |
 | `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD + 列表按品类/品牌/型号(like)/状态筛选；2026-10-15 整表清空后重建为 95 个型号（万和15/万家乐21/美的18/小松鼠41，id 144-238，`sql/ops_value_added_product_import_20261015*.sql`），同日补入万和壁挂炉 32 个型号（id 239-270，`sql/ops_value_added_product_import_20261015_wanhe_wallboiler.sql`），现共 127 个型号 |
 | `MemberController` | `/api/ops/admin/members` | 会员管理：分页查询/详情/启用禁用 |
@@ -191,7 +189,7 @@ ops-platform-project/
 | `GasUserController` | `/api/ops/admin/gas-user` | **燃气用户**：分页查询/批量导入/小区关联 |
 | `GasStovesController` | `/api/ops/admin/gas-stoves` | **燃具信息**：分页查询（用户号/种类/品牌筛选）/迁移预览/异步迁移导入/任务状态 |
 | `GridManagerController` | `/api/ops/admin/grid-manager` | **网格员管理**：CRUD + 小区分配 |
-| `MemberLedgerController` | `/api/ops/admin/member-ledger` | **会员台账**：按平台会员聚合列表 + 关联设备弹窗 + 台账 CRUD + 安检设备创建（异步） |
+| `MemberLedgerController` | `/api/ops/admin/member-ledger` | **会员台账**：按平台会员聚合列表（所属公司/网格员列+筛选）+ 关联设备弹窗 + 台账 CRUD + 安检设备创建（异步）+ filter-options 下拉 |
 | `CategoryLifecycleRuleController` | `/api/ops/admin/category-lifecycle-rules` | **品类使用年限规则**：CRUD + 品类下拉选项 + 按品类查询 |
 | **员工通道** | | |
 | `EmployeeAuthController` | `/api/ops/auth/employee` | **员工** 登录（手机号+密码+验证码），独立于会员认证 |
@@ -210,7 +208,7 @@ ops-platform-project/
 
 - **导入（两段式全异步，2026-09-20 起）**：`POST /import/check`（multipart 上传→落盘 `{app.import.upload-dir}` UUID 文件→建 `sys_import_task`（`business_data_check`）→提交 `AsyncImportSupport.importExecutor`（2~4 线程+队列100+AbortPolicy）→立即返回 taskId；工作线程重建 SecurityContext 后解析+校验+匹配，结果 JSON 写 progress_msg）→ 前端 2s 轮询 `GET /import/{taskId}/status`（DONE 时 `result`=业务结果 JSON）→ `POST /import/confirm`（`checkTaskId`+`confirmations`，**复用落盘文件不二次上传**——合伙人慢上行链路只传一次；校验任务类型/状态/归属/文件在盘→并发互斥（PENDING/PROCESSING 计数+confirmLock）→建 `business_data_confirm` 任务→立即返回 taskId→轮询）。**启动清扫** `sweepInterruptedTasks`：遗留 PENDING/PROCESSING 标 FAILED。**租户上下文**：`withSecurityContext` 用任务记录重建 LoginUser（否则 TenantLineHandler 跳过滤→跨租户泄漏）。**事务边界**：`BusinessDataImportHandler.confirm()` `@Transactional` 保证全量或全不（异步线程无外层事务）；worker markDone/markFailed 独立提交；完成后删暂存文件（重试=重新上传）。confirm 缺 `checkTaskId`/`confirmations`（旧版前端缓存）手动校验返回「请刷新页面后重新导入」。`progress_msg` 已扩 MEDIUMTEXT。旧 `/import`、`/import/submit` 已删除，Kafka 兜底 `execute()`=零决策 confirm（不用本线程池）。
 - **品牌型号校验顺序**：是否特批="是"或非核心四品类（燃气灶/抽油烟机/热水器/壁挂炉以外）跳过匹配（仍精确匹配提取底价）→ 精确匹配 → 已确认别名 → 模糊候选（同品牌+同品类 key+归一化型号包含关键词、按 id 排序）→ 失败「未找到匹配的品牌型号」。模糊项集中返回 `pendingItems`（品牌/品类/Excel 型号/行号/候选产品含三价格），主站弹窗逐项确认（唯一匹配标注"最接近的完整型号"）；确认关系落库 `ops_business_model_alias`（唯一键 `(corp_id, brand, category, model_keyword, delete_flag)`，迁移 `sql/migrate_business_model_alias.sql`——**新库部署必须先执行**），同型号免重复确认；确认后同 品牌+品类+关键词 行批量套用（零售底价/集团最低价落库，销售价保留 Excel 值）。
-- **必填列（12 个，精确匹配缺列拒）**：客户/客户手机/品类/品牌/型号/销售价/公司/经办人/经办人手机号/市场收款日期/财务收款日期/资金动态表横排数。**客户手机**必填 + 11 位大陆手机号，按手机号归属会员：命中 `ai_platform.sys_member`（uk_phone 唯一）写 platform_member_id，未命中报「客户手机号未关联平台会员，请先完成会员转化」。市场收款日期**必填**；财务收款日期可空但格式错拒行（连带整文件）；横排数可空允许文字（纯整数/`12.0`/文字中首个整数，全角数字 NFKC 归一化，无数字落库空）。日期解析 `normalizeDate`（销售/市场/财务共用）：点分 `2026.1.2`、斜杠、**区间取首日**（分隔符 `-`/`~`/`—`/`至`）、全角。多 sheet 按「前 10 行含必填列名最多」自动选 sheet + 定位表头行。
+- **必填列（12 个，精确匹配缺列拒）**：客户/客户手机/品类/品牌/型号/销售价/公司/经办人/经办人手机号/市场收款日期/财务收款日期/资金动态表横排数。**客户手机**必填 + 11 位大陆手机号（格式错拒行）；**客户**行值必填（建会员需姓名）。**会员归属（2026-10-19 起，`GasMemberMatcher`）**：corp→`sys_corp.gas_company_id` 限燃气公司范围，在 `ops_gas_user`（sb_gas_user 镜像）按 客户手机→客户名称 匹配取 platform_member_id（手机优先；同号取有会员者+最小 id；无 gas_company_id 回退全域）；均未命中→全局 uk_phone 复用→**自动建 sys_member**（phone/nickname/real_name/status=1/remark=业务数据导入自动创建/corp_id=导入组织；confirm 事务内同文件同手机只建一次，已删会员占号回滚）。**按批次重匹配** `POST /rematch-by-batch`：批次内 NULL 行按 全局手机→公司(corp)+姓名→创建 三级回填（已上报行跳过，幂等）。市场收款日期**必填**；财务收款日期可空但格式错拒行（连带整文件）；横排数可空允许文字（纯整数/`12.0`/文字中首个整数，全角数字 NFKC 归一化，无数字落库空）。日期解析 `normalizeDate`（销售/市场/财务共用）：点分 `2026.1.2`、斜杠、**区间取首日**（分隔符 `-`/`~`/`—`/`至`）、全角。多 sheet 按「前 10 行含必填列名最多」自动选 sheet + 定位表头行。
 - **模板**：`GET /template` 优先读 `app.import.template-path`（默认 `/home/jason/1.xlsx`；生产 volume 挂载 `/app/templates/1.xlsx` + `APP_IMPORT_TEMPLATE_PATH` 环境变量），缺失回退 classpath `templates/business_data_template.xlsx`；文件名固定 **增值业务数据模板.xlsx**。源文件 `/home/jason/1.xlsx`（12 sheet，18 列表头：收据号 客户 客户手机 品类 品牌 型号 销售价 公司 部门 经办人 经办人手机号 是否特批 提成比例 销售日期 市场收款日期 财务收款日期 资金动态表横排数 备注）。**修改必须手术式 XML 补丁**——openpyxl 重存会丢其它 sheet 图片（27 个 media/drawing 条目）。本地与生产 `/app/templates/1.xlsx` 已同步（md5 948cea25…），host 备份 `1.xlsx.bak-20261016`。
 - **部门/备注字段**：`department VARCHAR(100)`（迁移 `sql/migrate_business_data_department.sql` 已执行，存量 remark「部门: X」前缀回填并清空）。Excel 部门列→department、备注列→remark 直接映射（旧前缀 hack 已删除）；无备注列旧文件兼容（列索引 -1 守卫）。
 - **导出**：异步/同步两路径表头统一 22 列：公司 批次号 客户 **部门** 经办人 品牌 品类 型号 收款金额 销售价 零售底价 集团最低价 销售日期 收据号 市场收款日期 财务收款日期 资金动态表横排数 返利比例 返利金额 状态 **备注 是否特批**。筛选含 品牌/型号/市场收款日期起止（请求体 brand/model/receiptDateStart/receiptDateEnd → filters JSON → ExportHandler qw.eq/ge/le；列表 countFiltered/aggregateStats/categoryStats 三个注解 SQL 同步 `<if>` 条件，`receipt_date` 全量 ISO 可直接字符串区间比较）。**Kafka 降级已修复**：`syncExportFallback` 调 `service.exportExcel(...)`（写文件版，支持全部 8 筛选）落盘 `{upload.base-dir}/exports/` 后 `markDone(真实路径, Files.size)`。行序按**收据号分组相邻**（`sortByReceiptNo`：空沉底、组内 id 升序）。收款金额默认=销售价；同订单拆分多行（收据号+客户相同、多经办人）仅首行显示（`computeSplitOrderNonFirstIds`）。底价存量空值行导出时**关键字兜底匹配**（品牌+品类相同+归一化型号包含关键字、唯一命中才填充、歧义留空、仅内存不写库，`fillExportPrices/matchProductExactOrKeyword`）。品类 `qimi`=气密性检测（静态兜底字典）。
@@ -267,7 +265,7 @@ ops-platform-project/
 
 **日志存储**：`OperationLogService` — 按月分文件写入 `/home/jason/data/logs/operation/operation_YYYYMM.log`，每条日志一行 JSON，包含 `traceId`、`userId`、`corpId`、`ip`、`operation`、`params`、`result`、`timestamp`。
 
-**覆盖范围**：截至 2026-08 已覆盖全部 18 个管理后台 Controller（见上方 Controller 表）。
+**覆盖范围**：截至 2026-08 已覆盖全部 18 个管理后台 Controller。
 
 ### AI 助手架构（双通道：会员 + 员工）
 
@@ -276,7 +274,7 @@ ops-platform-project/
 **会员 AI**（`AiChatProxyController` `/api/ops/ai`）：
 - `POST /chat` — 同步聊天，转发到底座 `POST /api/ai/chat/send`
 - 语音：`POST /voice/recognize`（ASR）、`POST /voice/synthesize`（TTS），代理到底座 internal API
-- ASR/TTS 使用 `asrRestTemplate`（300s 超时），普通 chat 使用 `aiRestTemplate`（120s 超时）
+- ASR/TTS 走 `asrRestTemplate`、普通 chat 走 `aiRestTemplate`（超时见 RestTemplate Beans 表）
 
 **员工 AI**（`EmployeeAiController` `/api/ops/ai/employee`）：
 - `POST /chat` — 同步聊天，自动注入员工身份上下文（phone/company/role）
@@ -405,7 +403,7 @@ ETL 预计算 + 缓存架构，将原始业务数据聚合为只读看板，按�
 
 - **燃气用户**（`GasUserController` `/api/ops/admin/gas-user`）：`ops_gas_user` 表，按小区筛选 + 关键字搜索
 - **网格员管理**（`GridManagerController` `/api/ops/admin/grid-manager`）：`ops_grid_manager` + `ops_grid_manager_community` 关联表，网格员可分配多个小区
-- **会员台账**（`MemberLedgerController` `/api/ops/admin/member-ledger`）：`ops_member_ledger` 表仍是作战地图 ETL 与提成计算数据源，但 2026-10-16 起**列表按平台会员聚合**（AGG_SQL 按会员聚合（仅展示有设备的会员）；字段 platformMemberId/memberName/memberPhone/communityNames/regionNames/stoveCount/businessCount；筛选项 memberKeyword/communityName/sources）。设备明细走 `GET /member/{platformMemberId}/devices`（两组）。**销售组按收据号合并**：同收据号 distinct 非空经办人>1 → 合并为一条计 1（经办人"、"连接、multiAgent=true），否则逐条计，空收据号各行独立（AGG_SQL 与 mergeBusinessDevices 同口径须同步改）。活动解耦：列表零活动字段，activity_id 列与 CRUD 保留（复盘页销售台账编辑器直写）；/members /categories /communities 三端点已删。跨库直读 sys_member/sys_community，不可达降级空列表。
+- **会员台账**（`MemberLedgerController` `/api/ops/admin/member-ledger`）：`ops_member_ledger` 表仍是作战地图 ETL 与提成计算数据源，但 2026-10-16 起**列表按平台会员聚合**（AGG_SQL 按会员聚合（仅展示有设备的会员）；字段 platformMemberId/memberName/memberPhone/communityNames/regionNames/corpNames/gridManagerNames/stoveCount/businessCount；筛选项 memberKeyword/communityName/sources/corpId/gridManagerId）。**所属公司**=双腿 corp_id→sys_corp.name 聚合；**网格员**=安检侧小区→gmc→`ops_grid_manager.real_name`（gmc 无 delete_flag，子查询 MIN 防翻倍），业务腿无网格员（gm 筛选计数收缩，同小区筛选语义）。⚠️ 生产 gmc 4 条映射均指向已清空小区（网格员列多空，待补分配）。设备明细走 `GET /member/{platformMemberId}/devices`（两组；使用日期：业务=市场收款日期、安检=安装时间）。**销售组按收据号合并**：同收据号 distinct 非空经办人>1 → 合并为一条计 1（经办人"、"连接、multiAgent=true），否则逐条计，空收据号各行独立（AGG_SQL 与 mergeBusinessDevices 同口径须同步改）。活动解耦：列表零活动字段，activity_id 列与 CRUD 保留（复盘页销售台账编辑器直写）；/members /categories /communities 三端点已删。跨库直读 sys_member/sys_community，不可达降级空列表。
 
 ### 安检设备创建会员台账（Stove Ledger）
 
@@ -652,7 +650,7 @@ cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/op
 | `~/ops-platform-project/frontend/`（C 端/员工端 H5，hash 路由） | `/data2/boss-platform/html/ops/` | `boss-ops-nginx`(9083) |
 | `~/ai-native-platform/frontend/src/views/ops/`（管理后台页） | `/data2/boss-platform/html/platform/` | `docker exec boss-platform-nginx nginx -s reload` |
 
-**新增 `/ops/xxx` 管理页必须同步加 host nginx 白名单**：两套前端共用 `/ops/` 前缀，host nginx（`/data2/nginx/conf/conf.d/boss.conf`）以**逐路由白名单**把管理页路由到主站 9081，未列入者落入 catch-all 被送到 Ops H5 —— 用户刷新管理页会看到公众号移动端（URL 出现 `#/` 即已中招；2026-08-27 在 `/ops/gas-stoves`、`/ops/category-lifecycle-rules` 上踩过）。加一行 `location ^~ /ops/新路径 { proxy_pass http://172.17.0.1:9081; proxy_http_version 1.1; proxy_set_header Host $host; proxy_read_timeout 300s; proxy_buffering off; }` 后执行 `docker exec nginx nginx -t && docker exec nginx nginx -s reload`。校验：`curl -s https://boss.jdzn99.com/ops/新路径 | grep -o '<title>[^<]*</title>'` → 主站=「协同平台」，H5=「金地燃气」。
+**新增 `/ops/xxx` 管理页必须同步加 host nginx 白名单**：两套前端共用 `/ops/` 前缀，host nginx（`/data2/nginx/conf/conf.d/boss.conf`）以**逐路由白名单**把管理页路由到主站 9081，未列入者落入 catch-all 被送到 Ops H5 —— 用户刷新管理页会看到公众号移动端（URL 出现 `#/` 即已中招）。加一行 `location ^~ /ops/新路径 { proxy_pass http://172.17.0.1:9081; proxy_http_version 1.1; proxy_set_header Host $host; proxy_read_timeout 300s; proxy_buffering off; }` 后执行 `docker exec nginx nginx -t && docker exec nginx nginx -s reload`。校验：curl 该路径看 title——主站=「协同平台」，H5=「金地燃气」。
 
 生产 Docker 关键参数：
 - ops-backend: `SERVER_PORT=8082`, `network_mode: host`
@@ -684,26 +682,23 @@ cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/op
 | **前端部署清理** | 每次部署前端必须 `rm -rf assets/*` 再上传，否则旧 chunk 残留导致新功能不生效 |
 | **jweixin-1.6.0.js** | 必须用 `npm run build:h5`（= `uni build` + 复制 `static/jweixin-1.6.0.js` + 把产物里的 `"/static/` 重写为 `"/ops/static/`）。裸跑 `npx uni build` 会**漏掉静态路径重写**（`/ops/` 下静态资源 404），且 jweixin 版本不受控 |
 | **BaseEntity 字段命名** | SDK 使用 `modifyTime`（不是 `updateTime`） |
-| **增值业务物理删除** | `ops_business_data` 的 `batchDelete()` 用原始 JDBC 物理删除，不走 `@TableLogic` |
+| **增值业务物理删除** | `ops_business_data` 的 `batchDelete()` 用原始 JDBC 物理删除，不走 `@TableLogic`（无逻辑删除路径）；守卫：选中含已上报集团行即整体拒绝（BusinessException，计数按可见 corp 限定） |
 | **5 个实体未继承 BaseEntity** | `SysImportTask`、`SysExportTask`、`AiChatTask`、`OpsActivityReviewCost`、`OpsGridManagerCommunity` 自行声明审计字段；其余 31 个均继承。其中 `OpsActivityReviewCost` 无 `delete_flag`，`costMapper.delete()` 走物理删除 |
 | **数据库环境隔离** | 生产同实例并置 `mall_db`（业务）与 `ai_platform`（底座）两库，极易混淆。**部署时必须确认 `SPRING_DATASOURCE_URL` 指向 `mall_db`**（历史事故：生产容器误用测试库，17,745 条数据写错库） |
-| **无自动化测试** | 所有验证依赖手动检查和生产监控 |
 | **首页配置 corpId** | `/api/ops/home-data` 公开接口（无 JWT），必须传 `?corpId=` 参数 |
 | **Kafka 条件加载** | Consumer 仅在 `spring.kafka.enabled=true` 时加载，无 Kafka 环境自动降级为同步调用 |
-| **nimbus-jose-jwt** | 依赖保留用于 JWT 签名验证（PlatformAuthenticationFilter），不自签但需验签 |
-| **平台缓存层** | 底座菜单/字典/地区/组织配置已有 Caffeine 缓存。子系统通过 PlatformInternalClient 调平台 API 自动命中缓存，**禁止**子系统侧再缓存或直查 DB |
 | **AiChatProxyController vs EmployeeAiController** | 会员和员工是两个独立 AI 通道，不要混用。员工通道自动注入员工身份上下文 |
 | **SseEmitterManager** | SSE 连接持有限时（默认 120s），超时自动关闭。前端需处理重连 |
 | **CaptchaService 单实例** | 验证码存储在内存 `ConcurrentHashMap` 中，仅适用于单实例部署。多实例需替换为 Redis |
 | **双 Token 隔离** | 会员 token（`ops_token`）和员工 token（`ops_employee_token`）是独立的存储 key。`request.js` 按优先级发送（会员优先），但两个 token 不能混用——员工 token 不能访问会员接口，反之亦然；401 时清除两者 |
 | **ops-platform vs 平台主站** | 两套前端详见「生产部署 → 前端部署目标」。主站 `/ops/xxx` 是 `componentMap` 直接加载 Vue 组件（非微前端），改 H5 不影响主站 |
-| **Kafka 消费者组冲突** | 同一 group 内分区独占。多容器共享 `ai-platform-group` 时旧容器抢分区但连错库 → 任务僵死 PENDING、新容器收不到消息。**部署新容器前必须 `docker stop/rm` 旧容器**，部署后 `docker ps` 确认无残留。参见 `[[kafka-consumer-group-conflict]]` |
-| **旧容器/代码不留存** | **铁律**：新容器部署后旧容器必须立即清理（`docker stop + rm`）。旧代码、旧容器、旧配置不留存——git history 可随时恢复。参见 `[[no-legacy-code-retention]]`、`[[kafka-consumer-group-conflict]]` |
+| **Kafka 消费者组冲突** | 同一 group 内分区独占。多容器共享 `ai-platform-group` 时旧容器抢分区但连错库 → 任务僵死 PENDING、新容器收不到消息。**部署新容器前必须 `docker stop/rm` 旧容器**，部署后 `docker ps` 确认无残留 |
+| **旧容器/代码不留存** | **铁律**：新容器部署后旧容器必须立即清理（`docker stop + rm`）。旧代码、旧容器、旧配置不留存——git history 可随时恢复 |
 | **作战地图跨库查询** | `BattleMapController.summary()` 和 `region` 解析方法直读 `ai_platform.sys_corp` 和 `ai_platform.sys_region`（跨库）。这是仅有的例外——组织区域信息无法通过 API 获取。维护时注意表结构变更 |
 | **作战地图数据源仅生产** | 作战地图源表（`ops_business_data`/`ops_gas_user`/`ops_member_ledger`/`ops_grid_manager`）仅在**生产库**有数据，ETL 只能在生产环境跑。参见 `[[battle-map-data-only-on-prod]]` |
 | **新增 /ops/xxx 管理页未加 nginx 白名单** | host nginx 逐路由白名单未列入的新管理页会被 catch-all 送到 Ops H5，刷新后看到公众号移动端（URL 出现 `#/`）。步骤见「生产部署 → 前端部署目标」 |
 | **company-select 未注册路由** | `frontend/src/pages/employee/company-select.vue` 文件存在但**未在 pages.json 中注册路由**。该页面通过其他方式引用（如 `uni.navigateTo` 直接跳转），不要误删 |
-| **mysql 客户端默认 latin1** | `docker exec mysql mysql` 不指定字符集时 client/connection/results=latin1（服务器 utf8mb4）。含中文 SQL 必须加 `--default-character-set=utf8mb4`：否则写操作双重编码损坏数据（2026-08-29 `sys_corp.gas_company_id` 注释损坏已修复）、读操作显示乱码（数据无损）。判别：`HEX()` 看字节，`C3A7E280A1`=损坏。详见 `MEMORY.md` 1.4 节 |
+| **mysql 客户端默认 latin1** | `docker exec mysql mysql` 不指定字符集时 client/connection/results=latin1（服务器 utf8mb4）。含中文 SQL 必须加 `--default-character-set=utf8mb4`：否则写操作双重编码损坏数据、读操作显示乱码（数据无损）。判别：`HEX()` 看字节，`C3A7E280A1`=损坏 |
 | **生产 MySQL 8.0.46 + 表间 COLLATE 不一致** | 生产 MySQL 实为 8.0.46，不支持 `ADD COLUMN IF NOT EXISTS` → 迁移 DDL 用 information_schema 条件化 PREPARE；`ops_business_data`=unicode_ci vs `ops_gas_user`/`ops_value_added_product`=0900_ai_ci，跨表 JOIN 须双侧显式 COLLATE，型号比对须 `COLLATE utf8mb4_bin` |
 
 ### UI/UX 质量规范（强制）
