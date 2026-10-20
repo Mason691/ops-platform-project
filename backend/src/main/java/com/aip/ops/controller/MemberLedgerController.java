@@ -53,28 +53,39 @@ public class MemberLedgerController {
     private static final Map<String, String> INSTALL_POSITION_NAMES =
             Map.of("1", "厨房", "2", "过道", "3", "阳台", "4", "其他");
 
-    /** 会员聚合 SQL：安检/销售两类设备 UNION 后按平台会员分组计数（{...} 占位符由 Java 拼装）。 */
+    /** 会员聚合 SQL：安检/销售两类设备 UNION 后按平台会员分组计数（{...} 占位符由 Java 拼装）。
+     *  所属公司=各腿 corp_id → sys_corp.name 聚合；网格员=安检侧 小区→网格员 映射（业务侧无）。 */
     private static final String AGG_SQL = """
             SELECT t.pid AS platform_member_id,
                    COALESCE(NULLIF(m.nickname,''), NULLIF(m.real_name,''), m.phone) AS member_name,
                    m.phone AS member_phone,
                    GROUP_CONCAT(DISTINCT t.community_name ORDER BY t.community_name SEPARATOR '、') AS community_names,
                    GROUP_CONCAT(DISTINCT t.region_name ORDER BY t.region_name SEPARATOR '、') AS region_names,
+                   GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR '、') AS corp_names,
+                   GROUP_CONCAT(DISTINCT t.gm_name ORDER BY t.gm_name SEPARATOR '、') AS gm_names,
                    SUM(t.is_stove) AS stove_count, SUM(t.is_business) AS business_count
             FROM (
                 SELECT gu.platform_member_id AS pid, 1 AS is_stove, 0 AS is_business,
-                       sc.community_name, r.region_name, s.create_time AS active_ts
+                       sc.community_name, r.region_name, s.create_time AS active_ts,
+                       COALESCE(gu.corp_id, s.corp_id) AS corp_id,
+                       gm.real_name AS gm_name, gm.id AS gm_id
                 FROM ops_gas_stoves_info s
                 JOIN ops_gas_user gu ON gu.id = s.gas_user_id AND gu.delete_flag = 0
                 LEFT JOIN ai_platform.sys_community sc ON sc.id = gu.community_id AND sc.delete_flag = 0
                 LEFT JOIN ai_platform.sys_region r ON r.id = sc.region_id
+                -- 小区→网格员：子查询取每小区首个网格员，防 gmc 一小区多行导致设备行翻倍
+                LEFT JOIN (SELECT community_id, MIN(grid_manager_id) AS gm_id
+                           FROM ops_grid_manager_community GROUP BY community_id) gmc
+                       ON gmc.community_id = gu.community_id
+                LEFT JOIN ops_grid_manager gm ON gm.id = gmc.gm_id AND gm.delete_flag = 0
                 WHERE s.delete_flag = 0 AND gu.platform_member_id IS NOT NULL{scopeStove}
                 UNION ALL
                 -- 业务腿按收据号分组计数：同收据号 distinct 非空经办人>1 → 计 1（多经办人同订单），
                 -- 否则逐行计（同经办人多商品）；口径与 mergeBusinessDevices 一致（__row_ 前缀 key 同构），改动须两侧同步
-                SELECT g.pid, 0, g.cnt, NULL, NULL, g.active_ts
+                SELECT g.pid, 0, g.cnt, NULL, NULL, g.active_ts, g.corp_id, NULL, NULL
                 FROM (
                     SELECT bd.platform_member_id AS pid,
+                           MAX(bd.corp_id) AS corp_id,
                            MAX(bd.create_time) AS active_ts,
                            CASE WHEN COUNT(DISTINCT NULLIF(bd.agent,'')) > 1 THEN 1 ELSE COUNT(*) END AS cnt
                     FROM ops_business_data bd
@@ -84,7 +95,8 @@ public class MemberLedgerController {
                 ) g
             ) t
             JOIN ai_platform.sys_member m ON m.id = t.pid AND m.delete_flag = 0
-            WHERE 1=1{kwClause}{commClause}
+            LEFT JOIN ai_platform.sys_corp c ON c.id = t.corp_id AND c.delete_flag = 0
+            WHERE 1=1{kwClause}{commClause}{corpClause}{gmClause}
             GROUP BY t.pid, m.nickname, m.real_name, m.phone
             HAVING 1=1{sourceClause}
             """;
@@ -92,20 +104,24 @@ public class MemberLedgerController {
     /**
      * 会员聚合列表：仅展示至少关联一台设备（安检采集或销售业务）的会员。
      * 筛选：memberKeyword（姓名/手机号）、communityName（小区，仅安检侧有小区概念）、
-     * sources（stove,business 逗号分隔，空=全部）。
+     * sources（stove,business 逗号分隔，空=全部）、corpId（所属公司）、gridManagerId（网格员）。
      */
     @GetMapping
     public R<?> list(@RequestParam(defaultValue = "1") int pageNum,
                      @RequestParam(defaultValue = "10") int pageSize,
                      @RequestParam(required = false) String memberKeyword,
                      @RequestParam(required = false) String communityName,
-                     @RequestParam(required = false) String sources) {
+                     @RequestParam(required = false) String sources,
+                     @RequestParam(required = false) String corpId,
+                     @RequestParam(required = false) String gridManagerId) {
         Set<Long> visible = dataScopeService.getVisibleCorpIds();
         String aggSql = AGG_SQL
                 .replace("{scopeStove}", buildScopeStoveClause(visible))
                 .replace("{scopeBiz}", buildScopeBizClause(visible))
                 .replace("{kwClause}", buildKeywordClause(memberKeyword))
                 .replace("{commClause}", buildCommunityClause(communityName))
+                .replace("{corpClause}", buildCorpClause(corpId))
+                .replace("{gmClause}", buildGmClause(gridManagerId))
                 .replace("{sourceClause}", buildSourceClause(sources));
         try {
             int page = Math.max(pageNum, 1);
@@ -126,6 +142,37 @@ public class MemberLedgerController {
         }
     }
 
+    /** 筛选下拉选项：可见组织（sys_corp）与可见网格员（ops_grid_manager），超管全量；跨库不可达降级空列表。 */
+    @GetMapping("/filter-options")
+    public R<?> filterOptions() {
+        Set<Long> visible = dataScopeService.getVisibleCorpIds();
+        String scope = visible == null || visible.isEmpty() ? ""
+                : " AND id IN (" + visible.stream().map(String::valueOf)
+                        .collect(Collectors.joining(",")) + ")";
+        Map<String, Object> data = new LinkedHashMap<>();
+        try {
+            data.put("corps", jdbcTemplate.queryForList(
+                            "SELECT id, name FROM ai_platform.sys_corp WHERE delete_flag = 0" + scope + " ORDER BY id")
+                    .stream()
+                    .map(r -> Map.of("corpId", ((Number) r.get("id")).longValue(), "corpName", r.get("name")))
+                    .collect(Collectors.toList()));
+            String gmScope = visible == null || visible.isEmpty() ? ""
+                    : " AND corp_id IN (" + visible.stream().map(String::valueOf)
+                            .collect(Collectors.joining(",")) + ")";
+            data.put("gridManagers", jdbcTemplate.queryForList(
+                            "SELECT id, real_name FROM ops_grid_manager WHERE delete_flag = 0" + gmScope
+                                    + " ORDER BY corp_id, id")
+                    .stream()
+                    .map(r -> Map.of("gridManagerId", ((Number) r.get("id")).longValue(), "name", r.get("real_name")))
+                    .collect(Collectors.toList()));
+        } catch (Exception e) {
+            log.warn("filter options failed: {}", e.getMessage());
+            data.put("corps", List.of());
+            data.put("gridManagers", List.of());
+        }
+        return R.ok(data);
+    }
+
     /** 聚合行 → 前端 camelCase 记录（SUM 结果转 long，避免 BigDecimal 序列化差异）。 */
     private Map<String, Object> toRecord(Map<String, Object> row) {
         Map<String, Object> rec = new LinkedHashMap<>();
@@ -134,6 +181,8 @@ public class MemberLedgerController {
         rec.put("memberPhone", row.get("member_phone"));
         rec.put("communityNames", row.get("community_names"));
         rec.put("regionNames", row.get("region_names"));
+        rec.put("corpNames", row.get("corp_names"));
+        rec.put("gridManagerNames", row.get("gm_names"));
         rec.put("stoveCount", ((Number) row.get("stove_count")).longValue());
         rec.put("businessCount", ((Number) row.get("business_count")).longValue());
         return rec;
@@ -297,6 +346,18 @@ public class MemberLedgerController {
         return " AND t.community_name LIKE '%" + communityName.trim().replace("'", "''") + "%'";
     }
 
+    /** 所属公司筛选（数字 corpId；过滤该公司名下设备行，计数随之收缩——与小区筛选同语义）。 */
+    private String buildCorpClause(String corpId) {
+        if (corpId == null || !corpId.matches("\\d+")) return "";
+        return " AND t.corp_id = " + corpId;
+    }
+
+    /** 网格员筛选（数字 gridManagerId；仅安检侧有 小区→网格员 映射，业务腿 NULL 自然排除）。 */
+    private String buildGmClause(String gridManagerId) {
+        if (gridManagerId == null || !gridManagerId.matches("\\d+")) return "";
+        return " AND t.gm_id = " + gridManagerId;
+    }
+
     /** 设备来源筛选：stove/business 逗号分隔；空或双选=不过滤。 */
     private String buildSourceClause(String sources) {
         if (sources == null || sources.isBlank()) return "";
@@ -308,18 +369,18 @@ public class MemberLedgerController {
         return "";
     }
 
-    /** 安检采集设备：stoves → gas_user(platform_member_id)；usage_date 取安装/购买/启用首个非空。 */
+    /** 安检采集设备：stoves → gas_user(platform_member_id)；usage_date=安装时间（取日期部分；
+     *  buy_time/startup_time 生产恒 NULL 弃用，原 COALESCE 兜底链已删除）。 */
     private List<Map<String, Object>> queryStoveDevices(Long platformMemberId, String scopeStove) {
         String sql = """
                 SELECT s.id AS device_id, s.gas_stoves_class AS cls,
                        s.gas_stoves_brand AS brand, s.gas_stoves_type AS model,
-                       DATE_FORMAT(COALESCE(s.installation_time, s.buy_time, s.startup_time), '%Y-%m-%d') AS usage_date,
+                       DATE_FORMAT(s.installation_time, '%Y-%m-%d') AS usage_date,
                        s.installation_position AS install_position, s.focal_eye AS focal_eye, s.power AS power
                 FROM ops_gas_stoves_info s
                 JOIN ops_gas_user gu ON gu.id = s.gas_user_id AND gu.delete_flag = 0
                 WHERE s.delete_flag = 0 AND gu.platform_member_id = ?""" + scopeStove + """
-                 ORDER BY (COALESCE(s.installation_time, s.buy_time, s.startup_time) IS NULL),
-                          COALESCE(s.installation_time, s.buy_time, s.startup_time) DESC, s.id DESC
+                 ORDER BY (s.installation_time IS NULL), s.installation_time DESC, s.id DESC
                 -- 501=500+1 探测超限截断
                 LIMIT 501
                 """;
@@ -327,16 +388,17 @@ public class MemberLedgerController {
     }
 
     /** 销售设备：ops_business_data 按 platform_member_id 归属（回填规则见迁移脚本）；
-     *  全量拉取（单会员行数有限）供 mergeBusinessDevices 按收据号合并，合并后再截断 500。 */
+     *  全量拉取（单会员行数有限）供 mergeBusinessDevices 按收据号合并，合并后再截断 500。
+     *  使用日期=市场收款日期（receipt_date 全量 ISO yyyy-MM-dd，usage_date 列为死数据恒 NULL）。 */
     private List<Map<String, Object>> queryBusinessDevices(Long platformMemberId, String scopeBiz) {
         String sql = """
                 SELECT bd.id AS device_id, bd.category AS category_key, bd.brand, bd.model,
                        bd.sale_price, bd.sale_date, bd.receipt_date, bd.receipt_no,
                        bd.agent, bd.remark, bd.customer,
-                       DATE_FORMAT(bd.usage_date, '%Y-%m-%d') AS usage_date
+                       bd.receipt_date AS usage_date
                 FROM ops_business_data bd
                 WHERE bd.delete_flag = 0 AND bd.platform_member_id = ?""" + scopeBiz + """
-                 ORDER BY (bd.usage_date IS NULL), bd.usage_date DESC, bd.id DESC
+                 ORDER BY (bd.receipt_date IS NULL), bd.receipt_date DESC, bd.id DESC
                 """;
         return jdbcTemplate.queryForList(sql, platformMemberId);
     }
