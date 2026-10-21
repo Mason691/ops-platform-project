@@ -602,7 +602,7 @@ public class BusinessDataImportHandler implements ImportHandler {
                 + "sale_date, receipt_date, finance_receipt_date, fund_dynamic_rows, "
                 + "receipt_no, department, retail_floor_price, group_lowest_price, "
                 + "calc_status, remark, corp_id, operator_id) "
-                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
         int batchCount = 0;
         // 会员兜底确保（confirm 事务内）：未匹配行 → 全局已有会员复用（uk_phone）→ 创建新会员；
@@ -686,7 +686,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         final List<String> createdMembers = new ArrayList<>(); // 新建会员清单（姓名 手机号，每会员一条）
     }
 
-    /** 绑定 25 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
+    /** 绑定 27 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
     private void bindRow(PreparedStatement ps, ParsedRow pr, String batchNo, Long corpId)
             throws SQLException {
         int idx = 1;
