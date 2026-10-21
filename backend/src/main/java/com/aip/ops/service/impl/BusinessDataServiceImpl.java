@@ -446,7 +446,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                     "matchedCount", result.getMatchedCount(),
                     "unmatchedCount", result.getUnmatchedCount(),
                     "createdCount", result.getCreatedCount(),
-                    "createdList", result.getCreatedList());
+                    "createdList", result.getCreatedList(),
+                    "defaultQtyCount", result.getDefaultQtyCount());
         }
         return Map.of("status", "fail", "totalErrors", result.getFailRows(),
                 "errors", result.getErrors());
@@ -752,33 +753,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     /**
-     * 判定同一订单拆分多行的「收款金额」显示：
-     * 收据号+客户相同、且经办人不唯一（多经办人协作）即视为同一订单拆分
-     * ——不要求品类/型号相同，仅导出顺序中第一行显示收款金额，其余行留空。
-     *
-     * @return 收款金额需留空的行 id 集合
-     */
-    public static Set<Long> computeSplitOrderNonFirstIds(List<OpsBusinessData> rows) {
-        Map<String, List<Long>> idGroups = new LinkedHashMap<>();
-        Map<String, Set<String>> agentSets = new HashMap<>();
-        for (OpsBusinessData d : rows) {
-            String rn = d.getReceiptNo();
-            if (rn == null || rn.isEmpty()) continue;
-            String key = rn + "|" + Objects.toString(d.getCustomer(), "");
-            idGroups.computeIfAbsent(key, k -> new ArrayList<>()).add(d.getId());
-            agentSets.computeIfAbsent(key, k -> new HashSet<>()).add(Objects.toString(d.getAgent(), ""));
-        }
-        Set<Long> blankIds = new HashSet<>();
-        for (Map.Entry<String, List<Long>> e : idGroups.entrySet()) {
-            List<Long> ids = e.getValue();
-            if (ids.size() > 1 && agentSets.get(e.getKey()).size() > 1) {
-                blankIds.addAll(ids.subList(1, ids.size()));
-            }
-        }
-        return blankIds;
-    }
-
-    /**
      * Verify that no receipt group row has a negative or null amount
      * after splitting. Throws on data inconsistency to trigger rollback.
      */
@@ -870,14 +844,12 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             applyCorpScope(qw);
             List<OpsBusinessData> all = mapper.selectList(qw);
             sortByReceiptNo(all);
-            // 同一订单拆分多行的收款金额仅首行显示（口径与提成均分一致）
-            Set<Long> blankAmountIds = computeSplitOrderNonFirstIds(all);
             // 型号关键字行（如武山）兜底填充 零售底价/集团最低价（仅导出文件）
             fillExportPrices(all, productMapper.selectList(null));
 
             Path tsvFile = Files.createTempFile("export_", ".tsv");
             StringBuilder sb = new StringBuilder(EXPORT_HEADER);
-            for (OpsBusinessData d : all) appendExportRow(sb, d, blankAmountIds);
+            for (OpsBusinessData d : all) appendExportRow(sb, d);
             Files.writeString(tsvFile, sb.toString());
             Files.createDirectories(outFile.toAbsolutePath().getParent());
             // Convert TSV → XLSX using Python
@@ -894,17 +866,22 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     private static final String EXPORT_HEADER =
-            "批次\t公司\t客户\t部门\t品牌\t品类\t型号\t收款金额\t销售价\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\t备注\t是否特批\n";
+            "批次\t公司\t客户\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\t备注\t是否特批\n";
 
-    /** 单行 23 列 TSV 输出（与 EXPORT_HEADER 列序一致） */
-    private void appendExportRow(StringBuilder sb, OpsBusinessData d, Set<Long> blankAmountIds) {
+    /** 单行 23 列 TSV 输出（与 EXPORT_HEADER 列序一致）；收款金额=库中 receipt_amount（空则 单价×数量 兜底） */
+    private void appendExportRow(StringBuilder sb, OpsBusinessData d) {
         sb.append(fmt(d.getBatchNo())).append('\t')
           .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
           .append(fmt(d.getDepartment())).append('\t')
           .append(fmt(d.getBrand())).append('\t').append(getCategoryDisplayName(d.getCategory())).append('\t')
           .append(fmt(d.getModel())).append('\t')
-          .append(blankAmountIds.contains(d.getId()) ? "" : fmt(d.getSalePrice())).append('\t')
           .append(fmt(d.getSalePrice())).append('\t')
+          .append(fmt(d.getSaleQuantity())).append('\t')
+          .append(fmt(d.getReceiptAmount() != null ? d.getReceiptAmount()
+                  : d.getSalePrice() != null
+                      ? d.getSalePrice().multiply(java.math.BigDecimal.valueOf(
+                          d.getSaleQuantity() != null ? d.getSaleQuantity() : 1))
+                      : null)).append('\t')
           .append(fmt(d.getRetailFloorPrice())).append('\t').append(fmt(d.getGroupLowestPrice())).append('\t')
           .append(fmt(d.getCommissionRate())).append('\t').append(fmt(d.getCommissionAmount())).append('\t')
           .append(fmt(d.getCalcStatus())).append('\t').append(fmt(d.getAgent())).append('\t')

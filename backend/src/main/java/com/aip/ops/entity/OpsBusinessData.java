@@ -60,8 +60,14 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("model")
     private String model;
 
+    @TableField("sale_quantity")
+    private Integer saleQuantity;
+
     @TableField("sale_price")
     private BigDecimal salePrice;
+
+    @TableField("receipt_amount")
+    private BigDecimal receiptAmount;
 
     @TableField("sale_date")
     private String saleDate;

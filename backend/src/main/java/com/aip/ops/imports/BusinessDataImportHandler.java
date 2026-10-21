@@ -102,6 +102,9 @@ public class BusinessDataImportHandler implements ImportHandler {
         String customerPhone;       // 客户手机号（归一化后；必填，仅校验格式，匹配不到会员时不阻断）
         Long platformMemberId;      // = 燃气用户（ops_gas_user）的 platform_member_id；未匹配留空
         BigDecimal salePrice;
+        Integer saleQuantity = 1;      // 销售数量（空默认 1）
+        boolean quantityDefaulted;     // 数量列空 → 默认 1（结果统计用）
+        String quantityRaw = "";       // 原始数量文本（validateFields 校验用）
         String agent, agentPhone, dept, remark;
         String saleDate, receiptDate, receiptNo;
         String receiptDateRaw; // raw value for validation (市场收款日期：空=错误)
@@ -595,11 +598,11 @@ public class BusinessDataImportHandler implements ImportHandler {
         String insertSql = "INSERT INTO ops_business_data "
                 + "(batch_no, company, customer, customer_phone, platform_member_id, "
                 + "brand, category, model, "
-                + "sale_price, agent, agent_phone, is_special, commission_rate, "
+                + "sale_price, sale_quantity, receipt_amount, agent, agent_phone, is_special, commission_rate, "
                 + "sale_date, receipt_date, finance_receipt_date, fund_dynamic_rows, "
                 + "receipt_no, department, retail_floor_price, group_lowest_price, "
                 + "calc_status, remark, corp_id, operator_id) "
-                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
         int batchCount = 0;
         // 会员兜底确保（confirm 事务内）：未匹配行 → 全局已有会员复用（uk_phone）→ 创建新会员；
@@ -622,10 +625,13 @@ public class BusinessDataImportHandler implements ImportHandler {
                         + ")与有效行数(" + p.rows.size() + ")不一致");
             }
             log.info("Import done: {} rows, corpId={}, createdMembers={}", batchCount, corpId, ensure.createdMembers.size());
-            return ImportResult.success(batchCount, p.totalRows,
+            ImportResult ir = ImportResult.success(batchCount, p.totalRows,
                     batchCount - ensure.createdRows - ensure.unmatchedRows,
                     ensure.unmatchedRows,
                     ensure.createdMembers.size(), ensure.createdMembers);
+            ir.setDefaultQtyCount((int) p.rows.stream()
+                    .filter(r -> r.quantityDefaulted).count());
+            return ir;
         } finally {
             ps.close();
         }
@@ -694,6 +700,10 @@ public class BusinessDataImportHandler implements ImportHandler {
         ps.setString(idx++, pr.catKey);
         ps.setString(idx++, pr.model);
         ps.setBigDecimal(idx++, pr.salePrice);
+        // 销售数量（默认 1）+ 收款金额 = 销售单价 × 销售数量（系统计算写入）
+        ps.setObject(idx++, pr.saleQuantity);
+        ps.setBigDecimal(idx++, pr.salePrice.multiply(
+                java.math.BigDecimal.valueOf(pr.saleQuantity)));
         ps.setString(idx++, pr.agent);
         ps.setString(idx++, pr.agentPhone);
         ps.setString(idx++, pr.special ? "是" : "否");
@@ -828,24 +838,32 @@ public class BusinessDataImportHandler implements ImportHandler {
     private static final int I_SPECIAL = 14;
     private static final int I_RATIO = 15;
     private static final int I_REMARK = 16;
+    private static final int I_QUANTITY = 17;   // 销售数量（可选列：缺失/空默认 1）
 
     /** 表头校验 + 定位各列下标；任一必填列缺失 → 错误并返回 null。 */
     private int[] headerIndices(String[] headers, List<String> errors) {
         String[] requiredHeaders = {
-            "客户", "客户手机", "品类", "品牌", "型号", "销售价", "公司", "经办人", "经办人手机号",
+            "客户", "客户手机", "品类", "品牌", "型号", "销售单价", "公司", "经办人", "经办人手机号",
             "市场收款日期", "财务收款日期", "资金动态表横排数"
         };
+        // 旧模板"销售价"列名向下兼容（新版模板已改名"销售单价"）
+        if (indexOf(headers, "销售单价") < 0 && indexOf(headers, "销售价") >= 0) {
+            requiredHeaders[5] = "销售价";
+        }
         for (String h : requiredHeaders) {
             if (indexOf(headers, h) < 0) errors.add("缺少列: " + h);
         }
         if (!errors.isEmpty()) return null;
-        int[] idx = new int[18];
+        int[] idx = new int[19];
         idx[I_CUSTOMER] = indexOf(headers, "客户");
         idx[I_CUSTOMER_PHONE] = indexOf(headers, "客户手机");
         idx[I_CATEGORY] = indexOf(headers, "品类");
         idx[I_BRAND] = indexOf(headers, "品牌");
         idx[I_MODEL] = indexOf(headers, "型号");
-        idx[I_PRICE] = indexOf(headers, "销售价");
+        idx[I_PRICE] = indexOf(headers, "销售单价");
+        if (idx[I_PRICE] < 0) idx[I_PRICE] = indexOf(headers, "销售价");
+        // 销售数量为可选列：模板含该列时读取，缺失/空默认 1
+        idx[I_QUANTITY] = indexOf(headers, "销售数量");
         idx[I_COMPANY] = indexOf(headers, "公司");
         idx[I_DEPT] = indexOf(headers, "部门");
         idx[I_AGENT] = indexOf(headers, "经办人");
@@ -935,6 +953,10 @@ public class BusinessDataImportHandler implements ImportHandler {
         // 客户名称：自动创建会员的必要字段（real_name/nickname），必填
         if (pr.customer == null || pr.customer.isBlank())
             errors.add("第" + rowNum + "行：客户名称为空（自动创建会员需要客户名称）");
+        // 销售数量：必须为正整数；空已在 parseRow 默认 1
+        if (!pr.quantityRaw.isEmpty()
+                && (pr.saleQuantity == null || pr.saleQuantity <= 0))
+            errors.add("第" + rowNum + "行：销售数量必须为正整数（当前值：" + pr.quantityRaw + "）");
         // Date validation
         if (pr.saleDate == null)
             errors.add("第" + rowNum + "行: 销售日期格式不正确（支持: 2026-06-23 / 2026.1.2 / 2026/2/13 / 6月23日 / 2026年6月23日，日期区间取首日）");
@@ -1011,6 +1033,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         String agent = val(cols, idx[I_AGENT]);
         String agentPhone = val(cols, idx[I_AGENT_PHONE]);
         String priceStr = val(cols, idx[I_PRICE]);
+        String quantityStr = val(cols, idx[I_QUANTITY]);
 
         // Skip only TRULY blank rows: ALL meaningful fields empty.
         // Any row with partial data must go through validation —
@@ -1021,6 +1044,18 @@ public class BusinessDataImportHandler implements ImportHandler {
         }
 
         ParsedRow pr = new ParsedRow();
+        // 销售数量：空 → 默认 1（结果统计）；非空先按正整数解析，格式校验在 validateFields
+        if (quantityStr == null || quantityStr.isBlank()) {
+            pr.quantityDefaulted = true;
+        } else {
+            pr.quantityRaw = quantityStr.trim();
+            try {
+                java.math.BigDecimal q = new java.math.BigDecimal(
+                        java.text.Normalizer.normalize(pr.quantityRaw, java.text.Normalizer.Form.NFKC)
+                                .trim().replace(".0", ""));
+                if (q.stripTrailingZeros().scale() <= 0) pr.saleQuantity = q.intValue();
+            } catch (NumberFormatException ignored) { /* 非法数量在 validateFields 报错 */ }
+        }
         pr.company = company;
         pr.customer = customer;
         pr.customerPhone = customerPhone;

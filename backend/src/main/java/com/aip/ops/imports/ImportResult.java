@@ -21,6 +21,7 @@ public class ImportResult {
     private int unmatchedCount; // 未匹配会员行数（platform_member_id 留空，不阻断导入）
     private int createdCount;  // 本次导入自动新建会员数
     private List<String> createdList = new ArrayList<>(); // 新建会员清单（姓名 手机号）
+    private int defaultQtyCount; // 销售数量为空默认按 1 处理的行数
     private List<String> errors = new ArrayList<>();
     private String message;     // human-readable summary, e.g. "已有用户 XXX，增量导入 XXXX"
 
@@ -74,6 +75,7 @@ public class ImportResult {
         m.put("unmatchedCount", unmatchedCount);
         m.put("createdCount", createdCount);
         m.put("createdList", createdList);
+        m.put("defaultQtyCount", defaultQtyCount);
         m.put("errors", errors);
         m.put("message", message);
         return m;
@@ -89,6 +91,8 @@ public class ImportResult {
     public void setCreatedCount(int v) { createdCount = v; }
     public List<String> getCreatedList() { return createdList; }
     public void setCreatedList(List<String> v) { createdList = v; }
+    public int getDefaultQtyCount() { return defaultQtyCount; }
+    public void setDefaultQtyCount(int v) { defaultQtyCount = v; }
     public String getMessage() { return message; }
     public void setMessage(String v) { message = v; }
     public String getStatus() { return status; }

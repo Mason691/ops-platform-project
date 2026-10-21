@@ -148,7 +148,7 @@ public class BattleMapController {
             try {
                 String year = Integer.toString(LocalDate.now().getYear());
                 Double bd = jdbcTemplate.queryForObject(
-                    "SELECT COALESCE(SUM(sale_price),0) FROM ops_business_data " +
+                    "SELECT COALESCE(SUM(receipt_amount),0) FROM ops_business_data " +
                     "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对','已上报集团') AND sale_date>=?",
                     Double.class, year + "-01-01");
                 Double ml = jdbcTemplate.queryForObject(
@@ -268,7 +268,7 @@ public class BattleMapController {
 
             // 1) 主数据源：ops_business_data (已计算 + 经办人已核对 + 已上报集团)
             jdbcTemplate.queryForList(
-                "SELECT DATE_FORMAT(sale_date,'%Y-%m') ym, COALESCE(SUM(sale_price),0) total " +
+                "SELECT DATE_FORMAT(sale_date,'%Y-%m') ym, COALESCE(SUM(receipt_amount),0) total " +
                 "FROM ops_business_data WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对','已上报集团') AND sale_date>=? GROUP BY ym", since)
                 .forEach(row -> {
                     Map<String, Object> r = buckets.get((String) row.get("ym"));

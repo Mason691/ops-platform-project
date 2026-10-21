@@ -86,7 +86,7 @@ public class BattleMapEtlService {
             jdbc.update("DELETE FROM ops_map_employee_performance WHERE org_id=?", corpId);
             List<Map<String, Object>> tops = jdbc.queryForList(
                 "SELECT bd.agent AS agent_key," +
-                "COALESCE(SUM(bd.sale_price),0) AS total_sales," +
+                "COALESCE(SUM(bd.receipt_amount),0) AS total_sales," +
                 "COUNT(*) AS sales_count," +
                 "MIN(bd.agent_phone) AS agent_phone " +
                 "FROM ops_business_data bd WHERE bd.corp_id IN (" + scope + ") " +
@@ -122,7 +122,7 @@ public class BattleMapEtlService {
             List<Map<String, Object>> pc = jdbc.queryForList(
                 "SELECT company FROM ops_business_data " +
                 "WHERE agent=? AND corp_id IN (" + scope + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对','已上报集团') " +
-                "GROUP BY company ORDER BY SUM(sale_price) DESC LIMIT 1",
+                "GROUP BY company ORDER BY SUM(receipt_amount) DESC LIMIT 1",
                 agentKey);
             if (!pc.isEmpty()) {
                 Object c = pc.get(0).get("company");
@@ -239,13 +239,13 @@ public class BattleMapEtlService {
                 "sales_count,rank_order) " +
                 "SELECT ?,bd.category AS category_key," +
                 "COALESCE((SELECT item_value FROM ai_platform.sys_dict_item WHERE type_id=9 AND item_key=bd.category COLLATE utf8mb4_0900_ai_ci AND delete_flag=0 LIMIT 1),bd.category) AS category_name," +
-                "COALESCE(SUM(bd.sale_price),0),COUNT(*)," +
-                "ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(bd.sale_price),0) DESC) " +
+                "COALESCE(SUM(bd.receipt_amount),0),COUNT(*)," +
+                "ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(bd.receipt_amount),0) DESC) " +
                 "FROM ops_business_data bd " +
                 "WHERE bd.corp_id IN (" + scope + ") AND bd.delete_flag=0 " +
                 "AND bd.calc_status IN ('已计算','经办人已核对','已上报集团') " +
                 "AND bd.category IS NOT NULL AND bd.category<>'' " +
-                "GROUP BY bd.category ORDER BY COALESCE(SUM(bd.sale_price),0) DESC LIMIT 5",
+                "GROUP BY bd.category ORDER BY COALESCE(SUM(bd.receipt_amount),0) DESC LIMIT 5",
                 corpId);
         } catch (Exception e) { log.warn("ETL category sales org={} failed: {}", corpId, e.getMessage()); }
     }

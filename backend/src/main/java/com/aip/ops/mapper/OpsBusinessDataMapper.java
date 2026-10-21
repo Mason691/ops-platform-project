@@ -18,12 +18,12 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
      *  Rows with NULL receipt_no use a per-row sentinel (COALESCE + id) to stay
      *  independent — unrelated orders must not merge under a shared NULL group. */
     @Select("<script>"
-            + "SELECT COALESCE(SUM(t.sale_price),0) as totalSale, "
+            + "SELECT COALESCE(SUM(t.receipt_amount),0) as totalSale, "
             + "COALESCE(SUM(t.commission_amount),0) as totalCommission "
             + "FROM ("
             + "SELECT COALESCE(receipt_no, CONCAT('__NULL__', id)) as receipt_no, "
             + "category, model, "
-            + "MAX(sale_price) as sale_price, "
+            + "MAX(receipt_amount) as receipt_amount, "
             + "SUM(commission_amount) as commission_amount "
             + "FROM ops_business_data WHERE delete_flag=0 "
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
@@ -56,12 +56,12 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
      *  dedup rule as aggregateStats so per-category sums reconcile with overall totals. */
     @Select("<script>"
             + "SELECT t.category as category, "
-            + "COALESCE(SUM(t.sale_price),0) as totalSale, "
+            + "COALESCE(SUM(t.receipt_amount),0) as totalSale, "
             + "COALESCE(SUM(t.commission_amount),0) as totalCommission "
             + "FROM ("
             + "SELECT COALESCE(receipt_no, CONCAT('__NULL__', id)) as receipt_no, "
             + "category, model, "
-            + "MAX(sale_price) as sale_price, "
+            + "MAX(receipt_amount) as receipt_amount, "
             + "SUM(commission_amount) as commission_amount "
             + "FROM ops_business_data WHERE delete_flag=0 "
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
@@ -76,7 +76,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "<if test='receiptDateEnd != null and receiptDateEnd != \"\"'>AND receipt_date &lt;= #{receiptDateEnd}</if> "   // &lt;= 而非 <=：<script> 注解 SQL 是 XML，< 会破坏标签解析（2026-10-19 生产启动崩溃回滚教训）
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
             + "GROUP BY 1, category, model"
-            + ") t GROUP BY t.category ORDER BY SUM(t.sale_price) DESC"
+            + ") t GROUP BY t.category ORDER BY SUM(t.receipt_amount) DESC"
             + "</script>")
     List<Map<String, Object>> categoryStats(@Param("company") String company,
                                             @Param("batchNo") String batchNo,
@@ -127,18 +127,18 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
                                         @Param("corpId") Long corpId);
 
     /** Per-category × per-company totals for commission summary (品类提成汇总) —
-     *  销售金额按（收据号+公司）去重：同一订单只取一条 sale_price 计一次，归属规则：
+     *  销售金额按（收据号+公司）去重：同一订单只取一条 receipt_amount 计一次，归属规则：
      *  含 户内美装销售(6) 则归属销售品类；否则按品类中文名排序取首品类；
      *  提成金额仍按每条明细全量汇总（提成按明细独立计算）。排除已上报集团行。 */
     @Select("<script>"
             + "SELECT r.category as category, r.company as company, "
-            + "COALESCE(SUM(CASE WHEN r.rn = 1 THEN r.sale_price ELSE 0 END),0) as totalSale, "
+            + "COALESCE(SUM(CASE WHEN r.rn = 1 THEN r.receipt_amount ELSE 0 END),0) as totalSale, "
             + "COALESCE(SUM(r.commission_amount),0) as totalCommission "
             + "FROM ("
-            + "SELECT b.category, b.company, b.sale_price, b.commission_amount, "
+            + "SELECT b.category, b.company, b.receipt_amount, b.commission_amount, "
             + "ROW_NUMBER() OVER (PARTITION BY b.grp, b.company ORDER BY b.salePri, b.catName, b.id) as rn "
             + "FROM ("
-            + "SELECT id, category, company, sale_price, commission_amount, "
+            + "SELECT id, category, company, receipt_amount, commission_amount, "
             + "COALESCE(receipt_no, CONCAT('__NULL__', id)) as grp, "
             + "CASE WHEN category = '6' THEN 0 ELSE 1 END as salePri, "
             + "CASE category WHEN '10' THEN '保险' WHEN '4' THEN '壁挂炉' WHEN '5' THEN '壁挂炉以旧换新销售' WHEN '2' THEN '抽油烟机' WHEN '7' THEN '定尺波纹管' WHEN '8' THEN '户内美装工程' WHEN '6' THEN '户内美装销售' WHEN '9' THEN '户内美装运维' WHEN '12' THEN '美装安全评估' WHEN '11' THEN '美装管道整改' WHEN 'qimi' THEN '气密性检测' WHEN '1' THEN '燃气灶' WHEN '3' THEN '热水器' ELSE category END as catName "
@@ -165,14 +165,14 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
      *  销售/提成同归该月，保证各月合计与全部汇总对账一致。返回行含 saleMonth（YYYY-MM）。 */
     @Select("<script>"
             + "SELECT r.category as category, r.company as company, r.saleMonth as saleMonth, "
-            + "COALESCE(SUM(CASE WHEN r.rn = 1 THEN r.sale_price ELSE 0 END),0) as totalSale, "
+            + "COALESCE(SUM(CASE WHEN r.rn = 1 THEN r.receipt_amount ELSE 0 END),0) as totalSale, "
             + "COALESCE(SUM(r.commission_amount),0) as totalCommission "
             + "FROM ("
-            + "SELECT b.category, b.company, b.sale_price, b.commission_amount, "
+            + "SELECT b.category, b.company, b.receipt_amount, b.commission_amount, "
             + "ROW_NUMBER() OVER (PARTITION BY b.grp, b.company ORDER BY b.salePri, b.catName, b.id) as rn, "
             + "DATE_FORMAT(FIRST_VALUE(b.sale_date) OVER (PARTITION BY b.grp, b.company ORDER BY b.salePri, b.catName, b.id), '%Y-%m') as saleMonth "
             + "FROM ("
-            + "SELECT id, category, company, sale_price, sale_date, commission_amount, "
+            + "SELECT id, category, company, receipt_amount, sale_date, commission_amount, "
             + "COALESCE(receipt_no, CONCAT('__NULL__', id)) as grp, "
             + "CASE WHEN category = '6' THEN 0 ELSE 1 END as salePri, "
             + "CASE category WHEN '10' THEN '保险' WHEN '4' THEN '壁挂炉' WHEN '5' THEN '壁挂炉以旧换新销售' WHEN '2' THEN '抽油烟机' WHEN '7' THEN '定尺波纹管' WHEN '8' THEN '户内美装工程' WHEN '6' THEN '户内美装销售' WHEN '9' THEN '户内美装运维' WHEN '12' THEN '美装安全评估' WHEN '11' THEN '美装管道整改' WHEN 'qimi' THEN '气密性检测' WHEN '1' THEN '燃气灶' WHEN '3' THEN '热水器' ELSE category END as catName "

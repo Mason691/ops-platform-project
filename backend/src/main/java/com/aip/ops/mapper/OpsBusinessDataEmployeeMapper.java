@@ -28,7 +28,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
 
     /** Group by category within a month — sum sale, commission, count orders. */
     @Select("<script>"
-            + "SELECT category, COALESCE(SUM(sale_price),0) as totalSale, "
+            + "SELECT category, COALESCE(SUM(receipt_amount),0) as totalSale, "
             + "COALESCE(SUM(commission_amount),0) as totalCommission, COUNT(*) as orderCount "
             + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
@@ -54,7 +54,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
                                                    @Param("category") String category);
 
     /** Aggregate totals for a single month (no category breakdown). */
-    @Select("SELECT COALESCE(SUM(sale_price),0) as totalSale, "
+    @Select("SELECT COALESCE(SUM(receipt_amount),0) as totalSale, "
             + "COALESCE(SUM(commission_amount),0) as totalCommission, COUNT(*) as orderCount "
             + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
@@ -73,7 +73,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
     List<Map<String, Object>> selectAllRecords(@Param("agentPhone") String agentPhone);
 
     /** All-time totals across all months. */
-    @Select("SELECT COALESCE(SUM(sale_price),0) as totalSale, "
+    @Select("SELECT COALESCE(SUM(receipt_amount),0) as totalSale, "
             + "COALESCE(SUM(commission_amount),0) as totalCommission, COUNT(*) as orderCount "
             + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0")
