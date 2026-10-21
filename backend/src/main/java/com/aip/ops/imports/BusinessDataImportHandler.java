@@ -821,7 +821,8 @@ public class BusinessDataImportHandler implements ImportHandler {
 
     // header index slots（headerIndices 返回数组的下标）
     private static final int I_CUSTOMER = 0;
-    private static final int I_CUSTOMER_PHONE = 17;
+    // 独立槽位 18——d8d5579 曾误用 17 与 I_QUANTITY 冲突，导致客户手机读到销售数量列全行拒收
+    private static final int I_CUSTOMER_PHONE = 18;
     private static final int I_CATEGORY = 1;
     private static final int I_BRAND = 2;
     private static final int I_MODEL = 3;
