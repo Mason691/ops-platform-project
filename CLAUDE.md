@@ -151,7 +151,7 @@ ops-platform-project/
 │   ├── index.html           # 入口 HTML（含内联微信 JSSDK 初始化脚本）
 │   ├── vite.config.js       # base 由 VITE_BASE 控制 (prod: /ops/), proxy /api → 8084
 │   └── package.json
-├── sql/                     # init.sql + 迁移脚本
+├── sql/                     # init.sql + 迁移脚本 + 宽松历史导入三件套（gen_*.py 生成器 / ops_business_data_import_*.sql / *_import_report.md）
 ├── Specs/                   # 功能规格文档（中文）
 ├── specs/                   # 功能规格文档（英文，如 annual-plan-spec.md）
 ├── docs/                    # 附加文档（testing.md 手动测试指南）
@@ -212,6 +212,7 @@ ops-platform-project/
 - **模板**：`GET /template` 优先读 `app.import.template-path`（默认 `/home/jason/1.xlsx`；生产 volume 挂载 `/app/templates/1.xlsx` + `APP_IMPORT_TEMPLATE_PATH` 环境变量），缺失回退 classpath `templates/business_data_template.xlsx`；文件名固定 **增值业务数据模板.xlsx**。源文件 `/home/jason/1.xlsx`（12 sheet，19 列表头：收据号 客户 客户手机 品类 品牌 型号 销售单价 销售数量 公司 部门 经办人 经办人手机号 是否特批 提成比例 销售日期 市场收款日期 财务收款日期 资金动态表横排数 备注）。**修改必须手术式 XML 补丁**——openpyxl 重存会丢其它 sheet 图片（27 个 media/drawing 条目）。本地与生产 `/app/templates/1.xlsx` 已同步（md5 db2c9844b363…，销售数量列预填 1），host 备份 `1.xlsx.bak-20261021b`。
 - **部门/备注字段**：`department VARCHAR(100)`（迁移 `sql/migrate_business_data_department.sql` 已执行，存量 remark「部门: X」前缀回填并清空）。Excel 部门列→department、备注列→remark 直接映射（旧前缀 hack 已删除）；无备注列旧文件兼容（列索引 -1 守卫）。
 - **导出**：异步/同步两路径表头统一 23 列：公司 批次号 客户 **部门** 经办人 品牌 品类 型号 **销售单价 销售数量 收款金额** 零售底价 集团最低价 销售日期 收据号 市场收款日期 财务收款日期 资金动态表横排数 返利比例 返利金额 状态 **备注 是否特批**。筛选含 品牌/型号/市场收款日期起止（请求体 brand/model/receiptDateStart/receiptDateEnd → filters JSON → ExportHandler qw.eq/ge/le；列表 countFiltered/aggregateStats/categoryStats 三个注解 SQL 同步 `<if>` 条件，`receipt_date` 全量 ISO 可直接字符串区间比较）。**Kafka 降级已修复**：`syncExportFallback` 调 `service.exportExcel(...)`（写文件版，支持全部 8 筛选）落盘 `{upload.base-dir}/exports/` 后 `markDone(真实路径, Files.size)`。行序按**收据号分组相邻**（`sortByReceiptNo`：空沉底、组内 id 升序）。收款金额默认=销售价；同订单拆分多行（收据号+客户相同、多经办人）仅首行显示（`computeSplitOrderNonFirstIds`）。底价存量空值行导出时**关键字兜底匹配**（品牌+品类相同+归一化型号包含关键字、唯一命中才填充、歧义留空、仅内存不写库，`fillExportPrices/matchProductExactOrKeyword`）。品类 `qimi`=气密性检测（静态兜底字典）。
+- **宽松历史导入（SQL 三件套，绕开 Excel 上传链路）**：2023~2025 各公司历史台账 15 批次共 5,324 条（另德保2025 33 条仅 SQL 无报告）经 `sql/gen_{company}{year}_import.py` 生成器入库：xlrd 读 .xls → 按公司定制解析（29~48 列、双/三/四收款组、月度台账、品牌跨行合并、中文量词拆分、占位空行剔除）→ `docker exec mysql` 直查生产 `ops_gas_user` **燃气用户查号**（无电话行按姓名匹配补回手机）+ 会员匹配/创建（phone→uk_phone 复用→建 `ai_platform.sys_member`）→ 产出 `sql/ops_business_data_import_{company}{year}.sql`（会员 INSERT + 业务数据 INSERT 含 platform_member_id，batch_no=`{公司}{年}-001`）与 `sql/{company}{year}_import_report.md`（源数据行/生成记录数/新建会员清单/提示警告/口径说明）。三件套入库存档供复盘，每批「0 未关联会员、0 空数量」为验收基线。member 表 INSERT 与业务行 INSERT 同文件但**跨库**（sys_member 在 ai_platform、业务表在 mall_db，SQL 首行 USE mall_db 后全限定名写会员表）。
 - 列表 API 直接返回实体，新增字段自动序列化给前端展示。
 
 ---
@@ -713,7 +714,7 @@ cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/op
 
 ---
 
-最后更新：2026-10-19 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
+最后更新：2026-10-21 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
 
 ### 自定义 Claude 命令
 
