@@ -1109,7 +1109,7 @@ public class BusinessDataImportHandler implements ImportHandler {
                 "import openpyxl\n"
                 + "wb = openpyxl.load_workbook('"
                 + file.toAbsolutePath() + "')\n"
-                + "required = ['客户','品类','品牌','型号','销售价','收据号']\n"
+                + "required = ['客户','品类','品牌','型号','销售单价','销售价','收据号']\n"
                 + "# 多 sheet 模板（1.xlsx）：选前 10 行含必填列名最多的 sheet\n"
                 + "best_ws = None; best_score = -1\n"
                 + "for ws in wb.worksheets:\n"
