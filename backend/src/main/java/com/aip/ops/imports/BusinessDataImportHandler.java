@@ -972,13 +972,13 @@ public class BusinessDataImportHandler implements ImportHandler {
         // 资金动态表横排数可选、允许文字（模板该列为文字格式）——数字解析失败不报错，落库空
     }
 
-    /** 提成比例：特批=是 → 必填且大于 0；特批=否/空 → 可空（按默认"否"处理） */
+    /** 提成比例：特批=是 → 必填且可为 0（0 表示特批无提成）；负数拒绝；特批=否/空 → 可空（按默认"否"处理） */
     private void validateSpecialRatio(ParsedRow pr, int rowNum, List<String> errors) {
         if (!pr.special) return;
         if (pr.commissionRate == null) {
             errors.add("第" + rowNum + "行：特批数据提成比例不能为空");
-        } else if (pr.commissionRate.compareTo(BigDecimal.ZERO) <= 0) {
-            errors.add("第" + rowNum + "行：特批数据提成比例必须大于0");
+        } else if (pr.commissionRate.compareTo(BigDecimal.ZERO) < 0) {
+            errors.add("第" + rowNum + "行：特批数据提成比例不能为负数");
         }
     }
 
