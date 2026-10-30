@@ -1107,7 +1107,11 @@ public class BusinessDataImportHandler implements ImportHandler {
 
     private String parseExcelWithPython(Path file) throws Exception {
         ProcessBuilder pb = new ProcessBuilder("python3", "-c",
-                "import openpyxl\n"
+                // warnings 会写 stderr；redirectErrorStream 合并后置顶污染表头行解析
+                // （openpyxl 对超界日期序列号告警曾致「缺少列×12」，2026-10-30 临洮7-9.xlsx 事故）
+                "import warnings\n"
+                + "warnings.filterwarnings('ignore')\n"
+                + "import openpyxl\n"
                 + "wb = openpyxl.load_workbook('"
                 + file.toAbsolutePath() + "')\n"
                 + "required = ['客户','品类','品牌','型号','销售单价','销售价','收据号']\n"
@@ -1143,7 +1147,14 @@ public class BusinessDataImportHandler implements ImportHandler {
         pb.redirectErrorStream(true);
         Process p = pb.start();
         String out = new String(p.getInputStream().readAllBytes(), "UTF-8");
-        p.waitFor();
+        int exit = p.waitFor();
+        // 非零退出（如 openpyxl 抛异常/缺失）会把 traceback 当数据行解析成「缺少列×12」，
+        // 抛出明确错误让用户看到真实原因
+        if (exit != 0) {
+            String first = out == null || out.isBlank() ? "(无输出)"
+                    : out.lines().findFirst().orElse("(无输出)");
+            throw new IllegalStateException("python3 退出码 " + exit + "：" + first);
+        }
         return out;
     }
 
