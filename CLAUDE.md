@@ -127,7 +127,7 @@ ops-platform-project/
 │   │   ├── controller/      # 29 controllers（见下方）
 │   │   ├── entity/          # 36 entities（31 个继承 SDK BaseEntity；5 个例外见「已知陷阱」；含 MerchantMiniappConfig, OperatorMerchant, OpsBusinessModelAlias）
 │   │   ├── mapper/          # 37 MyBatis-Plus mappers（含 OpsBusinessDataEmployeeMapper 员工业务数据专用）
-│   │   ├── service/         # 18 service interfaces + 9 standalone services + 18 impls
+│   │   ├── service/         # 18 service interfaces + 10 standalone services + 18 impls
 │   │   ├── aspect/          # AOP 切面（OperationLogAspect）
 │   │   ├── client/          # 子系统间 HTTP 客户端（MemberSyncClient, ProductBatchClient）
 │   │   ├── agent/           # AI DomainAgent（OpsAgent.java）
@@ -207,6 +207,7 @@ ops-platform-project/
 `ops_business_data` 表 2026-09-03 起字段结构：`receipt_date` 展示名改为**市场收款日期**（字段名保留 varchar(50)），其后新增 `finance_receipt_date`（DATE 财务收款日期，可空）与 `fund_dynamic_rows`（INT 资金动态表横排数，可空）。迁移脚本 `sql/migrate_business_data_finance_fields.sql`（已执行）。2026-10-16 再增 `customer_phone`（存量行 NULL）+ `platform_member_id`（= `ai_platform.sys_member.id`），迁移 `sql/migrate_business_data_platform_member.sql`（**必须先于新 JAR 执行**）。2026-10-20 再增 `sale_quantity` INT（销售数量）+ 2026-10-21 增 `receipt_amount`（收款金额=销售单价×数量，导入时系统计算写入）；存量已回填 `receipt_amount=sale_price`。同日全平台废除 sys_member.member_id（M号 DROP），统一标识=memberDbId（sys_member.id），MemberConvertHandler 改 GeneratedKeyHolder。
 
 - **导入（两段式全异步，2026-09-20 起）**：`POST /import/check`（multipart 上传→落盘 `{app.import.upload-dir}` UUID 文件→建 `sys_import_task`（`business_data_check`）→提交 `AsyncImportSupport.importExecutor`（2~4 线程+队列100+AbortPolicy）→立即返回 taskId；工作线程重建 SecurityContext 后解析+校验+匹配，结果 JSON 写 progress_msg）→ 前端 2s 轮询 `GET /import/{taskId}/status`（DONE 时 `result`=业务结果 JSON）→ `POST /import/confirm`（`checkTaskId`+`confirmations`，**复用落盘文件不二次上传**——合伙人慢上行链路只传一次；校验任务类型/状态/归属/文件在盘→并发互斥（PENDING/PROCESSING 计数+confirmLock）→建 `business_data_confirm` 任务→立即返回 taskId→轮询）。**启动清扫** `sweepInterruptedTasks`：遗留 PENDING/PROCESSING 标 FAILED。**租户上下文**：`withSecurityContext` 用任务记录重建 LoginUser（否则 TenantLineHandler 跳过滤→跨租户泄漏）。**事务边界**：`BusinessDataImportHandler.confirm()` `@Transactional` 保证全量或全不（异步线程无外层事务）；worker markDone/markFailed 独立提交；完成后删暂存文件（重试=重新上传）。confirm 缺 `checkTaskId`/`confirmations` 手动校验返回「请刷新页面后重新导入」。`progress_msg` 已扩 MEDIUMTEXT。旧 `/import`、`/import/submit` 已删除，Kafka 兜底 `execute()`=零决策 confirm（不用本线程池）。
+- **⚠️ 改导入代码必查（三起生产事故教训）**：①索引槽位常量必须逐一唯一——`I_QUANTITY=17` 与 `I_CUSTOMER_PHONE=17` 同槽位曾致客户手机误读销售数量列、全行拒收，且解析层核查未走端到端 check 结论失真；②INSERT 列清单与 VALUES `?` 占位符数量必须同步核对——27 列仅 26 个 `?` 曾致 check 全绿、confirm 参数越界；③`parseExcelWithPython` 输出经 `redirectErrorStream(true)` 合并管道——stderr 无缓冲（openpyxl 对日期格式超界序列号告警在加载期立刻写入管道）先于块缓冲的 stdout 数据行，**警告行置顶被当表头 → 假「缺少列×12」**（2026-10-30 临洮7-9.xlsx 事故，文件 541~543 行收据号以日期格式存 6993741）。脚本头部已 `warnings.filterwarnings('ignore')` + 非零退出抛「python3 退出码」明确错误。改 `BusinessDataImportHandler` 后验收必须走到 confirm/INSERT 落库，不能止于 check。
 - **品牌型号校验顺序**：是否特批="是"或非核心四品类（燃气灶/抽油烟机/热水器/壁挂炉以外）跳过匹配（仍精确匹配提取底价）→ 精确匹配 → 已确认别名 → 模糊候选（同品牌+同品类 key+归一化型号包含关键词、按 id 排序）→ 失败「未找到匹配的品牌型号」。模糊项集中返回 `pendingItems`（品牌/品类/Excel 型号/行号/候选产品含三价格），主站弹窗逐项确认（唯一匹配标注"最接近的完整型号"）；确认关系落库 `ops_business_model_alias`（唯一键 `(corp_id, brand, category, model_keyword, delete_flag)`，迁移 `sql/migrate_business_model_alias.sql`——**新库部署必须先执行**），同型号免重复确认；确认后同 品牌+品类+关键词 行批量套用（零售底价/集团最低价落库，销售价保留 Excel 值）。
 - **必填列（12 个，缺列拒；"销售价"旧名兼容）**：客户/客户手机/品类/品牌/型号/销售单价/公司/经办人/经办人手机号/市场收款日期/财务收款日期/资金动态表横排数。**销售数量**可选列（数据区预填 1；空默认 1；非正整数拒行）；`receipt_amount`=单价×数量系统计算（模板无此列）。**客户手机**必填 + 11 位大陆手机号（格式错拒行）；**客户**行值必填（建会员需姓名）。**会员归属（2026-10-19 起，`GasMemberMatcher`）**：corp→`sys_corp.gas_company_id` 限燃气公司范围，在 `ops_gas_user`（sb_gas_user 镜像）按 客户手机→客户名称 匹配取 platform_member_id（手机优先；同号取有会员者+最小 id；无 gas_company_id 回退全域）；均未命中→全局 uk_phone 复用→**自动建 sys_member**（phone/nickname/real_name/status=1/remark=业务数据导入自动创建/corp_id=导入组织；confirm 事务内同文件同手机只建一次，已删会员占号回滚）。**按批次重匹配** `POST /rematch-by-batch`：批次内 NULL 行按 全局手机→公司(corp)+姓名→创建 三级回填（已上报行跳过，幂等）。市场收款日期**必填**；财务收款日期可空但格式错拒行（连带整文件）；横排数可空允许文字（纯整数/`12.0`/文字中首个整数，全角数字 NFKC 归一化，无数字落库空）。日期解析 `normalizeDate`（销售/市场/财务共用）：点分 `2026.1.2`、斜杠、**区间取首日**（分隔符 `-`/`~`/`—`/`至`）、全角。多 sheet 按「前 10 行含必填列名最多」自动选 sheet + 定位表头行。
 - **模板**：`GET /template` 优先读 `app.import.template-path`（默认 `/home/jason/1.xlsx`；生产 volume 挂载 `/app/templates/1.xlsx` + `APP_IMPORT_TEMPLATE_PATH` 环境变量），缺失回退 classpath `templates/business_data_template.xlsx`；文件名固定 **增值业务数据模板.xlsx**。源文件 `/home/jason/1.xlsx`（12 sheet，19 列表头：收据号 客户 客户手机 品类 品牌 型号 销售单价 销售数量 公司 部门 经办人 经办人手机号 是否特批 提成比例 销售日期 市场收款日期 财务收款日期 资金动态表横排数 备注）。**修改必须手术式 XML 补丁**——openpyxl 重存会丢其它 sheet 图片（27 个 media/drawing 条目）。本地与生产 `/app/templates/1.xlsx` 已同步（md5 db2c9844b363…，销售数量列预填 1），host 备份 `1.xlsx.bak-20261021b`。
@@ -527,7 +528,7 @@ Controller → Service.createTask() → DB 记录
 - **无 Vue Router**：uni-app 文件路由（`pages.json`），`uni.navigateTo()` + URL 参数
 - **iframe SSO**：`auth-bridge.js` 监听 `postMessage`（`AIP_AUTH` / `AIP_NAVIGATE`），信任同源和 `boss.jdzn99.com`
 - **公众号深链**：`App.vue` 支持 `?route=pages/employee/login` 与 `?from=employee` 查询参数跳转（公众号菜单不支持 hash）
-- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（约 150 个方法），统一使用 `request` 实例
+- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（约 166 个方法），统一使用 `request` 实例
 - **H5 hash 路由**：base 由构建时 `VITE_BASE` 环境变量控制
 
 ### 前端页面路由（pages.json）
@@ -714,7 +715,7 @@ cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/op
 
 ---
 
-最后更新：2026-10-21 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
+最后更新：2026-10-30 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
 
 ### 自定义 Claude 命令
 
