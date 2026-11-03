@@ -87,6 +87,14 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("receipt_no")
     private String receiptNo;
 
+    /** 是否收款（是/否）——员工手工录入时采集 */
+    @TableField("is_received")
+    private String isReceived;
+
+    /** 收款凭证 URL（最多 3 张，英文逗号分隔）——员工手工录入时上传 */
+    @TableField("voucher_url")
+    private String voucherUrl;
+
     /** 部门 */
     @TableField("department")
     private String department;

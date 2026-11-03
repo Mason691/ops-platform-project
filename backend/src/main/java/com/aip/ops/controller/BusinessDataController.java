@@ -452,10 +452,13 @@ public class BusinessDataController {
         service.exportCommissionSummary(company, batchNo, agent, receiptNo, category, response);
     }
 
-    /** 经办人核对：将指定批次已计算数据标记为已核对 */
+    /** 经办人核对（管理后台）：仅运营商管理员/超管可操作 */
     @OperationLog(module = "增值业务", action = "核对", targetTable = "ops_business_data")
     @PutMapping("/batch/check")
     public R<?> batchCheck(@RequestBody Map<String, String> params) {
+        if (!orgRoleService.isOperatorOrSuperAdmin()) {
+            return R.fail("仅运营商管理员可执行核对操作");
+        }
         String batchNo = params.get("batchNo");
         if (batchNo == null || batchNo.isBlank()) return R.fail("批次号不能为空");
         int count = service.batchCheck(batchNo);

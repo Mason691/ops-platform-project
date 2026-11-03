@@ -19,8 +19,11 @@ public interface EmployeeService {
     /** List distinct months (YYYY-MM) that have business data for this employee. */
     List<String> getAvailableMonths();
 
-    /** 获取当前经办人已计算的批次号列表（去重） */
+    /** 获取当前经办人的批次号列表（去重，含未计算——手工新增后立即可筛选） */
     List<String> getBatchNos();
+
+    /** 当前经办人手机号（agent_phone 口径，与列表查询一致）。 */
+    String getCurrentAgentPhone();
 
     /** Category-level summary for a given month: totals by category. */
     List<Map<String, Object>> getCategorySummary(String month);

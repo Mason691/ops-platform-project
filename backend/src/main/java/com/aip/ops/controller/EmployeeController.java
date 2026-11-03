@@ -1,8 +1,10 @@
 package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
+import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.EmployeeAuthService;
+import com.aip.ops.service.EmployeeBusinessEntryService;
 import com.aip.ops.service.EmployeeService;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.result.R;
@@ -43,6 +45,7 @@ public class EmployeeController {
     private final EmployeeService employeeService;
     private final EmployeeAuthService employeeAuthService;
     private final BusinessDataService businessDataService;
+    private final EmployeeBusinessEntryService employeeBusinessEntryService;
     private final PlatformInternalClient platformInternalClient;
 
     @Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
@@ -189,13 +192,35 @@ public class EmployeeController {
         return R.ok(employeeService.getBatchNos());
     }
 
-    /** 经办人核对：将指定批次已计算数据标记为已核对 */
+    // ═══ 员工手工新增业务数据 ═══
+
+    /** 表单选项：员工/公司信息、当前组织未上报批次、SCM 品牌/品类/型号。 */
+    @GetMapping("/business-data/manual/options")
+    public R<?> manualOptions() {
+        return R.ok(employeeBusinessEntryService.getManualEntryOptions());
+    }
+
+    /** 按客户手机号查询平台会员姓名（仅返回是否找到 + 姓名）。 */
+    @GetMapping("/business-data/manual/member")
+    public R<?> manualMember(@RequestParam String phone) {
+        return R.ok(employeeBusinessEntryService.lookupMember(phone));
+    }
+
+    /** 保存手工录入业务数据：组织/经办人由服务端从 JWT 派生。 */
+    @OperationLog(module = "运营管理", action = "员工手工新增业务数据", targetTable = "ops_business_data")
+    @PostMapping("/business-data/manual")
+    public R<?> createManual(@RequestBody EmployeeBusinessEntryRequest request) {
+        return R.ok(employeeBusinessEntryService.createManualEntry(request));
+    }
+
+    /** 经办人核对：仅将本组织 + 本人批次下已计算数据标记为已核对 */
     @OperationLog(module = "运营管理", action = "核对", targetTable = "ops_business_data")
     @PostMapping("/business-data/batch/check")
     public R<?> batchCheck(@RequestBody Map<String, String> params) {
         String batchNo = params.get("batchNo");
         if (batchNo == null || batchNo.isBlank()) return R.fail("批次号不能为空");
-        int count = businessDataService.batchCheck(batchNo);
+        int count = businessDataService.batchCheckOwned(batchNo,
+                SecurityUtils.getCurrentCorpId(), employeeService.getCurrentAgentPhone());
         return R.ok(Map.of("checkedCount", count, "message", "已核对 " + count + " 条数据"));
     }
 }

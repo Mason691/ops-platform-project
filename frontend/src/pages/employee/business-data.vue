@@ -15,13 +15,17 @@
     <view class="empty" v-else-if="!loading && months.length === 0">
       <text class="empty-icon">📋</text>
       <text class="empty-text">暂无业务数据</text>
+      <view class="add-btn empty-add" @click="goAddBusiness"><text>＋ 新增业务</text></view>
     </view>
 
     <!-- Data -->
     <template v-else>
       <!-- All-time Totals -->
       <view class="alltime-section">
-        <text class="section-title">📊 总计</text>
+        <view class="section-head">
+          <text class="section-title">📊 总计</text>
+          <view class="add-btn" @click="goAddBusiness"><text>＋ 新增业务</text></view>
+        </view>
         <!-- Batch selector -->
         <view class="batch-row">
           <picker mode="selector" :range="batchList" range-key="label" @change="onBatchChange">
@@ -51,43 +55,7 @@
       </view>
 
       <!-- Monthly Breakdown -->
-      <view class="monthly-section">
-        <text class="section-title">📅 月度明细</text>
-
-        <view class="month-card" v-for="m in months" :key="m.month">
-          <view class="month-header" @click="toggleMonth(m.month)">
-            <view class="month-info">
-              <text class="month-label">{{ m.monthLabel || m.month }}</text>
-              <text class="month-summary">
-                {{ formatMoney(m.totalSale) }} / {{ formatMoney(m.totalCommission) }} / {{ m.orderCount }}单
-              </text>
-            </view>
-            <text class="month-expand">{{ expanded[m.month] ? '▲' : '▼' }}</text>
-          </view>
-
-          <!-- Detail Records -->
-          <view class="month-detail" v-if="expanded[m.month]">
-            <view class="detail-row" v-for="(d, di) in (m.details || [])" :key="di">
-              <view class="detail-info">
-                <text class="detail-product">{{ d.brand || '-' }} {{ d.model || '' }}</text>
-                <text class="detail-meta">
-                  <text class="detail-cat">{{ d.categoryName || d.category || '-' }}</text>
-                  <text v-if="d.customer" class="detail-customer"> · 客户: {{ d.customer }}</text>
-                </text>
-                <text class="detail-date">{{ d.saleDate || '-' }}</text>
-              </view>
-              <view class="detail-money">
-                <text class="detail-sale">{{ formatMoney(d.salePrice) }}</text>
-                <text class="detail-commission">提成 {{ formatMoney(d.commissionAmount) }}</text>
-                <text v-if="d.commissionRate != null && d.commissionRate !== ''" class="detail-rate">比例 {{ formatRate(d.commissionRate) }}</text>
-                <text class="detail-status" :class="statusClass(d.calcStatus)">
-                  {{ d.calcStatus || '未计算' }}
-                </text>
-              </view>
-            </view>
-          </view>
-        </view>
-      </view>
+      <BusinessMonthList :months="months" />
     </template>
 
     <!-- Bottom Bar -->
@@ -110,13 +78,15 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
+import BusinessMonthList from '@/components/BusinessMonthList.vue'
 
 const loading = ref(true)
+const ready = ref(false)
 const errorMsg = ref('')
 const allTime = reactive({ totalSale: 0, totalCommission: 0, orderCount: 0 })
 const months = ref([])
-const expanded = reactive({})
 const batchList = reactive([{ label: '全部批次', value: '' }])
 const selectedBatch = ref('')
 const selectedBatchLabel = ref('全部批次')
@@ -146,7 +116,7 @@ async function doBatchCheck() {
   const r = await new Promise((resolve) => {
     uni.showModal({
       title: '确认核对',
-      content: '将批次 ' + selectedBatch.value + ' 下所有已计算数据标记为已核对，确认？',
+      content: '将批次 ' + selectedBatch.value + ' 下本人的已计算数据标记为已核对，确认？',
       success: (res) => resolve(res.confirm)
     })
   })
@@ -167,6 +137,14 @@ onMounted(() => { loadBatches();
     uni.redirectTo({ url: '/pages/employee/login' })
     return
   }
+  ready.value = true
+  loadData()
+})
+
+// 从「新增业务」返回时刷新批次与明细
+onShow(() => {
+  if (!ready.value) return
+  loadBatches()
   loadData()
 })
 
@@ -182,33 +160,14 @@ async function loadData() {
   } finally { loading.value = false }
 }
 
-function toggleMonth(key) {
-  if (expanded[key]) {
-    delete expanded[key]
-  } else {
-    expanded[key] = true
-  }
-}
-
 function formatMoney(val) {
   const n = Number(val) || 0
   return '¥' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
-function statusClass(s) {
-  if (s === '经办人已核对') return 'status-checked'
-  if (s === '已计算') return 'status-calc'
-  return 'status-raw'
-}
-function formatRate(val) {
-  const n = Number(val)
-  if (isNaN(n)) return '-'
-  // Strip trailing zeros: 12.50% → 12.5%, 12.00% → 12%
-  return (n % 1 === 0 ? n.toFixed(0) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')) + '%'
-}
-
 function goAiChat() { uni.navigateTo({ url: '/pages/employee/ai-chat' }) }
 function goProfile() { uni.navigateTo({ url: '/pages/employee/profile' }) }
+function goAddBusiness() { uni.navigateTo({ url: '/pages/employee/business-data-new' }) }
 </script>
 
 <style scoped>
@@ -221,11 +180,19 @@ function goProfile() { uni.navigateTo({ url: '/pages/employee/profile' }) }
 .retry-btn { display: inline-block; padding: 16rpx 48rpx; background: #FF6B35; color: #fff; border-radius: 32rpx; font-size: 28rpx; }
 .empty-icon { font-size: 80rpx; display: block; margin-bottom: 16rpx; }
 .empty-text { font-size: 28rpx; color: #999; }
+.empty-add { display: inline-block; margin-top: 24rpx; }
 
 /* Section title */
+.section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 24rpx 24rpx 16rpx;
+}
 .section-title {
   font-size: 28rpx; color: #999; font-weight: 600;
-  padding: 24rpx 24rpx 16rpx; display: block;
+}
+.add-btn {
+  padding: 10rpx 24rpx; background: #FF6B35; color: #fff;
+  border-radius: 28rpx; font-size: 24rpx; font-weight: 600;
 }
 
 /* All-time Totals */
@@ -242,38 +209,6 @@ function goProfile() { uni.navigateTo({ url: '/pages/employee/profile' }) }
 .at-val.commission { color: #4caf50; }
 .at-val.count { color: #333; }
 
-/* Monthly Section */
-.monthly-section { padding: 0 24rpx; }
-.month-card {
-  background: #fff; border-radius: 16rpx; margin-bottom: 16rpx;
-  overflow: hidden; box-shadow: 0 2rpx 12rpx rgba(0,0,0,.04);
-}
-.month-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 24rpx;
-}
-.month-info { flex: 1; display: flex; flex-direction: column; gap: 6rpx; }
-.month-label { font-size: 30rpx; font-weight: 600; color: #333; }
-.month-summary { font-size: 24rpx; color: #999; }
-.month-expand { font-size: 24rpx; color: #ccc; padding: 8rpx; }
-
-.month-detail { border-top: 1rpx solid #f0f0f0; }
-.detail-row {
-  display: flex; justify-content: space-between; align-items: flex-start;
-  padding: 20rpx 24rpx; border-bottom: 1rpx solid #f8f8f8;
-}
-.detail-row:last-child { border-bottom: none; }
-.detail-info { display: flex; flex-direction: column; gap: 4rpx; flex: 1; }
-.detail-product { font-size: 28rpx; color: #333; font-weight: 500; }
-.detail-meta { font-size: 22rpx; color: #999; }
-.detail-cat { color: #FF6B35; }
-.detail-customer { color: #999; }
-.detail-date { font-size: 22rpx; color: #bbb; }
-.detail-money { display: flex; flex-direction: column; align-items: flex-end; gap: 4rpx; }
-.detail-sale { font-size: 28rpx; color: #FF6B35; font-weight: 600; }
-.detail-commission { font-size: 22rpx; color: #4caf50; }
-.detail-rate { font-size: 20rpx; color: #2196F3; }
-
 /* Bottom Bar */
 .bottom-bar {
   position: fixed; bottom: 0; left: 0; right: 0; height: 110rpx;
@@ -288,8 +223,4 @@ function goProfile() { uni.navigateTo({ url: '/pages/employee/profile' }) }
 .batch-picker { display:flex; align-items:center; padding:12rpx 20rpx; background:#f5f5f5; border-radius:8rpx; font-size:26rpx; color:#333; flex:1; }
 .batch-arrow { font-size:20rpx; color:#999; margin-left:8rpx; }
 .check-btn { padding:12rpx 20rpx; background:#07C160; color:#fff; border-radius:8rpx; font-size:26rpx; white-space:nowrap; }
-.detail-status { font-size:22rpx; padding:2rpx 10rpx; border-radius:6rpx; margin-left:8rpx; }
-.status-calc { background:#E6F0FF; color:#409EFF; }
-.status-checked { background:#E8F8E8; color:#07C160; }
-.status-raw { background:#F5F5F5; color:#999; }
 </style>

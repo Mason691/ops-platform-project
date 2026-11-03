@@ -79,6 +79,11 @@ platform:
 mall-service:
   base-url: http://localhost:8083
 
+# 供应链基础资料服务（员工手工录入的品牌/品类/型号下拉 + 保存校验）
+# 生产与 scm-backend 同 host 网络，默认 8084；本地联调可覆盖 SCM_SERVICE_BASE_URL
+scm-service:
+  base-url: http://localhost:8084
+
 # 活动预约提醒配置
 ops:
   remind:

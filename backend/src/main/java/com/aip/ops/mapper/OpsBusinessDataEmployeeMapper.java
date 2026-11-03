@@ -23,7 +23,10 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
             + "ORDER BY month DESC")
     List<String> selectAvailableMonths(@Param("agentPhone") String agentPhone);
 
-    @Select("SELECT DISTINCT batch_no FROM ops_business_data WHERE agent_phone = #{agentPhone} AND calc_status IN ('已计算','经办人已核对') AND delete_flag = 0 ORDER BY batch_no DESC")
+    /** 经办人全部批次（含未计算）——手工新增后立即可在批次筛选器中查到 */
+    @Select("SELECT DISTINCT batch_no FROM ops_business_data "
+            + "WHERE agent_phone = #{agentPhone} AND delete_flag = 0 "
+            + "ORDER BY batch_no DESC")
     List<String> selectBatchNos(@Param("agentPhone") String agentPhone);
 
     /** Group by category within a month — sum sale, commission, count orders. */
@@ -42,7 +45,9 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
     @Select("<script>"
             + "SELECT brand, model, sale_price as salePrice, commission_amount as commissionAmount, "
             + "commission_rate as commissionRate, "
-            + "sale_date as saleDate, customer "
+            + "sale_date as saleDate, customer, receipt_amount as receiptAmount, "
+            + "sale_quantity as saleQuantity, "
+            + "is_received as isReceived, voucher_url as voucherUrl "
             + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
             + "<if test='month != null and month != \"\"'>AND SUBSTRING(sale_date, 1, 7) = #{month}</if> "
@@ -66,7 +71,9 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
     @Select("SELECT brand, model, sale_price as salePrice, commission_amount as commissionAmount, "
             + "commission_rate as commissionRate, "
             + "sale_date as saleDate, customer, category, "
-            + "calc_status as calcStatus, batch_no as batchNo "
+            + "receipt_amount as receiptAmount, sale_quantity as saleQuantity, "
+            + "calc_status as calcStatus, batch_no as batchNo, "
+            + "is_received as isReceived, voucher_url as voucherUrl "
             + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
             + "ORDER BY sale_date DESC")

@@ -1193,6 +1193,24 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         } catch (Exception e) { throw new RuntimeException("核对失败", e); }
     }
 
+    @Override
+    public int batchCheckOwned(String batchNo, Long corpId, String agentPhone) {
+        if (batchNo == null || batchNo.isBlank()) throw BusinessException.of("批次号不能为空");
+        if (corpId == null || corpId <= 0 || agentPhone == null || agentPhone.isBlank()) {
+            throw BusinessException.forbidden("无权核对该批次");
+        }
+        // 员工自助核对只允许写本人 + 本组织的数据，避免任意批次号跨租户改状态
+        String sql = "UPDATE ops_business_data SET calc_status = '经办人已核对' "
+                + "WHERE batch_no = ? AND corp_id = ? AND agent_phone = ? "
+                + "AND calc_status = '已计算'";
+        try (var conn = dataSource.getConnection(); var ps = conn.prepareStatement(sql)) {
+            ps.setString(1, batchNo);
+            ps.setLong(2, corpId);
+            ps.setString(3, agentPhone);
+            return ps.executeUpdate();
+        } catch (Exception e) { throw new RuntimeException("核对失败", e); }
+    }
+
     /**
      * Append corp_id scope filter to query wrapper.
      * null visibleIds (super admin) → no filter added.

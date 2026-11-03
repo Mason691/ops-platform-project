@@ -94,6 +94,11 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     @Override
+    public String getCurrentAgentPhone() {
+        return resolvePhone();
+    }
+
+    @Override
     public List<Map<String, Object>> getCategorySummary(String month) {
         String phone = resolvePhone();
         List<Map<String, Object>> rows = employeeMapper.selectCategorySummary(phone, month);
@@ -248,7 +253,10 @@ public class EmployeeServiceImpl implements EmployeeService {
         Map<String, MonthGroup> groups = new LinkedHashMap<>();
 
         for (Map<String, Object> row : all) {
-            BigDecimal sale = toBigDecimal(row.get("salePrice"));
+            BigDecimal salePrice = toBigDecimal(row.get("salePrice"));
+            // 汇总口径与提成计算/后台统计一致：收款金额（单价×数量）；存量行无该值时回退单价
+            BigDecimal sale = row.get("receiptAmount") != null
+                    ? toBigDecimal(row.get("receiptAmount")) : salePrice;
             BigDecimal commission = toBigDecimal(row.get("commissionAmount"));
             allTimeSale = allTimeSale.add(sale);
             allTimeCommission = allTimeCommission.add(commission);
@@ -270,7 +278,9 @@ public class EmployeeServiceImpl implements EmployeeService {
             Map<String, Object> detail = new LinkedHashMap<>();
             detail.put("brand", normalizeSentinel(row.get("brand")));
             detail.put("model", normalizeSentinel(row.get("model")));
-            detail.put("salePrice", sale);
+            detail.put("salePrice", salePrice);
+            detail.put("receiptAmount", sale);
+            if (row.get("saleQuantity") != null) detail.put("saleQuantity", row.get("saleQuantity"));
             detail.put("commissionAmount", commission);
             detail.put("commissionRate", toBigDecimal(row.get("commissionRate")));
             detail.put("saleDate", saleDate);
@@ -278,6 +288,8 @@ public class EmployeeServiceImpl implements EmployeeService {
             detail.put("category", row.get("category"));
             if (row.get("calcStatus") != null) detail.put("calcStatus", row.get("calcStatus"));
             if (row.get("batchNo") != null) detail.put("batchNo", row.get("batchNo"));
+            if (row.get("isReceived") != null) detail.put("isReceived", row.get("isReceived"));
+            if (row.get("voucherUrl") != null) detail.put("voucherUrl", row.get("voucherUrl"));
             String catKey = (String) row.get("category");
             detail.put("categoryName", BusinessDataServiceImpl.KEY_TO_CN.getOrDefault(catKey, catKey));
             g.details.add(detail);

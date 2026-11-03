@@ -16,8 +16,11 @@ public interface BusinessDataService {
     void runAsyncConfirm(SysImportTask task, List<ModelConfirmDecision> decisions);
     void batchDelete(List<Long> ids);
 
-    /** 经办人核对：将指定批次下已计算数据标记为已核对 */
+    /** 经办人核对：将指定批次下已计算数据标记为已核对（管理后台路径） */
     int batchCheck(String batchNo);
+
+    /** 员工自助核对：仅更新当前组织 + 当前经办人的已计算行（防跨组织/跨经办人写入） */
+    int batchCheckOwned(String batchNo, Long corpId, String agentPhone);
     /** 获取所有"未计算"批次列表，按时间倒序 */
     List<String> getUncalcBatches();
     /** 个人提成计算（按指定批次），batchNo 为 null 时计算所有未计算批次 */

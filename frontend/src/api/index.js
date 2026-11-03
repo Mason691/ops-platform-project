@@ -232,9 +232,13 @@ export const api = {
   employeeSummary: (month) => request({url:'/api/ops/employee/business-data/summary',data:{month}}),
   employeeDetail: (month, category) => request({url:'/api/ops/employee/business-data/detail',data:{month, category}}),
   employeeStats: (month) => request({url:'/api/ops/employee/business-data/stats',data:{month}}),
-  employeeOverview: (params) => request({url:'/api/ops/employee/business-data/overview',params}),
+  employeeOverview: (params) => request({url:'/api/ops/employee/business-data/overview',data:params}),
   employeeBatches: () => request({url:'/api/ops/employee/business-data/batches'}),
   employeeBatchCheck: (data) => request({url:'/api/ops/employee/business-data/batch/check',method:'POST',data}),
+  // 员工手工新增业务数据
+  employeeManualOptions: () => request({url:'/api/ops/employee/business-data/manual/options'}),
+  employeeLookupMember: (phone) => request({url:'/api/ops/employee/business-data/manual/member',data:{phone}}),
+  employeeCreateBusiness: (data) => request({url:'/api/ops/employee/business-data/manual',method:'POST',data}),
 
   // 员工登录（独立于会员登录）
   employeeCaptcha: () => request({url:'/api/ops/auth/employee/captcha'}),

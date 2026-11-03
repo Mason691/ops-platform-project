@@ -158,6 +158,33 @@ public class GasMemberMatcher {
     }
 
     /**
+     * 查单个手机号对应的会员信息（员工手工录入选客户时回填姓名）。
+     * 返回 null = 不存在；存在但已逻辑删除 → 抛异常（该手机号被占用，需人工处理）。
+     * 只返回 id 与姓名，不暴露会员画像字段。
+     */
+    public Map<String, Object> findMemberInfoByPhone(String phone) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, real_name, nickname, delete_flag FROM ai_platform.sys_member "
+                        + "WHERE phone = ? LIMIT 1", phone);
+        if (rows.isEmpty()) return null;
+        Map<String, Object> row = rows.get(0);
+        Object flag = row.get("delete_flag");
+        if (flag != null && ((Number) flag).intValue() != 0) {
+            throw new IllegalStateException("手机号 " + phone
+                    + " 已存在已删除的会员记录，请人工处理后重试");
+        }
+        Map<String, Object> info = new HashMap<>();
+        info.put("id", ((Number) row.get("id")).longValue());
+        Object realName = row.get("real_name");
+        Object nickname = row.get("nickname");
+        String name = realName != null && !realName.toString().isBlank()
+                ? realName.toString().trim()
+                : (nickname != null ? nickname.toString().trim() : "");
+        info.put("name", name);
+        return info;
+    }
+
+    /**
      * 全局查已有会员（创建前兜底复用；uk_phone 全局唯一）。
      * 返回 null = 不存在；存在但已逻辑删除 → 抛异常（该手机号被占用，需人工处理）。
      */
@@ -174,30 +201,40 @@ public class GasMemberMatcher {
     }
 
     /**
-     * 在底座平台创建新会员（燃气公司范围内无用户、全局无同手机号会员时的兜底）。
-     * 字段：phone/nickname/real_name 取导入行，status=1，remark 标注来源，
-     * 画像字段（gender/birthday/address/community_id）Excel 无对应列，留空待后续补充。
-     * corp_id 取导入组织。INSERT 模式镜像 MemberConvertHandler（GeneratedKeyHolder 取自增 id）。
+     * 在底座平台创建新会员（导入兜底）。
+     *
+     * @see #createMember(String, String, Long, String)
      */
     public Long createMember(String phone, String name, Long corpId) {
+        return createMember(phone, name, corpId, "业务数据导入自动创建");
+    }
+
+    /**
+     * 在底座平台创建新会员（燃气公司范围内无用户、全局无同手机号会员时的兜底）。
+     * 字段：phone/nickname/real_name 取来源行，status=1，remark 标注来源，
+     * 画像字段（gender/birthday/address/community_id）无对应列，留空待后续补充。
+     * corp_id 取来源组织。INSERT 模式镜像 MemberConvertHandler（GeneratedKeyHolder 取自增 id）。
+     */
+    public Long createMember(String phone, String name, Long corpId, String remark) {
         try {
             KeyHolder keyHolder = new GeneratedKeyHolder();
             jdbcTemplate.update(con -> {
                 PreparedStatement ps = con.prepareStatement(
                         "INSERT INTO ai_platform.sys_member " +
                         "(phone, nickname, real_name, status, remark, corp_id) " +
-                        "VALUES (?,?,?,1,'业务数据导入自动创建',?)",
+                        "VALUES (?,?,?,1,?,?)",
                         Statement.RETURN_GENERATED_KEYS);
                 ps.setString(1, phone);
                 ps.setString(2, name);
                 ps.setString(3, name);
-                ps.setLong(4, corpId != null ? corpId : 0L);
+                ps.setString(4, remark);
+                ps.setLong(5, corpId != null ? corpId : 0L);
                 return ps;
             }, keyHolder);
             return keyHolder.getKey().longValue();
         } catch (org.springframework.dao.DuplicateKeyException e) {
-            // uk_phone 冲突多为并发导入同手机号：整体回滚重试即可
-            throw new IllegalStateException("手机号 " + phone + " 会员创建冲突（并发导入？），请重试", e);
+            // uk_phone 冲突多为并发创建同手机号：整体回滚重试即可
+            throw new IllegalStateException("手机号 " + phone + " 会员创建冲突（并发操作？），请重试", e);
         }
     }
 }
