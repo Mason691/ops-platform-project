@@ -3,17 +3,6 @@
     <view class="card-title"><text class="bar"></text>产品信息</view>
 
     <view class="field">
-      <text class="label">品牌 <text class="req">*</text></text>
-      <picker mode="selector" :range="brands" :value="brandIndex" :disabled="!brands.length" @change="onBrandChange">
-        <view class="picker">
-          <text class="picker-text" :class="{ placeholder: !form.brand }">{{ form.brand || '请选择品牌' }}</text>
-          <text class="arrow">▼</text>
-        </view>
-      </picker>
-      <text v-if="errors.brand" class="ferr">{{ errors.brand }}</text>
-    </view>
-
-    <view class="field">
       <text class="label">品类 <text class="req">*</text></text>
       <picker mode="selector" :range="categoryNames" :value="categoryIndex" :disabled="!categoryNames.length"
               @change="onCategoryChange">
@@ -26,17 +15,32 @@
     </view>
 
     <view class="field">
+      <text class="label">品牌 <text class="req">*</text></text>
+      <picker mode="selector" :range="brandOptions" :value="brandIndex"
+              :disabled="!form.category || !brandOptions.length" @change="onBrandChange">
+        <view class="picker">
+          <text class="picker-text" :class="{ placeholder: !form.brand }">{{ form.brand || '请选择品牌' }}</text>
+          <text class="arrow">▼</text>
+        </view>
+      </picker>
+      <text v-if="errors.brand" class="ferr">{{ errors.brand }}</text>
+      <text v-else-if="!form.category" class="hint">请先选择品类</text>
+      <text v-else-if="!brandOptions.length" class="hint">该品类暂无可用品牌</text>
+    </view>
+
+    <view class="field">
       <text class="label">型号 <text class="req">*</text></text>
       <picker mode="selector" :range="modelOptions" :value="modelIndex"
-              :disabled="!modelOptions.length" @change="onModelChange">
+              :disabled="!form.category || !form.brand || !modelOptions.length"
+              @change="onModelChange">
         <view class="picker">
           <text class="picker-text" :class="{ placeholder: !form.model }">{{ modelLabel }}</text>
           <text class="arrow">▼</text>
         </view>
       </picker>
       <text v-if="errors.model" class="ferr">{{ errors.model }}</text>
-      <text v-else-if="form.brand && form.category && !modelOptions.length" class="hint">
-        该品牌与品类组合暂无可用型号
+      <text v-else-if="form.category && form.brand && !modelOptions.length" class="hint">
+        该品类与品牌组合暂无可用型号
       </text>
     </view>
 
@@ -70,11 +74,26 @@ const props = defineProps({
   errors: { type: Object, required: true }
 })
 
-const brands = computed(() => props.meta.brands || [])
+// 品类由 scm_bd_material_group 提供（后端已按 PRODUCT_CATEGORY 字典过滤）
 const categoryNames = computed(() => (props.meta.categories || []).map(item => item.name))
 
+// 品牌由 scm_bd_brand 提供，按已选品类在 scm_bd_material 中出现的品牌集合过滤
+const brandOptions = computed(() => {
+  if (!props.form.category) return []
+  const seen = new Set()
+  const result = []
+  for (const material of props.meta.materials || []) {
+    if (material.category !== props.form.category) continue
+    if (seen.has(material.brand)) continue
+    seen.add(material.brand)
+    result.push(material.brand)
+  }
+  return result.sort()
+})
+
+// 型号由 scm_bd_material 提供，按已选品类 + 品牌过滤
 const modelOptions = computed(() => {
-  if (!props.form.brand || !props.form.category) return []
+  if (!props.form.category || !props.form.brand) return []
   const seen = new Set()
   const result = []
   for (const material of props.meta.materials || []) {
@@ -86,23 +105,25 @@ const modelOptions = computed(() => {
   return result.sort()
 })
 
-const brandIndex = computed(() => Math.max(0, brands.value.indexOf(props.form.brand)))
+const brandIndex = computed(() => Math.max(0, brandOptions.value.indexOf(props.form.brand)))
 const categoryIndex = computed(() => Math.max(0, categoryNames.value.indexOf(props.form.category)))
 const modelIndex = computed(() => Math.max(0, modelOptions.value.indexOf(props.form.model)))
 const modelLabel = computed(() => {
   if (props.form.model) return props.form.model
-  if (!props.form.brand || !props.form.category) return '请先选择品牌和品类'
+  if (!props.form.category) return '请先选择品类'
+  if (!props.form.brand) return '请先选择品牌'
   return '请选择型号'
 })
 const receiptAmount = computed(() =>
   computeReceiptAmount(props.form.salePrice, props.form.saleQuantity).toFixed(2))
 
-function onBrandChange(e) {
-  props.form.brand = brands.value[Number(e.detail.value)] || ''
-  props.form.model = ''
-}
 function onCategoryChange(e) {
   props.form.category = categoryNames.value[Number(e.detail.value)] || ''
+  props.form.brand = ''
+  props.form.model = ''
+}
+function onBrandChange(e) {
+  props.form.brand = brandOptions.value[Number(e.detail.value)] || ''
   props.form.model = ''
 }
 function onModelChange(e) {

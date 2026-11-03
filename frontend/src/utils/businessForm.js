@@ -53,8 +53,8 @@ export function validateBusinessForm(form) {
     }
   }
 
-  if (!form.brand) errors.brand = '请选择品牌'
   if (!form.category) errors.category = '请选择品类'
+  if (!form.brand) errors.brand = '请选择品牌'
   if (!form.model) errors.model = '请选择型号'
 
   const price = normalizeMoney(form.salePrice)
@@ -69,8 +69,8 @@ export function validateBusinessForm(form) {
     errors.voucherUrls = '请上传至少1张收款凭证'
   }
 
-  const order = ['batchNo', 'customerPhone', 'customer', 'commissionRate', 'brand',
-    'category', 'model', 'salePrice', 'saleQuantity', 'receiptDate', 'voucherUrls']
+  const order = ['batchNo', 'customerPhone', 'customer', 'commissionRate', 'category',
+    'brand', 'model', 'salePrice', 'saleQuantity', 'receiptDate', 'voucherUrls']
   const firstError = order.map(key => errors[key]).find(Boolean) || ''
   return { valid: Object.keys(errors).length === 0, errors, firstError }
 }
