@@ -48,7 +48,10 @@ public class ScmBaseDataClient {
     private static final int MAX_PAGES = 20;
     private static final int MAX_CACHE_ENTRIES = 50;
 
-    /** 字典接口不可达时的兜底品类（与现网 PRODUCT_CATEGORY 标准值一致） */
+    /**
+     * 品类名称 → 字典 itemKey 的兜底映射（仅用于同名映射，不再用于过滤品类）。
+     * SCM 类别名与字典不一致时（如 燃气具/休闲食品/家用电器），保留 SCM 类别名称。
+     */
     private static final Map<String, String> FALLBACK_CATEGORY_KEYS = Map.ofEntries(
             Map.entry("燃气灶", "1"), Map.entry("抽油烟机", "2"),
             Map.entry("热水器", "3"), Map.entry("壁挂炉", "4"),
@@ -102,8 +105,9 @@ public class ScmBaseDataClient {
     }
 
     /**
-     * 校验品类名称命中数据字典，返回落库用 itemKey。
-     * 同时要求该品类出现在 SCM 商品类别中，保证表单选项与校验口径一致。
+     * 校验品类存在于 SCM 商品类别（scm_bd_material_group），返回落库值：
+     * 与 PRODUCT_CATEGORY 字典同名 → 字典 itemKey（兼容提成规则/ETL）；
+     * 未同名 → SCM 类别名称（如 燃气具/休闲食品/家用电器）。
      */
     public String requireCategoryKey(Long corpId, String categoryName) {
         ScmOptions opts = options(corpId);
@@ -112,7 +116,7 @@ public class ScmBaseDataClient {
                 .map(CategoryOption::key)
                 .findFirst()
                 .orElseThrow(() -> BusinessException.of(
-                        "品类「" + categoryName + "」不符合数据字典或供应链商品类别规范"));
+                        "品类「" + categoryName + "」未在供应链商品类别中找到"));
     }
 
     /** 校验 品牌+品类+型号 组合存在于 SCM 商品资料。 */
@@ -151,6 +155,11 @@ public class ScmBaseDataClient {
         return result;
     }
 
+    /**
+     * 读取 SCM 商品类别全量（scm_bd_material_group），不再按字典硬过滤。
+     * 城市合伙人登录时 SCM 共享域返回其所属运营商（parent_corp_id）维护的类别；
+     * 类别名与字典同名才映射 itemKey，否则保留类别名称，避免运营商目录被清空。
+     */
     private List<CategoryOption> fetchCategories(String auth) {
         List<Map<String, Object>> nodes = dataList(getJson(auth, "/api/bd/material-category/options"));
         Map<String, String> nameToKey = categoryDict();
@@ -166,8 +175,9 @@ public class ScmBaseDataClient {
         if (nodes == null) return;
         for (Map<String, Object> node : nodes) {
             String name = str(node.get("name"));
-            String key = nameToKey.get(name);
-            if (!name.isEmpty() && key != null && seen.add(name)) {
+            // 字典同名 → itemKey；未同名 → SCM 类别名称（保持运营商目录完整）
+            String key = nameToKey.getOrDefault(name, name);
+            if (!name.isEmpty() && seen.add(name)) {
                 out.add(new CategoryOption(key, name));
             }
             Object children = node.get("children");
@@ -241,7 +251,9 @@ public class ScmBaseDataClient {
             if (!(record instanceof Map<?, ?> row)) continue;
             String brand = str(row.get("brandName"));
             String category = str(row.get("groupName"));
+            // 规格型号为空时回退商品名称：金蝶部分商品只填名称（如 燃气灶JZT-CA021）
             String model = str(row.get("model"));
+            if (model.isEmpty()) model = str(row.get("name"));
             if (brand.isEmpty() || category.isEmpty() || model.isEmpty()) continue;
             if (!brands.contains(brand) || !categories.contains(category)) continue;
             if (seen.add(brand + "\u0001" + category + "\u0001" + model)) {
