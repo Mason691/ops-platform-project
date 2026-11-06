@@ -866,12 +866,13 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     private static final String EXPORT_HEADER =
-            "批次\t公司\t客户\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t收据号\t备注\t是否特批\n";
+            "批次\t公司\t客户\t收货地址\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t收据号\t备注\t是否特批\n";
 
-    /** 单行 23 列 TSV 输出（与 EXPORT_HEADER 列序一致）；收款金额=库中 receipt_amount（空则 单价×数量 兜底） */
+    /** 单行 26 列 TSV 输出（与 EXPORT_HEADER 列序一致）；收款金额=库中 receipt_amount（空则 单价×数量 兜底） */
     private void appendExportRow(StringBuilder sb, OpsBusinessData d) {
         sb.append(fmt(d.getBatchNo())).append('\t')
           .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
+          .append(fmt(d.getDeliveryAddress())).append('\t')
           .append(fmt(d.getDepartment())).append('\t')
           .append(fmt(d.getBrand())).append('\t').append(getCategoryDisplayName(d.getCategory())).append('\t')
           .append(fmt(d.getModel())).append('\t')
@@ -888,6 +889,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
           .append(fmt(d.getAgentPhone())).append('\t')
           .append(fmt(d.getSaleDate())).append('\t').append(fmt(d.getReceiptDate())).append('\t')
           .append(fmt(d.getFinanceReceiptDate())).append('\t').append(fmt(d.getFundDynamicRows())).append('\t')
+          .append(fmt(d.getIsReceived())).append('\t')
           .append(fmt(d.getReceiptNo())).append('\t')
           .append(fmt(d.getRemark())).append('\t')
           .append(fmt(d.getIsSpecial())).append('\n');

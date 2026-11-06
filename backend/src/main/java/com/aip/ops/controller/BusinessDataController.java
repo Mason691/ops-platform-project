@@ -1,9 +1,11 @@
 package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
+import com.aip.ops.dto.FinanceCheckRequest;
 import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.entity.SysExportTask;
+import com.aip.ops.service.BusinessDataFinanceService;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.ExportTaskService;
 import com.aip.ops.service.ImportTaskService;
@@ -41,6 +43,7 @@ public class BusinessDataController {
     private final BusinessDataService service;
     private final ExportTaskService taskService;
     private final ImportTaskService importTaskService;
+    private final BusinessDataFinanceService financeService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final OrgRoleService orgRoleService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -110,12 +113,15 @@ public class BusinessDataController {
     }
 
     public BusinessDataController(BusinessDataService service, ExportTaskService taskService,
-                                  ImportTaskService importTaskService, KafkaTemplate<String, String> kafkaTemplate,
+                                  ImportTaskService importTaskService,
+                                  BusinessDataFinanceService financeService,
+                                  KafkaTemplate<String, String> kafkaTemplate,
                                   OrgRoleService orgRoleService,
                                   @Qualifier("importExecutor") ExecutorService importExecutor) {
         this.service = service;
         this.taskService = taskService;
         this.importTaskService = importTaskService;
+        this.financeService = financeService;
         this.kafkaTemplate = kafkaTemplate;
         this.orgRoleService = orgRoleService;
         this.importExecutor = importExecutor;
@@ -450,6 +456,16 @@ public class BusinessDataController {
             return;
         }
         service.exportCommissionSummary(company, batchNo, agent, receiptNo, category, response);
+    }
+
+    /**
+     * 财务核对：补充/修改收据号、财务收款日期、资金动态表横排数、是否收款，
+     * 并记录核对人与核对时间。仅财务角色/运营商管理员可操作；已上报集团拒绝。
+     */
+    @OperationLog(module = "增值业务", action = "财务核对", targetTable = "ops_business_data")
+    @PutMapping("/{id}/finance-check")
+    public R<?> financeCheck(@PathVariable Long id, @RequestBody FinanceCheckRequest request) {
+        return R.ok(financeService.financeCheck(id, request));
     }
 
     /** 经办人核对（管理后台）：仅运营商管理员/超管可操作 */

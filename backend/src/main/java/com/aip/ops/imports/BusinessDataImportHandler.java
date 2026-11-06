@@ -106,6 +106,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         boolean quantityDefaulted;     // 数量列空 → 默认 1（结果统计用）
         String quantityRaw = "";       // 原始数量文本（validateFields 校验用）
         String agent, agentPhone, dept, remark;
+        String deliveryAddress;     // 收货地址（可选列；缺失/空 = 空，不阻断）
         String saleDate, receiptDate, receiptNo;
         String receiptDateRaw; // raw value for validation (市场收款日期：空=错误)
         String financeReceiptDateRaw, financeReceiptDate;
@@ -187,6 +188,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         resp.put("fileMd5", p.fileMd5);
         resp.put("totalRows", p.totalRows);
         resp.put("stats", statsMap(m));
+        resp.put("deliveryAddressEmptyCount", emptyAddressCount(p));
         return resp;
     }
 
@@ -547,7 +549,13 @@ public class BusinessDataImportHandler implements ImportHandler {
         resp.put("totalRows", p.totalRows);
         resp.put("pendingItems", items);
         resp.put("stats", statsMap(m));
+        resp.put("deliveryAddressEmptyCount", emptyAddressCount(p));
         return resp;
+    }
+
+    private int emptyAddressCount(Prepared p) {
+        return (int) p.rows.stream()
+                .filter(r -> r.deliveryAddress == null || r.deliveryAddress.isEmpty()).count();
     }
 
     private Map<String, Object> statsMap(MatchResult m) {
@@ -601,8 +609,8 @@ public class BusinessDataImportHandler implements ImportHandler {
                 + "sale_price, sale_quantity, receipt_amount, agent, agent_phone, is_special, commission_rate, "
                 + "sale_date, receipt_date, finance_receipt_date, fund_dynamic_rows, "
                 + "receipt_no, department, retail_floor_price, group_lowest_price, "
-                + "calc_status, remark, corp_id, operator_id) "
-                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "calc_status, remark, corp_id, operator_id, delivery_address) "
+                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
         int batchCount = 0;
         // 会员兜底确保（confirm 事务内）：未匹配行 → 全局已有会员复用（uk_phone）→ 创建新会员；
@@ -631,6 +639,7 @@ public class BusinessDataImportHandler implements ImportHandler {
                     ensure.createdMembers.size(), ensure.createdMembers);
             ir.setDefaultQtyCount((int) p.rows.stream()
                     .filter(r -> r.quantityDefaulted).count());
+            ir.setDeliveryAddressEmptyCount(emptyAddressCount(p));
             return ir;
         } finally {
             ps.close();
@@ -686,7 +695,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         final List<String> createdMembers = new ArrayList<>(); // 新建会员清单（姓名 手机号，每会员一条）
     }
 
-    /** 绑定 27 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
+    /** 绑定 28 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
     private void bindRow(PreparedStatement ps, ParsedRow pr, String batchNo, Long corpId)
             throws SQLException {
         int idx = 1;
@@ -724,6 +733,8 @@ public class BusinessDataImportHandler implements ImportHandler {
         ps.setString(idx++, pr.remark.isEmpty() ? null : pr.remark);
         ps.setLong(idx++, corpId);
         ps.setLong(idx++, corpId);
+        ps.setString(idx++, pr.deliveryAddress == null || pr.deliveryAddress.isEmpty()
+                ? null : pr.deliveryAddress);
     }
 
     /**
@@ -840,6 +851,9 @@ public class BusinessDataImportHandler implements ImportHandler {
     private static final int I_RATIO = 15;
     private static final int I_REMARK = 16;
     private static final int I_QUANTITY = 17;   // 销售数量（可选列：缺失/空默认 1）
+    // 独立槽位 19（可选列）：收货地址。模板在 S 列后备注列之后追加 T 列，
+    // 旧模板无该列时 idx=-1，val() 返回空，不阻断导入。
+    private static final int I_DELIVERY_ADDRESS = 19;
 
     /** 表头校验 + 定位各列下标；任一必填列缺失 → 错误并返回 null。 */
     private int[] headerIndices(String[] headers, List<String> errors) {
@@ -855,7 +869,7 @@ public class BusinessDataImportHandler implements ImportHandler {
             if (indexOf(headers, h) < 0) errors.add("缺少列: " + h);
         }
         if (!errors.isEmpty()) return null;
-        int[] idx = new int[19];
+        int[] idx = new int[20];
         idx[I_CUSTOMER] = indexOf(headers, "客户");
         idx[I_CUSTOMER_PHONE] = indexOf(headers, "客户手机");
         idx[I_CATEGORY] = indexOf(headers, "品类");
@@ -882,6 +896,8 @@ public class BusinessDataImportHandler implements ImportHandler {
         idx[I_RATIO] = indexOfExact(headers, "提成比例");
         // 备注为可选列：模板含该列时映射 remark，缺失时置空
         idx[I_REMARK] = indexOf(headers, "备注");
+        // 收货地址为可选列：新模板 T 列；旧模板缺失时 idx=-1，按空处理
+        idx[I_DELIVERY_ADDRESS] = indexOf(headers, "收货地址");
         return idx;
     }
 
@@ -954,6 +970,9 @@ public class BusinessDataImportHandler implements ImportHandler {
         // 客户名称：自动创建会员的必要字段（real_name/nickname），必填
         if (pr.customer == null || pr.customer.isBlank())
             errors.add("第" + rowNum + "行：客户名称为空（自动创建会员需要客户名称）");
+        // 收货地址可选；列宽 500，超长拒绝该行（避免入库截断）
+        if (pr.deliveryAddress != null && pr.deliveryAddress.length() > 500)
+            errors.add("第" + rowNum + "行：收货地址不能超过500个字符");
         // 销售数量：必须为正整数；空已在 parseRow 默认 1
         if (!pr.quantityRaw.isEmpty()
                 && (pr.saleQuantity == null || pr.saleQuantity <= 0))
@@ -1082,6 +1101,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         pr.special = "是".equals(rawSpecial);
         pr.commissionRate = parseRatio(val(cols, idx[I_RATIO]));
         pr.remark = val(cols, idx[I_REMARK]);
+        pr.deliveryAddress = val(cols, idx[I_DELIVERY_ADDRESS]);
         return pr;
     }
 

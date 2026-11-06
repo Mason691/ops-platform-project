@@ -285,6 +285,9 @@ public class EmployeeServiceImpl implements EmployeeService {
             detail.put("commissionRate", toBigDecimal(row.get("commissionRate")));
             detail.put("saleDate", saleDate);
             detail.put("customer", row.get("customer"));
+            if (row.get("deliveryAddress") != null) {
+                detail.put("deliveryAddress", row.get("deliveryAddress"));
+            }
             detail.put("category", row.get("category"));
             if (row.get("calcStatus") != null) detail.put("calcStatus", row.get("calcStatus"));
             if (row.get("batchNo") != null) detail.put("batchNo", row.get("batchNo"));

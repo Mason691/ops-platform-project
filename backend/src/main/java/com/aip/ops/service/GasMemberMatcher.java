@@ -164,7 +164,7 @@ public class GasMemberMatcher {
      */
     public Map<String, Object> findMemberInfoByPhone(String phone) {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT id, real_name, nickname, delete_flag FROM ai_platform.sys_member "
+                "SELECT id, real_name, nickname, community_id, delete_flag FROM ai_platform.sys_member "
                         + "WHERE phone = ? LIMIT 1", phone);
         if (rows.isEmpty()) return null;
         Map<String, Object> row = rows.get(0);
@@ -175,6 +175,10 @@ public class GasMemberMatcher {
         }
         Map<String, Object> info = new HashMap<>();
         info.put("id", ((Number) row.get("id")).longValue());
+        Object communityId = row.get("community_id");
+        if (communityId != null) {
+            info.put("communityId", ((Number) communityId).longValue());
+        }
         Object realName = row.get("real_name");
         Object nickname = row.get("nickname");
         String name = realName != null && !realName.toString().isBlank()

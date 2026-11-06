@@ -22,6 +22,7 @@
               <text v-if="d.customer" class="detail-customer"> · 客户: {{ d.customer }}</text>
             </text>
             <text class="detail-date">{{ d.saleDate || '-' }}</text>
+            <text v-if="d.deliveryAddress" class="detail-address">收货地址: {{ d.deliveryAddress }}</text>
             <text v-if="d.voucherUrl" class="detail-voucher"
                   @click.stop="previewVoucher(d.voucherUrl)">🧾 查看凭证</text>
           </view>
@@ -102,6 +103,7 @@ function previewVoucher(raw) {
 .detail-cat { color: #FF6B35; }
 .detail-customer { color: #999; }
 .detail-date { font-size: 22rpx; color: #bbb; }
+.detail-address { font-size: 22rpx; color: #666; word-break: break-all; }
 .detail-voucher { font-size: 22rpx; color: #2196F3; }
 .detail-money { display: flex; flex-direction: column; align-items: flex-end; gap: 4rpx; }
 .detail-sale { font-size: 28rpx; color: #FF6B35; font-weight: 600; }

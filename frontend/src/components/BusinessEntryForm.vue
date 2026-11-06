@@ -35,6 +35,26 @@
                placeholder="查询后自动填充，也可手动输入" />
         <text v-if="errors.customer" class="ferr">{{ errors.customer }}</text>
       </view>
+      <view class="field">
+        <text class="label">小区选择</text>
+        <picker mode="selector" :range="communityOptions" range-key="name"
+                :value="communityIndex" @change="onCommunityChange">
+          <view class="picker">
+            <text class="picker-text">{{ communityLabel }}</text>
+            <text class="arrow">▼</text>
+          </view>
+        </picker>
+        <text class="hint">选填；会员已关联小区时自动带出</text>
+      </view>
+      <view class="field">
+        <text class="label">详细地址</text>
+        <input class="input" v-model="form.detailAddress" maxlength="200"
+               placeholder="如：3栋2单元501号（选填）" />
+      </view>
+      <view class="address-preview">
+        <text class="preview-label">收货地址</text>
+        <text class="preview-value">{{ deliveryPreview || '未填写' }}</text>
+      </view>
     </view>
   </view>
 </template>
@@ -77,6 +97,39 @@ function onBatchChange(e) {
     props.form.batchNo = option.value
   }
 }
+
+const communityOptions = computed(() => [
+  { id: null, name: '不选择' },
+  ...(props.meta.communities || []).map(item => ({ id: item.id, name: item.name }))
+])
+
+const communityIndex = computed(() => {
+  const index = communityOptions.value.findIndex(
+    item => String(item.id) === String(props.form.communityId))
+  return index >= 0 ? index : 0
+})
+
+const communityLabel = computed(() => {
+  const option = communityOptions.value[communityIndex.value]
+  return option ? option.name : '不选择'
+})
+
+const deliveryPreview = computed(() => {
+  const community = String(props.form.communityName || '').trim()
+  const detail = String(props.form.detailAddress || '').trim()
+  return [community, detail].filter(Boolean).join(' ')
+})
+
+function onCommunityChange(e) {
+  const option = communityOptions.value[Number(e.detail.value)]
+  if (!option || option.id == null) {
+    props.form.communityId = null
+    props.form.communityName = ''
+    return
+  }
+  props.form.communityId = option.id
+  props.form.communityName = option.name
+}
 </script>
 
 <style scoped>
@@ -106,4 +159,10 @@ function onBatchChange(e) {
 .query-btn.disabled { opacity: .6; }
 .ferr { display: block; font-size: 22rpx; color: #e53935; margin-top: 8rpx; }
 .hint { display: block; font-size: 22rpx; color: #999; margin-top: 8rpx; line-height: 1.5; }
+.address-preview {
+  display: flex; align-items: baseline; gap: 12rpx;
+  padding: 16rpx 20rpx; background: #f7f7f7; border-radius: 10rpx;
+}
+.preview-label { font-size: 24rpx; color: #666; white-space: nowrap; }
+.preview-value { flex: 1; font-size: 26rpx; color: #333; word-break: break-all; }
 </style>

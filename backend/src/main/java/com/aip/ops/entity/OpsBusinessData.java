@@ -7,6 +7,7 @@ import lombok.EqualsAndHashCode;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 /**
  * 业务数据 — 从 Excel 导入的销售记录，支持提成计算与导出。
@@ -51,6 +52,14 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("platform_member_id")
     private Long platformMemberId;
 
+    /**
+     * 收货地址（小区名称 + 详细地址，空格拼接；选填）。
+     * 员工手工录入由服务端按 communityId + detailAddress 生成；
+     * Excel 导入直接取「收货地址」列；供应链出库打印按业务数据 ID 拉取。
+     */
+    @TableField("delivery_address")
+    private String deliveryAddress;
+
     @TableField("brand")
     private String brand;
 
@@ -87,9 +96,21 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("receipt_no")
     private String receiptNo;
 
-    /** 是否收款（是/否）——员工手工录入时采集 */
+    /** 是否收款（是/否）——员工手工录入时采集，财务核对可补充/修改 */
     @TableField("is_received")
     private String isReceived;
+
+    /** 财务核对人ID（ai_platform.sys_user.id） */
+    @TableField("finance_check_user_id")
+    private Long financeCheckUserId;
+
+    /** 财务核对人姓名（冗余展示/追溯） */
+    @TableField("finance_check_user_name")
+    private String financeCheckUserName;
+
+    /** 财务核对时间（非空=已核对） */
+    @TableField("finance_check_time")
+    private LocalDateTime financeCheckTime;
 
     /** 收款凭证 URL（最多 3 张，英文逗号分隔）——员工手工录入时上传 */
     @TableField("voucher_url")

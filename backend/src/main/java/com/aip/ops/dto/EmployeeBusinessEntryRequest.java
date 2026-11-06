@@ -24,6 +24,12 @@ public class EmployeeBusinessEntryRequest {
 
     private String customer;
 
+    /** 小区 ID（ai_platform.sys_community.id，选填；服务端校验属于当前组织） */
+    private Long communityId;
+
+    /** 详细地址/门牌号（选填，如“3栋2单元501号”） */
+    private String detailAddress;
+
     /** 是否特批（是/否） */
     private Boolean isSpecial;
 

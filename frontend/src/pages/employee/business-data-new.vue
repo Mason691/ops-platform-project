@@ -50,13 +50,15 @@ const errors = reactive({})
 function emptyMeta() {
   return {
     corpId: null, corpName: '', company: '', employeeName: '', employeePhone: '',
-    batches: [], newBatchPrefix: '', brands: [], categories: [], materials: [], productError: ''
+    batches: [], newBatchPrefix: '', brands: [], categories: [], materials: [],
+    communities: [], productError: ''
   }
 }
 
 function emptyForm() {
   return {
     batchNo: '', newBatch: false, customerPhone: '', customer: '',
+    communityId: null, communityName: '', detailAddress: '',
     isSpecial: false, commissionRate: '', brand: '', category: '', model: '',
     salePrice: '', saleQuantity: '1', receiptDate: today(),
     isReceived: false, voucherUrls: []
@@ -81,6 +83,7 @@ async function loadOptions() {
     meta.brands = Array.isArray(data && data.brands) ? data.brands : []
     meta.categories = Array.isArray(data && data.categories) ? data.categories : []
     meta.materials = Array.isArray(data && data.materials) ? data.materials : []
+    meta.communities = Array.isArray(data && data.communities) ? data.communities : []
     if (meta.batches.length) {
       form.newBatch = false
       form.batchNo = meta.batches[0]
@@ -108,6 +111,14 @@ async function queryMember() {
     const res = await api.employeeLookupMember(phone)
     if (res && res.found) {
       if (res.name) form.customer = res.name
+      if (res.communityId != null) {
+        const community = (meta.communities || []).find(
+          item => String(item.id) === String(res.communityId))
+        if (community) {
+          form.communityId = community.id
+          form.communityName = community.name
+        }
+      }
       toast(res.name ? '已找到会员：' + res.name : '已找到会员')
     } else {
       toast((res && res.message) || '未找到该手机号对应的会员')
@@ -140,6 +151,8 @@ async function submit() {
       newBatch: !!form.newBatch,
       customerPhone: normalizePhone(form.customerPhone),
       customer: String(form.customer || '').trim(),
+      communityId: form.communityId || null,
+      detailAddress: String(form.detailAddress || '').trim(),
       isSpecial: !!form.isSpecial,
       commissionRate: form.isSpecial ? Number(form.commissionRate) : 0,
       brand: form.brand,

@@ -1,5 +1,6 @@
 package com.aip.ops.controller;
 
+import com.aip.ops.service.FinancePermissionService;
 import com.aip.ops.service.OrgRoleService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
@@ -19,11 +20,12 @@ import java.util.Map;
 public class PermissionController {
 
     private final OrgRoleService orgRoleService;
+    private final FinancePermissionService financePermissionService;
 
     /**
      * 返回当前用户的权限概要。
      * 响应: { corpId, orgRoleType: "operator"|"partner"|"superadmin",
-     *         canEditProducts, canEditRules }
+     *         canEditProducts, canEditRules, canFinanceCheck }
      */
     @GetMapping("/profile")
     public R<Map<String, Object>> profile() {
@@ -33,7 +35,8 @@ public class PermissionController {
                 "corpId", SecurityUtils.getCurrentCorpIdOrNull(),
                 "orgRoleType", roleType,
                 "canEditProducts", canEdit,
-                "canEditRules", canEdit
+                "canEditRules", canEdit,
+                "canFinanceCheck", financePermissionService.canFinanceCheck()
         ));
     }
 }

@@ -47,6 +47,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private static final String INITIAL_CALC_STATUS = "未计算";
     private static final int MAX_VOUCHERS = 3;
     private static final int MAX_TEXT_LENGTH = 100;
+    private static final int MAX_DETAIL_ADDRESS_LENGTH = 200;
+    private static final int MAX_DELIVERY_ADDRESS_LENGTH = 500;
     /** sys_member.real_name / nickname 为 VARCHAR(50)，自动建会员时不能超长 */
     private static final int MAX_CUSTOMER_LENGTH = 50;
 
@@ -77,6 +79,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         result.put("employeePhone", ctx.employeePhone());
         result.put("batches", selectableBatches(ctx.corpId()));
         result.put("newBatchPrefix", ctx.company() + "-" + today() + "-");
+        result.put("communities", loadCommunities(ctx.corpId()));
         fillProductOptions(result, ctx.corpId());
         return result;
     }
@@ -91,16 +94,71 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         try {
             Map<String, Object> info = memberMatcher.findMemberInfoByPhone(normalized);
             if (info == null) return Map.of("found", false);
+            Long memberId = info.get("id") instanceof Number n ? n.longValue() : null;
+            Long communityId = info.get("communityId") instanceof Number n ? n.longValue() : null;
+            if (communityId == null) {
+                communityId = findGasUserCommunity(memberId, normalized);
+            }
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("found", true);
-            result.put("memberId", info.get("id"));
+            result.put("memberId", memberId);
             result.put("name", info.get("name"));
+            result.put("communityId", communityId);
+            result.put("communityName", communityName(communityId));
             return result;
         } catch (IllegalStateException e) {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("found", false);
             result.put("message", e.getMessage());
             return result;
+        }
+    }
+
+    // ── 小区 / 收货地址 ──
+
+    /** 当前员工所属组织的小区下拉（sys_community.corp_id 精确过滤）。 */
+    private List<Map<String, Object>> loadCommunities(Long corpId) {
+        try {
+            return jdbcTemplate.queryForList(
+                    "SELECT id, community_name AS name FROM ai_platform.sys_community "
+                            + "WHERE delete_flag = 0 AND corp_id = ? ORDER BY community_name",
+                    corpId);
+        } catch (Exception e) {
+            log.warn("加载组织小区列表失败 corpId={}: {}", corpId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** 会员未直接关联小区时，按手机号/会员ID 从燃气用户回退取小区。 */
+    private Long findGasUserCommunity(Long memberId, String phone) {
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT community_id FROM ops_gas_user "
+                            + "WHERE delete_flag = 0 AND community_id IS NOT NULL "
+                            + "AND (phone = ? OR platform_member_id = ?) "
+                            + "ORDER BY (platform_member_id = ?) DESC, id LIMIT 1",
+                    phone, memberId, memberId);
+            if (rows.isEmpty()) return null;
+            Object value = rows.get(0).get("community_id");
+            if (!(value instanceof Number n)) return null;
+            return n.longValue() > 0 ? n.longValue() : null;
+        } catch (Exception e) {
+            log.debug("回退查询会员小区失败 memberId={}, phone={}: {}",
+                    memberId, phone, e.getMessage());
+            return null;
+        }
+    }
+
+    private String communityName(Long communityId) {
+        if (communityId == null || communityId <= 0) return null;
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT community_name FROM ai_platform.sys_community "
+                            + "WHERE id = ? AND delete_flag = 0 LIMIT 1", communityId);
+            return rows.isEmpty() ? null : str(rows.get(0).get("community_name"));
+        } catch (Exception e) {
+            log.debug("查询小区名称失败 communityId={}: {}", communityId, e.getMessage());
+            return null;
         }
     }
 
@@ -352,10 +410,17 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         String receiptDate = normalizeDate(req.getReceiptDate());
         boolean received = Boolean.TRUE.equals(req.getIsReceived());
         String voucherUrl = normalizeVouchers(received, req.getVoucherUrls());
+        Long communityId = req.getCommunityId();
+        if (communityId != null && communityId <= 0) communityId = null;
+        String detailAddress = str(req.getDetailAddress());
+        if (detailAddress.length() > MAX_DETAIL_ADDRESS_LENGTH) {
+            throw BusinessException.of("详细地址不能超过" + MAX_DETAIL_ADDRESS_LENGTH + "个字符");
+        }
         String categoryKey = scmClient.requireCategoryKey(corpId, categoryName);
         scmClient.requireMaterial(corpId, brand, categoryName, model);
         return new Validated(phone, customer, special, rate, brand, categoryKey,
-                model, price, qty, amount, receiptDate, received, voucherUrl);
+                model, price, qty, amount, receiptDate, received, voucherUrl,
+                communityId, detailAddress);
     }
 
     private BigDecimal validateCommissionRate(boolean special, BigDecimal raw) {
@@ -460,6 +525,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         entity.setCustomer(v.customer());
         entity.setCustomerPhone(v.phone());
         entity.setPlatformMemberId(memberId);
+        entity.setDeliveryAddress(composeDeliveryAddress(
+                v.communityId(), v.detailAddress(), ctx.corpId()));
         entity.setBrand(v.brand());
         entity.setCategory(v.categoryKey());
         entity.setModel(v.model());
@@ -482,6 +549,31 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         entity.setCalcStatus(INITIAL_CALC_STATUS);
         entity.setDeleteFlag(0);
         return entity;
+    }
+
+    /**
+     * 收货地址 = 小区名称 + 空格 + 详细地址。小区为选填；两者皆空时返回 null。
+     * 小区必须属于当前员工组织（不接受前端传来的名称，防止跨租户引用）。
+     */
+    private String composeDeliveryAddress(Long communityId, String detailAddress, Long corpId) {
+        String detail = str(detailAddress);
+        String community = "";
+        if (communityId != null) {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT community_name FROM ai_platform.sys_community "
+                            + "WHERE id = ? AND corp_id = ? AND delete_flag = 0 LIMIT 1",
+                    communityId, corpId);
+            if (rows.isEmpty()) {
+                throw BusinessException.of("所选小区不属于当前组织，请重新选择");
+            }
+            community = str(rows.get(0).get("community_name"));
+        }
+        String composed = (community + (detail.isEmpty() ? "" : " " + detail)).trim();
+        if (composed.isEmpty()) return null;
+        if (composed.length() > MAX_DELIVERY_ADDRESS_LENGTH) {
+            throw BusinessException.of("收货地址不能超过" + MAX_DELIVERY_ADDRESS_LENGTH + "个字符");
+        }
+        return composed;
     }
 
     /** 复用导入的精确/关键字匹配口径，命中增值产品时写入底价，保证提成分档与导入一致。 */
@@ -549,7 +641,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private record Validated(String phone, String customer, boolean special, BigDecimal rate,
                              String brand, String categoryKey, String model, BigDecimal price,
                              int qty, BigDecimal amount, String receiptDate, boolean received,
-                             String voucherUrl) {}
+                             String voucherUrl, Long communityId, String detailAddress) {}
 
     private record MemberResolution(Long id, boolean created) {}
 }
