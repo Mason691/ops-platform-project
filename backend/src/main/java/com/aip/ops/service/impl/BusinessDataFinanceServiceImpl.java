@@ -32,7 +32,8 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>权限：运营商管理员/超管，或当前组织内角色名含「财务」的财务角色；</li>
  *   <li>已上报集团：只读锁定，前端按钮置灰，后端再次拒绝；</li>
- *   <li>收据号：必填，同 corp 内唯一（与导入口径一致），重复直接拦截；</li>
+ *   <li>收据号：必填，同 corp 内仅允许同一客户的多行共用（同订单拆分），
+ *       被其他客户占用时拦截（与导入侧组内一致性口径对齐）；</li>
  *   <li>财务收款日期：必填，不得早于市场收款日期（市场日期可解析时）；</li>
  *   <li>资金动态表横排数：可空，非空时 >=0 整数；</li>
  *   <li>是否收款：必填 是/否；凭证缺失仅前端提示，不强制补传。</li>
@@ -105,18 +106,23 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
         return new ValidatedFinance(receiptNo, financeDate, fundRows, isReceived);
     }
 
-    /** 收据号同 corp 内唯一（排除当前行），与 BusinessDataImportHandler 的查重口径一致。 */
+    /**
+     * 收据号查重（排除当前行），与导入侧的「同收据号组内客户一致」口径对齐：
+     * 同一客户的多行可共用收据号（同订单拆分），仅拦截被其他客户占用的收据号。
+     */
     private void assertReceiptNoUnique(String receiptNo, OpsBusinessData row) {
         if (row.getCorpId() == null) return;
         List<Map<String, Object>> dups = jdbcTemplate.queryForList(
                 "SELECT batch_no, customer FROM ops_business_data "
                         + "WHERE corp_id = ? AND receipt_no = ? AND id <> ? AND delete_flag = 0 "
-                        + "ORDER BY id LIMIT 1",
+                        + "ORDER BY id LIMIT 20",
                 row.getCorpId(), receiptNo, row.getId());
-        if (!dups.isEmpty()) {
-            Map<String, Object> dup = dups.get(0);
-            throw BusinessException.of("收据号 " + receiptNo + " 已存在（批次 "
-                    + str(dup.get("batch_no")) + "，客户 " + str(dup.get("customer")) + "），请更换");
+        String customer = str(row.getCustomer());
+        for (Map<String, Object> dup : dups) {
+            if (!customer.equals(str(dup.get("customer")))) {
+                throw BusinessException.of("收据号 " + receiptNo + " 已被其他客户占用（批次 "
+                        + str(dup.get("batch_no")) + "，客户 " + str(dup.get("customer")) + "），请更换");
+            }
         }
     }
 

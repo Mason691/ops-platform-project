@@ -4,6 +4,8 @@
 
 ## 2026-11-06
 
+- **增值业务「批量财务核对」（平台主站）**：业务数据列表「批量删除」右侧新增「财务核对」按钮（仅财务角色/运营商管理员可见；未勾选时提示「请先选择需要核对的业务数据」）。全屏弹窗按卡片逐条展示只读业务详情（批次/客户/手机/品牌/品类/型号/销售单价/销售数量/收款金额/市场收款日期/经办人/手机号/是否特批/提成比例/计算状态）+ 四项补录表单（收据号、财务收款日期、资金动态表横排数、是否收款）；每条独立「保存本条」，逐条校验、逐条落库，失败提示就近展示在该卡片内；保存成功后卡片置灰标「已保存」并禁用重复保存，关闭弹窗后列表刷新；选中超过 10 条时弹窗内分页（每页 10 条，草稿按行保留）；已上报集团行锁定不可编辑。复用 `PUT /api/ops/admin/business-data/{id}/finance-check`（`@OperationLog` 记录操作人/时间），不改动 `calc_status`。同批修复：收据号查重口径对齐导入侧「同收据号组内客户一致」——同客户多行（同订单拆分，生产 596 组）不再被误拦截，仅拦截被其他客户占用的收据号；前端 `el-radio` 迁移 `value`（Element Plus 2.14 弃用 `label`）。验证：ops 后端 `mvn clean package -DskipTests -o`、平台前端 `npm run build` 通过；生产 UI E2E 待部署。
+
 - **增值业务「收货地址」全链路**：`ops_business_data` 新增 `delivery_address VARCHAR(500) NULL`（迁移 `sql/migrate_business_data_delivery_address.sql`，必须先于新 ops/SCM JAR 执行）。①H5 员工新增业务：客户信息增加「小区选择（当前员工 corp_id 下 sys_community）+ 详细地址」，会员手机查询后按 `sys_member.community_id`（缺失回退 `ops_gas_user` 同手机/会员的 community）自动带出小区；只读预览「小区名称 + 空格 + 详细地址」，保存由服务端校验小区归属并落库，两者皆空为 null。②Excel 导入：模板「业务数据」sheet 追加 T 列「收货地址」（`sql/patch_business_data_template_delivery_address.py` 手术式 XML 补丁，保留 11 个 drawing；本机 `/home/jason/1.xlsx` 与 classpath 模板已更新）；导入按表头名可选读取，旧模板无该列/单元格空均允许且置空，超 500 字拒行；导入结果新增 `deliveryAddressEmptyCount` 空地址行数。③导出：异步/同步导出在「客户」后增加「收货地址」（24→25、25→26 列）。④供应链销售出库打印：`SaleOutboundDTO` 增 `dataDeliveryAddress`，`BusinessDataQueryService.printInfoOf` 一次取经办人+地址；仅 `BUSINESS_DATA` 来源取业务数据地址，空显示「未填写」，其它来源保持原口径。⑤列表：主平台业务数据列表增加「收货地址」列；H5 月度明细展示地址。⑥部署顺序：迁移 → 生产模板 `/data2/boss-platform/templates/1.xlsx` → ops 后端 → SCM 后端 → 主平台前端 → ops H5。
 
 ## 2026-11-03
