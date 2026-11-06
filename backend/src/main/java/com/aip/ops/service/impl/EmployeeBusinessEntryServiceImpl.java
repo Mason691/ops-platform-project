@@ -48,7 +48,6 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private static final int MAX_VOUCHERS = 3;
     private static final int MAX_TEXT_LENGTH = 100;
     private static final int MAX_DETAIL_ADDRESS_LENGTH = 200;
-    private static final int MAX_DELIVERY_ADDRESS_LENGTH = 500;
     /** sys_member.real_name / nickname 为 VARCHAR(50)，自动建会员时不能超长 */
     private static final int MAX_CUSTOMER_LENGTH = 50;
 
@@ -114,7 +113,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         }
     }
 
-    // ── 小区 / 收货地址 ──
+    // ── 小区 / 详细地址 ──
 
     /** 当前员工所属组织的小区下拉（sys_community.corp_id 精确过滤）。 */
     private List<Map<String, Object>> loadCommunities(Long corpId) {
@@ -412,10 +411,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         String voucherUrl = normalizeVouchers(received, req.getVoucherUrls());
         Long communityId = req.getCommunityId();
         if (communityId != null && communityId <= 0) communityId = null;
-        String detailAddress = str(req.getDetailAddress());
-        if (detailAddress.length() > MAX_DETAIL_ADDRESS_LENGTH) {
-            throw BusinessException.of("详细地址不能超过" + MAX_DETAIL_ADDRESS_LENGTH + "个字符");
-        }
+        // 小区选填（会员查询可自动带出），详细地址必填 —— 地址拆分后必须能定位到具体门牌
+        String detailAddress = requireText(
+                req.getDetailAddress(), "详细地址", MAX_DETAIL_ADDRESS_LENGTH);
         String categoryKey = scmClient.requireCategoryKey(corpId, categoryName);
         scmClient.requireMaterial(corpId, brand, categoryName, model);
         return new Validated(phone, customer, special, rate, brand, categoryKey,
@@ -525,8 +523,10 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         entity.setCustomer(v.customer());
         entity.setCustomerPhone(v.phone());
         entity.setPlatformMemberId(memberId);
-        entity.setDeliveryAddress(composeDeliveryAddress(
-                v.communityId(), v.detailAddress(), ctx.corpId()));
+        CommunityInfo community = resolveCommunity(v.communityId(), ctx.corpId());
+        entity.setCommunityId(community.id());
+        entity.setCommunityName(community.name());
+        entity.setDetailedAddress(v.detailAddress());
         entity.setBrand(v.brand());
         entity.setCategory(v.categoryKey());
         entity.setModel(v.model());
@@ -552,28 +552,23 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     }
 
     /**
-     * 收货地址 = 小区名称 + 空格 + 详细地址。小区为选填；两者皆空时返回 null。
-     * 小区必须属于当前员工组织（不接受前端传来的名称，防止跨租户引用）。
+     * 小区选填；有值时按 id + corp 校验归属并取名称（不接受前端传来的名称，防止跨租户引用）。
+     * 小区名称落库为冗余字段，供列表/导出/出库打印直接展示。
      */
-    private String composeDeliveryAddress(Long communityId, String detailAddress, Long corpId) {
-        String detail = str(detailAddress);
-        String community = "";
-        if (communityId != null) {
-            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                    "SELECT community_name FROM ai_platform.sys_community "
-                            + "WHERE id = ? AND corp_id = ? AND delete_flag = 0 LIMIT 1",
-                    communityId, corpId);
-            if (rows.isEmpty()) {
-                throw BusinessException.of("所选小区不属于当前组织，请重新选择");
-            }
-            community = str(rows.get(0).get("community_name"));
+    private CommunityInfo resolveCommunity(Long communityId, Long corpId) {
+        if (communityId == null) return new CommunityInfo(null, null);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT community_name FROM ai_platform.sys_community "
+                        + "WHERE id = ? AND corp_id = ? AND delete_flag = 0 LIMIT 1",
+                communityId, corpId);
+        if (rows.isEmpty()) {
+            throw BusinessException.of("所选小区不属于当前组织，请重新选择");
         }
-        String composed = (community + (detail.isEmpty() ? "" : " " + detail)).trim();
-        if (composed.isEmpty()) return null;
-        if (composed.length() > MAX_DELIVERY_ADDRESS_LENGTH) {
-            throw BusinessException.of("收货地址不能超过" + MAX_DELIVERY_ADDRESS_LENGTH + "个字符");
+        String name = str(rows.get(0).get("community_name"));
+        if (name.isEmpty()) {
+            throw BusinessException.of("小区名称为空，请重新选择");
         }
-        return composed;
+        return new CommunityInfo(communityId, name);
     }
 
     /** 复用导入的精确/关键字匹配口径，命中增值产品时写入底价，保证提成分档与导入一致。 */
@@ -644,4 +639,6 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                              String voucherUrl, Long communityId, String detailAddress) {}
 
     private record MemberResolution(Long id, boolean created) {}
+
+    private record CommunityInfo(Long id, String name) {}
 }

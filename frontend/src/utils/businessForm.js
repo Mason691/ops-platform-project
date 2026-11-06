@@ -44,6 +44,10 @@ export function validateBusinessForm(form) {
     errors.customerPhone = '请输入正确的11位手机号'
   }
   if (!customer) errors.customer = '请输入客户名称'
+  // 小区选填（会员查询自动带出）；详细地址必填，需能定位到具体门牌
+  const detailAddress = String(form.detailAddress || '').trim()
+  if (!detailAddress) errors.detailAddress = '请输入详细地址（楼栋/单元/门牌号）'
+  else if (detailAddress.length > 200) errors.detailAddress = '详细地址不能超过200个字'
 
   if (form.isSpecial) {
     const rate = Number(form.commissionRate)
@@ -69,8 +73,8 @@ export function validateBusinessForm(form) {
     errors.voucherUrls = '请上传至少1张收款凭证'
   }
 
-  const order = ['batchNo', 'customerPhone', 'customer', 'commissionRate', 'category',
-    'brand', 'model', 'salePrice', 'saleQuantity', 'receiptDate', 'voucherUrls']
+  const order = ['batchNo', 'customerPhone', 'customer', 'detailAddress', 'commissionRate',
+    'category', 'brand', 'model', 'salePrice', 'saleQuantity', 'receiptDate', 'voucherUrls']
   const firstError = order.map(key => errors[key]).find(Boolean) || ''
   return { valid: Object.keys(errors).length === 0, errors, firstError }
 }

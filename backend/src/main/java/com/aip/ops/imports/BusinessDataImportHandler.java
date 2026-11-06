@@ -106,7 +106,9 @@ public class BusinessDataImportHandler implements ImportHandler {
         boolean quantityDefaulted;     // 数量列空 → 默认 1（结果统计用）
         String quantityRaw = "";       // 原始数量文本（validateFields 校验用）
         String agent, agentPhone, dept, remark;
-        String deliveryAddress;     // 收货地址（可选列；缺失/空 = 空，不阻断）
+        String communityName;       // 小区名称（可选列；旧模板缺失/空 = 空，不阻断）
+        Long communityId;           // 按名称匹配 sys_community 回填；未匹配留空
+        String detailedAddress;     // 详细地址（可选列；旧模板列名「收货地址」兼容）
         String saleDate, receiptDate, receiptNo;
         String receiptDateRaw; // raw value for validation (市场收款日期：空=错误)
         String financeReceiptDateRaw, financeReceiptDate;
@@ -188,7 +190,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         resp.put("fileMd5", p.fileMd5);
         resp.put("totalRows", p.totalRows);
         resp.put("stats", statsMap(m));
-        resp.put("deliveryAddressEmptyCount", emptyAddressCount(p));
+        resp.put("detailedAddressEmptyCount", emptyAddressCount(p));
         return resp;
     }
 
@@ -549,13 +551,13 @@ public class BusinessDataImportHandler implements ImportHandler {
         resp.put("totalRows", p.totalRows);
         resp.put("pendingItems", items);
         resp.put("stats", statsMap(m));
-        resp.put("deliveryAddressEmptyCount", emptyAddressCount(p));
+        resp.put("detailedAddressEmptyCount", emptyAddressCount(p));
         return resp;
     }
 
     private int emptyAddressCount(Prepared p) {
         return (int) p.rows.stream()
-                .filter(r -> r.deliveryAddress == null || r.deliveryAddress.isEmpty()).count();
+                .filter(r -> r.detailedAddress == null || r.detailedAddress.isEmpty()).count();
     }
 
     private Map<String, Object> statsMap(MatchResult m) {
@@ -609,10 +611,13 @@ public class BusinessDataImportHandler implements ImportHandler {
                 + "sale_price, sale_quantity, receipt_amount, agent, agent_phone, is_special, commission_rate, "
                 + "sale_date, receipt_date, finance_receipt_date, fund_dynamic_rows, "
                 + "receipt_no, department, retail_floor_price, group_lowest_price, "
-                + "calc_status, remark, corp_id, operator_id, delivery_address) "
-                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "calc_status, remark, corp_id, operator_id, "
+                + "community_id, community_name, detailed_address) "
+                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
         int batchCount = 0;
+        // 小区名称 → sys_community.id 匹配（匹配失败不阻断，name 照常落库）
+        resolveCommunityIds(p, corpId);
         // 会员兜底确保（confirm 事务内）：未匹配行 → 全局已有会员复用（uk_phone）→ 创建新会员；
         // 同文件同手机号只创建一次（映射复用）。创建失败整体回滚，不留孤儿会员。
         MemberEnsure ensure = ensureMembers(p.rows, corpId);
@@ -639,7 +644,7 @@ public class BusinessDataImportHandler implements ImportHandler {
                     ensure.createdMembers.size(), ensure.createdMembers);
             ir.setDefaultQtyCount((int) p.rows.stream()
                     .filter(r -> r.quantityDefaulted).count());
-            ir.setDeliveryAddressEmptyCount(emptyAddressCount(p));
+            ir.setDetailedAddressEmptyCount(emptyAddressCount(p));
             return ir;
         } finally {
             ps.close();
@@ -695,7 +700,48 @@ public class BusinessDataImportHandler implements ImportHandler {
         final List<String> createdMembers = new ArrayList<>(); // 新建会员清单（姓名 手机号，每会员一条）
     }
 
-    /** 绑定 28 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
+    /**
+     * 导入小区名称 → sys_community.id 匹配（同 corp、名称精确、去重批量查询）。
+     * 匹配失败不阻断导入：community_name 照常落库，community_id 留空，
+     * 后续可由人工或匹配逻辑回填（需求：历史/未匹配小区允许为空）。
+     */
+    private void resolveCommunityIds(Prepared p, Long corpId) {
+        if (corpId == null) return;
+        List<String> names = p.rows.stream()
+                .map(r -> r.communityName)
+                .filter(n -> n != null && !n.isEmpty())
+                .distinct()
+                .collect(Collectors.toList());
+        if (names.isEmpty()) return;
+        try {
+            String placeholders = names.stream().map(n -> "?").collect(Collectors.joining(","));
+            List<Object> params = new ArrayList<>();
+            params.add(corpId);
+            params.addAll(names);
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT id, community_name FROM ai_platform.sys_community "
+                            + "WHERE delete_flag = 0 AND corp_id = ? "
+                            + "AND community_name IN (" + placeholders + ")",
+                    params.toArray());
+            Map<String, Long> byName = new HashMap<>();
+            for (Map<String, Object> row : rows) {
+                Object name = row.get("community_name");
+                Object id = row.get("id");
+                if (name != null && id instanceof Number n) {
+                    byName.putIfAbsent(name.toString(), n.longValue());
+                }
+            }
+            for (ParsedRow pr : p.rows) {
+                if (pr.communityId == null && pr.communityName != null) {
+                    pr.communityId = byName.get(pr.communityName);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("导入小区名称匹配失败 corpId={}: {}", corpId, e.getMessage());
+        }
+    }
+
+    /** 绑定 30 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
     private void bindRow(PreparedStatement ps, ParsedRow pr, String batchNo, Long corpId)
             throws SQLException {
         int idx = 1;
@@ -733,8 +779,11 @@ public class BusinessDataImportHandler implements ImportHandler {
         ps.setString(idx++, pr.remark.isEmpty() ? null : pr.remark);
         ps.setLong(idx++, corpId);
         ps.setLong(idx++, corpId);
-        ps.setString(idx++, pr.deliveryAddress == null || pr.deliveryAddress.isEmpty()
-                ? null : pr.deliveryAddress);
+        ps.setObject(idx++, pr.communityId);
+        ps.setString(idx++, pr.communityName == null || pr.communityName.isEmpty()
+                ? null : pr.communityName);
+        ps.setString(idx++, pr.detailedAddress == null || pr.detailedAddress.isEmpty()
+                ? null : pr.detailedAddress);
     }
 
     /**
@@ -851,9 +900,11 @@ public class BusinessDataImportHandler implements ImportHandler {
     private static final int I_RATIO = 15;
     private static final int I_REMARK = 16;
     private static final int I_QUANTITY = 17;   // 销售数量（可选列：缺失/空默认 1）
-    // 独立槽位 19（可选列）：收货地址。模板在 S 列后备注列之后追加 T 列，
-    // 旧模板无该列时 idx=-1，val() 返回空，不阻断导入。
-    private static final int I_DELIVERY_ADDRESS = 19;
+    // 独立槽位 19/20（可选列）：详细地址 / 小区。模板 S 备注后为 T=小区、U=详细地址；
+    // 旧模板 T=收货地址，按表头名回落映射到详细地址。idx=-1 时 val() 返回空，不阻断导入。
+    // 槽位必须逐一唯一（历史事故：I_CUSTOMER_PHONE 与 I_QUANTITY 同为 17 致整文件拒收）。
+    private static final int I_DETAILED_ADDRESS = 19;
+    private static final int I_COMMUNITY = 20;
 
     /** 表头校验 + 定位各列下标；任一必填列缺失 → 错误并返回 null。 */
     private int[] headerIndices(String[] headers, List<String> errors) {
@@ -869,7 +920,7 @@ public class BusinessDataImportHandler implements ImportHandler {
             if (indexOf(headers, h) < 0) errors.add("缺少列: " + h);
         }
         if (!errors.isEmpty()) return null;
-        int[] idx = new int[20];
+        int[] idx = new int[21];
         idx[I_CUSTOMER] = indexOf(headers, "客户");
         idx[I_CUSTOMER_PHONE] = indexOf(headers, "客户手机");
         idx[I_CATEGORY] = indexOf(headers, "品类");
@@ -896,8 +947,14 @@ public class BusinessDataImportHandler implements ImportHandler {
         idx[I_RATIO] = indexOfExact(headers, "提成比例");
         // 备注为可选列：模板含该列时映射 remark，缺失时置空
         idx[I_REMARK] = indexOf(headers, "备注");
-        // 收货地址为可选列：新模板 T 列；旧模板缺失时 idx=-1，按空处理
-        idx[I_DELIVERY_ADDRESS] = indexOf(headers, "收货地址");
+        // 详细地址为可选列：新模板 U 列「详细地址」；旧模板 T 列「收货地址」向下兼容
+        idx[I_DETAILED_ADDRESS] = indexOfExact(headers, "详细地址");
+        if (idx[I_DETAILED_ADDRESS] < 0) {
+            idx[I_DETAILED_ADDRESS] = indexOfExact(headers, "收货地址");
+        }
+        // 小区为可选列：新模板 T 列；旧模板/存量文件无该列时 idx=-1，按空处理
+        idx[I_COMMUNITY] = indexOfExact(headers, "小区");
+        if (idx[I_COMMUNITY] < 0) idx[I_COMMUNITY] = indexOf(headers, "小区");
         return idx;
     }
 
@@ -970,9 +1027,11 @@ public class BusinessDataImportHandler implements ImportHandler {
         // 客户名称：自动创建会员的必要字段（real_name/nickname），必填
         if (pr.customer == null || pr.customer.isBlank())
             errors.add("第" + rowNum + "行：客户名称为空（自动创建会员需要客户名称）");
-        // 收货地址可选；列宽 500，超长拒绝该行（避免入库截断）
-        if (pr.deliveryAddress != null && pr.deliveryAddress.length() > 500)
-            errors.add("第" + rowNum + "行：收货地址不能超过500个字符");
+        // 小区/详细地址均可选（手工录入详细地址必填）；超列宽拒绝该行，避免入库截断
+        if (pr.communityName != null && pr.communityName.length() > 200)
+            errors.add("第" + rowNum + "行：小区名称不能超过200个字符");
+        if (pr.detailedAddress != null && pr.detailedAddress.length() > 500)
+            errors.add("第" + rowNum + "行：详细地址不能超过500个字符");
         // 销售数量：必须为正整数；空已在 parseRow 默认 1
         if (!pr.quantityRaw.isEmpty()
                 && (pr.saleQuantity == null || pr.saleQuantity <= 0))
@@ -1101,7 +1160,8 @@ public class BusinessDataImportHandler implements ImportHandler {
         pr.special = "是".equals(rawSpecial);
         pr.commissionRate = parseRatio(val(cols, idx[I_RATIO]));
         pr.remark = val(cols, idx[I_REMARK]);
-        pr.deliveryAddress = val(cols, idx[I_DELIVERY_ADDRESS]);
+        pr.communityName = val(cols, idx[I_COMMUNITY]);
+        pr.detailedAddress = val(cols, idx[I_DETAILED_ADDRESS]);
         return pr;
     }
 

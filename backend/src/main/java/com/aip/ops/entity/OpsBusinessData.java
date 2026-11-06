@@ -53,12 +53,22 @@ public class OpsBusinessData extends BaseEntity {
     private Long platformMemberId;
 
     /**
-     * 收货地址（小区名称 + 详细地址，空格拼接；选填）。
-     * 员工手工录入由服务端按 communityId + detailAddress 生成；
-     * Excel 导入直接取「收货地址」列；供应链出库打印按业务数据 ID 拉取。
+     * 小区ID（= ai_platform.sys_community.id；选填）。
+     * 员工手工录入按组织校验后写入；Excel 导入按小区名称匹配成功时回填。
      */
-    @TableField("delivery_address")
-    private String deliveryAddress;
+    @TableField("community_id")
+    private Long communityId;
+
+    /** 小区名称（冗余展示；导入/手工录入均写入，便于列表与出库打印直接展示）。 */
+    @TableField("community_name")
+    private String communityName;
+
+    /**
+     * 详细地址（楼栋/单元/门牌号；手工录入必填，导入选填）。
+     * 历史「收货地址」列整列迁移至此，原值可能含小区名称。
+     */
+    @TableField("detailed_address")
+    private String detailedAddress;
 
     @TableField("brand")
     private String brand;

@@ -866,13 +866,15 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     private static final String EXPORT_HEADER =
-            "批次\t公司\t客户\t收货地址\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例%\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t收据号\t备注\t是否特批\n";
+            "批次\t公司\t客户\t客户手机\t小区\t详细地址\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t收据号\t备注\t是否特批\n";
 
-    /** 单行 26 列 TSV 输出（与 EXPORT_HEADER 列序一致）；收款金额=库中 receipt_amount（空则 单价×数量 兜底） */
+    /** 单行 28 列 TSV 输出（与 EXPORT_HEADER 列序一致）；收款金额=库中 receipt_amount（空则 单价×数量 兜底） */
     private void appendExportRow(StringBuilder sb, OpsBusinessData d) {
         sb.append(fmt(d.getBatchNo())).append('\t')
           .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
-          .append(fmt(d.getDeliveryAddress())).append('\t')
+          .append(fmt(d.getCustomerPhone())).append('\t')
+          .append(fmt(d.getCommunityName())).append('\t')
+          .append(fmt(d.getDetailedAddress())).append('\t')
           .append(fmt(d.getDepartment())).append('\t')
           .append(fmt(d.getBrand())).append('\t').append(getCategoryDisplayName(d.getCategory())).append('\t')
           .append(fmt(d.getModel())).append('\t')
@@ -895,7 +897,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
           .append(fmt(d.getIsSpecial())).append('\n');
     }
 
-    private String fmt(Object o) { return o == null ? "" : String.valueOf(o); }
+    /** TSV 单值清洗：自由文本（地址/备注等）中的制表符/换行会把导出 XLSX 的行列撕开。 */
+    private String fmt(Object o) {
+        if (o == null) return "";
+        return String.valueOf(o).replace('\t', ' ').replace('\r', ' ').replace('\n', ' ');
+    }
 
     // ── 提成上报集团 & 品类提成汇总 ──
 
@@ -1188,8 +1194,19 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     @Override
     public int batchCheck(String batchNo) {
         if (batchNo == null || batchNo.isBlank()) throw BusinessException.of("批次号不能为空");
-        String sql = "UPDATE ops_business_data SET calc_status = '经办人已核对' WHERE batch_no = ? AND calc_status = '已计算'";
-        try (var conn = dataSource.getConnection(); var ps = conn.prepareStatement(sql)) {
+        // 控制器的 isOperatorOrSuperAdmin 是组织级判定；SQL 必须再按当前用户可见 corp 收紧，
+        // 否则运营商组织内任意用户可传他组织批次号（跨租户改状态）。
+        Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        StringBuilder sql = new StringBuilder(
+                "UPDATE ops_business_data SET calc_status = '经办人已核对' "
+                        + "WHERE batch_no = ? AND calc_status = '已计算' AND delete_flag = 0");
+        if (visibleIds != null) {
+            if (visibleIds.isEmpty()) throw BusinessException.forbidden("无权核对该批次");
+            String corpCsv = visibleIds.stream().map(String::valueOf)
+                    .collect(Collectors.joining(","));
+            sql.append(" AND corp_id IN (").append(corpCsv).append(")");
+        }
+        try (var conn = dataSource.getConnection(); var ps = conn.prepareStatement(sql.toString())) {
             ps.setString(1, batchNo);
             return ps.executeUpdate();
         } catch (Exception e) { throw new RuntimeException("核对失败", e); }
@@ -1204,7 +1221,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         // 员工自助核对只允许写本人 + 本组织的数据，避免任意批次号跨租户改状态
         String sql = "UPDATE ops_business_data SET calc_status = '经办人已核对' "
                 + "WHERE batch_no = ? AND corp_id = ? AND agent_phone = ? "
-                + "AND calc_status = '已计算'";
+                + "AND calc_status = '已计算' AND delete_flag = 0";
         try (var conn = dataSource.getConnection(); var ps = conn.prepareStatement(sql)) {
             ps.setString(1, batchNo);
             ps.setLong(2, corpId);

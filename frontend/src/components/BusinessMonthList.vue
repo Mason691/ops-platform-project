@@ -22,7 +22,8 @@
               <text v-if="d.customer" class="detail-customer"> · 客户: {{ d.customer }}</text>
             </text>
             <text class="detail-date">{{ d.saleDate || '-' }}</text>
-            <text v-if="d.deliveryAddress" class="detail-address">收货地址: {{ d.deliveryAddress }}</text>
+            <text v-if="d.communityName" class="detail-address">小区: {{ d.communityName }}</text>
+            <text v-if="d.detailedAddress" class="detail-address">详细地址: {{ d.detailedAddress }}</text>
             <text v-if="d.voucherUrl" class="detail-voucher"
                   @click.stop="previewVoucher(d.voucherUrl)">🧾 查看凭证</text>
           </view>

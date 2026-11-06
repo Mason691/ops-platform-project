@@ -96,15 +96,18 @@ public class BusinessDataExportHandler implements ExportHandler {
         // 写 TSV
         try (BufferedWriter writer = new BufferedWriter(
                 new OutputStreamWriter(out, StandardCharsets.UTF_8))) {
-            writer.write("公司\t批次号\t客户\t收货地址\t部门\t经办人\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t销售日期\t收据号\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t返利比例\t返利金额\t状态\t备注\t是否特批\n");
+            writer.write("公司\t批次号\t客户\t客户手机\t小区\t详细地址\t部门\t经办人\t经办人手机号\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t销售日期\t收据号\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t提成比例\t提成金额\t状态\t备注\t是否特批\n");
             for (OpsBusinessData row : rows) {
                 writer.write(String.join("\t",
                         nvl(row.getCompany()),
                         nvl(row.getBatchNo()),
                         nvl(row.getCustomer()),
-                        nvl(row.getDeliveryAddress()),
+                        nvl(row.getCustomerPhone()),
+                        nvl(row.getCommunityName()),
+                        nvl(row.getDetailedAddress()),
                         nvl(row.getDepartment()),
                         nvl(row.getAgent()),
+                        nvl(row.getAgentPhone()),
                         nvl(row.getBrand()),
                         nvl(BusinessDataServiceImpl.getCategoryDisplayName(row.getCategory())),
                         nvl(row.getModel()),
@@ -133,5 +136,9 @@ public class BusinessDataExportHandler implements ExportHandler {
         }
     }
 
-    private static String nvl(String s) { return s == null ? "" : s; }
+    /** TSV 单值清洗：自由文本（地址/备注等）中的制表符/换行会把导出 XLSX 的行列撕开。 */
+    private static String nvl(String s) {
+        if (s == null) return "";
+        return s.replace('\t', ' ').replace('\r', ' ').replace('\n', ' ');
+    }
 }
