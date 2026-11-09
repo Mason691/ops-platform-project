@@ -127,14 +127,15 @@ ops-platform-project/
 │   │   ├── controller/      # 29 controllers（见下方）
 │   │   ├── entity/          # 36 entities（31 个继承 SDK BaseEntity；5 个例外见「已知陷阱」；含 MerchantMiniappConfig, OperatorMerchant, OpsBusinessModelAlias）
 │   │   ├── mapper/          # 37 MyBatis-Plus mappers（含 OpsBusinessDataEmployeeMapper 员工业务数据专用）
-│   │   ├── service/         # 18 service interfaces + 10 standalone services + 18 impls
+│   │   ├── service/         # 31 service interfaces（含 DataScopeService/OrgRoleService/FinancePermissionService 等独立服务）+ 20 impls
 │   │   ├── aspect/          # AOP 切面（OperationLogAspect）
-│   │   ├── client/          # 子系统间 HTTP 客户端（MemberSyncClient, ProductBatchClient）
+│   │   ├── client/          # 子系统间 HTTP 客户端（MemberSyncClient, ProductBatchClient, ScmBaseDataClient）
 │   │   ├── agent/           # AI DomainAgent（OpsAgent.java）
 │   │   ├── tool/            # MCP 工具（OpsOrderQueryTool, OpsEmployeeBusinessDataTool）
 │   │   ├── export/          # 通用异步导出策略（ExportHandler 接口 + 策略模式）
 │   │   ├── imports/         # 通用异步导入策略（ImportHandler 接口 + 策略模式：BusinessDataImportHandler, GasUserImportHandler, MemberConvertHandler, GasStovesImportHandler）
 │   │   ├── kafka/           # Kafka — 4 consumers, 1 producer, 3 message DTOs（条件加载）
+│   │   ├── security/        # JwtTokenInspector（读 token_type，员工接口拒绝 sso 会员令牌）
 │   │   ├── scheduler/        # 定时任务（BattleMapEtlBootstrap, BattleMapEtlScheduler）
 │   │   ├── dto/             # 数据传输对象
 │   │   └── util/            # 工具类（ImageUrlUtil, AesUtils, AmapGeocodeUtil 等）
@@ -142,10 +143,10 @@ ops-platform-project/
 ├── frontend/
 │   ├── src/main.js          # uni-app 入口
 │   ├── src/manifest.json    # uni-app 配置（H5 base 路径等）
-│   ├── src/pages/           # uni-app 页面（29 个路由，含 Tab/C 端/员工/管理）
-│   ├── src/components/      # 跨页面复用组件（ImageCropperModal, LiveStatusCard, EmployeeTabBar, Pager）
-│   ├── src/api/index.js     # 集中 API 注册（约 150 方法）
-│   ├── src/utils/           # request.js, image.js, jssdk.js, auth-bridge.js
+│   ├── src/pages/           # uni-app 页面（30 个路由，含 Tab/C 端/员工/管理）
+│   ├── src/components/      # 跨页面复用组件（ImageCropperModal, LiveStatusCard, EmployeeTabBar, Pager, Business* 手工录入表单组）
+│   ├── src/api/index.js     # 集中 API 注册（151 方法）
+│   ├── src/utils/           # request.js, image.js, jssdk.js, auth-bridge.js, businessForm.js
 │   ├── src/config.js        # BASE_URL + DEFAULT_CORP_ID
 │   ├── src/static/          # 静态资源（jweixin-1.6.0.js 等）
 │   ├── index.html           # 入口 HTML（含内联微信 JSSDK 初始化脚本）
@@ -176,7 +177,7 @@ ops-platform-project/
 | **管理后台** | | |
 | `AdminController` | `/api/ops/admin` | 活动/商品/直播室 CRUD、预约查询、首页统计、商家绑定 |
 | `AdminStationController` | `/api/ops/admin/station` | 站长审批/列表/统计 |
-| `BusinessDataController` | `/api/ops/admin/business-data` | 增值业务：两段式异步导入/提成计算/销售统计/异步导出/品类提成汇总/模板下载/状态流转 + 经办人核对 + 重新匹配会员/按批次重匹配——详见下方「增值业务数据」节 |
+| `BusinessDataController` | `/api/ops/admin/business-data` | 增值业务：两段式异步导入/提成计算/销售统计/异步导出/品类提成汇总/模板下载/状态流转 + 经办人核对 + **财务核对** + 重新匹配会员/按批次重匹配——详见下方「增值业务数据」节 |
 | `CommissionRuleController` | `/api/ops/admin/commission` | 个人/公司提成规则 CRUD（支持组织层级继承） |
 | `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD + 列表按品类/品牌/型号(like)/状态筛选；2026-10-15 整表清空后重建为 95 个型号（万和15/万家乐21/美的18/小松鼠41，id 144-238，`sql/ops_value_added_product_import_20261015*.sql`），同日补入万和壁挂炉 32 个型号（id 239-270，`sql/ops_value_added_product_import_20261015_wanhe_wallboiler.sql`），现共 127 个型号 |
 | `MemberController` | `/api/ops/admin/members` | 会员管理：分页查询/详情/启用禁用 |
@@ -193,7 +194,7 @@ ops-platform-project/
 | `CategoryLifecycleRuleController` | `/api/ops/admin/category-lifecycle-rules` | **品类使用年限规则**：CRUD + 品类下拉选项 + 按品类查询 |
 | **员工通道** | | |
 | `EmployeeAuthController` | `/api/ops/auth/employee` | **员工** 登录（手机号+密码+验证码），独立于会员认证 |
-| `EmployeeController` | `/api/ops/employee` | 员工身份校验 + 个人业务数据查询 + 头像上传 |
+| `EmployeeController` | `/api/ops/employee` | 员工身份校验 + 个人业务数据查询 + **手工新增业务数据**（表单选项/会员查询/批次/凭证）+ 头像上传 |
 | `EmployeeAiController` | `/api/ops/ai/employee` | **员工** AI 助手（chat + async + SSE stream + config + profile + report） |
 | **会员通道** | | |
 | `AiChatProxyController` | `/api/ops/ai` | **会员** AI 客服代理（chat + voice + config + profile + member personalization + skills） |
@@ -204,7 +205,7 @@ ops-platform-project/
 
 ### 增值业务数据（Business Data）
 
-`ops_business_data` 表 2026-09-03 起字段结构：`receipt_date` 展示名改为**市场收款日期**（字段名保留 varchar(50)），其后新增 `finance_receipt_date`（DATE 财务收款日期，可空）与 `fund_dynamic_rows`（INT 资金动态表横排数，可空）。迁移脚本 `sql/migrate_business_data_finance_fields.sql`（已执行）。2026-10-16 再增 `customer_phone`（存量行 NULL）+ `platform_member_id`（= `ai_platform.sys_member.id`），迁移 `sql/migrate_business_data_platform_member.sql`（**必须先于新 JAR 执行**）。2026-10-20 再增 `sale_quantity` INT（销售数量）+ 2026-10-21 增 `receipt_amount`（收款金额=销售单价×数量，导入时系统计算写入）；存量已回填 `receipt_amount=sale_price`。同日全平台废除 sys_member.member_id（M号 DROP），统一标识=memberDbId（sys_member.id），MemberConvertHandler 改 GeneratedKeyHolder。2026-11-06 地址字段拆分：`delivery_address` 整列重命名为 `detailed_address` VARCHAR(500)（详细地址/楼栋门牌），并在其前新增 `community_id` BIGINT + `community_name` VARCHAR(200)（小区，关联 `ai_platform.sys_community`），物理顺序 `customer_phone → community_id → community_name → detailed_address`；存量原值保留在详细地址、小区两列为空。迁移 `sql/migrate_business_data_community_detail_address.sql`（**必须先于新 ops/SCM JAR 执行；列重命名后旧 JAR 不可用，须同一发布窗口切换**）。
+`ops_business_data` 表 2026-09-03 起字段结构：`receipt_date` 展示名改为**市场收款日期**（字段名保留 varchar(50)），其后新增 `finance_receipt_date`（DATE 财务收款日期，可空）与 `fund_dynamic_rows`（INT 资金动态表横排数，可空）。迁移脚本 `sql/migrate_business_data_finance_fields.sql`（已执行）。2026-10-16 再增 `customer_phone`（存量行 NULL）+ `platform_member_id`（= `ai_platform.sys_member.id`），迁移 `sql/migrate_business_data_platform_member.sql`（**必须先于新 JAR 执行**）。2026-10-20 再增 `sale_quantity` INT（销售数量）+ 2026-10-21 增 `receipt_amount`（收款金额=销售单价×数量，导入时系统计算写入）；存量已回填 `receipt_amount=sale_price`。同日全平台废除 sys_member.member_id（M号 DROP），统一标识=memberDbId（sys_member.id），MemberConvertHandler 改 GeneratedKeyHolder。2026-11-03 增 `is_received` VARCHAR(2)（是否收款）+ `voucher_url` VARCHAR(1000)（收款凭证，最多 3 张英文逗号分隔），迁移 `sql/migrate_business_data_receipt_voucher.sql`（含批次流水表 `ops_batch_sequence`）；2026-11-06 增 `finance_check_user_id` BIGINT + `finance_check_user_name` VARCHAR(50) + `finance_check_time` DATETIME（非空=已核对）+ 索引 `idx_corp_receipt (corp_id, receipt_no)`，迁移 `sql/migrate_business_data_finance_check.sql`。以上两份迁移均**必须先于新 JAR 执行**。2026-11-06 地址字段拆分：`delivery_address` 整列重命名为 `detailed_address` VARCHAR(500)（详细地址/楼栋门牌），并在其前新增 `community_id` BIGINT + `community_name` VARCHAR(200)（小区，关联 `ai_platform.sys_community`），物理顺序 `customer_phone → community_id → community_name → detailed_address`；存量原值保留在详细地址、小区两列为空。迁移 `sql/migrate_business_data_community_detail_address.sql`（**必须先于新 ops/SCM JAR 执行；列重命名后旧 JAR 不可用，须同一发布窗口切换**）。
 
 - **导入（两段式全异步，2026-09-20 起）**：`POST /import/check`（multipart 上传→落盘 `{app.import.upload-dir}` UUID 文件→建 `sys_import_task`（`business_data_check`）→提交 `AsyncImportSupport.importExecutor`（2~4 线程+队列100+AbortPolicy）→立即返回 taskId；工作线程重建 SecurityContext 后解析+校验+匹配，结果 JSON 写 progress_msg）→ 前端 2s 轮询 `GET /import/{taskId}/status`（DONE 时 `result`=业务结果 JSON）→ `POST /import/confirm`（`checkTaskId`+`confirmations`，**复用落盘文件不二次上传**——合伙人慢上行链路只传一次；校验任务类型/状态/归属/文件在盘→并发互斥（PENDING/PROCESSING 计数+confirmLock）→建 `business_data_confirm` 任务→立即返回 taskId→轮询）。**启动清扫** `sweepInterruptedTasks`：遗留 PENDING/PROCESSING 标 FAILED。**租户上下文**：`withSecurityContext` 用任务记录重建 LoginUser（否则 TenantLineHandler 跳过滤→跨租户泄漏）。**事务边界**：`BusinessDataImportHandler.confirm()` `@Transactional` 保证全量或全不（异步线程无外层事务）；worker markDone/markFailed 独立提交；完成后删暂存文件（重试=重新上传）。confirm 缺 `checkTaskId`/`confirmations` 手动校验返回「请刷新页面后重新导入」。`progress_msg` 已扩 MEDIUMTEXT。旧 `/import`、`/import/submit` 已删除，Kafka 兜底 `execute()`=零决策 confirm（不用本线程池）。
 - **⚠️ 改导入代码必查（三起生产事故教训）**：①索引槽位常量必须逐一唯一——`I_QUANTITY=17` 与 `I_CUSTOMER_PHONE=17` 同槽位曾致客户手机误读销售数量列、全行拒收，且解析层核查未走端到端 check 结论失真；②INSERT 列清单与 VALUES `?` 占位符数量必须同步核对——27 列仅 26 个 `?` 曾致 check 全绿、confirm 参数越界；③`parseExcelWithPython` 输出经 `redirectErrorStream(true)` 合并管道——stderr 无缓冲（openpyxl 对日期格式超界序列号告警在加载期立刻写入管道）先于块缓冲的 stdout 数据行，**警告行置顶被当表头 → 假「缺少列×12」**（2026-10-30 临洮7-9.xlsx 事故，文件 541~543 行收据号以日期格式存 6993741）。脚本头部已 `warnings.filterwarnings('ignore')` + 非零退出抛「python3 退出码」明确错误。改 `BusinessDataImportHandler` 后验收必须走到 confirm/INSERT 落库，不能止于 check。
@@ -212,7 +213,9 @@ ops-platform-project/
 - **必填列（12 个，缺列拒；"销售价"旧名兼容）**：客户/客户手机/品类/品牌/型号/销售单价/公司/经办人/经办人手机号/市场收款日期/财务收款日期/资金动态表横排数。**销售数量**可选列（数据区预填 1；空默认 1；非正整数拒行）；`receipt_amount`=单价×数量系统计算（模板无此列）。**客户手机**必填 + 11 位大陆手机号（格式错拒行）；**客户**行值必填（建会员需姓名）。**会员归属（2026-10-19 起，`GasMemberMatcher`）**：corp→`sys_corp.gas_company_id` 限燃气公司范围，在 `ops_gas_user`（sb_gas_user 镜像）按 客户手机→客户名称 匹配取 platform_member_id（手机优先；同号取有会员者+最小 id；无 gas_company_id 回退全域）；均未命中→全局 uk_phone 复用→**自动建 sys_member**（phone/nickname/real_name/status=1/remark=业务数据导入自动创建/corp_id=导入组织；confirm 事务内同文件同手机只建一次，已删会员占号回滚）。**按批次重匹配** `POST /rematch-by-batch`：批次内 NULL 行按 全局手机→公司(corp)+姓名→创建 三级回填（已上报行跳过，幂等）。市场收款日期**必填**；财务收款日期可空但格式错拒行（连带整文件）；横排数可空允许文字（纯整数/`12.0`/文字中首个整数，全角数字 NFKC 归一化，无数字落库空）。日期解析 `normalizeDate`（销售/市场/财务共用）：点分 `2026.1.2`、斜杠、**区间取首日**（分隔符 `-`/`~`/`—`/`至`）、全角。多 sheet 按「前 10 行含必填列名最多」自动选 sheet + 定位表头行。
 - **模板**：`GET /template` 优先读 `app.import.template-path`（默认 `/home/jason/1.xlsx`；生产 volume 挂载 `/app/templates/1.xlsx` + `APP_IMPORT_TEMPLATE_PATH` 环境变量），缺失回退 classpath `templates/business_data_template.xlsx`；文件名固定 **增值业务数据模板.xlsx**。源文件 `/home/jason/1.xlsx`（12 sheet，21 列表头：收据号 客户 客户手机 品类 品牌 型号 销售单价 销售数量 公司 部门 经办人 经办人手机号 是否特批 提成比例 销售日期 市场收款日期 财务收款日期 资金动态表横排数 备注 **小区 详细地址**）。**修改必须手术式 XML 补丁**——openpyxl 重存会丢其它 sheet 图片（11 个 drawing）；补丁脚本 `sql/patch_business_data_template_community_detail_address.py`（仅改「业务数据」sheet10：T 列「收货地址」→「小区」，追加 U 列「详细地址」；旧模板 T 列「收货地址」导入时按表头名兼容映射）。本机与 classpath 模板已更新（md5 8ffbb490…，T=小区 U=详细地址，销售数量列预填 1），host 备份 `1.xlsx.bak-20261106-split`（拆分前）与 `1.xlsx.bak-20261106`（加地址列前）；生产 `/app/templates/1.xlsx` 待发布时同步（部署顺序：迁移 → 模板 → ops 后端 → SCM 后端 → 前端）。
 - **部门/备注字段**：`department VARCHAR(100)`（迁移 `sql/migrate_business_data_department.sql` 已执行，存量 remark「部门: X」前缀回填并清空）。Excel 部门列→department、备注列→remark 直接映射（旧前缀 hack 已删除）；无备注列旧文件兼容（列索引 -1 守卫）。
-- **导出**：异步/同步两路径表头统一 23 列：公司 批次号 客户 **部门** 经办人 品牌 品类 型号 **销售单价 销售数量 收款金额** 零售底价 集团最低价 销售日期 收据号 市场收款日期 财务收款日期 资金动态表横排数 返利比例 返利金额 状态 **备注 是否特批**。筛选含 品牌/型号/市场收款日期起止（请求体 brand/model/receiptDateStart/receiptDateEnd → filters JSON → ExportHandler qw.eq/ge/le；列表 countFiltered/aggregateStats/categoryStats 三个注解 SQL 同步 `<if>` 条件，`receipt_date` 全量 ISO 可直接字符串区间比较）。**Kafka 降级已修复**：`syncExportFallback` 调 `service.exportExcel(...)`（写文件版，支持全部 8 筛选）落盘 `{upload.base-dir}/exports/` 后 `markDone(真实路径, Files.size)`。行序按**收据号分组相邻**（`sortByReceiptNo`：空沉底、组内 id 升序）。收款金额默认=销售价；同订单拆分多行（收据号+客户相同、多经办人）仅首行显示（`computeSplitOrderNonFirstIds`）。底价存量空值行导出时**关键字兜底匹配**（品牌+品类相同+归一化型号包含关键字、唯一命中才填充、歧义留空、仅内存不写库，`fillExportPrices/matchProductExactOrKeyword`）。品类 `qimi`=气密性检测（静态兜底字典）。
+- **导出**：异步/同步两路径表头统一 28 列（两侧列序略有差异）：公司 批次号 客户 **客户手机 小区 详细地址** 部门 经办人 **经办人手机号** 品牌 品类 型号 **销售单价 销售数量 收款金额** 零售底价 集团最低价 销售日期 收据号 市场收款日期 财务收款日期 资金动态表横排数 **是否收款** 提成比例 提成金额 状态 **备注 是否特批**。表头覆盖导入 12 个必填列，导出文件可直接回导；TSV 写出时清洗自由文本中的制表符/换行（防地址 Alt+Enter 撕裂 XLSX 行）。筛选含 品牌/型号/市场收款日期起止（请求体 brand/model/receiptDateStart/receiptDateEnd → filters JSON → ExportHandler qw.eq/ge/le；列表 countFiltered/aggregateStats/categoryStats 三个注解 SQL 同步 `<if>` 条件，`receipt_date` 全量 ISO 可直接字符串区间比较）。**Kafka 降级已修复**：`syncExportFallback` 调 `service.exportExcel(...)`（写文件版，支持全部 8 筛选）落盘 `{upload.base-dir}/exports/` 后 `markDone(真实路径, Files.size)`。行序按**收据号分组相邻**（`sortByReceiptNo`：空沉底、组内 id 升序）。收款金额默认=销售价；同订单拆分多行（收据号+客户相同、多经办人）仅首行显示（`computeSplitOrderNonFirstIds`）。底价存量空值行导出时**关键字兜底匹配**（品牌+品类相同+归一化型号包含关键字、唯一命中才填充、歧义留空、仅内存不写库，`fillExportPrices/matchProductExactOrKeyword`）。品类 `qimi`=气密性检测（静态兜底字典）。
+- **员工手工新增（2026-11-03，公众号 H5）**：员工工作台「＋ 新增业务」→ `pages/employee/business-data-new.vue`，接口 `GET/POST /api/ops/employee/business-data/manual*`（options / member / 保存）。**鉴权**：仅员工 JWT——`JwtTokenInspector` 校验签名并拒绝 `token_type=sso` 的会员令牌（防会员 SSO 的 `sub=sys_member.id` 与 `sys_user.id` 撞号越权）；`corpId/agent/agentPhone` 全部服务端从 JWT 派生，前端传值忽略，`corpId<=0` 拒绝。**批次**：下拉仅列当前 corp 下不含「已上报集团」行的批次（LIMIT 200），保存时二次校验归属；新建批次 `{公司简称}-{yyyyMMdd}-{3位流水号}`，`ops_batch_sequence(corp_id, seq_date, last_seq)` 唯一键 + `INSERT ... ON DUPLICATE KEY UPDATE` 原子取号（禁止 SELECT MAX+1，事务内回滚不烧号）。**产品**：`ScmBaseDataClient` 携员工 JWT 调 scm-mehome-service 品牌/品类/型号接口（按 corp 缓存 5 分钟），保存时校验 品牌+品类+型号 精确命中 SCM 商品资料；SCM 不可达返回 `productError` 禁止提交、无本地兜底；品类显示名与 `PRODUCT_CATEGORY` 字典 `itemValue` 取交集，**落库仍为 itemKey**。**客户/会员**：手机号 11 位（NFKC 归一化），「查询」回填会员姓名；保存时 `GasMemberMatcher.findMemberIdByPhone` 全局匹配，未命中自动建会员（与 INSERT 同事务）。**字段**：`receipt_amount=单价×数量` 服务端重算、`sale_date=市场收款日期`、`finance_receipt_date=NULL`、`calc_status='未计算'`、非特批 `commission_rate=0`；凭证 `voucher_url` 最多 3 张（H5 canvas ≤1600px/JPEG 0.82 压缩后走 `/api/ops/files/upload`）。**事务**：HTTP/SCM 校验在事务外，`TransactionTemplate` 只包取号/行锁/建会员/INSERT（防 Hikari 连接被外部 HTTP 占用）。员工核对走 `batchCheckOwned(corpId, agentPhone)`（带 corp 条件）。
+- **财务核对（2026-11-06）**：`PUT /api/ops/admin/business-data/{id}/finance-check` 只允许改四项——收据号（必填 ≤50 字，同 corp 内仅同一客户的多行可共用，被其他客户占用即拦截）、财务收款日期（必填，不得早于市场收款日期）、资金动态表横排数（可空，≥0 整数）、是否收款（是/否）；核对人/核对时间由服务端从 JWT 派生。**权限** `FinancePermissionService`（fail-closed）：超管（corp=0）直接放行；corp 角色名含「财务」任意组织可用；运营商管理员需 `sys_user.is_admin=1` 或当前 corp 角色名含「管理员」；平台不可达/`orgRoleId` 缺失一律拒绝。已上报集团行锁定（后端拒绝 + 前端按钮置灰，`/api/ops/admin/permission/profile` 返回 `canFinanceCheck`）。`PUT /batch/check`（经办人核对）限运营商/超管，SQL 带 `corp_id IN (可见范围)` + `delete_flag=0`。
 - **宽松历史导入（SQL 三件套，绕开 Excel 上传链路）**：2023~2025 各公司历史台账 15 批次共 5,324 条（另德保2025 33 条仅 SQL 无报告）经 `sql/gen_{company}{year}_import.py` 生成器入库：xlrd 读 .xls → 按公司定制解析（29~48 列、双/三/四收款组、月度台账、品牌跨行合并、中文量词拆分、占位空行剔除）→ `docker exec mysql` 直查生产 `ops_gas_user` **燃气用户查号**（无电话行按姓名匹配补回手机）+ 会员匹配/创建（phone→uk_phone 复用→建 `ai_platform.sys_member`）→ 产出 `sql/ops_business_data_import_{company}{year}.sql`（会员 INSERT + 业务数据 INSERT 含 platform_member_id，batch_no=`{公司}{年}-001`）与 `sql/{company}{year}_import_report.md`（源数据行/生成记录数/新建会员清单/提示警告/口径说明）。三件套入库存档供复盘，每批「0 未关联会员、0 空数量」为验收基线。member 表 INSERT 与业务行 INSERT 同文件但**跨库**（sys_member 在 ai_platform、业务表在 mall_db，SQL 首行 USE mall_db 后全限定名写会员表）。
 - 列表 API 直接返回实体，新增字段自动序列化给前端展示。
 
@@ -528,7 +531,7 @@ Controller → Service.createTask() → DB 记录
 - **无 Vue Router**：uni-app 文件路由（`pages.json`），`uni.navigateTo()` + URL 参数
 - **iframe SSO**：`auth-bridge.js` 监听 `postMessage`（`AIP_AUTH` / `AIP_NAVIGATE`），信任同源和 `boss.jdzn99.com`
 - **公众号深链**：`App.vue` 支持 `?route=pages/employee/login` 与 `?from=employee` 查询参数跳转（公众号菜单不支持 hash）
-- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（约 166 个方法），统一使用 `request` 实例
+- **API 集中管理**：`frontend/src/api/index.js` 导出 `api` 对象（151 个方法），统一使用 `request` 实例
 - **H5 hash 路由**：base 由构建时 `VITE_BASE` 环境变量控制
 
 ### 前端页面路由（pages.json）
@@ -546,7 +549,7 @@ Controller → Service.createTask() → DB 记录
 管理页面（已注册，不在 Tab 中）：`pages/admin/commission-rules`, `pages/admin/gas-user`, `pages/admin/annual-plan`, `pages/admin/live-room-manage`  
 管理页面（文件存在，未注册到 pages.json，由平台主站 componentMap 加载）：`pages/admin/activity-form`, `pages/admin/home-config`, `pages/admin/business-data`, `pages/admin/members`  
 站长页面：`pages/station/apply`, `pages/station/center`  
-员工页面（已注册）：`pages/employee/login`、`pages/employee/ai-chat`（AI 助手 H5）、`pages/employee/dashboard`、`pages/employee/business-data`、`pages/employee/profile`  
+员工页面（已注册）：`pages/employee/login`、`pages/employee/ai-chat`（AI 助手 H5）、`pages/employee/dashboard`、`pages/employee/business-data`、`pages/employee/business-data-new`（手工新增业务）、`pages/employee/profile`  
 员工页面（未注册）：`pages/employee/company-select`（见陷阱表）
 
 ### 关键前端组件
@@ -554,6 +557,7 @@ Controller → Service.createTask() → DB 记录
 | 组件 | 文件 | 说明 |
 |------|------|------|
 | `EmployeeTabBar` | `components/EmployeeTabBar.vue` | 员工端底部导航栏（AI助手/业务数据/我的） |
+| `BusinessEntryForm` / `BusinessProductForm` / `BusinessReceiptForm` / `BusinessVoucherUploader` / `BusinessMonthList` | `components/Business*.vue` | 员工手工新增业务表单组：客户+小区/详细地址、品类→品牌→型号联动、收款金额实时计算、特批/收款开关、凭证压缩上传与预览、月度明细；校验逻辑共用 `utils/businessForm.js` |
 | `ImageCropperModal` | `components/ImageCropperModal.vue` | 图片裁剪上传弹窗，uni-app `<image>` 的 `mode` 裁剪封装 |
 | `LiveStatusCard` | `components/LiveStatusCard.vue` | 直播状态卡片（预告/直播中/结束 + 开播倒计时） |
 | `Pager` | `components/Pager.vue` | 通用分页器，配合列表页使用 |
@@ -588,6 +592,7 @@ Controller → Service.createTask() → DB 记录
 | `spring.servlet.multipart.max-file-size` | 上传文件大小限制 | `50MB` |
 | `spring.servlet.multipart.max-request-size` | 上传请求大小限制 | `50MB` |
 | `mall-service.base-url` | mall 子系统地址 | `http://localhost:8083` |
+| `scm-service.base-url` | 供应链基础资料服务（员工手工新增的品牌/品类/型号下拉与保存校验） | `http://localhost:8084`（生产同 host 网络，可由 `SCM_SERVICE_BASE_URL` 覆盖） |
 | `app.upload.base-dir` | 上传根目录 | `/app/uploads`（Docker） |
 | `app.import.upload-dir` | 异步导入文件暂存目录 | `${user.home}/data/imports`（Docker 环境变量覆盖） |
 | `app.resource.base-url` | 静态资源域名 | `https://boss.jdzn99.com` |
@@ -690,7 +695,7 @@ cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/op
 | **AiChatProxyController vs EmployeeAiController** | 会员和员工是两个独立 AI 通道，勿混用。员工通道自动注入员工身份上下文 |
 | **SseEmitterManager** | SSE 连接持有限时（默认 120s），超时自动关闭。前端需处理重连 |
 | **CaptchaService 单实例** | 验证码存储在内存 `ConcurrentHashMap` 中，仅适用于单实例部署。多实例需替换为 Redis |
-| **双 Token 隔离** | 会员 token（`ops_token`）和员工 token（`ops_employee_token`）是独立的存储 key。`request.js` 按优先级发送（会员优先），但两个 token 不能混用——员工 token 不能访问会员接口，反之亦然；401 时清除两者 |
+| **双 Token 隔离** | 会员 token（`ops_token`）和员工 token（`ops_employee_token`）是独立的存储 key。`request.js` 按 `token_type`（employee/member）选择发送哪个，未标记时员工优先；两个 token 不能混用——员工 token 不能访问会员接口，反之亦然；401 时清除两者。员工手工录入等敏感接口另用 `JwtTokenInspector` 拒绝 `token_type=sso` 的会员令牌（会员 `sub=sys_member.id` 可能与 `sys_user.id` 撞号越权） |
 | **ops-platform vs 平台主站** | 两套前端详见「生产部署 → 前端部署目标」。主站 `/ops/xxx` 是 `componentMap` 直接加载 Vue 组件（非微前端），改 H5 不影响主站 |
 | **Kafka 消费者组冲突** | 同一 group 内分区独占。多容器共享 `ai-platform-group` 时旧容器抢分区但连错库 → 任务僵死 PENDING、新容器收不到消息。**部署新容器前必须 `docker stop/rm` 旧容器**，部署后 `docker ps` 确认无残留 |
 | **旧容器/代码不留存** | **铁律**：新容器部署后旧容器必须立即清理（`docker stop + rm`）。旧代码、旧容器、旧配置不留存——git history 可随时恢复 |
@@ -715,7 +720,7 @@ cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/op
 
 ---
 
-最后更新：2026-10-30 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
+最后更新：2026-11-09 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
 
 ### 自定义 Claude 命令
 
