@@ -8,6 +8,7 @@ import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.FinancePermissionService;
 import com.aip.sdk.exception.BusinessException;
 import com.aip.sdk.security.SecurityUtils;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +19,8 @@ import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,19 +65,49 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
         OpsBusinessData row = businessDataMapper.selectById(id);
         if (row == null) throw BusinessException.notFound("业务数据不存在");
         assertScope(row);
-        if (REPORTED_STATUS.equals(row.getCalcStatus())) {
-            throw BusinessException.of("已上报集团的数据已锁定，不能财务核对");
+        // 财务核对为业务级字段：同一订单/业务组的所有明细必须一起核对，
+        // 避免部分明细已核对、部分未核对的状态混乱
+        List<OpsBusinessData> group = loadFinanceGroup(row);
+        for (OpsBusinessData item : group) {
+            if (REPORTED_STATUS.equals(item.getCalcStatus())) {
+                throw BusinessException.of("该订单包含已上报集团数据，不能财务核对");
+            }
         }
+        List<Long> groupIds = group.stream().map(OpsBusinessData::getId).toList();
 
-        ValidatedFinance v = validate(request, row);
+        ValidatedFinance v = validate(request, row, groupIds);
         Long userId = SecurityUtils.getCurrentUserId();
         String userName = resolveUserName(userId);
         LocalDateTime now = LocalDateTime.now();
-        int updated = updateFinance(id, v, userId, userName, now);
-        if (updated == 0) {
-            throw BusinessException.of("数据已上报集团或状态已变更，请刷新后重试");
+        int updated = updateFinance(groupIds, v, userId, userName, now);
+        if (updated != groupIds.size()) {
+            throw BusinessException.of("订单内部分数据已上报集团或状态已变更，请刷新后重试");
         }
         return result(id, v, userId, userName, now);
+    }
+
+    /** 同一订单编号（优先）、业务组号或收据号+客户下的全部明细；无组键时仅当前行。 */
+    private List<OpsBusinessData> loadFinanceGroup(OpsBusinessData row) {
+        String orderNo = str(row.getOrderNo());
+        String groupNo = str(row.getBusinessGroupNo());
+        String receiptNo = str(row.getReceiptNo());
+        if (orderNo.isEmpty() && groupNo.isEmpty() && receiptNo.isEmpty()) {
+            return List.of(row);
+        }
+        LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
+        qw.eq(OpsBusinessData::getCorpId, row.getCorpId())
+                .eq(OpsBusinessData::getDeleteFlag, 0);
+        if (!orderNo.isEmpty()) {
+            qw.eq(OpsBusinessData::getOrderNo, orderNo);
+        } else if (!groupNo.isEmpty()) {
+            qw.eq(OpsBusinessData::getBusinessGroupNo, groupNo);
+        } else {
+            // 历史导入同收据号多经办人拆分行：按收据号+客户视为同一订单
+            qw.eq(OpsBusinessData::getReceiptNo, receiptNo)
+                    .eq(OpsBusinessData::getCustomer, row.getCustomer());
+        }
+        List<OpsBusinessData> rows = businessDataMapper.selectList(qw);
+        return rows.isEmpty() ? List.of(row) : rows;
     }
 
     private void assertScope(OpsBusinessData row) {
@@ -85,7 +118,8 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
         }
     }
 
-    private ValidatedFinance validate(FinanceCheckRequest req, OpsBusinessData row) {
+    private ValidatedFinance validate(FinanceCheckRequest req, OpsBusinessData row,
+                                      List<Long> groupIds) {
         if (req == null) throw BusinessException.of("请求参数不能为空");
         String receiptNo = str(req.getReceiptNo());
         if (receiptNo.isEmpty()) throw BusinessException.of("收据号不能为空");
@@ -102,21 +136,27 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
         if (!"是".equals(isReceived) && !"否".equals(isReceived)) {
             throw BusinessException.of("请选择是否收款");
         }
-        assertReceiptNoUnique(receiptNo, row);
+        assertReceiptNoUnique(receiptNo, row, groupIds);
         return new ValidatedFinance(receiptNo, financeDate, fundRows, isReceived);
     }
 
     /**
-     * 收据号查重（排除当前行），与导入侧的「同收据号组内客户一致」口径对齐：
+     * 收据号查重（排除同一订单/业务组的全部行），与导入侧的「同收据号组内客户一致」口径对齐：
      * 同一客户的多行可共用收据号（同订单拆分），仅拦截被其他客户占用的收据号。
      */
-    private void assertReceiptNoUnique(String receiptNo, OpsBusinessData row) {
+    private void assertReceiptNoUnique(String receiptNo, OpsBusinessData row,
+                                       List<Long> groupIds) {
         if (row.getCorpId() == null) return;
+        String placeholders = String.join(",", Collections.nCopies(groupIds.size(), "?"));
+        List<Object> args = new ArrayList<>();
+        args.add(row.getCorpId());
+        args.add(receiptNo);
+        args.addAll(groupIds);
         List<Map<String, Object>> dups = jdbcTemplate.queryForList(
                 "SELECT batch_no, customer FROM ops_business_data "
-                        + "WHERE corp_id = ? AND receipt_no = ? AND id <> ? AND delete_flag = 0 "
-                        + "ORDER BY id LIMIT 20",
-                row.getCorpId(), receiptNo, row.getId());
+                        + "WHERE corp_id = ? AND receipt_no = ? AND delete_flag = 0 "
+                        + "AND id NOT IN (" + placeholders + ") ORDER BY id LIMIT 20",
+                args.toArray());
         String customer = str(row.getCustomer());
         for (Map<String, Object> dup : dups) {
             if (!customer.equals(str(dup.get("customer")))) {
@@ -183,12 +223,13 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
      * 显式 set 全部四项 + 核对人/时间 + 审计字段：
      * 资金动态表横排数允许被清空（null 也要写回），故不能用实体非空更新的默认策略。
      */
-    private int updateFinance(Long id, ValidatedFinance v, Long userId,
+    private int updateFinance(List<Long> ids, ValidatedFinance v, Long userId,
                               String userName, LocalDateTime now) {
         LambdaUpdateWrapper<OpsBusinessData> uw = new LambdaUpdateWrapper<>();
-        uw.eq(OpsBusinessData::getId, id)
+        uw.in(OpsBusinessData::getId, ids)
                 .eq(OpsBusinessData::getDeleteFlag, 0)
-                .ne(OpsBusinessData::getCalcStatus, REPORTED_STATUS)
+                .and(w -> w.isNull(OpsBusinessData::getCalcStatus)
+                        .or().ne(OpsBusinessData::getCalcStatus, REPORTED_STATUS))
                 .set(OpsBusinessData::getReceiptNo, v.receiptNo())
                 .set(OpsBusinessData::getFinanceReceiptDate, v.financeReceiptDate())
                 .set(OpsBusinessData::getFundDynamicRows, v.fundDynamicRows())

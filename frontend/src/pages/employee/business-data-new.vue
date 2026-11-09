@@ -61,7 +61,7 @@ function emptyMeta() {
 
 function emptyForm() {
   return {
-    batchNo: '', newBatch: false, customerPhone: '', customer: '',
+    batchNo: '', newBatch: false, orderNo: '', customerPhone: '', customer: '',
     communityId: null, communityName: '', detailAddress: '',
     isSpecial: false, products: [emptyProduct()],
     receiptDate: today(), isReceived: false, voucherUrls: [],
@@ -90,9 +90,11 @@ async function loadOptions() {
     meta.communities = Array.isArray(data && data.communities) ? data.communities : []
     meta.employees = Array.isArray(data && data.employees) ? data.employees : []
     form.agentUserIds = meta.employeeUserId ? [meta.employeeUserId] : []
-    if (meta.batches.length) {
+    // 默认使用当前月批次（存在则复用，不存在则新建），历史未上报批次仍可手动选择
+    const monthlyBatch = meta.newBatchPrefix
+    if (monthlyBatch && meta.batches.includes(monthlyBatch)) {
       form.newBatch = false
-      form.batchNo = meta.batches[0]
+      form.batchNo = monthlyBatch
     } else {
       form.newBatch = true
       form.batchNo = ''
@@ -186,10 +188,11 @@ function showSuccess(created) {
   const count = Number(created && created.detailCount ? created.detailCount : 0)
   const productCount = Number(created && created.productCount ? created.productCount : 1)
   const agentCount = Number(created && created.agentCount ? created.agentCount : 1)
+  const orderNo = created && created.orderNo ? created.orderNo : '—'
   uni.showModal({
     title: '新增成功',
-    content: '共生成' + count + '条业务明细（' + productCount + '个产品 × '
-      + agentCount + '名经办人）。批次：' + (created ? created.batchNo : '')
+    content: '订单编号：' + orderNo + '。共生成' + count + '条业务明细（' + productCount
+      + '个产品 × ' + agentCount + '名经办人）。批次：' + (created ? created.batchNo : '')
       + '，收款合计：¥' + amount,
     confirmText: '继续新增',
     cancelText: '返回列表',
@@ -209,8 +212,14 @@ function resetForNext(batchNo) {
     form.batchNo = batchNo
     form.newBatch = false
   } else {
-    form.newBatch = meta.batches.length === 0
-    form.batchNo = meta.batches[0] || ''
+    const monthlyBatch = meta.newBatchPrefix
+    if (monthlyBatch && meta.batches.includes(monthlyBatch)) {
+      form.batchNo = monthlyBatch
+      form.newBatch = false
+    } else {
+      form.newBatch = true
+      form.batchNo = ''
+    }
   }
 }
 

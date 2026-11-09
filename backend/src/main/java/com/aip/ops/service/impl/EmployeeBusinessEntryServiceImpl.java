@@ -24,6 +24,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.Normalizer;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -34,7 +35,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 员工手工新增业务数据实现。
@@ -87,7 +87,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         result.put("employees", loadCorpEmployees(ctx.corpId(), ctx.employeeUserId(),
                 ctx.employeeName(), ctx.employeePhone()));
         result.put("batches", selectableBatches(ctx.corpId()));
-        result.put("newBatchPrefix", ctx.company() + "-" + today() + "-");
+        result.put("newBatchPrefix", monthlyBatchNo(ctx.company()));
         result.put("communities", loadCommunities(ctx.corpId()));
         fillProductOptions(result, ctx.corpId());
         return result;
@@ -236,8 +236,11 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         MemberResolution member = resolveOrCreateMember(v.phone(), v.customer(), ctx.corpId());
         CommunityInfo community = resolveCommunity(v.communityId(), ctx.corpId());
         List<OpsValueAddedProduct> valueAddedProducts = loadValueAddedProducts();
-        // 一笔手工业务的所有行共享组号：提成/统计按组号分组，不依赖财务补录收据号
-        String businessGroupNo = "BG" + UUID.randomUUID().toString().replace("-", "");
+        // 订单编号在写库前生成，缩短全局流水行锁持有时间；事务回滚不烧号
+        String orderNo = generateOrderNo();
+        // 订单编号即业务组号：提成/统计/财务核对均以订单为维度；
+        // 同时写入 business_group_no 兼容历史分组逻辑
+        String businessGroupNo = orderNo;
         List<Long> ids = new ArrayList<>();
         BigDecimal totalAmount = v.products().stream()
                 .map(ValidatedProduct::amount)
@@ -249,17 +252,21 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                     matchValueAddedProduct(product, valueAddedProducts);
             for (AgentInfo agent : v.agents()) {
                 OpsBusinessData entity = buildEntity(ctx, v, product, agent,
-                        batchNo, businessGroupNo, member.id(), community, matched);
+                        batchNo, orderNo, businessGroupNo, member.id(), community, matched);
                 businessDataMapper.insert(entity);
                 ids.add(entity.getId());
             }
         }
+        // 新月度批次首次写入时无行可锁；入库后再次锁定校验，
+        // 防止「检查为空 → 并发上报 → 继续插入」产生已上报批次下的新行
+        lockAndCheckBatch(ctx.corpId(), batchNo);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("ids", ids);
         result.put("detailCount", ids.size());
         result.put("productCount", v.products().size());
         result.put("agentCount", v.agents().size());
         result.put("batchNo", batchNo);
+        result.put("orderNo", orderNo);
         result.put("businessGroupNo", businessGroupNo);
         result.put("receiptAmount", totalAmount);
         result.put("platformMemberId", member.id());
@@ -393,7 +400,10 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     private String resolveBatch(EmployeeBusinessEntryRequest req, EmployeeContext ctx) {
         if (Boolean.TRUE.equals(req.getNewBatch())) {
-            return generateBatchNo(ctx);
+            // 一公司一月一批次：存在则复用（已上报则拒绝），不存在则使用该月批次
+            String monthly = monthlyBatchNo(ctx.company());
+            lockAndCheckBatch(ctx.corpId(), monthly);
+            return monthly;
         }
         String batchNo = str(req.getBatchNo());
         if (batchNo.isEmpty()) {
@@ -402,70 +412,52 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         if (batchNo.length() > 64) {
             throw BusinessException.of("批次号过长");
         }
-        lockAndCheckBatch(ctx.corpId(), batchNo);
+        boolean exists = lockAndCheckBatch(ctx.corpId(), batchNo);
+        if (!exists) {
+            throw BusinessException.of("批次不存在或不属于当前公司");
+        }
         return batchNo;
+    }
+
+    /** 公司月度批次：{公司简称}-{yyyyMM}。 */
+    private static String monthlyBatchNo(String company) {
+        return company + "-" + YearMonth.now().format(DateTimeFormatter.ofPattern("yyyyMM"));
     }
 
     /**
      * 锁定批次现有行并检查是否已上报集团（SELECT ... FOR UPDATE，锁定读）。
      * 与「提成上报集团」更新串行化，避免“检查未上报 → 上报提交 → 新行插入”
      * 竞态产生部分上报批次；锁定读也保证能看到最新已提交的上报状态，
-     * 不受 REPEATABLE READ 快照影响。空结果 = 批次不存在或不属于当前公司。
+     * 不受 REPEATABLE READ 快照影响。
+     *
+     * @return 批次是否已有行（false = 可创建新批次）
      */
-    private void lockAndCheckBatch(Long corpId, String batchNo) {
+    private boolean lockAndCheckBatch(Long corpId, String batchNo) {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                 "SELECT calc_status FROM ops_business_data "
                         + "WHERE corp_id = ? AND batch_no = ? AND delete_flag = 0 FOR UPDATE",
                 corpId, batchNo);
-        if (rows.isEmpty()) {
-            throw BusinessException.of("批次不存在或不属于当前公司");
-        }
         for (Map<String, Object> row : rows) {
             if (REPORTED_STATUS.equals(str(row.get("calc_status")))) {
-                throw BusinessException.of("该批次已上报集团，不能新增数据");
+                throw BusinessException.of("该批次已上报集团，无法新增业务");
             }
         }
-    }
-
-    private String generateBatchNo(EmployeeContext ctx) {
-        String date = today();
-        String prefix = ctx.company() + "-" + date + "-";
-        for (int attempt = 0; attempt < 100; attempt++) {
-            int seq = nextSequence(ctx.corpId(), date);
-            String batchNo = prefix + String.format(Locale.ROOT, "%03d", seq);
-            if (countByBatch(ctx.corpId(), batchNo, null) == 0) {
-                return batchNo;
-            }
-        }
-        throw BusinessException.of("批次号生成失败，请稍后重试");
+        return !rows.isEmpty();
     }
 
     /**
-     * 原子取号：唯一键 (corp_id, seq_date) + ON DUPLICATE KEY UPDATE 行锁串行化，
-     * 避免并发 SELECT MAX+1 重号。失败时随事务回滚，不留下无主流水号。
+     * 全局订单流水：单行 UPDATE 行锁串行化，事务回滚不烧号。
+     * 格式 dd + 至少 3 位流水（dd001…dd999、dd1000…），保证全局唯一。
      */
-    private int nextSequence(Long corpId, String date) {
-        jdbcTemplate.update("INSERT INTO ops_batch_sequence "
-                        + "(corp_id, seq_date, last_seq, delete_flag) VALUES (?, ?, 1, 0) "
-                        + "ON DUPLICATE KEY UPDATE last_seq = last_seq + 1",
-                corpId, date);
-        Integer seq = jdbcTemplate.queryForObject(
-                "SELECT last_seq FROM ops_batch_sequence WHERE corp_id = ? AND seq_date = ?",
-                Integer.class, corpId, date);
+    private String generateOrderNo() {
+        jdbcTemplate.update("INSERT IGNORE INTO ops_order_sequence (id, last_seq) VALUES (1, 0)");
+        jdbcTemplate.update("UPDATE ops_order_sequence SET last_seq = last_seq + 1 WHERE id = 1");
+        Long seq = jdbcTemplate.queryForObject(
+                "SELECT last_seq FROM ops_order_sequence WHERE id = 1", Long.class);
         if (seq == null || seq <= 0) {
-            throw BusinessException.of("批次流水号生成失败，请稍后重试");
+            throw BusinessException.of("订单编号生成失败，请稍后重试");
         }
-        return seq;
-    }
-
-    private long countByBatch(Long corpId, String batchNo, String calcStatus) {
-        String sql = "SELECT COUNT(*) FROM ops_business_data "
-                + "WHERE corp_id = ? AND batch_no = ? AND delete_flag = 0"
-                + (calcStatus != null ? " AND calc_status = ?" : "");
-        Long count = calcStatus != null
-                ? jdbcTemplate.queryForObject(sql, Long.class, corpId, batchNo, calcStatus)
-                : jdbcTemplate.queryForObject(sql, Long.class, corpId, batchNo);
-        return count != null ? count : 0L;
+        return "dd" + String.format(Locale.ROOT, "%03d", seq);
     }
 
     // ── 校验 ──
@@ -700,13 +692,15 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     }
 
     private OpsBusinessData buildEntity(EmployeeContext ctx, Validated v, ValidatedProduct p,
-                                        AgentInfo agent, String batchNo, String businessGroupNo,
+                                        AgentInfo agent, String batchNo, String orderNo,
+                                        String businessGroupNo,
                                         Long memberId, CommunityInfo community,
                                         OpsValueAddedProduct product) {
         OpsBusinessData entity = new OpsBusinessData();
         entity.setCorpId(ctx.corpId());
         entity.setOperatorId(ctx.corpId());
         entity.setBatchNo(batchNo);
+        entity.setOrderNo(orderNo);
         entity.setBusinessGroupNo(businessGroupNo);
         entity.setCompany(ctx.company());
         entity.setCustomer(v.customer());
@@ -815,10 +809,6 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     private static int num(Object value) {
         return value instanceof Number n ? n.intValue() : 0;
-    }
-
-    private static String today() {
-        return LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
     }
 
     // ── records ──

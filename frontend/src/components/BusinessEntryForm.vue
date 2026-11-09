@@ -11,8 +11,13 @@
           </view>
         </picker>
         <text v-if="errors.batchNo" class="ferr">{{ errors.batchNo }}</text>
-        <text v-if="form.newBatch" class="hint">提交后自动生成：{{ meta.newBatchPrefix }}xxx</text>
+        <text v-if="form.newBatch" class="hint">提交后自动使用：{{ meta.newBatchPrefix }}</text>
         <text v-else class="hint">仅可选择未上报集团的批次</text>
+      </view>
+      <view class="field">
+        <text class="label">订单编号</text>
+        <input class="input" :value="form.orderNo || '保存后自动生成'" disabled />
+        <text class="hint">系统自动生成，同一次提交的所有明细共用一个订单编号</text>
       </view>
     </view>
 

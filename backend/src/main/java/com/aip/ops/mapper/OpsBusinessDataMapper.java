@@ -13,16 +13,16 @@ import java.util.Map;
 @Mapper
 public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
 
-    /** Aggregate stats for current filter — deduplicated by (business_group_no, receipt_no,
-     *  category, brand, model) so that multi-agent rows sharing the same order+product are counted once.
-     *  Manual-entry rows use business_group_no (available before finance fills receipt_no);
-     *  imported rows fall back to receipt_no; rows with neither use a per-row sentinel
-     *  (COALESCE + id) to stay independent — unrelated orders must not merge under a shared NULL group. */
+    /** Aggregate stats for current filter — deduplicated by (order_no, business_group_no,
+     *  receipt_no, category, brand, model) so multi-agent rows sharing the same order+product
+     *  are counted once. Manual-entry rows use order_no/business_group_no (available before
+     *  finance fills receipt_no); imported rows fall back to receipt_no; rows with neither use
+     *  a per-row sentinel (COALESCE + id) to stay independent. */
     @Select("<script>"
             + "SELECT COALESCE(SUM(t.receipt_amount),0) as totalSale, "
             + "COALESCE(SUM(t.commission_amount),0) as totalCommission "
             + "FROM ("
-            + "SELECT COALESCE(NULLIF(business_group_no, ''), NULLIF(receipt_no, ''), CONCAT('__NULL__', id)) as receipt_no, "
+            + "SELECT COALESCE(NULLIF(order_no, ''), NULLIF(business_group_no, ''), NULLIF(receipt_no, ''), CONCAT('__NULL__', id)) as receipt_no, "
             + "category, brand, model, "
             + "MAX(receipt_amount) as receipt_amount, "
             + "SUM(commission_amount) as commission_amount "
@@ -53,14 +53,14 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
                                            @Param("receiptDateEnd") String receiptDateEnd,
                                            @Param("corpIds") List<Long> corpIds);
 
-    /** Per-category totals for current filter — same (business_group_no/receipt_no, category, brand, model)
+    /** Per-category totals for current filter — same (order_no/business_group_no/receipt_no, category, brand, model)
      *  dedup rule as aggregateStats so per-category sums reconcile with overall totals. */
     @Select("<script>"
             + "SELECT t.category as category, "
             + "COALESCE(SUM(t.receipt_amount),0) as totalSale, "
             + "COALESCE(SUM(t.commission_amount),0) as totalCommission "
             + "FROM ("
-            + "SELECT COALESCE(NULLIF(business_group_no, ''), NULLIF(receipt_no, ''), CONCAT('__NULL__', id)) as receipt_no, "
+            + "SELECT COALESCE(NULLIF(order_no, ''), NULLIF(business_group_no, ''), NULLIF(receipt_no, ''), CONCAT('__NULL__', id)) as receipt_no, "
             + "category, brand, model, "
             + "MAX(receipt_amount) as receipt_amount, "
             + "SUM(commission_amount) as commission_amount "
@@ -144,7 +144,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "MIN(d0.id) as id, MAX(d0.receipt_amount) as amount, SUM(d0.commission_amount) as commission_amount "
             + "FROM ("
             + "SELECT id, category, company, brand, model, receipt_amount, commission_amount, "
-            + "COALESCE(NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) as grp, "
+            + "COALESCE(NULLIF(order_no,''), NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) as grp, "
             + "CASE WHEN category = '6' THEN 0 ELSE 1 END as salePri, "
             + "CASE category WHEN '10' THEN '保险' WHEN '4' THEN '壁挂炉' WHEN '5' THEN '壁挂炉以旧换新销售' WHEN '2' THEN '抽油烟机' WHEN '7' THEN '定尺波纹管' WHEN '8' THEN '户内美装工程' WHEN '6' THEN '户内美装销售' WHEN '9' THEN '户内美装运维' WHEN '12' THEN '美装安全评估' WHEN '11' THEN '美装管道整改' WHEN 'qimi' THEN '气密性检测' WHEN '1' THEN '燃气灶' WHEN '3' THEN '热水器' ELSE category END as catName "
             + "FROM ops_business_data WHERE delete_flag=0 "
@@ -185,7 +185,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "MAX(d0.receipt_amount) as amount, SUM(d0.commission_amount) as commission_amount "
             + "FROM ("
             + "SELECT id, category, company, brand, model, receipt_amount, sale_date, commission_amount, "
-            + "COALESCE(NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) as grp, "
+            + "COALESCE(NULLIF(order_no,''), NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) as grp, "
             + "CASE WHEN category = '6' THEN 0 ELSE 1 END as salePri, "
             + "CASE category WHEN '10' THEN '保险' WHEN '4' THEN '壁挂炉' WHEN '5' THEN '壁挂炉以旧换新销售' WHEN '2' THEN '抽油烟机' WHEN '7' THEN '定尺波纹管' WHEN '8' THEN '户内美装工程' WHEN '6' THEN '户内美装销售' WHEN '9' THEN '户内美装运维' WHEN '12' THEN '美装安全评估' WHEN '11' THEN '美装管道整改' WHEN 'qimi' THEN '气密性检测' WHEN '1' THEN '燃气灶' WHEN '3' THEN '热水器' ELSE category END as catName "
             + "FROM ops_business_data WHERE delete_flag=0 "

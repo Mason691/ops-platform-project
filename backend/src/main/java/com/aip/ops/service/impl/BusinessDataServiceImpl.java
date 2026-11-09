@@ -46,6 +46,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import java.util.Objects;
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -232,6 +233,267 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 "totalSale", totalSale.setScale(2, RoundingMode.HALF_UP),
                 "totalCommission", totalCommission.setScale(2, RoundingMode.HALF_UP),
                 "categoryStats", categoryStats);
+    }
+
+    /**
+     * 订单维度列表：按订单编号（无则业务组号/收据号/单行）聚合，
+     * 组内按产品合并多经办人行，表头展示订单级公共字段与合计金额。
+     * 当前数据量约万级，全量加载后在内存聚合；后续可按订单键 SQL 分页优化。
+     */
+    @Override
+    public Map<String, Object> orderPage(int pageNum, int pageSize, String company, String batchNo,
+                                         String agent, String receiptNo, String customer,
+                                         String orderNo, String category, String isSpecial,
+                                         String brand, String model, String receiptDateStart,
+                                         String receiptDateEnd) {
+        Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        List<Long> corpIdList = (visibleIds != null && !visibleIds.isEmpty())
+                ? new ArrayList<>(visibleIds) : null;
+        LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
+        if (hasText(company)) qw.eq(OpsBusinessData::getCompany, company);
+        if (hasText(batchNo)) qw.eq(OpsBusinessData::getBatchNo, batchNo);
+        if (hasText(receiptNo)) qw.eq(OpsBusinessData::getReceiptNo, receiptNo);
+        if (hasText(customer)) qw.like(OpsBusinessData::getCustomer, customer.trim());
+        if (hasText(orderNo)) qw.eq(OpsBusinessData::getOrderNo, orderNo.trim());
+        if (hasText(category)) qw.eq(OpsBusinessData::getCategory, category);
+        if (hasText(isSpecial)) qw.eq(OpsBusinessData::getIsSpecial, isSpecial);
+        if (hasText(brand)) qw.eq(OpsBusinessData::getBrand, brand);
+        if (hasText(model)) qw.eq(OpsBusinessData::getModel, model);
+        if (hasText(receiptDateStart)) qw.ge(OpsBusinessData::getReceiptDate, receiptDateStart);
+        if (hasText(receiptDateEnd)) qw.le(OpsBusinessData::getReceiptDate, receiptDateEnd);
+        if (corpIdList != null) qw.in(OpsBusinessData::getCorpId, corpIdList);
+        qw.orderByDesc(OpsBusinessData::getId);
+        List<OpsBusinessData> rows = mapper.selectList(qw);
+
+        Map<String, List<OpsBusinessData>> grouped = new LinkedHashMap<>();
+        for (OpsBusinessData row : rows) {
+            grouped.computeIfAbsent(orderKey(row), k -> new ArrayList<>()).add(row);
+        }
+        // 经办人筛选在订单级生效：保留包含该经办人的订单，再展示订单全部明细
+        if (hasText(agent)) {
+            String needle = agent.trim().toLowerCase(Locale.ROOT);
+            grouped.entrySet().removeIf(e -> e.getValue().stream()
+                    .noneMatch(r -> containsAgent(r, needle)));
+        }
+        List<Map<String, Object>> orders = new ArrayList<>();
+        BigDecimal totalSale = BigDecimal.ZERO;
+        BigDecimal totalCommission = BigDecimal.ZERO;
+        Map<String, BigDecimal[]> categoryTotals = new LinkedHashMap<>();
+        for (List<OpsBusinessData> group : grouped.values()) {
+            Map<String, Object> order = buildOrderView(group);
+            orders.add(order);
+            totalSale = totalSale.add((BigDecimal) order.get("totalAmount"));
+            totalCommission = totalCommission.add((BigDecimal) order.get("totalCommission"));
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> products = (List<Map<String, Object>>) order.get("products");
+            for (Map<String, Object> product : products) {
+                String key = Objects.toString(product.get("category"), "");
+                BigDecimal[] sums = categoryTotals.computeIfAbsent(key,
+                        k -> new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO});
+                sums[0] = sums[0].add((BigDecimal) product.get("receiptAmount"));
+                sums[1] = sums[1].add((BigDecimal) product.get("commissionAmount"));
+            }
+        }
+        orders.sort((a, b) -> Long.compare((Long) b.get("_maxId"), (Long) a.get("_maxId")));
+        int total = orders.size();
+        int safePage = Math.max(1, pageNum);
+        int safeSize = Math.max(1, pageSize);
+        int from = Math.min(total, (safePage - 1) * safeSize);
+        int to = Math.min(total, from + safeSize);
+        List<Map<String, Object>> records = new ArrayList<>();
+        for (Map<String, Object> order : orders.subList(from, to)) {
+            order.remove("_maxId");
+            records.add(order);
+        }
+        List<Map<String, Object>> categoryStats = new ArrayList<>();
+        categoryTotals.entrySet().stream()
+                .sorted((a, b) -> b.getValue()[0].compareTo(a.getValue()[0]))
+                .forEach(e -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("category", e.getKey());
+                    item.put("totalSale", e.getValue()[0].setScale(2, RoundingMode.HALF_UP));
+                    item.put("totalCommission", e.getValue()[1].setScale(2, RoundingMode.HALF_UP));
+                    categoryStats.add(item);
+                });
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("records", records);
+        result.put("total", total);
+        result.put("size", safeSize);
+        result.put("current", safePage);
+        result.put("totalSale", totalSale.setScale(2, RoundingMode.HALF_UP));
+        result.put("totalCommission", totalCommission.setScale(2, RoundingMode.HALF_UP));
+        result.put("categoryStats", categoryStats);
+        return result;
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    /** 订单键：订单编号优先，其次历史业务组号/收据号+客户，最后单行。 */
+    private static String orderKey(OpsBusinessData row) {
+        if (hasText(row.getOrderNo())) return "O|" + row.getOrderNo().trim();
+        if (hasText(row.getBusinessGroupNo())) return "G|" + row.getBusinessGroupNo().trim();
+        if (hasText(row.getReceiptNo())) {
+            return "R|" + row.getReceiptNo().trim() + "|"
+                    + Objects.toString(row.getCustomer(), "");
+        }
+        return "I|" + row.getId();
+    }
+
+    private static boolean containsAgent(OpsBusinessData row, String needle) {
+        String agent = row.getAgent();
+        String phone = row.getAgentPhone();
+        return (agent != null && agent.toLowerCase(Locale.ROOT).contains(needle))
+                || (phone != null && phone.toLowerCase(Locale.ROOT).contains(needle));
+    }
+
+    private Map<String, Object> buildOrderView(List<OpsBusinessData> rows) {
+        rows.sort(Comparator.comparing(OpsBusinessData::getId));
+        OpsBusinessData first = rows.get(0);
+        Map<String, List<OpsBusinessData>> productGroups = new LinkedHashMap<>();
+        for (OpsBusinessData row : rows) {
+            String key = Objects.toString(row.getCategory(), "") + "|"
+                    + Objects.toString(row.getBrand(), "") + "|"
+                    + Objects.toString(row.getModel(), "") + "|"
+                    + Objects.toString(row.getSalePrice(), "");
+            productGroups.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
+        }
+        List<Map<String, Object>> products = new ArrayList<>();
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        BigDecimal totalCommission = BigDecimal.ZERO;
+        for (List<OpsBusinessData> productRows : productGroups.values()) {
+            Map<String, Object> product = buildProductView(productRows);
+            products.add(product);
+            totalAmount = totalAmount.add((BigDecimal) product.get("receiptAmount"));
+            totalCommission = totalCommission.add((BigDecimal) product.get("commissionAmount"));
+        }
+        LinkedHashSet<String> agentNames = new LinkedHashSet<>();
+        LinkedHashSet<String> agentPhones = new LinkedHashSet<>();
+        for (OpsBusinessData row : rows) {
+            if (hasText(row.getAgent())) agentNames.add(row.getAgent().trim());
+            if (hasText(row.getAgentPhone())) agentPhones.add(row.getAgentPhone().trim());
+        }
+        int checkedCount = (int) rows.stream()
+                .filter(r -> r.getFinanceCheckTime() != null).count();
+        Map<String, Object> order = new LinkedHashMap<>();
+        order.put("orderKey", orderKey(first));
+        order.put("orderNo", firstText(rows, OpsBusinessData::getOrderNo));
+        order.put("batchNo", firstText(rows, OpsBusinessData::getBatchNo));
+        order.put("receiptNo", firstText(rows, OpsBusinessData::getReceiptNo));
+        order.put("customer", firstText(rows, OpsBusinessData::getCustomer));
+        order.put("customerPhone", firstText(rows, OpsBusinessData::getCustomerPhone));
+        order.put("communityName", firstText(rows, OpsBusinessData::getCommunityName));
+        order.put("detailedAddress", firstText(rows, OpsBusinessData::getDetailedAddress));
+        order.put("company", firstText(rows, OpsBusinessData::getCompany));
+        order.put("agents", new ArrayList<>(agentNames));
+        order.put("agentNames", String.join("、", agentNames));
+        order.put("agentPhones", String.join("、", agentPhones));
+        order.put("receiptDate", firstText(rows, OpsBusinessData::getReceiptDate));
+        order.put("financeReceiptDate",
+                firstNonNull(rows, OpsBusinessData::getFinanceReceiptDate));
+        order.put("createTime", firstNonNull(rows, OpsBusinessData::getCreateTime));
+        order.put("fundDynamicRows", firstNonNull(rows, OpsBusinessData::getFundDynamicRows));
+        order.put("isReceived", firstText(rows, OpsBusinessData::getIsReceived));
+        order.put("voucherUrl", firstText(rows, OpsBusinessData::getVoucherUrl));
+        order.put("calcStatus", computeOrderStatus(rows));
+        order.put("financeChecked", checkedCount > 0 && checkedCount == rows.size());
+        order.put("financeCheckedCount", checkedCount);
+        order.put("financeCheckedTotal", rows.size());
+        order.put("financeCheckTime",
+                firstNonNull(rows, OpsBusinessData::getFinanceCheckTime));
+        order.put("financeCheckUserName",
+                firstText(rows, OpsBusinessData::getFinanceCheckUserName));
+        order.put("hasUnmatchedMember",
+                rows.stream().anyMatch(r -> r.getPlatformMemberId() == null));
+        order.put("totalAmount", totalAmount.setScale(2, RoundingMode.HALF_UP));
+        order.put("totalCommission", totalCommission.setScale(2, RoundingMode.HALF_UP));
+        order.put("productCount", products.size());
+        order.put("products", products);
+        order.put("category", products.isEmpty() ? null : products.get(0).get("category"));
+        // 兼容财务核对弹窗/卡片的单产品字段：取首个产品；多产品以 productCount/totalAmount 提示
+        if (!products.isEmpty()) {
+            Map<String, Object> p0 = products.get(0);
+            order.put("brand", p0.get("brand"));
+            order.put("model", p0.get("model"));
+            order.put("salePrice", p0.get("salePrice"));
+            order.put("saleQuantity", p0.get("saleQuantity"));
+            order.put("receiptAmount", p0.get("receiptAmount"));
+            order.put("commissionAmount", p0.get("commissionAmount"));
+            order.put("commissionRate", p0.get("commissionRate"));
+            order.put("isSpecial", p0.get("isSpecial"));
+            order.put("retailFloorPrice", p0.get("retailFloorPrice"));
+            order.put("groupLowestPrice", p0.get("groupLowestPrice"));
+        }
+        order.put("agent", String.join("、", agentNames));
+        order.put("agentPhone", String.join("、", agentPhones));
+        order.put("id", first.getId());
+        order.put("representativeId", first.getId());
+        order.put("rowIds", rows.stream().map(OpsBusinessData::getId).toList());
+        order.put("_maxId", rows.stream().mapToLong(OpsBusinessData::getId).max().orElse(0L));
+        return order;
+    }
+
+    private Map<String, Object> buildProductView(List<OpsBusinessData> rows) {
+        rows.sort(Comparator.comparing(OpsBusinessData::getId));
+        OpsBusinessData first = rows.get(0);
+        BigDecimal amount = rows.stream().map(OpsBusinessData::getReceiptAmount)
+                .filter(Objects::nonNull).max(Comparator.naturalOrder())
+                .orElse(BigDecimal.ZERO);
+        BigDecimal commission = rows.stream().map(OpsBusinessData::getCommissionAmount)
+                .filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal rate = rows.stream().map(OpsBusinessData::getCommissionRate)
+                .filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
+        Integer quantity = rows.stream().map(OpsBusinessData::getSaleQuantity)
+                .filter(Objects::nonNull).max(Integer::compareTo).orElse(null);
+        Map<String, Object> product = new LinkedHashMap<>();
+        product.put("productKey", Objects.toString(first.getCategory(), "") + "|"
+                + Objects.toString(first.getBrand(), "") + "|"
+                + Objects.toString(first.getModel(), "") + "|"
+                + Objects.toString(first.getSalePrice(), ""));
+        product.put("brand", first.getBrand());
+        product.put("category", first.getCategory());
+        product.put("model", first.getModel());
+        product.put("salePrice", first.getSalePrice());
+        product.put("saleQuantity", quantity);
+        product.put("receiptAmount", amount.setScale(2, RoundingMode.HALF_UP));
+        product.put("commissionAmount", commission.setScale(2, RoundingMode.HALF_UP));
+        product.put("commissionRate", rate.setScale(2, RoundingMode.HALF_UP));
+        product.put("isSpecial", first.getIsSpecial());
+        product.put("retailFloorPrice",
+                firstNonNull(rows, OpsBusinessData::getRetailFloorPrice));
+        product.put("groupLowestPrice",
+                firstNonNull(rows, OpsBusinessData::getGroupLowestPrice));
+        product.put("rowIds", rows.stream().map(OpsBusinessData::getId).toList());
+        return product;
+    }
+
+    private static String firstText(List<OpsBusinessData> rows,
+                                    Function<OpsBusinessData, String> getter) {
+        for (OpsBusinessData row : rows) {
+            String value = getter.apply(row);
+            if (hasText(value)) return value.trim();
+        }
+        return null;
+    }
+
+    private static <T> T firstNonNull(List<OpsBusinessData> rows,
+                                      Function<OpsBusinessData, T> getter) {
+        for (OpsBusinessData row : rows) {
+            T value = getter.apply(row);
+            if (value != null) return value;
+        }
+        return null;
+    }
+
+    private static String computeOrderStatus(List<OpsBusinessData> rows) {
+        Set<String> statuses = rows.stream().map(OpsBusinessData::getCalcStatus)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        if (statuses.contains("已上报集团")) return "已上报集团";
+        if (statuses.contains("未计算")) return "未计算";
+        if (statuses.contains("已计算")) return "已计算";
+        if (statuses.contains("经办人已核对")) return "经办人已核对";
+        return rows.isEmpty() ? null : rows.get(0).getCalcStatus();
     }
 
     /** Round per-category totals to 2 decimals for display consistency. */
@@ -748,21 +1010,25 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     /**
-     * 提成/校验分组键：员工手工业务优先按 business_group_no（一笔业务共享），
-     * 历史导入按「收据号 + 客户」；品类/品牌/型号作为产品维度。
-     * 品牌纳入键，避免不同品牌同型号文本被误合并。
+     * 提成/校验分组键：优先按订单编号（同一次提交共享），其次历史业务组号，
+     * 再次收据号；品类/品牌/型号作为产品维度。品牌纳入键，避免不同品牌同型号文本被误合并。
      */
     private static String commissionGroupKey(OpsBusinessData d) {
         String product = "|" + Objects.toString(d.getCategory(), "")
                 + "|" + Objects.toString(d.getBrand(), "")
                 + "|" + Objects.toString(d.getModel(), "");
+        String customer = Objects.toString(d.getCustomer(), "");
+        String orderNo = d.getOrderNo();
+        if (orderNo != null && !orderNo.isEmpty()) {
+            return "O|" + orderNo + "|" + customer + product;
+        }
         String groupNo = d.getBusinessGroupNo();
         if (groupNo != null && !groupNo.isEmpty()) {
-            return "G|" + groupNo + "|" + Objects.toString(d.getCustomer(), "") + product;
+            return "G|" + groupNo + "|" + customer + product;
         }
         String receiptNo = d.getReceiptNo();
         if (receiptNo != null && !receiptNo.isEmpty()) {
-            return "R|" + receiptNo + "|" + Objects.toString(d.getCustomer(), "") + product;
+            return "R|" + receiptNo + "|" + customer + product;
         }
         return null;
     }

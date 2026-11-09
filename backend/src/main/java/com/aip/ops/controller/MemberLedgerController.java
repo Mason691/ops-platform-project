@@ -91,7 +91,7 @@ public class MemberLedgerController {
                     FROM ops_business_data bd
                     WHERE bd.delete_flag = 0 AND bd.platform_member_id IS NOT NULL{scopeBiz}
                     GROUP BY bd.platform_member_id,
-                             COALESCE(NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__row_', bd.id)),
+                             COALESCE(NULLIF(bd.order_no,''), NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__row_', bd.id)),
                              bd.category, bd.brand, bd.model
                 ) g
             ) t
@@ -395,7 +395,7 @@ public class MemberLedgerController {
         String sql = """
                 SELECT bd.id AS device_id, bd.category AS category_key, bd.brand, bd.model,
                        bd.sale_price, bd.sale_date, bd.receipt_date, bd.receipt_no,
-                       bd.business_group_no, bd.agent, bd.remark, bd.customer,
+                       bd.order_no, bd.business_group_no, bd.agent, bd.remark, bd.customer,
                        bd.receipt_date AS usage_date
                 FROM ops_business_data bd
                 WHERE bd.delete_flag = 0 AND bd.platform_member_id = ?""" + scopeBiz + """
@@ -415,10 +415,12 @@ public class MemberLedgerController {
     private List<Map<String, Object>> mergeBusinessDevices(List<Map<String, Object>> rows) {
         Map<String, List<Map<String, Object>>> groups = new LinkedHashMap<>();
         for (Map<String, Object> row : rows) {
+            String orderNo = (String) row.get("order_no");
             String groupNo = (String) row.get("business_group_no");
             String receiptNo = (String) row.get("receipt_no");
             String base;
-            if (groupNo != null && !groupNo.isEmpty()) base = groupNo;
+            if (orderNo != null && !orderNo.isEmpty()) base = orderNo;
+            else if (groupNo != null && !groupNo.isEmpty()) base = groupNo;
             else if (receiptNo != null && !receiptNo.isEmpty()) base = receiptNo;
             else base = "__row_" + row.get("device_id");
             String key = base + "|" + row.get("category_key") + "|"

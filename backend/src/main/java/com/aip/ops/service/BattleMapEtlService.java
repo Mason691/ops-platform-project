@@ -244,7 +244,7 @@ public class BattleMapEtlService {
                 "ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(x.amount),0) DESC) " +
                 "FROM (" +
                 "SELECT bd.category AS category_key," +
-                "COALESCE(NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__NULL__', bd.id)) AS grp," +
+                "COALESCE(NULLIF(bd.order_no,''), NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__NULL__', bd.id)) AS grp," +
                 "bd.brand, bd.model, MAX(bd.receipt_amount) AS amount " +
                 "FROM ops_business_data bd " +
                 "WHERE bd.corp_id IN (" + scope + ") AND bd.delete_flag=0 " +

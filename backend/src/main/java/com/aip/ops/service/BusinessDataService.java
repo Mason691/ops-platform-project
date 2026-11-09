@@ -9,6 +9,11 @@ import java.util.Map;
 
 public interface BusinessDataService {
     Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial, String brand, String model, String receiptDateStart, String receiptDateEnd);
+    /** 订单维度聚合列表：订单级公共信息 + 产品明细 + 合计金额 + 经办人列表 */
+    Map<String, Object> orderPage(int pageNum, int pageSize, String company, String batchNo,
+                                  String agent, String receiptNo, String customer, String orderNo,
+                                  String category, String isSpecial, String brand, String model,
+                                  String receiptDateStart, String receiptDateEnd);
     List<String> getBatches();
     /** 导入阶段一（异步工作线程）：文件校验 + 品牌型号匹配解析，结果 JSON（fail/confirm/ready）写入任务 progressMsg */
     void runAsyncCheck(SysImportTask task);

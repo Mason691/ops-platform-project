@@ -32,8 +32,15 @@ public class OpsBusinessData extends BaseEntity {
     private String batchNo;
 
     /**
+     * 订单编号（dd + 全局流水号）：同一次提交的所有「产品×经办人」明细共享。
+     * 由后端提交时生成，前端不可传入；用于按订单聚合展示/财务核对。
+     */
+    @TableField("order_no")
+    private String orderNo;
+
+    /**
      * 员工手工业务组号：一笔手工业务的所有「产品×经办人」行共享同一组号。
-     * 提成均分与统计去重优先按组号分组，不依赖财务补录收据号；历史导入行为 NULL。
+     * 提成均分与统计去重优先按订单编号，其次按组号；历史导入行为 NULL。
      */
     @TableField("business_group_no")
     private String businessGroupNo;

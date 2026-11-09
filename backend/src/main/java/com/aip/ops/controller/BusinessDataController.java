@@ -143,6 +143,26 @@ public class BusinessDataController {
         return R.ok(service.page(pageNum, pageSize, company, batchNo, agent, receiptNo, category, isSpecial, brand, model, receiptDateStart, receiptDateEnd));
     }
 
+    @GetMapping("/orders")
+    public R<?> orders(@RequestParam(defaultValue = "1") int pageNum,
+                       @RequestParam(defaultValue = "10") int pageSize,
+                       @RequestParam(required = false) String company,
+                       @RequestParam(required = false) String batchNo,
+                       @RequestParam(required = false) String agent,
+                       @RequestParam(required = false) String receiptNo,
+                       @RequestParam(required = false) String customer,
+                       @RequestParam(required = false) String orderNo,
+                       @RequestParam(required = false) String category,
+                       @RequestParam(required = false) String isSpecial,
+                       @RequestParam(required = false) String brand,
+                       @RequestParam(required = false) String model,
+                       @RequestParam(required = false) String receiptDateStart,
+                       @RequestParam(required = false) String receiptDateEnd) {
+        return R.ok(service.orderPage(pageNum, pageSize, company, batchNo, agent, receiptNo,
+                customer, orderNo, category, isSpecial, brand, model,
+                receiptDateStart, receiptDateEnd));
+    }
+
     @GetMapping("/batches")
     public R<?> batches() { return R.ok(service.getBatches()); }
 
