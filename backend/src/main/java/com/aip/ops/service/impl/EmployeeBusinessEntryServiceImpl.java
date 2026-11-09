@@ -447,7 +447,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     /**
      * 全局订单流水：单行 UPDATE 行锁串行化，事务回滚不烧号。
-     * 格式 dd + 至少 3 位流水（dd001…dd999、dd1000…），保证全局唯一。
+     * 编号规则：{dd} 为日期中的天（两位，如 09/10）+ 至少 3 位全局流水，
+     * 例：9 日第 1 单 09001、10 日第 2 单 10002；流水全局递增保证全局唯一。
      */
     private String generateOrderNo() {
         jdbcTemplate.update("INSERT IGNORE INTO ops_order_sequence (id, last_seq) VALUES (1, 0)");
@@ -457,7 +458,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         if (seq == null || seq <= 0) {
             throw BusinessException.of("订单编号生成失败，请稍后重试");
         }
-        return "dd" + String.format(Locale.ROOT, "%03d", seq);
+        int day = LocalDate.now().getDayOfMonth();
+        return String.format(Locale.ROOT, "%02d%03d", day, seq);
     }
 
     // ── 校验 ──
