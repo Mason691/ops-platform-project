@@ -31,6 +31,13 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("batch_no")
     private String batchNo;
 
+    /**
+     * 员工手工业务组号：一笔手工业务的所有「产品×经办人」行共享同一组号。
+     * 提成均分与统计去重优先按组号分组，不依赖财务补录收据号；历史导入行为 NULL。
+     */
+    @TableField("business_group_no")
+    private String businessGroupNo;
+
     @TableField("company")
     private String company;
 

@@ -234,18 +234,25 @@ public class BattleMapEtlService {
             jdbc.update("DELETE FROM ops_map_category_sales WHERE org_id=?", corpId);
             // 品类中文名优先从数据字典转换，降级用原始 category 值
             // 数据源：ops_business_data（已计算 + 经办人已核对 + 已上报集团）
+            // 先按「业务组号/收据号 + 品类+品牌+型号」去重产品行（多经办人只计一次），再按品类汇总
             jdbc.update(
                 "INSERT INTO ops_map_category_sales (org_id,category_key,category_name,total_sales," +
                 "sales_count,rank_order) " +
-                "SELECT ?,bd.category AS category_key," +
-                "COALESCE((SELECT item_value FROM ai_platform.sys_dict_item WHERE type_id=9 AND item_key=bd.category COLLATE utf8mb4_0900_ai_ci AND delete_flag=0 LIMIT 1),bd.category) AS category_name," +
-                "COALESCE(SUM(bd.receipt_amount),0),COUNT(*)," +
-                "ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(bd.receipt_amount),0) DESC) " +
+                "SELECT ?,x.category_key," +
+                "COALESCE((SELECT item_value FROM ai_platform.sys_dict_item WHERE type_id=9 AND item_key=x.category_key COLLATE utf8mb4_0900_ai_ci AND delete_flag=0 LIMIT 1),x.category_key) AS category_name," +
+                "COALESCE(SUM(x.amount),0),COUNT(*)," +
+                "ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(x.amount),0) DESC) " +
+                "FROM (" +
+                "SELECT bd.category AS category_key," +
+                "COALESCE(NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__NULL__', bd.id)) AS grp," +
+                "bd.brand, bd.model, MAX(bd.receipt_amount) AS amount " +
                 "FROM ops_business_data bd " +
                 "WHERE bd.corp_id IN (" + scope + ") AND bd.delete_flag=0 " +
                 "AND bd.calc_status IN ('已计算','经办人已核对','已上报集团') " +
                 "AND bd.category IS NOT NULL AND bd.category<>'' " +
-                "GROUP BY bd.category ORDER BY COALESCE(SUM(bd.receipt_amount),0) DESC LIMIT 5",
+                "GROUP BY grp, bd.category, bd.brand, bd.model" +
+                ") x " +
+                "GROUP BY x.category_key ORDER BY COALESCE(SUM(x.amount),0) DESC LIMIT 5",
                 corpId);
         } catch (Exception e) { log.warn("ETL category sales org={} failed: {}", corpId, e.getMessage()); }
     }

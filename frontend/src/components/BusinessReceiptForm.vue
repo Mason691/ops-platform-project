@@ -8,14 +8,7 @@
         <view class="radio" :class="{ on: form.isSpecial }" @click="form.isSpecial = true">是</view>
         <view class="radio" :class="{ on: !form.isSpecial }" @click="form.isSpecial = false">否</view>
       </view>
-      <text class="hint">选择「是」时需填写提成比例；选择「否」按 0 处理</text>
-    </view>
-
-    <view v-if="form.isSpecial" class="field">
-      <text class="label">提成比例(%) <text class="req">*</text></text>
-      <input class="input" v-model="form.commissionRate" type="digit"
-             placeholder="0-100，保留两位小数" />
-      <text v-if="errors.commissionRate" class="ferr">{{ errors.commissionRate }}</text>
+      <text class="hint">选择「是」时每个产品行需单独填写提成比例；选择「否」按 0 处理</text>
     </view>
 
     <view class="field">

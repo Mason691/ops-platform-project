@@ -27,10 +27,14 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * 员工手工新增业务数据实现。
@@ -46,6 +50,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private static final String REPORTED_STATUS = "已上报集团";
     private static final String INITIAL_CALC_STATUS = "未计算";
     private static final int MAX_VOUCHERS = 3;
+    /** 单笔业务最多产品行/经办人数，防止超大批量录入拖垮事务 */
+    private static final int MAX_PRODUCTS = 50;
+    private static final int MAX_AGENTS = 20;
     private static final int MAX_TEXT_LENGTH = 100;
     private static final int MAX_DETAIL_ADDRESS_LENGTH = 200;
     /** sys_member.real_name / nickname 为 VARCHAR(50)，自动建会员时不能超长 */
@@ -74,8 +81,11 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         result.put("corpId", ctx.corpId());
         result.put("corpName", ctx.corpName());
         result.put("company", ctx.company());
+        result.put("employeeUserId", ctx.employeeUserId());
         result.put("employeeName", ctx.employeeName());
         result.put("employeePhone", ctx.employeePhone());
+        result.put("employees", loadCorpEmployees(ctx.corpId(), ctx.employeeUserId(),
+                ctx.employeeName(), ctx.employeePhone()));
         result.put("batches", selectableBatches(ctx.corpId()));
         result.put("newBatchPrefix", ctx.company() + "-" + today() + "-");
         result.put("communities", loadCommunities(ctx.corpId()));
@@ -161,10 +171,60 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         }
     }
 
+    /**
+     * 当前组织可选经办人：sys_user_corp 关联 sys_user（账号 username 即手机号）。
+     * 当前操作员工固定在首位且 isSelf=true；若 sys_user_corp 缺关联仍兜底展示本人。
+     */
+    private List<Map<String, Object>> loadCorpEmployees(Long corpId, Long selfUserId,
+                                                        String selfName, String selfPhone) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT u.id AS userId, u.real_name AS realName, u.username, u.phone "
+                            + "FROM ai_platform.sys_user u "
+                            + "WHERE u.status = 1 AND u.delete_flag = 0 "
+                            + "AND (u.corp_id = ? OR EXISTS ("
+                            + "  SELECT 1 FROM ai_platform.sys_user_corp uc "
+                            + "  WHERE uc.user_id = u.id AND uc.corp_id = ? "
+                            + "  AND uc.status = 1 AND uc.delete_flag = 0)) "
+                            + "ORDER BY u.real_name, u.id",
+                    corpId, corpId);
+            for (Map<String, Object> row : rows) {
+                Long userId = row.get("userId") instanceof Number n ? n.longValue() : null;
+                if (userId == null) continue;
+                String username = str(row.get("username"));
+                String phone = username.isEmpty() ? str(row.get("phone")) : username;
+                if (phone.isEmpty()) continue;
+                String name = str(row.get("realName"));
+                result.add(employeeOption(userId, name.isEmpty() ? phone : name, phone,
+                        userId.equals(selfUserId)));
+            }
+        } catch (Exception e) {
+            log.warn("加载组织员工列表失败 corpId={}: {}", corpId, e.getMessage());
+        }
+        boolean selfPresent = result.stream()
+                .anyMatch(item -> Boolean.TRUE.equals(item.get("isSelf")));
+        if (!selfPresent && selfUserId != null) {
+            result.removeIf(item -> selfUserId.equals(item.get("userId")));
+            result.add(0, employeeOption(selfUserId, selfName, selfPhone, true));
+        }
+        return result;
+    }
+
+    private Map<String, Object> employeeOption(Long userId, String name, String phone,
+                                               boolean isSelf) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("userId", userId);
+        item.put("name", name);
+        item.put("phone", phone);
+        item.put("isSelf", isSelf);
+        return item;
+    }
+
     @Override
     public Map<String, Object> createManualEntry(EmployeeBusinessEntryRequest request) {
         EmployeeContext ctx = resolveEmployeeContext();
-        Validated v = validateRequest(request, ctx.corpId());
+        Validated v = validateRequest(request, ctx);
         // 平台/SCM 的 HTTP 查询在事务外完成；事务只包裹批次取号+行锁、会员创建、INSERT，
         // 避免 Hikari 连接在外部 HTTP 期间被长期占用（连接池耗尽风险）。
         return transactionTemplate.execute(status -> persistManualEntry(request, ctx, v));
@@ -174,13 +234,34 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                                                    EmployeeContext ctx, Validated v) {
         String batchNo = resolveBatch(request, ctx);
         MemberResolution member = resolveOrCreateMember(v.phone(), v.customer(), ctx.corpId());
-        OpsBusinessData entity = buildEntity(ctx, v, batchNo, member.id());
-        businessDataMapper.insert(entity);
-
+        CommunityInfo community = resolveCommunity(v.communityId(), ctx.corpId());
+        List<OpsValueAddedProduct> valueAddedProducts = loadValueAddedProducts();
+        // 一笔手工业务的所有行共享组号：提成/统计按组号分组，不依赖财务补录收据号
+        String businessGroupNo = "BG" + UUID.randomUUID().toString().replace("-", "");
+        List<Long> ids = new ArrayList<>();
+        BigDecimal totalAmount = v.products().stream()
+                .map(ValidatedProduct::amount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // 多经办人按「产品 × 经办人」拆行：每行独立 agent_phone 归属，
+        // 提成计算沿用「同收据号+客户+品类+型号」组内均分规则。
+        for (ValidatedProduct product : v.products()) {
+            OpsValueAddedProduct matched =
+                    matchValueAddedProduct(product, valueAddedProducts);
+            for (AgentInfo agent : v.agents()) {
+                OpsBusinessData entity = buildEntity(ctx, v, product, agent,
+                        batchNo, businessGroupNo, member.id(), community, matched);
+                businessDataMapper.insert(entity);
+                ids.add(entity.getId());
+            }
+        }
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("id", entity.getId());
+        result.put("ids", ids);
+        result.put("detailCount", ids.size());
+        result.put("productCount", v.products().size());
+        result.put("agentCount", v.agents().size());
         result.put("batchNo", batchNo);
-        result.put("receiptAmount", v.amount());
+        result.put("businessGroupNo", businessGroupNo);
+        result.put("receiptAmount", totalAmount);
         result.put("platformMemberId", member.id());
         result.put("memberCreated", member.created());
         return result;
@@ -192,7 +273,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         EmployeeIdentity identity = assertEmployee();
         CorpInfo corp = fetchCorpInfo(identity.corpId());
         return new EmployeeContext(identity.corpId(), corp.corpName(), corp.company(),
-                identity.name(), identity.phone());
+                identity.name(), identity.phone(), SecurityUtils.getCurrentUserId());
     }
 
     /** 校验当前 JWT 确为在职员工；返回组织 + 经办人姓名/手机号。 */
@@ -389,7 +470,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     // ── 校验 ──
 
-    private Validated validateRequest(EmployeeBusinessEntryRequest req, Long corpId) {
+    private Validated validateRequest(EmployeeBusinessEntryRequest req, EmployeeContext ctx) {
         if (req == null) throw BusinessException.of("请求参数不能为空");
         String phone = normalizePhone(req.getCustomerPhone());
         if (!GasMemberMatcher.PHONE_PATTERN.matcher(phone).matches()) {
@@ -397,15 +478,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         }
         String customer = requireText(req.getCustomer(), "客户名称", MAX_CUSTOMER_LENGTH);
         boolean special = Boolean.TRUE.equals(req.getIsSpecial());
-        BigDecimal rate = validateCommissionRate(special, req.getCommissionRate());
-        String brand = requireText(req.getBrand(), "品牌");
-        String categoryName = requireText(req.getCategory(), "品类");
-        String model = requireText(req.getModel(), "型号");
-        BigDecimal price = normalizePrice(req.getSalePrice());
-        int qty = req.getSaleQuantity() != null ? req.getSaleQuantity() : 0;
-        if (qty < 1) throw BusinessException.of("销售数量必须为正整数");
-        BigDecimal amount = price.multiply(BigDecimal.valueOf(qty))
-                .setScale(2, RoundingMode.HALF_UP);
+        List<ValidatedProduct> products =
+                validateProducts(req.getProducts(), special, ctx.corpId());
+        List<AgentInfo> agents = validateAgents(req.getAgentUserIds(), ctx);
         String receiptDate = normalizeDate(req.getReceiptDate());
         boolean received = Boolean.TRUE.equals(req.getIsReceived());
         String voucherUrl = normalizeVouchers(received, req.getVoucherUrls());
@@ -414,26 +489,139 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         // 小区选填（会员查询可自动带出），详细地址必填 —— 地址拆分后必须能定位到具体门牌
         String detailAddress = requireText(
                 req.getDetailAddress(), "详细地址", MAX_DETAIL_ADDRESS_LENGTH);
-        String categoryKey = scmClient.requireCategoryKey(corpId, categoryName);
-        scmClient.requireMaterial(corpId, brand, categoryName, model);
-        return new Validated(phone, customer, special, rate, brand, categoryKey,
-                model, price, qty, amount, receiptDate, received, voucherUrl,
-                communityId, detailAddress);
+        return new Validated(phone, customer, special, products, agents,
+                receiptDate, received, voucherUrl, communityId, detailAddress);
     }
 
-    private BigDecimal validateCommissionRate(boolean special, BigDecimal raw) {
+    /** 产品明细：至少一行；每行独立校验品牌/品类/型号、单价、数量与特批提成比例。 */
+    private List<ValidatedProduct> validateProducts(
+            List<EmployeeBusinessEntryRequest.ProductItem> items, boolean special, Long corpId) {
+        if (items == null || items.isEmpty()) {
+            throw BusinessException.of("请至少添加一行产品");
+        }
+        if (items.size() > MAX_PRODUCTS) {
+            throw BusinessException.of("单笔业务最多" + MAX_PRODUCTS + "行产品");
+        }
+        List<ValidatedProduct> result = new ArrayList<>();
+        Map<String, Integer> seenModels = new LinkedHashMap<>();
+        for (int i = 0; i < items.size(); i++) {
+            ValidatedProduct product = validateProduct(items.get(i), i + 1, special, corpId);
+            // 同一型号重复成行会被提成均分逻辑误判为多经办人/重复订单，要求合并数量
+            String key = product.brand() + "|" + product.categoryKey() + "|" + product.model();
+            Integer firstRow = seenModels.putIfAbsent(key, i + 1);
+            if (firstRow != null) {
+                throw BusinessException.of("第" + (i + 1) + "个产品与第" + firstRow
+                        + "个产品品牌/品类/型号重复，请合并数量后录入");
+            }
+            result.add(product);
+        }
+        return result;
+    }
+
+    private ValidatedProduct validateProduct(EmployeeBusinessEntryRequest.ProductItem item,
+                                             int rowNo, boolean special, Long corpId) {
+        String prefix = "第" + rowNo + "个产品：";
+        if (item == null) throw BusinessException.of(prefix + "信息不能为空");
+        String brand = requireText(item.getBrand(), prefix + "品牌");
+        String categoryName = requireText(item.getCategory(), prefix + "品类");
+        String model = requireText(item.getModel(), prefix + "型号");
+        BigDecimal price = normalizePrice(item.getSalePrice(), prefix);
+        int qty = item.getSaleQuantity() != null ? item.getSaleQuantity() : 0;
+        if (qty < 1) throw BusinessException.of(prefix + "销售数量必须为正整数");
+        BigDecimal amount = price.multiply(BigDecimal.valueOf(qty))
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal rate = validateCommissionRate(special, item.getCommissionRate(), prefix);
+        String categoryKey;
+        try {
+            categoryKey = scmClient.requireCategoryKey(corpId, categoryName);
+            scmClient.requireMaterial(corpId, brand, categoryName, model);
+        } catch (BusinessException e) {
+            throw BusinessException.of(prefix + e.getMessage());
+        }
+        return new ValidatedProduct(brand, categoryKey, model, price, qty, amount, rate);
+    }
+
+    /**
+     * 经办人：本人始终在列且不可移除；其他人员必须属于当前组织且在职。
+     * 手机号取 sys_user.username（员工登录账号即手机号）。
+     */
+    private List<AgentInfo> validateAgents(List<Long> requestedIds, EmployeeContext ctx) {
+        List<AgentInfo> agents = new ArrayList<>();
+        agents.add(new AgentInfo(ctx.employeeUserId(), ctx.employeeName(), ctx.employeePhone()));
+        LinkedHashSet<Long> requested = new LinkedHashSet<>();
+        if (requestedIds != null) {
+            for (Long id : requestedIds) {
+                if (id != null && id > 0) requested.add(id);
+            }
+        }
+        requested.remove(ctx.employeeUserId());
+        if (requested.isEmpty()) return agents;
+        if (requested.size() + 1 > MAX_AGENTS) {
+            throw BusinessException.of("单笔业务最多选择" + MAX_AGENTS + "名经办人");
+        }
+        agents.addAll(findCorpAgents(requested, ctx.corpId()));
+        return agents;
+    }
+
+    /** 按 ID 回查当前组织在职员工，返回顺序与请求一致；有缺失即拒绝。 */
+    private List<AgentInfo> findCorpAgents(Set<Long> requested, Long corpId) {
+        String placeholders = String.join(",",
+                Collections.nCopies(requested.size(), "?"));
+        List<Map<String, Object>> rows;
+        try {
+            rows = jdbcTemplate.queryForList(
+                    "SELECT u.id AS userId, u.real_name AS realName, u.username, u.phone "
+                            + "FROM ai_platform.sys_user u "
+                            + "WHERE u.status = 1 AND u.delete_flag = 0 "
+                            + "AND (u.corp_id = ? OR EXISTS ("
+                            + "  SELECT 1 FROM ai_platform.sys_user_corp uc "
+                            + "  WHERE uc.user_id = u.id AND uc.corp_id = ? "
+                            + "  AND uc.status = 1 AND uc.delete_flag = 0)) "
+                            + "AND u.id IN (" + placeholders + ")",
+                    buildAgentQueryArgs(corpId, requested));
+        } catch (Exception e) {
+            log.warn("校验经办人失败 corpId={}: {}", corpId, e.getMessage());
+            throw BusinessException.of("经办人信息查询失败，请稍后重试");
+        }
+        Map<Long, AgentInfo> found = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            Long userId = row.get("userId") instanceof Number n ? n.longValue() : null;
+            String username = str(row.get("username"));
+            String phone = username.isEmpty() ? str(row.get("phone")) : username;
+            if (userId == null || phone.isEmpty()) continue;
+            String name = str(row.get("realName"));
+            found.put(userId, new AgentInfo(userId, name.isEmpty() ? phone : name, phone));
+        }
+        if (found.size() != requested.size()) {
+            throw BusinessException.of("部分经办人不属于当前组织或已停用，请重新选择");
+        }
+        List<AgentInfo> result = new ArrayList<>();
+        for (Long id : requested) result.add(found.get(id));
+        return result;
+    }
+
+    /** 查询参数：组织ID 出现两次（sys_user.corp_id 与 sys_user_corp.corp_id），后接员工ID。 */
+    private static Object[] buildAgentQueryArgs(Long corpId, Set<Long> requested) {
+        List<Object> args = new ArrayList<>();
+        args.add(corpId);
+        args.add(corpId);
+        args.addAll(requested);
+        return args.toArray();
+    }
+
+    private BigDecimal validateCommissionRate(boolean special, BigDecimal raw, String prefix) {
         if (!special) return BigDecimal.ZERO;
-        if (raw == null) throw BusinessException.of("特批时提成比例不能为空");
+        if (raw == null) throw BusinessException.of(prefix + "特批时提成比例不能为空");
         if (raw.signum() < 0 || raw.compareTo(BigDecimal.valueOf(100)) > 0) {
-            throw BusinessException.of("提成比例必须在0-100之间");
+            throw BusinessException.of(prefix + "提成比例必须在0-100之间");
         }
         return raw.setScale(2, RoundingMode.HALF_UP);
     }
 
-    private BigDecimal normalizePrice(BigDecimal raw) {
-        if (raw == null) throw BusinessException.of("销售单价不能为空");
+    private BigDecimal normalizePrice(BigDecimal raw, String prefix) {
+        if (raw == null) throw BusinessException.of(prefix + "销售单价不能为空");
         BigDecimal price = raw.setScale(2, RoundingMode.HALF_UP);
-        if (price.signum() <= 0) throw BusinessException.of("销售单价必须大于0");
+        if (price.signum() <= 0) throw BusinessException.of(prefix + "销售单价必须大于0");
         return price;
     }
 
@@ -511,28 +699,28 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         }
     }
 
-    private OpsBusinessData buildEntity(EmployeeContext ctx, Validated v,
-                                        String batchNo, Long memberId) {
-        OpsValueAddedProduct product = matchValueAddedProduct(
-                v.brand(), v.categoryKey(), v.model());
+    private OpsBusinessData buildEntity(EmployeeContext ctx, Validated v, ValidatedProduct p,
+                                        AgentInfo agent, String batchNo, String businessGroupNo,
+                                        Long memberId, CommunityInfo community,
+                                        OpsValueAddedProduct product) {
         OpsBusinessData entity = new OpsBusinessData();
         entity.setCorpId(ctx.corpId());
         entity.setOperatorId(ctx.corpId());
         entity.setBatchNo(batchNo);
+        entity.setBusinessGroupNo(businessGroupNo);
         entity.setCompany(ctx.company());
         entity.setCustomer(v.customer());
         entity.setCustomerPhone(v.phone());
         entity.setPlatformMemberId(memberId);
-        CommunityInfo community = resolveCommunity(v.communityId(), ctx.corpId());
         entity.setCommunityId(community.id());
         entity.setCommunityName(community.name());
         entity.setDetailedAddress(v.detailAddress());
-        entity.setBrand(v.brand());
-        entity.setCategory(v.categoryKey());
-        entity.setModel(v.model());
-        entity.setSalePrice(v.price());
-        entity.setSaleQuantity(v.qty());
-        entity.setReceiptAmount(v.amount());
+        entity.setBrand(p.brand());
+        entity.setCategory(p.categoryKey());
+        entity.setModel(p.model());
+        entity.setSalePrice(p.price());
+        entity.setSaleQuantity(p.qty());
+        entity.setReceiptAmount(p.amount());
         // 复用导入口径匹配增值产品底价；未命中则留空，提成按规则全额比例（与导入未匹配行一致）
         entity.setRetailFloorPrice(product != null ? product.getRetailFloorPrice() : null);
         entity.setGroupLowestPrice(product != null ? product.getGroupLowestPrice() : null);
@@ -540,10 +728,10 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         entity.setSaleDate(v.receiptDate());
         entity.setReceiptDate(v.receiptDate());
         entity.setFinanceReceiptDate(null);
-        entity.setAgent(ctx.employeeName());
-        entity.setAgentPhone(ctx.employeePhone());
+        entity.setAgent(agent.name());
+        entity.setAgentPhone(agent.phone());
         entity.setIsSpecial(v.special() ? "是" : "否");
-        entity.setCommissionRate(v.rate());
+        entity.setCommissionRate(p.rate());
         entity.setIsReceived(v.received() ? "是" : "否");
         entity.setVoucherUrl(v.voucherUrl());
         entity.setCalcStatus(INITIAL_CALC_STATUS);
@@ -571,12 +759,21 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         return new CommunityInfo(communityId, name);
     }
 
-    /** 复用导入的精确/关键字匹配口径，命中增值产品时写入底价，保证提成分档与导入一致。 */
-    private OpsValueAddedProduct matchValueAddedProduct(String brand, String categoryKey, String model) {
+    private List<OpsValueAddedProduct> loadValueAddedProducts() {
         try {
-            List<OpsValueAddedProduct> products = valueAddedProductMapper.selectList(null);
+            return valueAddedProductMapper.selectList(null);
+        } catch (Exception e) {
+            log.warn("加载增值产品失败: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** 复用导入的精确/关键字匹配口径，命中增值产品时写入底价，保证提成分档与导入一致。 */
+    private OpsValueAddedProduct matchValueAddedProduct(ValidatedProduct p,
+                                                        List<OpsValueAddedProduct> products) {
+        try {
             return BusinessDataServiceImpl.matchProductExactOrKeyword(
-                    brand, categoryKey, model, products);
+                    p.brand(), p.categoryKey(), p.model(), products);
         } catch (Exception e) {
             log.warn("匹配增值产品底价失败: {}", e.getMessage());
             return null;
@@ -629,14 +826,21 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private record EmployeeIdentity(Long corpId, String name, String phone) {}
 
     private record EmployeeContext(Long corpId, String corpName, String company,
-                                   String employeeName, String employeePhone) {}
+                                   String employeeName, String employeePhone,
+                                   Long employeeUserId) {}
 
     private record CorpInfo(String corpName, String company) {}
 
-    private record Validated(String phone, String customer, boolean special, BigDecimal rate,
-                             String brand, String categoryKey, String model, BigDecimal price,
-                             int qty, BigDecimal amount, String receiptDate, boolean received,
-                             String voucherUrl, Long communityId, String detailAddress) {}
+    private record Validated(String phone, String customer, boolean special,
+                             List<ValidatedProduct> products, List<AgentInfo> agents,
+                             String receiptDate, boolean received, String voucherUrl,
+                             Long communityId, String detailAddress) {}
+
+    private record ValidatedProduct(String brand, String categoryKey, String model,
+                                    BigDecimal price, int qty, BigDecimal amount,
+                                    BigDecimal rate) {}
+
+    private record AgentInfo(Long userId, String name, String phone) {}
 
     private record MemberResolution(Long id, boolean created) {}
 

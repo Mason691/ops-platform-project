@@ -148,8 +148,12 @@ public class BattleMapController {
             try {
                 String year = Integer.toString(LocalDate.now().getYear());
                 Double bd = jdbcTemplate.queryForObject(
-                    "SELECT COALESCE(SUM(receipt_amount),0) FROM ops_business_data " +
-                    "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对','已上报集团') AND sale_date>=?",
+                    "SELECT COALESCE(SUM(x.amount),0) FROM (" +
+                    "SELECT COALESCE(NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) grp, " +
+                    "category, brand, model, MAX(receipt_amount) amount " +
+                    "FROM ops_business_data " +
+                    "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对','已上报集团') AND sale_date>=? " +
+                    "GROUP BY 1, category, brand, model) x",
                     Double.class, year + "-01-01");
                 Double ml = jdbcTemplate.queryForObject(
                     "SELECT COALESCE(SUM(sales_price),0) FROM ops_member_ledger " +
@@ -268,8 +272,13 @@ public class BattleMapController {
 
             // 1) 主数据源：ops_business_data (已计算 + 经办人已核对 + 已上报集团)
             jdbcTemplate.queryForList(
-                "SELECT DATE_FORMAT(sale_date,'%Y-%m') ym, COALESCE(SUM(receipt_amount),0) total " +
-                "FROM ops_business_data WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对','已上报集团') AND sale_date>=? GROUP BY ym", since)
+                "SELECT x.ym ym, COALESCE(SUM(x.amount),0) total FROM (" +
+                "SELECT DATE_FORMAT(sale_date,'%Y-%m') ym, " +
+                "COALESCE(NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) grp, " +
+                "category, brand, model, MAX(receipt_amount) amount " +
+                "FROM ops_business_data WHERE corp_id IN (" + sc + ") AND delete_flag=0 " +
+                "AND calc_status IN ('已计算','经办人已核对','已上报集团') AND sale_date>=? " +
+                "GROUP BY ym, grp, category, brand, model) x GROUP BY x.ym", since)
                 .forEach(row -> {
                     Map<String, Object> r = buckets.get((String) row.get("ym"));
                     if (r != null) {

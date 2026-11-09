@@ -697,14 +697,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
      */
     private int splitCommissionByReceiptGroup(List<OpsBusinessData> records,
                                                Map<Long, BigDecimal[]> results) {
-        // Build receipt×customer×category×model groups
+        // Build receipt/group × customer × category × brand × model groups
         Map<String, List<OpsBusinessData>> groups = new LinkedHashMap<>();
         for (OpsBusinessData d : records) {
-            String rn = d.getReceiptNo();
-            if (rn != null && !rn.isEmpty()) {
-                String key = rn + "|" + Objects.toString(d.getCustomer(), "")
-                        + "|" + Objects.toString(d.getCategory(), "")
-                        + "|" + Objects.toString(d.getModel(), "");
+            String key = commissionGroupKey(d);
+            if (key != null) {
                 groups.computeIfAbsent(key, k -> new ArrayList<>()).add(d);
             }
         }
@@ -712,16 +709,14 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         int splitGroups = 0;
         for (Map.Entry<String, List<OpsBusinessData>> entry : groups.entrySet()) {
             List<OpsBusinessData> group = entry.getValue();
-            // 特批行不参与均分（提成按提成比例独立计算），仅对组内非特批行均分
-            List<OpsBusinessData> splittable = group.stream()
-                    .filter(d -> !isSpecial(d)).toList();
+            List<OpsBusinessData> splittable = splitCandidates(group);
             if (splittable.size() <= 1) continue;
             splitGroups++;
 
-            // Within a (receiptNo, customer, category, model) group, all rows
-            // represent the same product sold to the same customer, so every row
-            // should match the same commission rule and yield the same amount.
-            // We pick the first row's result as the reference for splitting.
+            // Within a group (business group no / receipt + customer + category +
+            // brand + model), all rows represent the same product sold to the same
+            // customer, so every row should match the same commission rule and
+            // yield the same amount. We pick the first row's result for splitting.
             BigDecimal[] firstResult = results.get(splittable.get(0).getId());
             BigDecimal totalAmount = (firstResult != null && firstResult[1] != null)
                     ? firstResult[1] : BigDecimal.ZERO;
@@ -753,6 +748,74 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     /**
+     * 提成/校验分组键：员工手工业务优先按 business_group_no（一笔业务共享），
+     * 历史导入按「收据号 + 客户」；品类/品牌/型号作为产品维度。
+     * 品牌纳入键，避免不同品牌同型号文本被误合并。
+     */
+    private static String commissionGroupKey(OpsBusinessData d) {
+        String product = "|" + Objects.toString(d.getCategory(), "")
+                + "|" + Objects.toString(d.getBrand(), "")
+                + "|" + Objects.toString(d.getModel(), "");
+        String groupNo = d.getBusinessGroupNo();
+        if (groupNo != null && !groupNo.isEmpty()) {
+            return "G|" + groupNo + "|" + Objects.toString(d.getCustomer(), "") + product;
+        }
+        String receiptNo = d.getReceiptNo();
+        if (receiptNo != null && !receiptNo.isEmpty()) {
+            return "R|" + receiptNo + "|" + Objects.toString(d.getCustomer(), "") + product;
+        }
+        return null;
+    }
+
+    /**
+     * 组内参与均分的行：
+     * <ul>
+     *   <li>仅当组内存在多个不同经办人时才均分——同一经办人重复录入同一型号
+     *       （同收据号/同组号）属于两条独立明细，不能被误当作多经办人协作均分；</li>
+     *   <li>非特批行按现有口径全部参与；整组均为特批行时全部参与；</li>
+     *   <li>单价不一致（或特批组提成比例不一致）说明不是同一产品行/数据异常，
+     *       拒绝均分并保留各自提成，避免丢弃他人提成。</li>
+     * </ul>
+     */
+    private List<OpsBusinessData> splitCandidates(List<OpsBusinessData> group) {
+        long agentCount = group.stream()
+                .map(BusinessDataServiceImpl::agentKey)
+                .filter(Objects::nonNull)
+                .distinct()
+                .count();
+        if (agentCount <= 1) return List.of();
+        boolean allSpecial = group.stream().allMatch(this::isSpecial);
+        List<OpsBusinessData> candidates = allSpecial ? group
+                : group.stream().filter(d -> !isSpecial(d)).toList();
+        if (candidates.size() <= 1) return List.of();
+        BigDecimal basePrice = candidates.get(0).getSalePrice();
+        if (candidates.stream().anyMatch(d -> !sameAmount(d.getSalePrice(), basePrice))) {
+            return List.of();
+        }
+        if (allSpecial) {
+            BigDecimal baseRate = candidates.get(0).getCommissionRate();
+            if (candidates.stream().anyMatch(
+                    d -> !sameAmount(d.getCommissionRate(), baseRate))) {
+                return List.of();
+            }
+        }
+        return candidates;
+    }
+
+    /** 经办人标识：手机号优先，空串视为缺失并回退姓名。 */
+    private static String agentKey(OpsBusinessData d) {
+        String phone = d.getAgentPhone();
+        if (phone != null && !phone.isEmpty()) return phone;
+        String name = d.getAgent();
+        return name != null && !name.isEmpty() ? name : null;
+    }
+
+    private static boolean sameAmount(BigDecimal a, BigDecimal b) {
+        if (a == null || b == null) return a == b;
+        return a.compareTo(b) == 0;
+    }
+
+    /**
      * Verify that no receipt group row has a negative or null amount
      * after splitting. Throws on data inconsistency to trigger rollback.
      */
@@ -760,11 +823,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                                                 Map<Long, BigDecimal[]> results) {
         Map<String, List<OpsBusinessData>> groups = new LinkedHashMap<>();
         for (OpsBusinessData d : records) {
-            String rn = d.getReceiptNo();
-            if (rn != null && !rn.isEmpty()) {
-                String key = rn + "|" + Objects.toString(d.getCustomer(), "")
-                        + "|" + Objects.toString(d.getCategory(), "")
-                        + "|" + Objects.toString(d.getModel(), "");
+            String key = commissionGroupKey(d);
+            if (key != null) {
                 groups.computeIfAbsent(key, k -> new ArrayList<>()).add(d);
             }
         }

@@ -7,8 +7,8 @@ import java.util.Map;
 /**
  * 员工手工新增业务数据。
  *
- * <p>所有方法仅面向已登录员工：组织/经办人信息从 JWT + 平台 sys_user 派生，
- * 不接受前端传入的 corp_id / agent / agent_phone。</p>
+ * <p>所有方法仅面向已登录员工：组织/当前经办人信息从 JWT + 平台 sys_user 派生，
+ * 不接受前端传入的 corp_id / agent / agent_phone；共同经办人仅接受员工ID，由服务端回查组织归属。</p>
  */
 public interface EmployeeBusinessEntryService {
 

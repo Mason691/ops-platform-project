@@ -18,8 +18,10 @@
 
       <BusinessEntryForm :form="form" :meta="meta" :errors="errors"
                          :querying="querying" @query-member="queryMember" />
-      <BusinessProductForm :form="form" :meta="meta" :errors="errors" />
+      <BusinessAgentSelector :form="form" :meta="meta" :errors="errors" />
       <BusinessReceiptForm :form="form" :errors="errors" />
+      <BusinessProductList :products="form.products" :meta="meta" :errors="errors"
+                           :is-special="form.isSpecial" />
 
       <view class="footer-space"></view>
       <view class="submit-bar">
@@ -35,9 +37,10 @@
 import { ref, reactive, onMounted } from 'vue'
 import { api } from '@/api/index'
 import BusinessEntryForm from '@/components/BusinessEntryForm.vue'
-import BusinessProductForm from '@/components/BusinessProductForm.vue'
+import BusinessAgentSelector from '@/components/BusinessAgentSelector.vue'
+import BusinessProductList from '@/components/BusinessProductList.vue'
 import BusinessReceiptForm from '@/components/BusinessReceiptForm.vue'
-import { validateBusinessForm, today, PHONE_RE, normalizePhone, normalizeMoney } from '@/utils/businessForm'
+import { emptyProduct, validateBusinessForm, today, PHONE_RE, normalizePhone, normalizeMoney } from '@/utils/businessForm'
 
 const loading = ref(true)
 const errorMsg = ref('')
@@ -49,9 +52,10 @@ const errors = reactive({})
 
 function emptyMeta() {
   return {
-    corpId: null, corpName: '', company: '', employeeName: '', employeePhone: '',
+    corpId: null, corpName: '', company: '',
+    employeeUserId: null, employeeName: '', employeePhone: '',
     batches: [], newBatchPrefix: '', brands: [], categories: [], materials: [],
-    communities: [], productError: ''
+    communities: [], employees: [], productError: ''
   }
 }
 
@@ -59,9 +63,9 @@ function emptyForm() {
   return {
     batchNo: '', newBatch: false, customerPhone: '', customer: '',
     communityId: null, communityName: '', detailAddress: '',
-    isSpecial: false, commissionRate: '', brand: '', category: '', model: '',
-    salePrice: '', saleQuantity: '1', receiptDate: today(),
-    isReceived: false, voucherUrls: []
+    isSpecial: false, products: [emptyProduct()],
+    receiptDate: today(), isReceived: false, voucherUrls: [],
+    agentUserIds: []
   }
 }
 
@@ -84,6 +88,8 @@ async function loadOptions() {
     meta.categories = Array.isArray(data && data.categories) ? data.categories : []
     meta.materials = Array.isArray(data && data.materials) ? data.materials : []
     meta.communities = Array.isArray(data && data.communities) ? data.communities : []
+    meta.employees = Array.isArray(data && data.employees) ? data.employees : []
+    form.agentUserIds = meta.employeeUserId ? [meta.employeeUserId] : []
     if (meta.batches.length) {
       form.newBatch = false
       form.batchNo = meta.batches[0]
@@ -132,7 +138,7 @@ async function queryMember() {
 
 async function submit() {
   if (submitting.value) return
-  const result = validateBusinessForm(form)
+  const result = validateBusinessForm(form, meta)
   Object.keys(errors).forEach(key => delete errors[key])
   Object.assign(errors, result.errors)
   if (!result.valid) {
@@ -154,12 +160,15 @@ async function submit() {
       communityId: form.communityId || null,
       detailAddress: String(form.detailAddress || '').trim(),
       isSpecial: !!form.isSpecial,
-      commissionRate: form.isSpecial ? Number(form.commissionRate) : 0,
-      brand: form.brand,
-      category: form.category,
-      model: form.model,
-      salePrice: normalizeMoney(form.salePrice),
-      saleQuantity: Number(form.saleQuantity),
+      agentUserIds: (form.agentUserIds || []).map(id => Number(id)),
+      products: form.products.map(product => ({
+        brand: product.brand,
+        category: product.category,
+        model: product.model,
+        salePrice: normalizeMoney(product.salePrice),
+        saleQuantity: Number(product.saleQuantity),
+        commissionRate: form.isSpecial ? Number(product.commissionRate) : 0
+      })),
       receiptDate: form.receiptDate,
       isReceived: !!form.isReceived,
       voucherUrls: form.isReceived ? form.voucherUrls : []
@@ -174,9 +183,14 @@ async function submit() {
 
 function showSuccess(created) {
   const amount = Number(created && created.receiptAmount ? created.receiptAmount : 0).toFixed(2)
+  const count = Number(created && created.detailCount ? created.detailCount : 0)
+  const productCount = Number(created && created.productCount ? created.productCount : 1)
+  const agentCount = Number(created && created.agentCount ? created.agentCount : 1)
   uni.showModal({
     title: '新增成功',
-    content: '批次：' + (created ? created.batchNo : '') + '，收款金额：¥' + amount,
+    content: '共生成' + count + '条业务明细（' + productCount + '个产品 × '
+      + agentCount + '名经办人）。批次：' + (created ? created.batchNo : '')
+      + '，收款合计：¥' + amount,
     confirmText: '继续新增',
     cancelText: '返回列表',
     success: (res) => {
@@ -189,6 +203,7 @@ function showSuccess(created) {
 function resetForNext(batchNo) {
   Object.assign(form, emptyForm())
   Object.keys(errors).forEach(key => delete errors[key])
+  form.agentUserIds = meta.employeeUserId ? [meta.employeeUserId] : []
   if (batchNo) {
     if (!meta.batches.includes(batchNo)) meta.batches.unshift(batchNo)
     form.batchNo = batchNo
