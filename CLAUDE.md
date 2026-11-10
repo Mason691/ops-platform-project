@@ -124,10 +124,10 @@ ops-platform-project/
 │   ├── src/main/java/com/aip/ops/
 │   │   ├── OpsApplication.java
 │   │   ├── config/          # SecurityConfig, AuthConfig, RestTemplateConfig, WebMvcConfig, MybatisPlusConfig, JacksonConfig, GasDataSourceConfig
-│   │   ├── controller/      # 29 controllers（见下方）
-│   │   ├── entity/          # 36 entities（31 个继承 SDK BaseEntity；5 个例外见「已知陷阱」；含 MerchantMiniappConfig, OperatorMerchant, OpsBusinessModelAlias）
-│   │   ├── mapper/          # 37 MyBatis-Plus mappers（含 OpsBusinessDataEmployeeMapper 员工业务数据专用）
-│   │   ├── service/         # 31 service interfaces（含 DataScopeService/OrgRoleService/FinancePermissionService 等独立服务）+ 20 impls
+│   │   ├── controller/      # 30 controllers（见下方）
+│   │   ├── entity/          # 37 entities（32 个继承 SDK BaseEntity；5 个例外见「已知陷阱」；含 MerchantMiniappConfig, OperatorMerchant, OpsBusinessModelAlias, FfCategory）
+│   │   ├── mapper/          # 38 MyBatis-Plus mappers（含 OpsBusinessDataEmployeeMapper 员工业务数据专用）
+│   │   ├── service/         # 32 service interfaces（含 DataScopeService/OrgRoleService/FinancePermissionService 等独立服务）+ 21 impls
 │   │   ├── aspect/          # AOP 切面（OperationLogAspect）
 │   │   ├── client/          # 子系统间 HTTP 客户端（MemberSyncClient, ProductBatchClient, ScmBaseDataClient）
 │   │   ├── agent/           # AI DomainAgent（OpsAgent.java）
@@ -164,7 +164,7 @@ ops-platform-project/
 └── uploads/                 # 文件上传输出目录
 ```
 
-### Controllers（29 个）
+### Controllers（30 个）
 
 | Controller | 端点前缀 | 说明 |
 |---|---|---|
@@ -192,6 +192,7 @@ ops-platform-project/
 | `GridManagerController` | `/api/ops/admin/grid-manager` | **网格员管理**：CRUD + 小区分配 |
 | `MemberLedgerController` | `/api/ops/admin/member-ledger` | **会员台账**：按平台会员聚合列表（所属公司/网格员列+筛选）+ 关联设备弹窗 + 台账 CRUD + 安检设备创建（异步）+ filter-options 下拉 |
 | `CategoryLifecycleRuleController` | `/api/ops/admin/category-lifecycle-rules` | **品类使用年限规则**：CRUD + 品类下拉选项 + 按品类查询 |
+| `FfCategoryController` | `/api/ops/admin/ff-category` | **财务分类（财务管理 → 分类管理）**：分页/详情/新增/编辑/逻辑删除/Excel 上传导入/服务器路径导入（仅超管）；权限码 `finance:category:*`，超管绕过 |
 | **员工通道** | | |
 | `EmployeeAuthController` | `/api/ops/auth/employee` | **员工** 登录（手机号+密码+验证码），独立于会员认证 |
 | `EmployeeController` | `/api/ops/employee` | 员工身份校验 + 个人业务数据查询 + **手工新增业务数据**（表单选项/会员查询/批次/凭证）+ 头像上传 |
@@ -720,7 +721,7 @@ cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/op
 
 ---
 
-最后更新：2026-11-09 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
+最后更新：2026-11-10 | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
 
 ### 自定义 Claude 命令
 
