@@ -1,12 +1,15 @@
 package com.aip.ops.service.impl;
 
 import com.aip.ops.client.ScmBaseDataClient;
+import com.aip.ops.component.OrderNoGenerator;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.entity.OpsBusinessData;
+import com.aip.ops.entity.OpsBusinessOrder;
 import com.aip.ops.entity.OpsValueAddedProduct;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.security.JwtTokenInspector;
+import com.aip.ops.service.BusinessOrderService;
 import com.aip.ops.service.EmployeeBusinessEntryService;
 import com.aip.ops.service.GasMemberMatcher;
 import com.aip.sdk.client.PlatformInternalClient;
@@ -32,7 +35,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -66,6 +68,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private final ScmBaseDataClient scmClient;
     private final JwtTokenInspector jwtTokenInspector;
     private final PlatformTransactionManager transactionManager;
+    private final BusinessOrderService orderService;
+    private final OrderNoGenerator orderNoGenerator;
 
     private TransactionTemplate transactionTemplate;
 
@@ -236,8 +240,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         MemberResolution member = resolveOrCreateMember(v.phone(), v.customer(), ctx.corpId());
         CommunityInfo community = resolveCommunity(v.communityId(), ctx.corpId());
         List<OpsValueAddedProduct> valueAddedProducts = loadValueAddedProducts();
-        // 订单编号在写库前生成，缩短全局流水行锁持有时间；事务回滚不烧号
-        String orderNo = generateOrderNo();
+        // 订单编号由独立事务生成（REQUIRES_NEW），避免长事务持有流水行锁；回滚可能产生号段空洞
+        String orderNo = orderNoGenerator.next();
         // 订单编号即业务组号：提成/统计/财务核对均以订单为维度；
         // 同时写入 business_group_no 兼容历史分组逻辑
         String businessGroupNo = orderNo;
@@ -245,6 +249,13 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         BigDecimal totalAmount = v.products().stream()
                 .map(ValidatedProduct::amount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // 主子表拆分：一次提交 = 1 条订单头 + N（产品×经办人）条子表
+        OpsBusinessOrder order = orderService.createOrder(
+                ctx.corpId(), "O|" + orderNo, orderNo, batchNo, businessGroupNo,
+                null, ctx.company(), v.customer(), v.phone(), member.id(),
+                community.id(), community.name(), v.detailAddress(), v.receiptDate(),
+                null, null, v.received() ? "是" : "否", v.voucherUrl(),
+                totalAmount, INITIAL_CALC_STATUS);
         // 多经办人按「产品 × 经办人」拆行：每行独立 agent_phone 归属，
         // 提成计算沿用「同收据号+客户+品类+型号」组内均分规则。
         for (ValidatedProduct product : v.products()) {
@@ -253,10 +264,13 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
             for (AgentInfo agent : v.agents()) {
                 OpsBusinessData entity = buildEntity(ctx, v, product, agent,
                         batchNo, orderNo, businessGroupNo, member.id(), community, matched);
+                entity.setOrderId(order.getId());
                 businessDataMapper.insert(entity);
                 ids.add(entity.getId());
             }
         }
+        orderService.refreshAgentSummary(order.getId());
+        orderService.refreshTotals(order.getId());
         // 新月度批次首次写入时无行可锁；入库后再次锁定校验，
         // 防止「检查为空 → 并发上报 → 继续插入」产生已上报批次下的新行
         lockAndCheckBatch(ctx.corpId(), batchNo);
@@ -374,7 +388,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private String establishedCompany(Long corpId) {
         try {
             List<String> rows = jdbcTemplate.queryForList(
-                    "SELECT company FROM ops_business_data "
+                    "SELECT company FROM ops_business_order_item "
                             + "WHERE corp_id = ? AND delete_flag = 0 "
                             + "AND company IS NOT NULL AND company <> '' "
                             + "GROUP BY company ORDER BY COUNT(*) DESC LIMIT 1",
@@ -389,7 +403,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     // ── 批次 ──
 
     private List<String> selectableBatches(Long corpId) {
-        String sql = "SELECT batch_no FROM ops_business_data "
+        String sql = "SELECT batch_no FROM ops_business_order_item "
                 + "WHERE corp_id = ? AND delete_flag = 0 "
                 + "AND batch_no IS NOT NULL AND batch_no <> '' "
                 + "GROUP BY batch_no "
@@ -434,7 +448,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
      */
     private boolean lockAndCheckBatch(Long corpId, String batchNo) {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT calc_status FROM ops_business_data "
+                "SELECT calc_status FROM ops_business_order_item "
                         + "WHERE corp_id = ? AND batch_no = ? AND delete_flag = 0 FOR UPDATE",
                 corpId, batchNo);
         for (Map<String, Object> row : rows) {
@@ -445,23 +459,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         return !rows.isEmpty();
     }
 
-    /**
-     * 全局订单流水：单行 UPDATE 行锁串行化，事务回滚不烧号。
-     * 编号规则：{dd} 为日期中的天（两位，如 09/10）+ 至少 3 位全局流水，
-     * 例：9 日第 1 单 09001、10 日第 2 单 10002；流水全局递增保证全局唯一。
-     */
-    private String generateOrderNo() {
-        jdbcTemplate.update("INSERT IGNORE INTO ops_order_sequence (id, last_seq) VALUES (1, 0)");
-        jdbcTemplate.update("UPDATE ops_order_sequence SET last_seq = last_seq + 1 WHERE id = 1");
-        Long seq = jdbcTemplate.queryForObject(
-                "SELECT last_seq FROM ops_order_sequence WHERE id = 1", Long.class);
-        if (seq == null || seq <= 0) {
-            throw BusinessException.of("订单编号生成失败，请稍后重试");
-        }
-        int day = LocalDate.now().getDayOfMonth();
-        return String.format(Locale.ROOT, "%02d%03d", day, seq);
-    }
-
+    // 订单编号由 OrderNoGenerator 统一生成（导入/手工共用同一全局流水）。
     // ── 校验 ──
 
     private Validated validateRequest(EmployeeBusinessEntryRequest req, EmployeeContext ctx) {
@@ -730,6 +728,13 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         entity.setCommissionRate(p.rate());
         entity.setIsReceived(v.received() ? "是" : "否");
         entity.setVoucherUrl(v.voucherUrl());
+        // 退货字段初始化：无退货时结算数量=销售数量，收款金额即为原始金额
+        entity.setIsReturn("否");
+        entity.setReturnQuantity(0);
+        entity.setReturnAmount(BigDecimal.ZERO);
+        entity.setSettleQuantity(p.qty());
+        entity.setReturnStatus("未申请");
+        entity.setOriginalReceiptAmount(p.amount());
         entity.setCalcStatus(INITIAL_CALC_STATUS);
         entity.setDeleteFlag(0);
         return entity;

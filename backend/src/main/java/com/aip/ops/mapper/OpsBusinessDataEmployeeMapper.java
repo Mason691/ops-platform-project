@@ -18,13 +18,13 @@ import java.util.Map;
 public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessData> {
 
     /** List distinct months (YYYY-MM) that have data for this employee. */
-    @Select("SELECT DISTINCT SUBSTRING(sale_date, 1, 7) as month FROM ops_business_data "
+    @Select("SELECT DISTINCT SUBSTRING(sale_date, 1, 7) as month FROM ops_business_order_item "
             + "WHERE agent_phone = #{agentPhone} AND delete_flag = 0 "
             + "ORDER BY month DESC")
     List<String> selectAvailableMonths(@Param("agentPhone") String agentPhone);
 
     /** 经办人全部批次（含未计算）——手工新增后立即可在批次筛选器中查到 */
-    @Select("SELECT DISTINCT batch_no FROM ops_business_data "
+    @Select("SELECT DISTINCT batch_no FROM ops_business_order_item "
             + "WHERE agent_phone = #{agentPhone} AND delete_flag = 0 "
             + "ORDER BY batch_no DESC")
     List<String> selectBatchNos(@Param("agentPhone") String agentPhone);
@@ -33,7 +33,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
     @Select("<script>"
             + "SELECT category, COALESCE(SUM(receipt_amount),0) as totalSale, "
             + "COALESCE(SUM(commission_amount),0) as totalCommission, COUNT(*) as orderCount "
-            + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
+            + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
             + "<if test='month != null and month != \"\"'>AND SUBSTRING(sale_date, 1, 7) = #{month}</if> "
             + "GROUP BY category ORDER BY totalSale DESC"
@@ -43,13 +43,16 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
 
     /** Individual records for a given month + category. */
     @Select("<script>"
-            + "SELECT brand, model, sale_price as salePrice, commission_amount as commissionAmount, "
+            + "SELECT id, brand, model, sale_price as salePrice, commission_amount as commissionAmount, "
             + "commission_rate as commissionRate, "
             + "sale_date as saleDate, customer, receipt_amount as receiptAmount, "
             + "community_name as communityName, detailed_address as detailedAddress, "
             + "sale_quantity as saleQuantity, "
+            + "is_return as isReturn, return_quantity as returnQuantity, "
+            + "settle_quantity as settleQuantity, return_status as returnStatus, "
+            + "calc_status as calcStatus, "
             + "is_received as isReceived, voucher_url as voucherUrl "
-            + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
+            + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
             + "<if test='month != null and month != \"\"'>AND SUBSTRING(sale_date, 1, 7) = #{month}</if> "
             + "<if test='category != null and category != \"\"'>AND category = #{category}</if> "
@@ -62,21 +65,23 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
     /** Aggregate totals for a single month (no category breakdown). */
     @Select("SELECT COALESCE(SUM(receipt_amount),0) as totalSale, "
             + "COALESCE(SUM(commission_amount),0) as totalCommission, COUNT(*) as orderCount "
-            + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
+            + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
             + "AND SUBSTRING(sale_date, 1, 7) = #{month}")
     Map<String, Object> selectMonthlyStats(@Param("agentPhone") String agentPhone,
                                             @Param("month") String month);
 
     /** All records for this employee (for grouping/overview in Java). */
-    @Select("SELECT brand, model, sale_price as salePrice, commission_amount as commissionAmount, "
+    @Select("SELECT id, brand, model, sale_price as salePrice, commission_amount as commissionAmount, "
             + "commission_rate as commissionRate, "
             + "sale_date as saleDate, customer, category, "
             + "receipt_amount as receiptAmount, sale_quantity as saleQuantity, "
+            + "is_return as isReturn, return_quantity as returnQuantity, "
+            + "settle_quantity as settleQuantity, return_status as returnStatus, "
             + "community_name as communityName, detailed_address as detailedAddress, "
             + "calc_status as calcStatus, batch_no as batchNo, "
             + "is_received as isReceived, voucher_url as voucherUrl "
-            + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
+            + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
             + "ORDER BY sale_date DESC")
     List<Map<String, Object>> selectAllRecords(@Param("agentPhone") String agentPhone);
@@ -84,7 +89,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
     /** All-time totals across all months. */
     @Select("SELECT COALESCE(SUM(receipt_amount),0) as totalSale, "
             + "COALESCE(SUM(commission_amount),0) as totalCommission, COUNT(*) as orderCount "
-            + "FROM ops_business_data WHERE agent_phone = #{agentPhone} "
+            + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0")
     Map<String, Object> selectAllTimeTotals(@Param("agentPhone") String agentPhone);
 }

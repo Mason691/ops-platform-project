@@ -7,6 +7,7 @@ import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.impl.BusinessDataServiceImpl;
+import com.aip.sdk.exception.BusinessException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +24,7 @@ import java.util.Set;
 /**
  * 业务数据导出处理器。
  * 从 sys_export_task.filters JSON 中提取筛选条件，
- * 查询 ops_business_data 并输出 TSV 格式。
+ * 查询 ops_business_order_item 并输出 TSV 格式。
  */
 @Slf4j
 @Component
@@ -80,7 +81,10 @@ public class BusinessDataExportHandler implements ExportHandler {
 
         // 组织级数据隔离
         Set<Long> visibleCorpIds = dataScopeService.getVisibleCorpIdsForCorp(task.getCorpId());
-        if (visibleCorpIds != null && !visibleCorpIds.isEmpty()) {
+        if (visibleCorpIds != null) {
+            if (visibleCorpIds.isEmpty()) {
+                throw BusinessException.forbidden("当前组织无可见数据，无法导出");
+            }
             qw.in(OpsBusinessData::getCorpId, visibleCorpIds);
         }
 
@@ -96,7 +100,7 @@ public class BusinessDataExportHandler implements ExportHandler {
         // 写 TSV
         try (BufferedWriter writer = new BufferedWriter(
                 new OutputStreamWriter(out, StandardCharsets.UTF_8))) {
-            writer.write("公司\t批次号\t客户\t客户手机\t小区\t详细地址\t部门\t经办人\t经办人手机号\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t销售日期\t收据号\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t提成比例\t提成金额\t状态\t备注\t是否特批\n");
+            writer.write("公司\t批次号\t客户\t客户手机\t小区\t详细地址\t部门\t经办人\t经办人手机号\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t销售日期\t收据号\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t提成比例\t提成金额\t状态\t备注\t是否特批\t是否退货\t退货数量\t实际结算数量\n");
             for (OpsBusinessData row : rows) {
                 writer.write(String.join("\t",
                         nvl(row.getCompany()),
@@ -130,7 +134,10 @@ public class BusinessDataExportHandler implements ExportHandler {
                         row.getCommissionAmount() != null ? row.getCommissionAmount().toString() : "",
                         nvl(row.getCalcStatus()),
                         nvl(row.getRemark()),
-                        nvl(row.getIsSpecial())));
+                        nvl(row.getIsSpecial()),
+                        nvl(row.getIsReturn()),
+                        row.getReturnQuantity() != null ? row.getReturnQuantity().toString() : "",
+                        row.getSettleQuantity() != null ? row.getSettleQuantity().toString() : ""));
                 writer.newLine();
             }
         }

@@ -26,7 +26,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "category, brand, model, "
             + "MAX(receipt_amount) as receipt_amount, "
             + "SUM(commission_amount) as commission_amount "
-            + "FROM ops_business_data WHERE delete_flag=0 "
+            + "FROM ops_business_order_item WHERE delete_flag=0 "
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
             + "<if test='batchNo != null and batchNo != \"\"'>AND batch_no = #{batchNo}</if> "
             + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "
@@ -64,7 +64,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "category, brand, model, "
             + "MAX(receipt_amount) as receipt_amount, "
             + "SUM(commission_amount) as commission_amount "
-            + "FROM ops_business_data WHERE delete_flag=0 "
+            + "FROM ops_business_order_item WHERE delete_flag=0 "
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
             + "<if test='batchNo != null and batchNo != \"\"'>AND batch_no = #{batchNo}</if> "
             + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "
@@ -93,7 +93,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
 
     /** Count only — delegates to COUNT(*) for speed. */
     @Select("<script>"
-            + "SELECT COUNT(*) FROM ops_business_data WHERE delete_flag=0 "
+            + "SELECT COUNT(*) FROM ops_business_order_item WHERE delete_flag=0 "
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
             + "<if test='batchNo != null and batchNo != \"\"'>AND batch_no = #{batchNo}</if> "
             + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "
@@ -120,7 +120,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
 
     /** Find which receipt numbers from the given set already exist in DB (within corp scope). */
     @Select("<script>"
-            + "SELECT DISTINCT receipt_no FROM ops_business_data WHERE delete_flag=0 "
+            + "SELECT DISTINCT receipt_no FROM ops_business_order_item WHERE delete_flag=0 "
             + "<if test='corpId != null'>AND corp_id = #{corpId}</if> "
             + "AND receipt_no IN <foreach collection='receiptNos' item='r' open='(' separator=',' close=')'>#{r}</foreach>"
             + "</script>")
@@ -147,7 +147,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "COALESCE(NULLIF(order_no,''), NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) as grp, "
             + "CASE WHEN category = '6' THEN 0 ELSE 1 END as salePri, "
             + "CASE category WHEN '10' THEN '保险' WHEN '4' THEN '壁挂炉' WHEN '5' THEN '壁挂炉以旧换新销售' WHEN '2' THEN '抽油烟机' WHEN '7' THEN '定尺波纹管' WHEN '8' THEN '户内美装工程' WHEN '6' THEN '户内美装销售' WHEN '9' THEN '户内美装运维' WHEN '12' THEN '美装安全评估' WHEN '11' THEN '美装管道整改' WHEN 'qimi' THEN '气密性检测' WHEN '1' THEN '燃气灶' WHEN '3' THEN '热水器' ELSE category END as catName "
-            + "FROM ops_business_data WHERE delete_flag=0 "
+            + "FROM ops_business_order_item WHERE delete_flag=0 "
             + "AND calc_status != '已上报集团' "   // != 而非 <>：<script> XML 解析器中 <> 会破坏标签解析
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
             + "<if test='batchNo != null and batchNo != \"\"'>AND batch_no = #{batchNo}</if> "
@@ -188,7 +188,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "COALESCE(NULLIF(order_no,''), NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) as grp, "
             + "CASE WHEN category = '6' THEN 0 ELSE 1 END as salePri, "
             + "CASE category WHEN '10' THEN '保险' WHEN '4' THEN '壁挂炉' WHEN '5' THEN '壁挂炉以旧换新销售' WHEN '2' THEN '抽油烟机' WHEN '7' THEN '定尺波纹管' WHEN '8' THEN '户内美装工程' WHEN '6' THEN '户内美装销售' WHEN '9' THEN '户内美装运维' WHEN '12' THEN '美装安全评估' WHEN '11' THEN '美装管道整改' WHEN 'qimi' THEN '气密性检测' WHEN '1' THEN '燃气灶' WHEN '3' THEN '热水器' ELSE category END as catName "
-            + "FROM ops_business_data WHERE delete_flag=0 "
+            + "FROM ops_business_order_item WHERE delete_flag=0 "
             + "AND calc_status != '已上报集团' "
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
             + "<if test='batchNo != null and batchNo != \"\"'>AND batch_no = #{batchNo}</if> "

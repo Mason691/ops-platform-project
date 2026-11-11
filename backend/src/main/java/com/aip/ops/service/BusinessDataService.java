@@ -30,6 +30,8 @@ public interface BusinessDataService {
     List<String> getUncalcBatches();
     /** 个人提成计算（按指定批次），batchNo 为 null 时计算所有未计算批次 */
     Map<String, Object> calcCommission(String batchNo);
+    /** 退货审批后重算指定订单的“未计算”行提成，并同步主表状态/合计 */
+    Map<String, Object> recalculateOrder(Long orderId);
     /** 同步导出：按筛选条件查询并生成 XLSX 文件到 outFile（Kafka 不可用时的降级路径） */
     void exportExcel(String company, String batchNo, String agent, String category,
                      String brand, String model, String receiptDateStart, String receiptDateEnd, Path outFile);

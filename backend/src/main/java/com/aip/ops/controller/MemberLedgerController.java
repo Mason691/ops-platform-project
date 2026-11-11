@@ -88,7 +88,7 @@ public class MemberLedgerController {
                            MAX(bd.corp_id) AS corp_id,
                            MAX(bd.create_time) AS active_ts,
                            CASE WHEN COUNT(DISTINCT NULLIF(bd.agent,'')) > 1 THEN 1 ELSE COUNT(*) END AS cnt
-                    FROM ops_business_data bd
+                    FROM ops_business_order_item bd
                     WHERE bd.delete_flag = 0 AND bd.platform_member_id IS NOT NULL{scopeBiz}
                     GROUP BY bd.platform_member_id,
                              COALESCE(NULLIF(bd.order_no,''), NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__row_', bd.id)),
@@ -325,7 +325,7 @@ public class MemberLedgerController {
         return " AND (s.corp_id IN (" + csv + ") OR gu.corp_id IN (" + csv + "))";
     }
 
-    /** 业务侧范围：ops_business_data 自身 corp 过滤。 */
+    /** 业务侧范围：ops_business_order_item 自身 corp 过滤。 */
     private String buildScopeBizClause(Set<Long> visible) {
         if (visible == null || visible.isEmpty()) return "";
         String csv = visible.stream().map(String::valueOf).collect(Collectors.joining(","));
@@ -388,7 +388,7 @@ public class MemberLedgerController {
         return jdbcTemplate.queryForList(sql, platformMemberId);
     }
 
-    /** 销售设备：ops_business_data 按 platform_member_id 归属（回填规则见迁移脚本）；
+    /** 销售设备：ops_business_order_item 按 platform_member_id 归属（回填规则见迁移脚本）；
      *  全量拉取（单会员行数有限）供 mergeBusinessDevices 按收据号合并，合并后再截断 500。
      *  使用日期=市场收款日期（receipt_date 全量 ISO yyyy-MM-dd，usage_date 列为死数据恒 NULL）。 */
     private List<Map<String, Object>> queryBusinessDevices(Long platformMemberId, String scopeBiz) {
@@ -397,7 +397,7 @@ public class MemberLedgerController {
                        bd.sale_price, bd.sale_date, bd.receipt_date, bd.receipt_no,
                        bd.order_no, bd.business_group_no, bd.agent, bd.remark, bd.customer,
                        bd.receipt_date AS usage_date
-                FROM ops_business_data bd
+                FROM ops_business_order_item bd
                 WHERE bd.delete_flag = 0 AND bd.platform_member_id = ?""" + scopeBiz + """
                  ORDER BY (bd.receipt_date IS NULL), bd.receipt_date DESC, bd.id DESC
                 """;

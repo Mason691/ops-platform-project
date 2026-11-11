@@ -2,8 +2,11 @@ package com.aip.ops.service.impl;
 
 import com.aip.ops.dto.FinanceCheckRequest;
 import com.aip.ops.entity.OpsBusinessData;
+import com.aip.ops.entity.OpsBusinessOrder;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
+import com.aip.ops.mapper.OpsBusinessOrderMapper;
 import com.aip.ops.service.BusinessDataFinanceService;
+import com.aip.ops.service.BusinessOrderService;
 import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.FinancePermissionService;
 import com.aip.sdk.exception.BusinessException;
@@ -14,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DateTimeException;
 import java.time.LocalDate;
@@ -52,11 +56,14 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
     private static final Pattern FLEX_DATE = Pattern.compile("^(\\d{4})[-/.](\\d{1,2})[-/.](\\d{1,2})$");
 
     private final OpsBusinessDataMapper businessDataMapper;
+    private final OpsBusinessOrderMapper orderMapper;
+    private final BusinessOrderService orderService;
     private final JdbcTemplate jdbcTemplate;
     private final DataScopeService dataScopeService;
     private final FinancePermissionService financePermissionService;
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> financeCheck(Long id, FinanceCheckRequest request) {
         if (id == null) throw BusinessException.of("数据ID不能为空");
         if (!financePermissionService.canFinanceCheck()) {
@@ -65,9 +72,11 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
         OpsBusinessData row = businessDataMapper.selectById(id);
         if (row == null) throw BusinessException.notFound("业务数据不存在");
         assertScope(row);
+        // 订单头可能因旧 JAR/历史数据缺失，先补建并回填 order_id
+        OpsBusinessOrder order = orderService.ensureOrderForItem(row);
         // 财务核对为业务级字段：同一订单/业务组的所有明细必须一起核对，
         // 避免部分明细已核对、部分未核对的状态混乱
-        List<OpsBusinessData> group = loadFinanceGroup(row);
+        List<OpsBusinessData> group = loadFinanceGroup(row, order);
         for (OpsBusinessData item : group) {
             if (REPORTED_STATUS.equals(item.getCalcStatus())) {
                 throw BusinessException.of("该订单包含已上报集团数据，不能财务核对");
@@ -75,7 +84,7 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
         }
         List<Long> groupIds = group.stream().map(OpsBusinessData::getId).toList();
 
-        ValidatedFinance v = validate(request, row, groupIds);
+        ValidatedFinance v = validate(request, row, order, groupIds);
         Long userId = SecurityUtils.getCurrentUserId();
         String userName = resolveUserName(userId);
         LocalDateTime now = LocalDateTime.now();
@@ -83,11 +92,18 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
         if (updated != groupIds.size()) {
             throw BusinessException.of("订单内部分数据已上报集团或状态已变更，请刷新后重试");
         }
-        return result(id, v, userId, userName, now);
+        // 订单级字段以主表为准，同时回写主表
+        orderService.updateFinanceFields(order.getId(), v.receiptNo(), v.financeReceiptDate(),
+                v.fundDynamicRows(), v.isReceived(), userId, userName, now);
+        return result(id, order.getId(), v, userId, userName, now);
     }
 
-    /** 同一订单编号（优先）、业务组号或收据号+客户下的全部明细；无组键时仅当前行。 */
-    private List<OpsBusinessData> loadFinanceGroup(OpsBusinessData row) {
+    /** 同一订单的全部明细（order_id 优先）；无 order_id 时按订单编号/业务组号/收据号+客户回退。 */
+    private List<OpsBusinessData> loadFinanceGroup(OpsBusinessData row, OpsBusinessOrder order) {
+        if (order != null && order.getId() != null) {
+            List<OpsBusinessData> items = orderMapper.selectItems(order.getId());
+            if (!items.isEmpty()) return items;
+        }
         String orderNo = str(row.getOrderNo());
         String groupNo = str(row.getBusinessGroupNo());
         String receiptNo = str(row.getReceiptNo());
@@ -119,7 +135,7 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
     }
 
     private ValidatedFinance validate(FinanceCheckRequest req, OpsBusinessData row,
-                                      List<Long> groupIds) {
+                                      OpsBusinessOrder order, List<Long> groupIds) {
         if (req == null) throw BusinessException.of("请求参数不能为空");
         String receiptNo = str(req.getReceiptNo());
         if (receiptNo.isEmpty()) throw BusinessException.of("收据号不能为空");
@@ -127,7 +143,9 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
             throw BusinessException.of("收据号不能超过" + MAX_RECEIPT_NO_LENGTH + "个字符");
         }
         LocalDate financeDate = parseRequiredDate(req.getFinanceReceiptDate());
-        LocalDate marketDate = parseOptionalDate(row.getReceiptDate());
+        String marketRaw = order != null && str(order.getReceiptDate()).length() > 0
+                ? order.getReceiptDate() : row.getReceiptDate();
+        LocalDate marketDate = parseOptionalDate(marketRaw);
         if (marketDate != null && financeDate.isBefore(marketDate)) {
             throw BusinessException.of("财务收款日期不得早于市场收款日期（" + marketDate + "）");
         }
@@ -141,23 +159,33 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
     }
 
     /**
-     * 收据号查重（排除同一订单/业务组的全部行），与导入侧的「同收据号组内客户一致」口径对齐：
-     * 同一客户的多行可共用收据号（同订单拆分），仅拦截被其他客户占用的收据号。
+     * 收据号查重（排除本订单全部子表行），与导入侧的「同收据号组内客户一致」口径对齐：
+     * 同一客户的多张订单可共用收据号（同订单拆分），仅拦截被其他客户占用的收据号。
+     * 以子表为准可覆盖旧 JAR 经兼容视图写入、尚未回填 order_id 的行。
      */
     private void assertReceiptNoUnique(String receiptNo, OpsBusinessData row,
                                        List<Long> groupIds) {
         if (row.getCorpId() == null) return;
-        String placeholders = String.join(",", Collections.nCopies(groupIds.size(), "?"));
-        List<Object> args = new ArrayList<>();
-        args.add(row.getCorpId());
-        args.add(receiptNo);
-        args.addAll(groupIds);
-        List<Map<String, Object>> dups = jdbcTemplate.queryForList(
-                "SELECT batch_no, customer FROM ops_business_data "
-                        + "WHERE corp_id = ? AND receipt_no = ? AND delete_flag = 0 "
-                        + "AND id NOT IN (" + placeholders + ") ORDER BY id LIMIT 20",
-                args.toArray());
+        List<Map<String, Object>> dups;
         String customer = str(row.getCustomer());
+        if (groupIds == null || groupIds.isEmpty()) {
+            dups = jdbcTemplate.queryForList(
+                    "SELECT batch_no, customer FROM ops_business_order_item "
+                            + "WHERE corp_id = ? AND receipt_no = ? AND delete_flag = 0 "
+                            + "AND id <> ? ORDER BY id LIMIT 20",
+                    row.getCorpId(), receiptNo, row.getId());
+        } else {
+            String placeholders = String.join(",", Collections.nCopies(groupIds.size(), "?"));
+            List<Object> args = new ArrayList<>();
+            args.add(row.getCorpId());
+            args.add(receiptNo);
+            args.addAll(groupIds);
+            dups = jdbcTemplate.queryForList(
+                    "SELECT batch_no, customer FROM ops_business_order_item "
+                            + "WHERE corp_id = ? AND receipt_no = ? AND delete_flag = 0 "
+                            + "AND id NOT IN (" + placeholders + ") ORDER BY id LIMIT 20",
+                    args.toArray());
+        }
         for (Map<String, Object> dup : dups) {
             if (!customer.equals(str(dup.get("customer")))) {
                 throw BusinessException.of("收据号 " + receiptNo + " 已被其他客户占用（批次 "
@@ -260,10 +288,11 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
         return username != null ? username : "";
     }
 
-    private Map<String, Object> result(Long id, ValidatedFinance v, Long userId,
+    private Map<String, Object> result(Long id, Long orderId, ValidatedFinance v, Long userId,
                                        String userName, LocalDateTime now) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", id);
+        result.put("orderId", orderId);
         result.put("receiptNo", v.receiptNo());
         result.put("financeReceiptDate", v.financeReceiptDate());
         result.put("fundDynamicRows", v.fundDynamicRows());

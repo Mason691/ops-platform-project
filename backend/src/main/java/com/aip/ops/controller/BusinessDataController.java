@@ -1,12 +1,16 @@
 package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
+import com.aip.ops.dto.BusinessReturnApproveRequest;
+import com.aip.ops.dto.BusinessReturnRequest;
 import com.aip.ops.dto.FinanceCheckRequest;
 import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.entity.SysExportTask;
 import com.aip.ops.service.BusinessDataFinanceService;
+import com.aip.ops.service.BusinessDataReconcileService;
 import com.aip.ops.service.BusinessDataService;
+import com.aip.ops.service.BusinessReturnService;
 import com.aip.ops.service.ExportTaskService;
 import com.aip.ops.service.ImportTaskService;
 import com.aip.ops.service.OrgRoleService;
@@ -44,6 +48,8 @@ public class BusinessDataController {
     private final ExportTaskService taskService;
     private final ImportTaskService importTaskService;
     private final BusinessDataFinanceService financeService;
+    private final BusinessReturnService returnService;
+    private final BusinessDataReconcileService reconcileService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final OrgRoleService orgRoleService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -115,6 +121,8 @@ public class BusinessDataController {
     public BusinessDataController(BusinessDataService service, ExportTaskService taskService,
                                   ImportTaskService importTaskService,
                                   BusinessDataFinanceService financeService,
+                                  BusinessReturnService returnService,
+                                  BusinessDataReconcileService reconcileService,
                                   KafkaTemplate<String, String> kafkaTemplate,
                                   OrgRoleService orgRoleService,
                                   @Qualifier("importExecutor") ExecutorService importExecutor) {
@@ -122,6 +130,8 @@ public class BusinessDataController {
         this.taskService = taskService;
         this.importTaskService = importTaskService;
         this.financeService = financeService;
+        this.returnService = returnService;
+        this.reconcileService = reconcileService;
         this.kafkaTemplate = kafkaTemplate;
         this.orgRoleService = orgRoleService;
         this.importExecutor = importExecutor;
@@ -173,7 +183,7 @@ public class BusinessDataController {
      * confirm（pendingItems 列出待确认项与候选产品）/ready（可直接导入）。
      * 大文件解析不再占用请求线程——超时问题由此根治。
      */
-    @OperationLog(module = "增值业务", action = "导入校验", targetTable = "ops_business_data")
+    @OperationLog(module = "增值业务", action = "导入校验", targetTable = "ops_business_order_item")
     @PostMapping("/import/check")
     public R<Map<String, Object>> importCheck(@RequestParam("file") MultipartFile file) {
         Map<String, Object> extError = checkFileExtension(file);
@@ -204,7 +214,7 @@ public class BusinessDataController {
      * 立即返回 taskId，前端轮询 /import/{taskId}/status；结果格式与历史 /import/submit 一致：
      * success → { status: "success", count: N } / failure → { status: "fail", totalErrors, errors }。
      */
-    @OperationLog(module = "增值业务", action = "导入", targetTable = "ops_business_data")
+    @OperationLog(module = "增值业务", action = "导入", targetTable = "ops_business_order_item")
     @PostMapping("/import/confirm")
     public R<Map<String, Object>> importConfirm(
             @RequestParam(value = "checkTaskId", required = false) Long checkTaskId,
@@ -432,7 +442,7 @@ public class BusinessDataController {
         }
     }
 
-    @OperationLog(module = "增值业务", action = "删除", targetTable = "ops_business_data")
+    @OperationLog(module = "增值业务", action = "删除", targetTable = "ops_business_order_item")
     @DeleteMapping("/batch")
     public R<?> batchDelete(@RequestBody Map<String, List<Long>> params) {
         service.batchDelete(params.get("ids"));
@@ -444,7 +454,7 @@ public class BusinessDataController {
      * 仅运营商管理员/超管可操作；只处理非"已上报集团"的数据；
      * 锁定后所有组织均不可删除/修改/重新计算。
      */
-    @OperationLog(module = "增值业务", action = "提成上报集团", targetTable = "ops_business_data")
+    @OperationLog(module = "增值业务", action = "提成上报集团", targetTable = "ops_business_order_item")
     @PostMapping("/report-to-group")
     public R<?> reportToGroup(@RequestBody(required = false) Map<String, String> params) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -461,7 +471,7 @@ public class BusinessDataController {
      * 品类提成汇总：按当前筛选条件汇总非"已上报集团"数据（品类×公司×提成金额/销售额），
      * 按模板格式生成 Excel 同步下载。仅运营商管理员/超管可操作。
      */
-    @OperationLog(module = "增值业务", action = "品类提成汇总", targetTable = "ops_business_data")
+    @OperationLog(module = "增值业务", action = "品类提成汇总", targetTable = "ops_business_order_item")
     @GetMapping("/commission-summary")
     public void commissionSummary(@RequestParam(required = false) String company,
                                   @RequestParam(required = false) String batchNo,
@@ -482,14 +492,54 @@ public class BusinessDataController {
      * 财务核对：补充/修改收据号、财务收款日期、资金动态表横排数、是否收款，
      * 并记录核对人与核对时间。仅财务角色/运营商管理员可操作；已上报集团拒绝。
      */
-    @OperationLog(module = "增值业务", action = "财务核对", targetTable = "ops_business_data")
+    @OperationLog(module = "增值业务", action = "财务核对", targetTable = "ops_business_order_item")
     @PutMapping("/{id}/finance-check")
     public R<?> financeCheck(@PathVariable Long id, @RequestBody FinanceCheckRequest request) {
         return R.ok(financeService.financeCheck(id, request));
     }
 
+    /**
+     * 退货申请：经办人（仅本人经办行）或财务/运营商管理员发起。
+     * 审批通过后按实际结算数量调整收款金额与提成，并重算订单提成。
+     */
+    @OperationLog(module = "增值业务", action = "退货申请", targetTable = "ops_business_return")
+    @PostMapping("/{id}/returns")
+    public R<?> createReturn(@PathVariable Long id, @RequestBody BusinessReturnRequest request) {
+        return R.ok(returnService.create(id, request));
+    }
+
+    /** 某订单的全部退货申请（含已驳回）。 */
+    @GetMapping("/orders/{orderId}/returns")
+    public R<?> orderReturns(@PathVariable Long orderId) {
+        return R.ok(returnService.listByOrder(orderId));
+    }
+
+    /** 待审批退货申请（当前组织范围，最多 200 条）。 */
+    @GetMapping("/returns/pending")
+    public R<?> pendingReturns() {
+        return R.ok(returnService.listPending());
+    }
+
+    /** 退货审批：approved=true 通过并生效，false 驳回。仅财务/运营商管理员。 */
+    @OperationLog(module = "增值业务", action = "退货审批", targetTable = "ops_business_return")
+    @PutMapping("/returns/{requestId}/approve")
+    public R<?> approveReturn(@PathVariable Long requestId,
+                              @RequestBody BusinessReturnApproveRequest request) {
+        return R.ok(returnService.approve(requestId, request));
+    }
+
+    /** 主子表对账（只读）：主表合计 vs 子表聚合、结算数量 vs 退货数量。仅超管（全局口径）。 */
+    @GetMapping("/reconcile")
+    public R<?> reconcile() {
+        Long corpId = SecurityUtils.getCurrentCorpIdOrNull();
+        if (corpId == null || corpId != 0L) {
+            return R.forbidden();
+        }
+        return R.ok(reconcileService.reconcile());
+    }
+
     /** 经办人核对（管理后台）：仅运营商管理员/超管可操作 */
-    @OperationLog(module = "增值业务", action = "核对", targetTable = "ops_business_data")
+    @OperationLog(module = "增值业务", action = "核对", targetTable = "ops_business_order_item")
     @PutMapping("/batch/check")
     public R<?> batchCheck(@RequestBody Map<String, String> params) {
         if (!orgRoleService.isOperatorOrSuperAdmin()) {
@@ -503,7 +553,7 @@ public class BusinessDataController {
 
     /** 手工重匹配会员：对选定行按 客户手机→客户名称 在行所属燃气公司范围内重匹配并回写
      *  platform_member_id（未匹配留空；已上报集团行跳过）。 */
-    @OperationLog(module = "增值业务", action = "重新匹配会员", targetTable = "ops_business_data")
+    @OperationLog(module = "增值业务", action = "重新匹配会员", targetTable = "ops_business_order_item")
     @PostMapping("/rematch-members")
     public R<?> rematchMembers(@RequestBody Map<String, List<Long>> params) {
         return R.ok(service.rematchMembers(params != null ? params.get("ids") : null));
@@ -511,7 +561,7 @@ public class BusinessDataController {
 
     /** 按批次重匹配会员：批次内未关联行按 全局手机号→公司+姓名→自动创建 三级规则回写
      *  platform_member_id（已上报集团行跳过；幂等可重跑）。 */
-    @OperationLog(module = "增值业务", action = "按批次重匹配会员", targetTable = "ops_business_data")
+    @OperationLog(module = "增值业务", action = "按批次重匹配会员", targetTable = "ops_business_order_item")
     @PostMapping("/rematch-by-batch")
     public R<?> rematchByBatch(@RequestBody Map<String, String> params) {
         return R.ok(service.rematchMembersByBatch(params != null ? params.get("batchNo") : null));

@@ -13,6 +13,7 @@ public class ImportResult {
     private String status;     // "success" or "fail"
     private String phase;      // current phase identifier
     private int count;
+    private int orderCount;    // 生成/关联的主表（订单头）条数
     private int totalRows;
     private int successRows;
     private int failRows;
@@ -68,6 +69,7 @@ public class ImportResult {
         m.put("status", status);
         m.put("phase", phase);
         m.put("count", count);
+        m.put("orderCount", orderCount);
         m.put("totalRows", totalRows);
         m.put("successRows", successRows);
         m.put("failRows", failRows);
@@ -105,6 +107,8 @@ public class ImportResult {
     public void setPhase(String v) { phase = v; }
     public int getCount() { return count; }
     public void setCount(int v) { count = v; }
+    public int getOrderCount() { return orderCount; }
+    public void setOrderCount(int v) { orderCount = v; }
     public int getTotalRows() { return totalRows; }
     public void setTotalRows(int v) { totalRows = v; }
     public int getSuccessRows() { return successRows; }

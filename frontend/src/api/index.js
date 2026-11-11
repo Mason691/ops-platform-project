@@ -235,6 +235,7 @@ export const api = {
   employeeOverview: (params) => request({url:'/api/ops/employee/business-data/overview',data:params}),
   employeeBatches: () => request({url:'/api/ops/employee/business-data/batches'}),
   employeeBatchCheck: (data) => request({url:'/api/ops/employee/business-data/batch/check',method:'POST',data}),
+  employeeRequestReturn: (id, data) => request({url:'/api/ops/employee/business-data/'+id+'/return',method:'POST',data}),
   // 员工手工新增业务数据
   employeeManualOptions: () => request({url:'/api/ops/employee/business-data/manual/options'}),
   employeeLookupMember: (phone) => request({url:'/api/ops/employee/business-data/manual/member',data:{phone}}),

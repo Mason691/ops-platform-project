@@ -276,11 +276,17 @@ public class EmployeeServiceImpl implements EmployeeService {
             g.orderCount++;
 
             Map<String, Object> detail = new LinkedHashMap<>();
+            if (row.get("id") != null) detail.put("id", row.get("id"));
             detail.put("brand", normalizeSentinel(row.get("brand")));
             detail.put("model", normalizeSentinel(row.get("model")));
             detail.put("salePrice", salePrice);
             detail.put("receiptAmount", sale);
             if (row.get("saleQuantity") != null) detail.put("saleQuantity", row.get("saleQuantity"));
+            // 退货信息（员工端展示 + 申请退货按钮）
+            if (row.get("isReturn") != null) detail.put("isReturn", row.get("isReturn"));
+            if (row.get("returnQuantity") != null) detail.put("returnQuantity", row.get("returnQuantity"));
+            if (row.get("settleQuantity") != null) detail.put("settleQuantity", row.get("settleQuantity"));
+            if (row.get("returnStatus") != null) detail.put("returnStatus", row.get("returnStatus"));
             detail.put("commissionAmount", commission);
             detail.put("commissionRate", toBigDecimal(row.get("commissionRate")));
             detail.put("saleDate", saleDate);

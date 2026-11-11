@@ -3,15 +3,20 @@ package com.aip.ops.service.impl;
 import com.aip.sdk.exception.BusinessException;
 import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.OpsBusinessData;
+import com.aip.ops.entity.OpsBusinessOrder;
+import com.aip.ops.entity.OpsBusinessReturn;
 import com.aip.ops.entity.OpsPersonalCommissionRule;
 import com.aip.ops.entity.OpsValueAddedProduct;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.imports.BusinessDataImportHandler;
 import com.aip.ops.imports.ImportResult;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
+import com.aip.ops.mapper.OpsBusinessOrderMapper;
+import com.aip.ops.mapper.OpsBusinessReturnMapper;
 import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.BusinessDataService;
+import com.aip.ops.service.BusinessOrderService;
 import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.GasMemberMatcher;
 import com.aip.ops.service.ImportTaskService;
@@ -22,6 +27,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -54,14 +60,18 @@ import java.util.stream.Collectors;
 public class BusinessDataServiceImpl implements BusinessDataService {
 
     private final OpsBusinessDataMapper mapper;
+    private final OpsBusinessOrderMapper orderMapper;
+    private final OpsBusinessReturnMapper returnMapper;
     private final OpsValueAddedProductMapper productMapper;
     private final OpsPersonalCommissionRuleMapper ruleMapper;
     private final DataScopeService dataScopeService;
     private final DataSource dataSource;
+    private final JdbcTemplate jdbcTemplate;
     private final PlatformInternalClient platformInternalClient;
     private final BusinessDataImportHandler importHandler;
     private final ImportTaskService importTaskService;
     private final GasMemberMatcher memberMatcher;
+    private final BusinessOrderService orderService;
 
     /** 锁定状态：已上报集团的数据禁止删除/修改/重新计算（所有组织一致） */
     public static final String REPORTED_STATUS = "已上报集团";
@@ -110,23 +120,31 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     public BusinessDataServiceImpl(
             OpsBusinessDataMapper mapper,
+            OpsBusinessOrderMapper orderMapper,
+            OpsBusinessReturnMapper returnMapper,
             OpsValueAddedProductMapper productMapper,
             OpsPersonalCommissionRuleMapper ruleMapper,
             DataScopeService dataScopeService,
             DataSource dataSource,
+            JdbcTemplate jdbcTemplate,
             PlatformInternalClient platformInternalClient,
             BusinessDataImportHandler importHandler,
             ImportTaskService importTaskService,
-            GasMemberMatcher memberMatcher) {
+            GasMemberMatcher memberMatcher,
+            BusinessOrderService orderService) {
         this.mapper = mapper;
+        this.orderMapper = orderMapper;
+        this.returnMapper = returnMapper;
         this.productMapper = productMapper;
         this.ruleMapper = ruleMapper;
         this.dataScopeService = dataScopeService;
         this.dataSource = dataSource;
+        this.jdbcTemplate = jdbcTemplate;
         this.platformInternalClient = platformInternalClient;
         this.importHandler = importHandler;
         this.importTaskService = importTaskService;
         this.memberMatcher = memberMatcher;
+        this.orderService = orderService;
     }
     public static String getCategoryDisplayName(String key) {
         if (key == null || key.isEmpty()) return "";
@@ -193,6 +211,12 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     public Map<String, Object> page(int pageNum, int pageSize, String company, String batchNo, String agent, String receiptNo, String category, String isSpecial, String brand, String model, String receiptDateStart, String receiptDateEnd) {
         // Build visible corp IDs once
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        if (noVisibleCorp(visibleIds)) {
+            return Map.of("records", List.of(), "total", 0,
+                    "size", pageSize, "current", pageNum,
+                    "totalSale", BigDecimal.ZERO, "totalCommission", BigDecimal.ZERO,
+                    "categoryStats", List.of());
+        }
         List<Long> corpIdList = (visibleIds != null && !visibleIds.isEmpty())
                 ? new ArrayList<>(visibleIds) : null;
 
@@ -247,6 +271,17 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                                          String brand, String model, String receiptDateStart,
                                          String receiptDateEnd) {
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        if (noVisibleCorp(visibleIds)) {
+            Map<String, Object> empty = new LinkedHashMap<>();
+            empty.put("records", List.of());
+            empty.put("total", 0);
+            empty.put("size", pageSize);
+            empty.put("current", pageNum);
+            empty.put("totalSale", BigDecimal.ZERO);
+            empty.put("totalCommission", BigDecimal.ZERO);
+            empty.put("categoryStats", List.of());
+            return empty;
+        }
         List<Long> corpIdList = (visibleIds != null && !visibleIds.isEmpty())
                 ? new ArrayList<>(visibleIds) : null;
         LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
@@ -279,8 +314,16 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         BigDecimal totalSale = BigDecimal.ZERO;
         BigDecimal totalCommission = BigDecimal.ZERO;
         Map<String, BigDecimal[]> categoryTotals = new LinkedHashMap<>();
+        // 预载主页：订单级字段以主表为准（历史无 order_id 行由 buildOrderView 回退到子表首行）
+        Set<Long> orderIds = grouped.values().stream()
+                .map(g -> g.get(0).getOrderId())
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, OpsBusinessOrder> masters = orderService.findByIds(orderIds).stream()
+                .collect(Collectors.toMap(OpsBusinessOrder::getId, x -> x, (a, b) -> a));
         for (List<OpsBusinessData> group : grouped.values()) {
-            Map<String, Object> order = buildOrderView(group);
+            Map<String, Object> order = buildOrderView(group,
+                    masters.get(group.get(0).getOrderId()));
             orders.add(order);
             totalSale = totalSale.add((BigDecimal) order.get("totalAmount"));
             totalCommission = totalCommission.add((BigDecimal) order.get("totalCommission"));
@@ -330,8 +373,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         return value != null && !value.trim().isEmpty();
     }
 
-    /** 订单键：订单编号优先，其次历史业务组号/收据号+客户，最后单行。 */
+    /** 订单键：主表 order_id 优先；历史无 order_id 行按订单编号/业务组号/收据号+客户回退。 */
     private static String orderKey(OpsBusinessData row) {
+        if (row.getOrderId() != null) return "D|" + row.getOrderId();
         if (hasText(row.getOrderNo())) return "O|" + row.getOrderNo().trim();
         if (hasText(row.getBusinessGroupNo())) return "G|" + row.getBusinessGroupNo().trim();
         if (hasText(row.getReceiptNo())) {
@@ -348,7 +392,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 || (phone != null && phone.toLowerCase(Locale.ROOT).contains(needle));
     }
 
-    private Map<String, Object> buildOrderView(List<OpsBusinessData> rows) {
+    private Map<String, Object> buildOrderView(List<OpsBusinessData> rows, OpsBusinessOrder master) {
         rows.sort(Comparator.comparing(OpsBusinessData::getId));
         OpsBusinessData first = rows.get(0);
         Map<String, List<OpsBusinessData>> productGroups = new LinkedHashMap<>();
@@ -356,17 +400,17 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             String key = Objects.toString(row.getCategory(), "") + "|"
                     + Objects.toString(row.getBrand(), "") + "|"
                     + Objects.toString(row.getModel(), "") + "|"
-                    + Objects.toString(row.getSalePrice(), "");
+                    + priceKey(row.getSalePrice());
             productGroups.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
         }
         List<Map<String, Object>> products = new ArrayList<>();
-        BigDecimal totalAmount = BigDecimal.ZERO;
-        BigDecimal totalCommission = BigDecimal.ZERO;
+        BigDecimal computedAmount = BigDecimal.ZERO;
+        BigDecimal computedCommission = BigDecimal.ZERO;
         for (List<OpsBusinessData> productRows : productGroups.values()) {
             Map<String, Object> product = buildProductView(productRows);
             products.add(product);
-            totalAmount = totalAmount.add((BigDecimal) product.get("receiptAmount"));
-            totalCommission = totalCommission.add((BigDecimal) product.get("commissionAmount"));
+            computedAmount = computedAmount.add((BigDecimal) product.get("receiptAmount"));
+            computedCommission = computedCommission.add((BigDecimal) product.get("commissionAmount"));
         }
         LinkedHashSet<String> agentNames = new LinkedHashSet<>();
         LinkedHashSet<String> agentPhones = new LinkedHashSet<>();
@@ -376,40 +420,68 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         }
         int checkedCount = (int) rows.stream()
                 .filter(r -> r.getFinanceCheckTime() != null).count();
+        BigDecimal totalAmount = computedAmount;
+        BigDecimal totalCommission = computedCommission;
+        String calcStatus = master != null && hasText(master.getCalcStatus())
+                ? master.getCalcStatus() : computeOrderStatus(rows);
+        boolean hasReturn = products.stream().anyMatch(p -> "是".equals(p.get("isReturn")));
+        boolean hasPendingReturn = products.stream()
+                .anyMatch(p -> "审批中".equals(p.get("returnStatus")));
+        boolean financeChecked = checkedCount > 0 && checkedCount == rows.size();
         Map<String, Object> order = new LinkedHashMap<>();
+        order.put("orderId", master != null ? master.getId() : first.getOrderId());
         order.put("orderKey", orderKey(first));
-        order.put("orderNo", firstText(rows, OpsBusinessData::getOrderNo));
-        order.put("batchNo", firstText(rows, OpsBusinessData::getBatchNo));
-        order.put("receiptNo", firstText(rows, OpsBusinessData::getReceiptNo));
-        order.put("customer", firstText(rows, OpsBusinessData::getCustomer));
-        order.put("customerPhone", firstText(rows, OpsBusinessData::getCustomerPhone));
-        order.put("communityName", firstText(rows, OpsBusinessData::getCommunityName));
-        order.put("detailedAddress", firstText(rows, OpsBusinessData::getDetailedAddress));
-        order.put("company", firstText(rows, OpsBusinessData::getCompany));
+        order.put("orderNo", pick(master != null ? master.getOrderNo() : null,
+                rows, OpsBusinessData::getOrderNo));
+        order.put("batchNo", pick(master != null ? master.getBatchNo() : null,
+                rows, OpsBusinessData::getBatchNo));
+        order.put("receiptNo", pick(master != null ? master.getReceiptNo() : null,
+                rows, OpsBusinessData::getReceiptNo));
+        order.put("customer", pick(master != null ? master.getCustomer() : null,
+                rows, OpsBusinessData::getCustomer));
+        order.put("customerPhone", pick(master != null ? master.getCustomerPhone() : null,
+                rows, OpsBusinessData::getCustomerPhone));
+        order.put("communityName", pick(master != null ? master.getCommunityName() : null,
+                rows, OpsBusinessData::getCommunityName));
+        order.put("detailedAddress", pick(master != null ? master.getDetailedAddress() : null,
+                rows, OpsBusinessData::getDetailedAddress));
+        order.put("company", pick(master != null ? master.getCompany() : null,
+                rows, OpsBusinessData::getCompany));
         order.put("agents", new ArrayList<>(agentNames));
         order.put("agentNames", String.join("、", agentNames));
         order.put("agentPhones", String.join("、", agentPhones));
-        order.put("receiptDate", firstText(rows, OpsBusinessData::getReceiptDate));
-        order.put("financeReceiptDate",
-                firstNonNull(rows, OpsBusinessData::getFinanceReceiptDate));
+        order.put("receiptDate", pick(master != null ? master.getReceiptDate() : null,
+                rows, OpsBusinessData::getReceiptDate));
+        order.put("financeReceiptDate", pickNonNull(
+                master != null ? master.getFinanceReceiptDate() : null,
+                rows, OpsBusinessData::getFinanceReceiptDate));
         order.put("createTime", firstNonNull(rows, OpsBusinessData::getCreateTime));
-        order.put("fundDynamicRows", firstNonNull(rows, OpsBusinessData::getFundDynamicRows));
-        order.put("isReceived", firstText(rows, OpsBusinessData::getIsReceived));
-        order.put("voucherUrl", firstText(rows, OpsBusinessData::getVoucherUrl));
-        order.put("calcStatus", computeOrderStatus(rows));
-        order.put("financeChecked", checkedCount > 0 && checkedCount == rows.size());
+        order.put("fundDynamicRows", pickNonNull(
+                master != null ? master.getFundDynamicRows() : null,
+                rows, OpsBusinessData::getFundDynamicRows));
+        order.put("isReceived", pick(master != null ? master.getIsReceived() : null,
+                rows, OpsBusinessData::getIsReceived));
+        order.put("voucherUrl", pick(master != null ? master.getVoucherUrl() : null,
+                rows, OpsBusinessData::getVoucherUrl));
+        order.put("calcStatus", calcStatus);
+        order.put("financeChecked", financeChecked);
         order.put("financeCheckedCount", checkedCount);
         order.put("financeCheckedTotal", rows.size());
-        order.put("financeCheckTime",
-                firstNonNull(rows, OpsBusinessData::getFinanceCheckTime));
-        order.put("financeCheckUserName",
-                firstText(rows, OpsBusinessData::getFinanceCheckUserName));
+        order.put("financeCheckTime", pickNonNull(
+                master != null ? master.getFinanceCheckTime() : null,
+                rows, OpsBusinessData::getFinanceCheckTime));
+        order.put("financeCheckUserName", pick(
+                master != null ? master.getFinanceCheckUserName() : null,
+                rows, OpsBusinessData::getFinanceCheckUserName));
         order.put("hasUnmatchedMember",
                 rows.stream().anyMatch(r -> r.getPlatformMemberId() == null));
         order.put("totalAmount", totalAmount.setScale(2, RoundingMode.HALF_UP));
         order.put("totalCommission", totalCommission.setScale(2, RoundingMode.HALF_UP));
         order.put("productCount", products.size());
         order.put("products", products);
+        order.put("hasReturn", hasReturn);
+        order.put("hasPendingReturn", hasPendingReturn);
+        order.put("canReturn", !REPORTED_STATUS.equals(calcStatus) && !hasPendingReturn);
         order.put("category", products.isEmpty() ? null : products.get(0).get("category"));
         // 兼容财务核对弹窗/卡片的单产品字段：取首个产品；多产品以 productCount/totalAmount 提示
         if (!products.isEmpty()) {
@@ -434,6 +506,21 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         return order;
     }
 
+    private static String pick(String masterValue, List<OpsBusinessData> rows,
+                               Function<OpsBusinessData, String> getter) {
+        return hasText(masterValue) ? masterValue : firstText(rows, getter);
+    }
+
+    /** 价格归一化：10.00 与 10 视为同一价格（与主表合计/导入归组口径一致）。 */
+    private static String priceKey(BigDecimal price) {
+        return price == null ? "" : price.stripTrailingZeros().toPlainString();
+    }
+
+    private static <T> T pickNonNull(T masterValue, List<OpsBusinessData> rows,
+                                     Function<OpsBusinessData, T> getter) {
+        return masterValue != null ? masterValue : firstNonNull(rows, getter);
+    }
+
     private Map<String, Object> buildProductView(List<OpsBusinessData> rows) {
         rows.sort(Comparator.comparing(OpsBusinessData::getId));
         OpsBusinessData first = rows.get(0);
@@ -450,7 +537,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         product.put("productKey", Objects.toString(first.getCategory(), "") + "|"
                 + Objects.toString(first.getBrand(), "") + "|"
                 + Objects.toString(first.getModel(), "") + "|"
-                + Objects.toString(first.getSalePrice(), ""));
+                + priceKey(first.getSalePrice()));
         product.put("brand", first.getBrand());
         product.put("category", first.getCategory());
         product.put("model", first.getModel());
@@ -464,6 +551,13 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 firstNonNull(rows, OpsBusinessData::getRetailFloorPrice));
         product.put("groupLowestPrice",
                 firstNonNull(rows, OpsBusinessData::getGroupLowestPrice));
+        // 退货信息（同产品多经办人行已同步，取首行展示）
+        product.put("isReturn", first.getIsReturn());
+        product.put("returnQuantity", first.getReturnQuantity());
+        product.put("returnAmount", first.getReturnAmount());
+        product.put("settleQuantity", first.getSettleQuantity());
+        product.put("returnStatus", first.getReturnStatus());
+        product.put("originalReceiptAmount", first.getOriginalReceiptAmount());
         product.put("rowIds", rows.stream().map(OpsBusinessData::getId).toList());
         return product;
     }
@@ -512,6 +606,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         }
         // 数据范围：仅可见组织内的行（超管无限制），写回同样按 corp 限定
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        if (noVisibleCorp(visibleIds)) {
+            return Map.of("total", 0, "matched", 0, "unmatched", 0,
+                    "updated", 0, "skippedReported", 0);
+        }
         LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
         qw.in(OpsBusinessData::getId, ids);
         if (visibleIds != null && !visibleIds.isEmpty()) {
@@ -547,6 +645,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                             .eq(OpsBusinessData::getId, row.getId())
                             .eq(OpsBusinessData::getCorpId, row.getCorpId())
                             .set(OpsBusinessData::getPlatformMemberId, memberId));
+                    syncMasterMember(row.getOrderId(), memberId);
                     updated++;
                 }
             }
@@ -563,6 +662,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         }
         // 数据范围：仅可见组织内的行（超管无限制）；只处理未关联行（幂等可重跑）
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        if (noVisibleCorp(visibleIds)) {
+            return Map.of("total", 0, "matchedExisting", 0, "created", 0,
+                    "updated", 0, "skippedReported", 0, "createdList", List.of());
+        }
         LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<OpsBusinessData>()
                 .eq(OpsBusinessData::getBatchNo, batchNo)
                 .isNull(OpsBusinessData::getPlatformMemberId);
@@ -621,6 +724,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                             .eq(OpsBusinessData::getId, row.getId())
                             .eq(OpsBusinessData::getCorpId, row.getCorpId())
                             .set(OpsBusinessData::getPlatformMemberId, memberId));
+                    syncMasterMember(row.getOrderId(), memberId);
                     updated++;
                 }
             }
@@ -633,6 +737,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     @Override
     public List<String> getBatches() {
+        if (noVisibleCorp(dataScopeService.getVisibleCorpIds())) return List.of();
         LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<OpsBusinessData>()
                 .select(OpsBusinessData::getBatchNo)
                 .groupBy(OpsBusinessData::getBatchNo);
@@ -705,6 +810,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private Map<String, Object> mapImportResult(ImportResult result) {
         if ("success".equals(result.getStatus())) {
             return Map.of("status", "success", "count", result.getCount(),
+                    "orderCount", result.getOrderCount(),
                     "matchedCount", result.getMatchedCount(),
                     "unmatchedCount", result.getUnmatchedCount(),
                     "createdCount", result.getCreatedCount(),
@@ -762,6 +868,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     @Override
     public List<String> getUncalcBatches() {
+        if (noVisibleCorp(dataScopeService.getVisibleCorpIds())) return List.of();
         LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<OpsBusinessData>()
                 .select(OpsBusinessData::getBatchNo)
                 .eq(OpsBusinessData::getCalcStatus, "未计算")
@@ -775,6 +882,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     @Override
     @Transactional
     public Map<String, Object> calcCommission(String batchNo) {
+        Set<Long> visible = dataScopeService.getVisibleCorpIds();
+        if (noVisibleCorp(visible)) {
+            return Map.of("total", 0, "commissioned", 0, "zero", 0, "splitGroups", 0);
+        }
         // 锁定守卫：已上报集团的批次禁止重新计算（否则 CASE-WHEN UPDATE 会覆盖锁定状态）
         if (batchNo != null && !batchNo.isBlank()) {
             long reported = mapper.selectCount(new LambdaQueryWrapper<OpsBusinessData>()
@@ -784,7 +895,38 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 throw BusinessException.of("该批次包含" + reported + "条已上报集团数据，禁止重新计算");
             }
         }
-        Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        LambdaQueryWrapper<OpsBusinessData> uncalcQw = new LambdaQueryWrapper<OpsBusinessData>()
+                .eq(OpsBusinessData::getCalcStatus, "未计算");
+        if (batchNo != null && !batchNo.isBlank()) {
+            uncalcQw.eq(OpsBusinessData::getBatchNo, batchNo);
+        }
+        applyCorpScope(uncalcQw);
+        List<OpsBusinessData> uncalcs = mapper.selectList(uncalcQw);
+        return calculateCommission(uncalcs, visible);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> recalculateOrder(Long orderId) {
+        if (orderId == null) {
+            return Map.of("total", 0, "commissioned", 0, "zero", 0, "splitGroups", 0);
+        }
+        OpsBusinessOrder order = orderService.getById(orderId);
+        if (order == null) throw BusinessException.notFound("订单不存在");
+        if (REPORTED_STATUS.equals(order.getCalcStatus())) {
+            throw BusinessException.of("该订单已上报集团，禁止重新计算");
+        }
+        List<OpsBusinessData> uncalcs = orderMapper.selectItems(orderId).stream()
+                .filter(r -> "未计算".equals(r.getCalcStatus())).toList();
+        if (uncalcs.isEmpty()) {
+            orderService.syncStatus(orderId);
+            return Map.of("total", 0, "commissioned", 0, "zero", 0, "splitGroups", 0);
+        }
+        return calculateCommission(uncalcs, dataScopeService.getVisibleCorpIds());
+    }
+
+    /** 提成计算引擎：对传入的“未计算”行匹配规则、均分、批量回写，并同步主表状态/合计。 */
+    private Map<String, Object> calculateCommission(List<OpsBusinessData> uncalcs, Set<Long> visibleIds) {
 
         // ── Build parent chain BEFORE querying rules ──
         // We need the full ancestor set so the rule query can fetch parent/ancestor
@@ -857,14 +999,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             log.info("Super admin: merged {} rules from all corps as fallback", allRules.size());
         }
 
-        LambdaQueryWrapper<OpsBusinessData> uncalcQw = new LambdaQueryWrapper<OpsBusinessData>()
-                .eq(OpsBusinessData::getCalcStatus, "未计算");
-        if (batchNo != null && !batchNo.isBlank()) {
-            uncalcQw.eq(OpsBusinessData::getBatchNo, batchNo);
-        }
-        applyCorpScope(uncalcQw);
-        List<OpsBusinessData> uncalcs = mapper.selectList(uncalcQw);
-
         if (uncalcs.isEmpty()) {
             return Map.of("total", 0, "commissioned", 0, "zero", 0, "splitGroups", 0);
         }
@@ -879,7 +1013,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 BigDecimal amt = d.getSalePrice() == null ? BigDecimal.ZERO
                         : d.getSalePrice().multiply(rate)
                                 .divide(HUNDRED, 2, RoundingMode.HALF_UP);
-                results.put(d.getId(), new BigDecimal[]{rate, amt});
+                results.put(d.getId(), new BigDecimal[]{rate, scaleBySettleQuantity(d, amt)});
                 continue;
             }
             Long dCorpId = d.getCorpId() != null ? d.getCorpId() : 0L;
@@ -888,7 +1022,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             OpsPersonalCommissionRule rule = corpRuleMap.get(d.getCategory());
             BigDecimal[] cr = calcCommissionAmount(d.getSalePrice(),
                     d.getRetailFloorPrice(), d.getGroupLowestPrice(), rule);
-            results.put(d.getId(), new BigDecimal[]{cr[0], cr[1]});
+            results.put(d.getId(), new BigDecimal[]{cr[0], scaleBySettleQuantity(d, cr[1])});
         }
 
         // ── Phase 2: Split by receipt×customer×category×model group ──
@@ -901,14 +1035,15 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         }
 
         // ── Phase 3: Batch SQL update (preserves existing CASE WHEN pattern) ──
-        try (var conn = dataSource.getConnection(); var stmt = conn.createStatement()) {
+        java.sql.Connection conn = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
+        try (var stmt = conn.createStatement()) {
             int batchSize = 500;
             for (int i = 0; i < uncalcs.size(); i += batchSize) {
                 int end = Math.min(i + batchSize, uncalcs.size());
                 StringBuilder rateSql = new StringBuilder(
-                        "UPDATE ops_business_data SET commission_rate = CASE ");
+                        "UPDATE ops_business_order_item SET commission_rate = CASE ");
                 StringBuilder amtSql  = new StringBuilder(
-                        "UPDATE ops_business_data SET commission_amount = CASE ");
+                        "UPDATE ops_business_order_item SET commission_amount = CASE ");
                 StringBuilder ids = new StringBuilder();
                 for (int j = i; j < end; j++) {
                     Long id = uncalcs.get(j).getId();
@@ -930,15 +1065,41 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         } catch (Exception e) {
             log.error("批量计算提成失败", e);
             throw new RuntimeException("批量计算提成失败", e);
+        } finally {
+            org.springframework.jdbc.datasource.DataSourceUtils.releaseConnection(conn, dataSource);
         }
 
         // ── Phase 4: Verify receipt group consistency ──
         verifyReceiptGroupConsistency(uncalcs, results);
 
+        // 子表提成/状态已更新 → 同步订单头合计与状态
+        syncOrderTotals(uncalcs);
+
         log.info("提成计算完成: {}条有提成, {}条0提成, {}个分组均分, 共{}条",
                 commissioned, zero, splitGroups, uncalcs.size());
         return Map.of("total", uncalcs.size(), "commissioned", commissioned,
                 "zero", zero, "splitGroups", splitGroups);
+    }
+
+    /** 退货后按 结算数量/销售数量 等比缩放提成；无退货行原样返回。 */
+    private static BigDecimal scaleBySettleQuantity(OpsBusinessData d, BigDecimal amount) {
+        if (amount == null || amount.signum() == 0) return amount;
+        Integer settle = d.getSettleQuantity();
+        Integer sold = d.getSaleQuantity();
+        if (settle == null || sold == null || sold <= 0 || settle >= sold) return amount;
+        int effective = Math.max(settle, 0);
+        return amount.multiply(BigDecimal.valueOf(effective))
+                .divide(BigDecimal.valueOf(sold), 2, RoundingMode.HALF_UP);
+    }
+
+    /** 同步受影响订单头的 total_commission / calc_status。 */
+    private void syncOrderTotals(List<OpsBusinessData> rows) {
+        Set<Long> orderIds = rows.stream().map(OpsBusinessData::getOrderId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        for (Long orderId : orderIds) {
+            orderService.refreshTotals(orderId);
+            orderService.syncStatus(orderId);
+        }
     }
 
     /**
@@ -1158,6 +1319,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     public void exportExcel(String company, String batchNo, String agent, String category,
                             String brand, String model, String receiptDateStart, String receiptDateEnd, Path outFile) {
         try {
+            if (noVisibleCorp(dataScopeService.getVisibleCorpIds())) {
+                log.warn("导出被拒绝：当前用户无可见组织 scope");
+                return;
+            }
             LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
             if (company != null && !company.isEmpty()) qw.eq(OpsBusinessData::getCompany, company);
             if (batchNo != null && !batchNo.isEmpty()) qw.eq(OpsBusinessData::getBatchNo, batchNo);
@@ -1192,7 +1357,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     private static final String EXPORT_HEADER =
-            "批次\t公司\t客户\t客户手机\t小区\t详细地址\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t收据号\t备注\t是否特批\n";
+            "批次\t公司\t客户\t客户手机\t小区\t详细地址\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t收据号\t备注\t是否特批\t是否退货\t退货数量\t实际结算数量\n";
 
     /** 单行 28 列 TSV 输出（与 EXPORT_HEADER 列序一致）；收款金额=库中 receipt_amount（空则 单价×数量 兜底） */
     private void appendExportRow(StringBuilder sb, OpsBusinessData d) {
@@ -1220,7 +1385,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
           .append(fmt(d.getIsReceived())).append('\t')
           .append(fmt(d.getReceiptNo())).append('\t')
           .append(fmt(d.getRemark())).append('\t')
-          .append(fmt(d.getIsSpecial())).append('\n');
+          .append(fmt(d.getIsSpecial())).append('\t')
+          .append(fmt(d.getIsReturn())).append('\t')
+          .append(fmt(d.getReturnQuantity())).append('\t')
+          .append(fmt(d.getSettleQuantity())).append('\n');
     }
 
     /** TSV 单值清洗：自由文本（地址/备注等）中的制表符/换行会把导出 XLSX 的行列撕开。 */
@@ -1232,6 +1400,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     // ── 提成上报集团 & 品类提成汇总 ──
 
     @Override
+    @Transactional
     public int reportToGroup(String company, String batchNo, String agent, String receiptNo, String category) {
         // 显式 delete_flag=0：MyBatis-Plus 的 update 不会自动过滤逻辑删除
         LambdaUpdateWrapper<OpsBusinessData> uw = new LambdaUpdateWrapper<>();
@@ -1244,8 +1413,42 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         if (receiptNo != null && !receiptNo.isBlank()) uw.eq(OpsBusinessData::getReceiptNo, receiptNo.trim());
         if (category != null && !category.isBlank()) uw.eq(OpsBusinessData::getCategory, category.trim());
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        if (noVisibleCorp(visibleIds)) {
+            throw BusinessException.forbidden("无权操作该数据");
+        }
         if (visibleIds != null && !visibleIds.isEmpty()) uw.in(OpsBusinessData::getCorpId, visibleIds);
-        return mapper.update(null, uw);
+
+        LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<OpsBusinessData>()
+                .select(OpsBusinessData::getOrderId)
+                .eq(OpsBusinessData::getDeleteFlag, 0)
+                .ne(OpsBusinessData::getCalcStatus, REPORTED_STATUS);
+        if (company != null && !company.isBlank()) qw.eq(OpsBusinessData::getCompany, company.trim());
+        if (batchNo != null && !batchNo.isBlank()) qw.eq(OpsBusinessData::getBatchNo, batchNo.trim());
+        if (agent != null && !agent.isBlank()) qw.eq(OpsBusinessData::getAgent, agent.trim());
+        if (receiptNo != null && !receiptNo.isBlank()) qw.eq(OpsBusinessData::getReceiptNo, receiptNo.trim());
+        if (category != null && !category.isBlank()) qw.eq(OpsBusinessData::getCategory, category.trim());
+        if (visibleIds != null && !visibleIds.isEmpty()) qw.in(OpsBusinessData::getCorpId, visibleIds);
+        Set<Long> affectedOrders = mapper.selectList(qw).stream()
+                .map(OpsBusinessData::getOrderId).filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        int updated = mapper.update(null, uw);
+        // 订单级上报：命中筛选条件的订单，其余产品/经办人行一并上报，
+        // 避免“部分上报”把整单锁死却仍有未上报明细无法重算/退货
+        if (!affectedOrders.isEmpty()) {
+            LambdaUpdateWrapper<OpsBusinessData> expand = new LambdaUpdateWrapper<>();
+            expand.in(OpsBusinessData::getOrderId, affectedOrders)
+                    .eq(OpsBusinessData::getDeleteFlag, 0)
+                    .and(w -> w.isNull(OpsBusinessData::getCalcStatus)
+                            .or().ne(OpsBusinessData::getCalcStatus, REPORTED_STATUS))
+                    .set(OpsBusinessData::getCalcStatus, REPORTED_STATUS);
+            if (visibleIds != null && !visibleIds.isEmpty()) {
+                expand.in(OpsBusinessData::getCorpId, visibleIds);
+            }
+            updated += mapper.update(null, expand);
+        }
+        syncOrderStatus(affectedOrders);
+        return updated;
     }
 
     @Override
@@ -1493,6 +1696,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     public void batchDelete(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return;
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        if (noVisibleCorp(visibleIds)) {
+            throw BusinessException.forbidden("无权删除该数据");
+        }
         // 锁定守卫：已上报集团的数据禁止删除（所有组织一致）；与删除同口径做 corp 范围限定，
         // 防止他组织不可见的已上报行误阻断本组织的删除请求
         LambdaQueryWrapper<OpsBusinessData> guardQw = new LambdaQueryWrapper<OpsBusinessData>()
@@ -1505,26 +1711,70 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         if (reported > 0) {
             throw BusinessException.of("所选数据包含" + reported + "条已上报集团记录，已上报数据禁止删除");
         }
+        LambdaQueryWrapper<OpsBusinessReturn> pendingQw = new LambdaQueryWrapper<OpsBusinessReturn>()
+                .in(OpsBusinessReturn::getItemId, ids)
+                .eq(OpsBusinessReturn::getStatus, OpsBusinessReturn.STATUS_PENDING)
+                .eq(OpsBusinessReturn::getDeleteFlag, 0);
+        if (visibleIds != null && !visibleIds.isEmpty()) {
+            pendingQw.in(OpsBusinessReturn::getCorpId, visibleIds);
+        }
+        Long pendingReturns = returnMapper.selectCount(pendingQw);
+        if (pendingReturns != null && pendingReturns > 0) {
+            throw BusinessException.of("所选数据包含" + pendingReturns + "条审批中的退货申请，请先处理");
+        }
+        LambdaQueryWrapper<OpsBusinessData> itemsQw = new LambdaQueryWrapper<OpsBusinessData>()
+                .select(OpsBusinessData::getId, OpsBusinessData::getOrderId)
+                .in(OpsBusinessData::getId, ids);
+        if (visibleIds != null && !visibleIds.isEmpty()) {
+            itemsQw.in(OpsBusinessData::getCorpId, visibleIds);
+        }
+        List<OpsBusinessData> items = mapper.selectList(itemsQw);
+        Set<Long> orderIds = items.stream().map(OpsBusinessData::getOrderId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        // 退货申请随明细一起逻辑删除（限定可见 corp，防跨租户误删）
+        LambdaQueryWrapper<OpsBusinessReturn> returnDel = new LambdaQueryWrapper<OpsBusinessReturn>()
+                .in(OpsBusinessReturn::getItemId, ids);
+        if (visibleIds != null && !visibleIds.isEmpty()) {
+            returnDel.in(OpsBusinessReturn::getCorpId, visibleIds);
+        }
+        returnMapper.delete(returnDel);
         // physical DELETE bypassing @TableLogic, but enforce corp_id scope
         String in = ids.stream().map(Object::toString).reduce((a, b) -> a + "," + b).orElse("");
-        StringBuilder sql = new StringBuilder("DELETE FROM ops_business_data WHERE id IN (").append(in).append(")");
+        StringBuilder sql = new StringBuilder("DELETE FROM ops_business_order_item WHERE id IN (").append(in).append(")");
         if (visibleIds != null && !visibleIds.isEmpty()) {
             String corpIn = visibleIds.stream().map(Object::toString).reduce((a, b) -> a + "," + b).orElse("");
             sql.append(" AND corp_id IN (").append(corpIn).append(")");
         }
-        try (var conn = dataSource.getConnection(); var stmt = conn.createStatement()) {
+        java.sql.Connection conn = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
+        try (var stmt = conn.createStatement()) {
             stmt.executeUpdate(sql.toString());
-        } catch (Exception e) { throw new RuntimeException("批量删除失败", e); }
+        } catch (Exception e) {
+            throw new RuntimeException("批量删除失败", e);
+        } finally {
+            org.springframework.jdbc.datasource.DataSourceUtils.releaseConnection(conn, dataSource);
+        }
+        // 主表随剩余明细重算；已无明细的订单头删除
+        for (Long orderId : orderIds) {
+            orderService.refreshTotals(orderId);
+            orderService.syncStatus(orderId);
+            orderService.refreshAgentSummary(orderId);
+        }
+        orderService.deleteEmptyOrders(orderIds);
     }
 
     @Override
+    @Transactional
     public int batchCheck(String batchNo) {
         if (batchNo == null || batchNo.isBlank()) throw BusinessException.of("批次号不能为空");
         // 控制器的 isOperatorOrSuperAdmin 是组织级判定；SQL 必须再按当前用户可见 corp 收紧，
         // 否则运营商组织内任意用户可传他组织批次号（跨租户改状态）。
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
+        if (noVisibleCorp(visibleIds)) {
+            throw BusinessException.forbidden("无权核对该批次");
+        }
+        Set<Long> affectedOrders = collectOrderIds(batchNo, null, null, visibleIds);
         StringBuilder sql = new StringBuilder(
-                "UPDATE ops_business_data SET calc_status = '经办人已核对' "
+                "UPDATE ops_business_order_item SET calc_status = '经办人已核对' "
                         + "WHERE batch_no = ? AND calc_status = '已计算' AND delete_flag = 0");
         if (visibleIds != null) {
             if (visibleIds.isEmpty()) throw BusinessException.forbidden("无权核对该批次");
@@ -1532,28 +1782,74 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                     .collect(Collectors.joining(","));
             sql.append(" AND corp_id IN (").append(corpCsv).append(")");
         }
-        try (var conn = dataSource.getConnection(); var ps = conn.prepareStatement(sql.toString())) {
+        java.sql.Connection conn = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
+        try (var ps = conn.prepareStatement(sql.toString())) {
             ps.setString(1, batchNo);
-            return ps.executeUpdate();
-        } catch (Exception e) { throw new RuntimeException("核对失败", e); }
+            int updated = ps.executeUpdate();
+            syncOrderStatus(affectedOrders);
+            return updated;
+        } catch (Exception e) {
+            throw new RuntimeException("核对失败", e);
+        } finally {
+            org.springframework.jdbc.datasource.DataSourceUtils.releaseConnection(conn, dataSource);
+        }
     }
 
     @Override
+    @Transactional
     public int batchCheckOwned(String batchNo, Long corpId, String agentPhone) {
         if (batchNo == null || batchNo.isBlank()) throw BusinessException.of("批次号不能为空");
         if (corpId == null || corpId <= 0 || agentPhone == null || agentPhone.isBlank()) {
             throw BusinessException.forbidden("无权核对该批次");
         }
+        Set<Long> affectedOrders = collectOrderIds(batchNo, corpId, agentPhone, null);
         // 员工自助核对只允许写本人 + 本组织的数据，避免任意批次号跨租户改状态
-        String sql = "UPDATE ops_business_data SET calc_status = '经办人已核对' "
+        String sql = "UPDATE ops_business_order_item SET calc_status = '经办人已核对' "
                 + "WHERE batch_no = ? AND corp_id = ? AND agent_phone = ? "
                 + "AND calc_status = '已计算' AND delete_flag = 0";
-        try (var conn = dataSource.getConnection(); var ps = conn.prepareStatement(sql)) {
+        java.sql.Connection conn = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
+        try (var ps = conn.prepareStatement(sql)) {
             ps.setString(1, batchNo);
             ps.setLong(2, corpId);
             ps.setString(3, agentPhone);
-            return ps.executeUpdate();
-        } catch (Exception e) { throw new RuntimeException("核对失败", e); }
+            int updated = ps.executeUpdate();
+            syncOrderStatus(affectedOrders);
+            return updated;
+        } catch (Exception e) {
+            throw new RuntimeException("核对失败", e);
+        } finally {
+            org.springframework.jdbc.datasource.DataSourceUtils.releaseConnection(conn, dataSource);
+        }
+    }
+
+    /** 待变更状态的明细所属订单（用于更新后同步主表状态）。 */
+    private Set<Long> collectOrderIds(String batchNo, Long corpId, String agentPhone,
+                                      Set<Long> visibleIds) {
+        LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<OpsBusinessData>()
+                .select(OpsBusinessData::getOrderId)
+                .eq(OpsBusinessData::getBatchNo, batchNo)
+                .eq(OpsBusinessData::getCalcStatus, "已计算");
+        if (corpId != null) qw.eq(OpsBusinessData::getCorpId, corpId);
+        if (agentPhone != null) qw.eq(OpsBusinessData::getAgentPhone, agentPhone);
+        if (visibleIds != null && !visibleIds.isEmpty()) qw.in(OpsBusinessData::getCorpId, visibleIds);
+        return mapper.selectList(qw).stream().map(OpsBusinessData::getOrderId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+    }
+
+    private void syncOrderStatus(Set<Long> orderIds) {
+        for (Long orderId : orderIds) orderService.syncStatus(orderId);
+    }
+
+    /** 空可见组织集合 = 无任何数据权限（区别于超管的 null），不得退化为“全量”。 */
+    private static boolean noVisibleCorp(Set<Long> visibleIds) {
+        return visibleIds != null && visibleIds.isEmpty();
+    }
+
+    /** 子表会员回写后同步主表 platform_member_id（订单级字段以主表为准）。 */
+    private void syncMasterMember(Long orderId, Long memberId) {
+        if (orderId == null) return;
+        jdbcTemplate.update("UPDATE ops_business_order SET platform_member_id = ? WHERE id = ?",
+                memberId, orderId);
     }
 
     /**

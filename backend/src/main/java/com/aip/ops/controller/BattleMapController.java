@@ -144,14 +144,14 @@ public class BattleMapController {
                 Map<String, Object> os = jdbcTemplate.queryForMap("SELECT * FROM ops_map_org_summary WHERE org_id=?", corpId);
                 s.putAll(os);
             } catch (Exception ignore) { /* 尚未 ETL 的组织无汇总行 */ }
-            // YTD total: ops_business_data (已计算/已核对/已上报集团) + ops_member_ledger (本年)
+            // YTD total: ops_business_order_item (已计算/已核对/已上报集团) + ops_member_ledger (本年)
             try {
                 String year = Integer.toString(LocalDate.now().getYear());
                 Double bd = jdbcTemplate.queryForObject(
                     "SELECT COALESCE(SUM(x.amount),0) FROM (" +
                     "SELECT COALESCE(NULLIF(order_no,''), NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) grp, " +
                     "category, brand, model, MAX(receipt_amount) amount " +
-                    "FROM ops_business_data " +
+                    "FROM ops_business_order_item " +
                     "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对','已上报集团') AND sale_date>=? " +
                     "GROUP BY 1, category, brand, model) x",
                     Double.class, year + "-01-01");
@@ -160,7 +160,7 @@ public class BattleMapController {
                     "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND usage_date>=?",
                     Double.class, year + "-01-01");
                 s.put("ytdAmount", (bd != null ? bd : 0d) + (ml != null ? ml : 0d));
-                // 销售金额：ops_business_data（已计算 + 经办人已核对），用于指标卡片
+                // 销售金额：ops_business_order_item（已计算 + 经办人已核对），用于指标卡片
                 s.put("salesAmount", bd != null ? bd : 0d);
             } catch (Exception ignore) { s.put("ytdAmount", 0); s.put("salesAmount", 0); }
 
@@ -194,7 +194,7 @@ public class BattleMapController {
             d.put("agents", jdbcTemplate.queryForList(
                 "SELECT ml.agent AS agent_key," +
                 "COALESCE(" +
-                "(SELECT bd.agent FROM ops_business_data bd WHERE bd.agent_phone COLLATE utf8mb4_0900_ai_ci=ml.agent AND bd.delete_flag=0 LIMIT 1)," +
+                "(SELECT bd.agent FROM ops_business_order_item bd WHERE bd.agent_phone COLLATE utf8mb4_0900_ai_ci=ml.agent AND bd.delete_flag=0 LIMIT 1)," +
                 "(SELECT real_name FROM ai_platform.sys_user su WHERE CONCAT(',',su.phone,',') LIKE CONCAT('%,',ml.agent,',%') OR su.phone=ml.agent LIMIT 1)," +
                 "ml.agent" +
                 ") AS employee_name," +
@@ -247,7 +247,7 @@ public class BattleMapController {
     private String now() { return LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME); }
 
     /**
-     * 近 6 个月销售趋势：优先 ops_business_data (calc_status IN 已计算/已核对/已上报集团) 按月汇总 sale_price，
+     * 近 6 个月销售趋势：优先 ops_business_order_item (calc_status IN 已计算/已核对/已上报集团) 按月汇总 sale_price，
      * 月内无数据或为零时从 ops_member_ledger 取 sales_price 补充；仍无数据补 0。
      * 保证连续 6 个桶不缺月。
      */
@@ -270,13 +270,13 @@ public class BattleMapController {
             String since = first.format(ym) + "-01";
             String sc = scope(corpId);
 
-            // 1) 主数据源：ops_business_data (已计算 + 经办人已核对 + 已上报集团)
+            // 1) 主数据源：ops_business_order_item (已计算 + 经办人已核对 + 已上报集团)
             jdbcTemplate.queryForList(
                 "SELECT x.ym ym, COALESCE(SUM(x.amount),0) total FROM (" +
                 "SELECT DATE_FORMAT(sale_date,'%Y-%m') ym, " +
                 "COALESCE(NULLIF(order_no,''), NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) grp, " +
                 "category, brand, model, MAX(receipt_amount) amount " +
-                "FROM ops_business_data WHERE corp_id IN (" + sc + ") AND delete_flag=0 " +
+                "FROM ops_business_order_item WHERE corp_id IN (" + sc + ") AND delete_flag=0 " +
                 "AND calc_status IN ('已计算','经办人已核对','已上报集团') AND sale_date>=? " +
                 "GROUP BY ym, grp, category, brand, model) x GROUP BY x.ym", since)
                 .forEach(row -> {

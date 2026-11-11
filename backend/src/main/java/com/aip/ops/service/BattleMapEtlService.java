@@ -12,7 +12,7 @@ import java.util.Map;
 /**
  * 作战地图 ETL：从原始业务表抽取聚合到 6 张预计算表（org 维度隔离）。
  * <ul>
- *   <li>经办人业绩 TOP5：来源 {@code ops_business_data}，按 agent(姓名) 分组，
+ *   <li>经办人业绩 TOP5：来源 {@code ops_business_order_item}，按 agent(姓名) 分组，
  *       仅统计 {@code calc_status IN ('已计算','经办人已核对','已上报集团')}</li>
  *   <li>{@link #refreshOrg(Long)} 单组织全量重算</li>
  *   <li>{@link #refreshAllOrgs()} 全量重算所有活跃组织</li>
@@ -80,7 +80,7 @@ public class BattleMapEtlService {
         } catch (Exception e) { log.warn("ETL community org={} failed: {}", corpId, e.getMessage()); }
     }
 
-    // ── 经办人业绩表（TOP5）— 来源 ops_business_data（已计算 + 经办人已核对）──
+    // ── 经办人业绩表（TOP5）— 来源 ops_business_order_item（已计算 + 经办人已核对）──
     private void refreshEmployeePerformance(Long corpId, String scope) {
         try {
             jdbc.update("DELETE FROM ops_map_employee_performance WHERE org_id=?", corpId);
@@ -89,7 +89,7 @@ public class BattleMapEtlService {
                 "COALESCE(SUM(bd.receipt_amount),0) AS total_sales," +
                 "COUNT(*) AS sales_count," +
                 "MIN(bd.agent_phone) AS agent_phone " +
-                "FROM ops_business_data bd WHERE bd.corp_id IN (" + scope + ") " +
+                "FROM ops_business_order_item bd WHERE bd.corp_id IN (" + scope + ") " +
                 "AND bd.delete_flag=0 " +
                 "AND bd.agent IS NOT NULL AND bd.agent<>'' " +
                 "AND bd.calc_status IN ('已计算','经办人已核对','已上报集团') " +
@@ -103,7 +103,7 @@ public class BattleMapEtlService {
     }
 
     private void insertEmployeeRow(Long corpId, String scope, String agentKey, Map<String, Object> t, int rank) {
-        // agentKey is now agent name (from ops_business_data.agent), not phone
+        // agentKey is now agent name (from ops_business_order_item.agent), not phone
         String name = agentKey;
         String phone = (String) t.getOrDefault("agent_phone", "");
         // 部门：当前组织简称
@@ -116,11 +116,11 @@ public class BattleMapEtlService {
                 if (dsn != null && !dsn.toString().isBlank()) department = dsn.toString();
             }
         } catch (Exception ignored) { /* 跨库查询失败不影响主流程 */ }
-        // 主营区域：按销售额最高的公司（即 ops_business_data.company）
+        // 主营区域：按销售额最高的公司（即 ops_business_order_item.company）
         String primaryCommunity = null;
         try {
             List<Map<String, Object>> pc = jdbc.queryForList(
-                "SELECT company FROM ops_business_data " +
+                "SELECT company FROM ops_business_order_item " +
                 "WHERE agent=? AND corp_id IN (" + scope + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对','已上报集团') " +
                 "GROUP BY company ORDER BY SUM(receipt_amount) DESC LIMIT 1",
                 agentKey);
@@ -167,7 +167,7 @@ public class BattleMapEtlService {
                 "(SELECT COUNT(*) FROM ops_activity WHERE corp_id IN (" + scope + ") AND delete_flag=0)," +
                 "(SELECT COUNT(*) FROM ops_activity WHERE corp_id IN (" + scope + ") AND delete_flag=0 AND create_time>=DATE_FORMAT(CURDATE(),'%Y-%m-01'))," +
                 "(SELECT COALESCE(SUM(sales_price),0) FROM ops_member_ledger WHERE corp_id IN (" + scope + ") AND delete_flag=0)," +
-                "(SELECT COALESCE(SUM(commission_amount),0) FROM ops_business_data WHERE corp_id IN (" + scope + ") AND delete_flag=0)," +
+                "(SELECT COALESCE(SUM(commission_amount),0) FROM ops_business_order_item WHERE corp_id IN (" + scope + ") AND delete_flag=0)," +
                 "(SELECT COUNT(*) FROM ops_gas_user WHERE corp_id IN (" + scope + "))",
                 corpId);
         } catch (Exception e) { log.warn("ETL summary org={} failed: {}", corpId, e.getMessage()); }
@@ -233,7 +233,7 @@ public class BattleMapEtlService {
         try {
             jdbc.update("DELETE FROM ops_map_category_sales WHERE org_id=?", corpId);
             // 品类中文名优先从数据字典转换，降级用原始 category 值
-            // 数据源：ops_business_data（已计算 + 经办人已核对 + 已上报集团）
+            // 数据源：ops_business_order_item（已计算 + 经办人已核对 + 已上报集团）
             // 先按「业务组号/收据号 + 品类+品牌+型号」去重产品行（多经办人只计一次），再按品类汇总
             jdbc.update(
                 "INSERT INTO ops_map_category_sales (org_id,category_key,category_name,total_sales," +
@@ -246,7 +246,7 @@ public class BattleMapEtlService {
                 "SELECT bd.category AS category_key," +
                 "COALESCE(NULLIF(bd.order_no,''), NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__NULL__', bd.id)) AS grp," +
                 "bd.brand, bd.model, MAX(bd.receipt_amount) AS amount " +
-                "FROM ops_business_data bd " +
+                "FROM ops_business_order_item bd " +
                 "WHERE bd.corp_id IN (" + scope + ") AND bd.delete_flag=0 " +
                 "AND bd.calc_status IN ('已计算','经办人已核对','已上报集团') " +
                 "AND bd.category IS NOT NULL AND bd.category<>'' " +

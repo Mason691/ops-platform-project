@@ -10,19 +10,27 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
- * 业务数据 — 从 Excel 导入的销售记录，支持提成计算与导出。
+ * 业务数据（商品分录，子表 ops_business_order_item）— 商品 × 经办人粒度明细。
+ *
+ * <p>2026-11 主子表拆分后本表为订单子表，订单级公共信息以
+ * {@link OpsBusinessOrder} 为准；旧名 ops_business_data 保留为兼容视图，
+ * 供 SCM / AI 只读。</p>
  *
  * <p>删除策略：<b>物理删除</b>（不走 @TableLogic）。
  * 业务数据为导入的统计明细，纠错时需直接删除重导，逻辑删除无实际意义。
- * 参见 Specs/增值业务-规格说明.md。</p>
+ * 参见 Specs/增值业务-规格说明.md、Specs/业务数据主子表拆分-规格说明.md。</p>
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName("ops_business_data")
+@TableName("ops_business_order_item")
 public class OpsBusinessData extends BaseEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
+
+    /** 订单头ID（ops_business_order.id） */
+    @TableField("order_id")
+    private Long orderId;
 
     /** 租户ID（多租户隔离） */
     @TableField("corp_id")
@@ -165,6 +173,30 @@ public class OpsBusinessData extends BaseEntity {
 
     @TableField("commission_amount")
     private BigDecimal commissionAmount;
+
+    /** 是否退货（是/否）；审批通过累计退货数量>0 后为“是” */
+    @TableField("is_return")
+    private String isReturn;
+
+    /** 累计退货数量（同一产品多经办人行同步累计，不超过销售数量） */
+    @TableField("return_quantity")
+    private Integer returnQuantity;
+
+    /** 累计退货金额 = 累计退货数量 × 销售单价 */
+    @TableField("return_amount")
+    private BigDecimal returnAmount;
+
+    /** 实际结算数量 = 销售数量 - 累计退货数量 */
+    @TableField("settle_quantity")
+    private Integer settleQuantity;
+
+    /** 退货审批状态：未申请/审批中/已通过/已驳回 */
+    @TableField("return_status")
+    private String returnStatus;
+
+    /** 退货前收款金额（首次退货审批通过时留存，用于导出/对账） */
+    @TableField("original_receipt_amount")
+    private BigDecimal originalReceiptAmount;
 
     @TableField("calc_status")
     private String calcStatus;
