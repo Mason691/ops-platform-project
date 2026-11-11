@@ -747,7 +747,7 @@ public class BusinessDataImportHandler implements ImportHandler {
                 .distinct().map(String::valueOf).collect(Collectors.joining(","));
         if (orderIds.isEmpty()) return;
         jdbcTemplate.update("UPDATE ops_business_order_item SET "
-                + "settle_quantity = COALESCE(sale_quantity, 1), "
+                + "settle_quantity = GREATEST(COALESCE(sale_quantity, 1), 0), "
                 + "return_status = '未申请', "
                 + "original_receipt_amount = COALESCE(original_receipt_amount, receipt_amount) "
                 + "WHERE order_id IN (" + orderIds + ") AND settle_quantity IS NULL");

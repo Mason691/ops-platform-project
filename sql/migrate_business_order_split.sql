@@ -295,7 +295,7 @@ WHERE is_return IS NULL OR is_return = '';
 
 UPDATE ops_business_order_item
 SET return_quantity = 0, return_amount = 0,
-    settle_quantity = COALESCE(sale_quantity, 1),
+    settle_quantity = GREATEST(COALESCE(sale_quantity, 1), 0),
     return_status = '未申请',
     original_receipt_amount = COALESCE(original_receipt_amount, receipt_amount)
 WHERE return_quantity IS NULL OR settle_quantity IS NULL OR return_status IS NULL

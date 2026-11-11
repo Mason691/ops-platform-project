@@ -207,7 +207,7 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
         args.add(order.getId());
         args.addAll(ids);
         jdbcTemplate.update("UPDATE ops_business_order_item SET order_id = ?, "
-                + "settle_quantity = COALESCE(settle_quantity, COALESCE(sale_quantity, 1)), "
+                + "settle_quantity = GREATEST(COALESCE(settle_quantity, COALESCE(sale_quantity, 1)), 0), "
                 + "return_status = COALESCE(return_status, '未申请'), "
                 + "original_receipt_amount = COALESCE(original_receipt_amount, receipt_amount) "
                 + "WHERE id IN (" + placeholders + ")", args.toArray());
