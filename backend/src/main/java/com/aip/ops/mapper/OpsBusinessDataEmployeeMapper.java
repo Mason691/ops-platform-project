@@ -33,7 +33,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
     @Select("<script>"
             + "SELECT category, COALESCE(SUM(receipt_amount),0) as totalSale, "
             + "COALESCE(SUM(commission_amount),0) as totalCommission, "
-            + "SUM(CASE WHEN sale_quantity < 0 THEN 0 ELSE 1 END) as orderCount "
+            + "SUM(CASE WHEN sale_quantity &lt; 0 THEN 0 ELSE 1 END) as orderCount "
             + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
             + "<if test='month != null and month != \"\"'>AND SUBSTRING(sale_date, 1, 7) = #{month}</if> "
