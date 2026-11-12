@@ -17,6 +17,10 @@ export default {
       })
     }
 
+    // 微信网页授权回调优先：微信会在 /ops/ 后追加 ?code=...&state=...
+    // 先落盘并立即清理地址栏，再进入回调页；避免 code 留在历史记录/分享链接中。
+    if (this.handleWechatOAuthCallback()) return
+
     // Handle WeChat Official Account custom menu redirects.
     // Custom menus don't support hash fragments (e.g. #/pages/employee/login),
     // so we use query params: ?from=employee or ?route=pages/employee/login
@@ -24,6 +28,33 @@ export default {
   },
   onShow() {},
   methods: {
+    handleWechatOAuthCallback() {
+      // #ifdef H5
+      try {
+        const params = new URLSearchParams(window.location.search)
+        const code = params.get('code')
+        const state = params.get('state')
+        if (!code || !state) return false
+        uni.setStorageSync('ops_wechat_oauth_code', code)
+        uni.setStorageSync('ops_wechat_oauth_state', state)
+        try {
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname + window.location.hash
+          )
+        } catch (_) { /* ignore — 部分微信 WebView 限制 history API */ }
+        // 延迟到首屏页面栈就绪后再切换，避免 onLaunch 阶段 reLaunch 被忽略
+        setTimeout(() => {
+          uni.reLaunch({ url: '/pages/employee/wechat-callback' })
+        }, 0)
+        return true
+      } catch (_) {
+        return false
+      }
+      // #endif
+      return false
+    },
     handleDeepLink() {
       try {
         const params = new URLSearchParams(window.location.search)

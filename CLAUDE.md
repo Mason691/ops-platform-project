@@ -196,7 +196,7 @@ ops-platform-project/
 | `CategoryLifecycleRuleController` | `/api/ops/admin/category-lifecycle-rules` | **品类使用年限规则**：CRUD + 品类下拉选项 + 按品类查询 |
 | `FfCategoryController` | `/api/ops/admin/ff-category` | **财务分类（财务管理 → 分类管理）**：分页/详情/新增/编辑/逻辑删除/Excel 上传导入/服务器路径导入（仅超管）；权限码 `finance:category:*`，超管绕过 |
 | **员工通道** | | |
-| `EmployeeAuthController` | `/api/ops/auth/employee` | **员工** 登录（手机号+密码+验证码），独立于会员认证 |
+| `EmployeeAuthController` | `/api/ops/auth/employee` | **员工** 登录（手机号+密码+验证码；微信公众号网页授权登录/绑定/绑定状态），独立于会员认证 |
 | `EmployeeController` | `/api/ops/employee` | 员工身份校验 + 个人业务数据查询 + **手工新增业务数据**（表单选项/会员查询/批次/凭证）+ 头像上传 |
 | `EmployeeAiController` | `/api/ops/ai/employee` | **员工** AI 助手（chat + async + SSE stream + config + profile + report） |
 | **会员通道** | | |
@@ -238,6 +238,7 @@ ops-platform-project/
 **双通道认证**：会员和员工使用**独立**的认证体系：
 - **会员登录**：`AuthController` `/api/ops/auth/*` → 底座 SSO（PHONE 类型），token 存 `ops_token`
 - **员工登录**：`EmployeeAuthController` `/api/ops/auth/employee/*` → 手机号+密码+图形验证码，由 `EmployeeAuthServiceImpl` 委托底座 `POST /api/auth/employee/login`（平台 `sys_user` 表鉴权），子系统不存储员工账号/密码，token 存 `ops_employee_token`
+- **员工微信授权登录（2026-11-12）**：公众号 H5 新增 `GET /wechat/authorize-url`（一次性 state 5 分钟）、`POST /wechat/login`、`POST /wechat/bind`、`GET /wechat/bind-status`。`WechatOAuthServiceImpl` 用 `sys_public_account_config` 的 appId/appSecret 服务端换取 openid，再调底座 `POST /api/auth/employee/wechat/login`（X-Internal-Token）。底座新增 `sys_user_wechat_bind` 绑定表（迁移 `sql/migrate-user-wechat-bind.sql`，**先于底座 JAR**），密码/微信登录共用 `EmployeeSessionService` 签发同一套员工 JWT；底座「用户管理」可查看/解绑。公众号 OAuth（`snsapi_base`）拿不到手机号，**首次绑定须先密码登录后在「我的」完成**，不自动创建员工账号。`wechat.oauth.redirect-uri` 必须与公众号「网页授权域名」一致（默认 `https://boss.jdzn99.com/ops/`）。
 - 子系统只负责前置安全层：图形验证码校验、IP 频率限制（每分钟10次）、输入格式校验
 
 **图形验证码**（`CaptchaService`）：
@@ -600,6 +601,9 @@ Controller → Service.createTask() → DB 记录
 | `app.upload.base-dir` | 上传根目录 | `/app/uploads`（Docker） |
 | `app.import.upload-dir` | 异步导入文件暂存目录 | `${user.home}/data/imports`（Docker 环境变量覆盖） |
 | `app.resource.base-url` | 静态资源域名 | `https://boss.jdzn99.com` |
+| `wechat.oauth.redirect-uri` | 员工微信授权回调地址（必须与公众号网页授权域名一致） | `https://boss.jdzn99.com/ops/`（`WECHAT_OAUTH_REDIRECT_URI` 可覆盖） |
+| `wechat.oauth.state-ttl-seconds` | 微信 OAuth state 有效期（秒） | `300` |
+| `wechat.oauth.scope` | 微信网页授权 scope | `snsapi_base` |
 | `spring.kafka.enabled` | Kafka 开关 | yml 签入 `true`；无 Kafka 环境自动降级同步 |
 | `battle-map.etl.auto-refresh` | 作战地图定时 ETL | `true` |
 | `battle-map.etl.init-on-startup` | 启动时全量 ETL | `true` |

@@ -19,4 +19,28 @@ public class PublicAccountConfigServiceImpl
                 .eq(PublicAccountConfig::getStatus, 1)
                 .last("LIMIT 1"));
     }
+
+    @Override
+    public PublicAccountConfig getDefaultConfig(Long corpId) {
+        boolean scoped = corpId != null && corpId > 0;
+        PublicAccountConfig cfg = getOne(new LambdaQueryWrapper<PublicAccountConfig>()
+                .eq(scoped, PublicAccountConfig::getCorpId, corpId)
+                .eq(PublicAccountConfig::getIsDefault, 1)
+                .eq(PublicAccountConfig::getStatus, 1)
+                .orderByAsc(PublicAccountConfig::getId)
+                .last("LIMIT 1"));
+        if (cfg != null) return cfg;
+        cfg = getOne(new LambdaQueryWrapper<PublicAccountConfig>()
+                .eq(scoped, PublicAccountConfig::getCorpId, corpId)
+                .eq(PublicAccountConfig::getStatus, 1)
+                .orderByAsc(PublicAccountConfig::getId)
+                .last("LIMIT 1"));
+        if (cfg != null || !scoped) return cfg;
+        // 组织未单独配置公众号时，回退到平台默认公众号（H5 共用同一公众号）
+        return getOne(new LambdaQueryWrapper<PublicAccountConfig>()
+                .eq(PublicAccountConfig::getStatus, 1)
+                .orderByDesc(PublicAccountConfig::getIsDefault)
+                .orderByAsc(PublicAccountConfig::getId)
+                .last("LIMIT 1"));
+    }
 }

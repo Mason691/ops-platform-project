@@ -84,6 +84,15 @@ mall-service:
 scm-service:
   base-url: http://localhost:8084
 
+# 微信公众号网页授权（员工微信登录）
+# redirect-uri 必须与公众号后台「网页授权域名」下的实际回调地址完全一致；
+# 生产 H5 base 为 /ops/，微信会在该地址后追加 ?code=...&state=...
+wechat:
+  oauth:
+    redirect-uri: ${WECHAT_OAUTH_REDIRECT_URI:https://boss.jdzn99.com/ops/}
+    state-ttl-seconds: 300
+    scope: snsapi_base
+
 # 活动预约提醒配置
 ops:
   remind:

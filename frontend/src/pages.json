@@ -22,6 +22,7 @@
     {"path":"pages/station/apply","style":{"navigationBarTitleText":"站长申请"}},
     {"path":"pages/station/center","style":{"navigationBarTitleText":"站长中心"}},
     {"path":"pages/employee/login","style":{"navigationBarTitleText":"员工登录","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
+    {"path":"pages/employee/wechat-callback","style":{"navigationBarTitleText":"微信授权","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/dashboard","style":{"navigationBarTitleText":"员工工作台","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/profile","style":{"navigationBarTitleText":"我的","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/business-data","style":{"navigationBarTitleText":"业务数据","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},

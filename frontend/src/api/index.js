@@ -244,6 +244,14 @@ export const api = {
   employeeCaptcha: () => request({url:'/api/ops/auth/employee/captcha'}),
   employeeLogin: (data) => request({url:'/api/ops/auth/employee/login',method:'POST',data}),
   employeeRefreshToken: () => request({url:'/api/ops/auth/employee/refresh-token',method:'POST'}),
+  // 微信授权登录 / 绑定
+  employeeWechatAuthorizeUrl: (mode = 'login', corpId) => request({
+    url: '/api/ops/auth/employee/wechat/authorize-url',
+    data: corpId ? { mode, corpId } : { mode }
+  }),
+  employeeWechatLogin: (data) => request({url:'/api/ops/auth/employee/wechat/login',method:'POST',data}),
+  employeeWechatBind: (data) => request({url:'/api/ops/auth/employee/wechat/bind',method:'POST',data}),
+  employeeWechatBindStatus: () => request({url:'/api/ops/auth/employee/wechat/bind-status'}),
   employeeChangePassword: (data) => request({url:'/api/ops/employee/change-password',method:'POST',data}),
   employeeUploadAvatar: (filePath) => new Promise((resolve, reject) => {
     const token = resolveToken()

@@ -28,7 +28,14 @@
         <text class="card-label">组织角色</text>
         <text class="card-value">{{ activeCompany.roleName || activeCompany.roleType || '-' }}</text>
       </view>
+      <view class="card">
+        <text class="card-label">登录方式</text>
+        <text class="card-value">{{ loginModeText }}</text>
+      </view>
     </view>
+
+    <!-- WeChat binding -->
+    <EmployeeWechatBindCard />
 
     <!-- Menu -->
     <view class="section">
@@ -79,9 +86,12 @@
 import { ref, computed, onMounted } from 'vue'
 import { api } from '@/api/index.js'
 import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
+import EmployeeWechatBindCard from '@/components/EmployeeWechatBindCard.vue'
+import { clearEmployeeSession } from '@/utils/employeeSession'
 
 const info = ref({})
 const activeCompany = ref({})
+const loginMode = ref('')
 const showPwdModal = ref(false)
 const showNickModal = ref(false)
 const oldPwd = ref('')
@@ -93,6 +103,12 @@ const nickError = ref('')
 const avatarKey = ref(0)
 
 const avatarUrl = ref('/static/gas-avatar.png')
+
+const loginModeText = computed(() => {
+  if (loginMode.value === 'wechat') return '微信授权登录'
+  if (loginMode.value === 'password') return '用户名+密码'
+  return '—'
+})
 
 onMounted(() => {
   const empToken = uni.getStorageSync('ops_employee_token')
@@ -109,6 +125,7 @@ onMounted(() => {
     try { activeCompany.value = JSON.parse(active) } catch(e) {}
   }
   nickInput.value = info.value.name || ''
+  loginMode.value = uni.getStorageSync('ops_employee_login_mode') || ''
   // 读取 sys_user 头像（若未上传过则用默认头像）
   if (info.value.avatar) avatarUrl.value = info.value.avatar
 })
@@ -179,15 +196,7 @@ function doLogout() {
     content: '退出后需要重新登录，确定要退出吗？',
     success(res) {
       if (res.confirm) {
-        uni.removeStorageSync('ops_employee_token')
-        uni.removeStorageSync('ops_employee_info')
-        uni.removeStorageSync('ops_employee_companies')
-        uni.removeStorageSync('ops_employee_active_company')
-        uni.removeStorageSync('token_type')
-        // Also clear member tokens to prevent stale token from being used after re-login
-        uni.removeStorageSync('ops_token')
-        uni.removeStorageSync('ops_member')
-        uni.removeStorageSync('corp_id')
+        clearEmployeeSession()
         uni.redirectTo({ url: '/pages/employee/login' })
       }
     }
