@@ -55,7 +55,7 @@
       </view>
 
       <!-- Monthly Breakdown -->
-      <BusinessMonthList :months="months" @submitted="loadData" />
+      <BusinessMonthList :months="months" />
     </template>
 
     <!-- Bottom Bar -->

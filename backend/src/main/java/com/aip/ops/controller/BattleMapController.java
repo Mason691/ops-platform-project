@@ -149,7 +149,9 @@ public class BattleMapController {
                 String year = Integer.toString(LocalDate.now().getYear());
                 Double bd = jdbcTemplate.queryForObject(
                     "SELECT COALESCE(SUM(x.amount),0) FROM (" +
-                    "SELECT COALESCE(NULLIF(order_no,''), NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) grp, " +
+                    "SELECT CASE WHEN sale_quantity < 0 " +
+                    "  THEN CONCAT('__RET__', COALESCE(source_return_id, 0), '_', COALESCE(order_id, id)) " +
+                    "  ELSE COALESCE(NULLIF(order_no,''), NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) END grp, " +
                     "category, brand, model, MAX(receipt_amount) amount " +
                     "FROM ops_business_order_item " +
                     "WHERE corp_id IN (" + sc + ") AND delete_flag=0 AND calc_status IN ('已计算','经办人已核对','已上报集团') AND sale_date>=? " +
@@ -274,7 +276,9 @@ public class BattleMapController {
             jdbcTemplate.queryForList(
                 "SELECT x.ym ym, COALESCE(SUM(x.amount),0) total FROM (" +
                 "SELECT DATE_FORMAT(sale_date,'%Y-%m') ym, " +
-                "COALESCE(NULLIF(order_no,''), NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) grp, " +
+                "CASE WHEN sale_quantity < 0 " +
+                "  THEN CONCAT('__RET__', COALESCE(source_return_id, 0), '_', COALESCE(order_id, id)) " +
+                "  ELSE COALESCE(NULLIF(order_no,''), NULLIF(business_group_no,''), NULLIF(receipt_no,''), CONCAT('__NULL__', id)) END grp, " +
                 "category, brand, model, MAX(receipt_amount) amount " +
                 "FROM ops_business_order_item WHERE corp_id IN (" + sc + ") AND delete_flag=0 " +
                 "AND calc_status IN ('已计算','经办人已核对','已上报集团') AND sale_date>=? " +

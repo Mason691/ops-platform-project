@@ -22,9 +22,10 @@ import java.util.Map;
  *
  * <p>核对口径：
  * <ul>
- *   <li>主表 total_amount = 子表按 订单+品类+品牌+型号+单价 去重后的 MAX(收款金额) 之和；</li>
- *   <li>主表 total_commission = 子表 commission_amount 之和；</li>
- *   <li>子表 settle_quantity = 销售数量 - 退货数量。</li>
+ *   <li>主表 total_amount = 正数分录按 订单+品类+品牌+型号+单价 去重后的 MAX(收款金额)
+ *       + 退货负数分录按 退货单+产品组 取 MAX 的冲减额之和；</li>
+ *   <li>主表 total_commission = 子表 commission_amount 之和（正负相抵）；</li>
+ *   <li>退货分录必须为负数数量且带 source_return_id/历史标记。</li>
  * </ul>
  * 金额容差 0.01，避免 DECIMAL 舍入误报。</p>
  */
@@ -48,7 +49,16 @@ public class BusinessDataReconcileServiceImpl implements BusinessDataReconcileSe
                         + "         MAX(i.receipt_amount) AS amount "
                         + "  FROM ops_business_order_item i "
                         + "  WHERE i.delete_flag = 0 AND i.order_id IS NOT NULL "
+                        + "    AND COALESCE(i.sale_quantity, 1) >= 0 "
                         + "  GROUP BY i.order_id, i.category, i.brand, i.model, i.sale_price"
+                        + "  UNION ALL "
+                        + "  SELECT i.order_id, i.category, i.brand, i.model, i.sale_price, "
+                        + "         MAX(i.receipt_amount) AS amount "
+                        + "  FROM ops_business_order_item i "
+                        + "  WHERE i.delete_flag = 0 AND i.order_id IS NOT NULL "
+                        + "    AND i.sale_quantity < 0 "
+                        + "  GROUP BY i.order_id, COALESCE(i.source_return_id, 0), "
+                        + "           i.category, i.brand, i.model, i.sale_price"
                         + ") x GROUP BY x.order_id");
         Map<Long, BigDecimal> commissions = aggregate(
                 "SELECT i.order_id, COALESCE(SUM(i.commission_amount),0) AS amount "
@@ -76,21 +86,23 @@ public class BusinessDataReconcileServiceImpl implements BusinessDataReconcileSe
             }
         }
 
-        Long settleMismatch = jdbcTemplate.queryForObject(
+        // 退货分录完整性：负数数量必须带退货来源标记（新单 source_return_id 或历史 0/历史单号）
+        Long returnMarkerMismatch = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM ops_business_order_item "
-                        + "WHERE delete_flag = 0 AND settle_quantity IS NOT NULL "
-                        + "AND settle_quantity <> GREATEST(COALESCE(sale_quantity,1) - COALESCE(return_quantity,0), 0)",
+                        + "WHERE delete_flag = 0 AND sale_quantity < 0 "
+                        + "AND source_return_id IS NULL AND source_return_no IS NULL",
                 Long.class);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("orders", orders.size());
         result.put("totalAmountMismatch", amountMismatch.size());
         result.put("totalCommissionMismatch", commissionMismatch.size());
-        result.put("settleQuantityMismatch", settleMismatch != null ? settleMismatch : 0);
+        result.put("returnMarkerMismatch",
+                returnMarkerMismatch != null ? returnMarkerMismatch : 0);
         result.put("amountMismatchOrderIds", amountMismatch);
         result.put("commissionMismatchOrderIds", commissionMismatch);
         if (amountMismatch.size() > 0 || commissionMismatch.size() > 0
-                || (settleMismatch != null && settleMismatch > 0)) {
+                || (returnMarkerMismatch != null && returnMarkerMismatch > 0)) {
             log.warn("业务数据对账发现差异: {}", result);
         } else {
             log.info("业务数据对账通过: orders={}", orders.size());

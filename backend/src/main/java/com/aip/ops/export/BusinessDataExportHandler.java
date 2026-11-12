@@ -100,7 +100,7 @@ public class BusinessDataExportHandler implements ExportHandler {
         // 写 TSV
         try (BufferedWriter writer = new BufferedWriter(
                 new OutputStreamWriter(out, StandardCharsets.UTF_8))) {
-            writer.write("公司\t批次号\t客户\t客户手机\t小区\t详细地址\t部门\t经办人\t经办人手机号\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t销售日期\t收据号\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t提成比例\t提成金额\t状态\t备注\t是否特批\t是否退货\t退货数量\t实际结算数量\n");
+            writer.write("公司\t批次号\t客户\t客户手机\t小区\t详细地址\t部门\t经办人\t经办人手机号\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t销售日期\t收据号\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t提成比例\t提成金额\t状态\t备注\t是否特批\t退货标识\n");
             for (OpsBusinessData row : rows) {
                 writer.write(String.join("\t",
                         nvl(row.getCompany()),
@@ -135,9 +135,7 @@ public class BusinessDataExportHandler implements ExportHandler {
                         nvl(row.getCalcStatus()),
                         nvl(row.getRemark()),
                         nvl(row.getIsSpecial()),
-                        nvl(row.getIsReturn()),
-                        row.getReturnQuantity() != null ? row.getReturnQuantity().toString() : "",
-                        row.getSettleQuantity() != null ? row.getSettleQuantity().toString() : ""));
+                        row.getSaleQuantity() != null && row.getSaleQuantity() < 0 ? "是" : "否"));
                 writer.newLine();
             }
         }

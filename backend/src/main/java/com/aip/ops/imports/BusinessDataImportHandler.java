@@ -651,7 +651,6 @@ public class BusinessDataImportHandler implements ImportHandler {
                 throw new RuntimeException("入库行数(" + batchCount
                         + ")与有效行数(" + p.rows.size() + ")不一致");
             }
-            initReturnFields(p.rows);
             // 主表合计/经办人汇总以已落库子表为准
             p.rows.stream().map(r -> r.orderId).filter(Objects::nonNull).distinct()
                     .forEach(orderId -> {
@@ -739,18 +738,6 @@ public class BusinessDataImportHandler implements ImportHandler {
     private static java.time.LocalDate parseLocalDate(String v) {
         if (v == null || v.isBlank()) return null;
         try { return java.time.LocalDate.parse(v.trim()); } catch (Exception e) { return null; }
-    }
-
-    /** 新导入行退货字段初始化：结算数量=销售数量、未申请、留存原始收款金额。 */
-    private void initReturnFields(List<ParsedRow> rows) {
-        String orderIds = rows.stream().map(r -> r.orderId).filter(Objects::nonNull)
-                .distinct().map(String::valueOf).collect(Collectors.joining(","));
-        if (orderIds.isEmpty()) return;
-        jdbcTemplate.update("UPDATE ops_business_order_item SET "
-                + "settle_quantity = GREATEST(COALESCE(sale_quantity, 1), 0), "
-                + "return_status = '未申请', "
-                + "original_receipt_amount = COALESCE(original_receipt_amount, receipt_amount) "
-                + "WHERE order_id IN (" + orderIds + ") AND settle_quantity IS NULL");
     }
 
     /**

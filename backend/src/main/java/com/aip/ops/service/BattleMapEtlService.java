@@ -87,7 +87,7 @@ public class BattleMapEtlService {
             List<Map<String, Object>> tops = jdbc.queryForList(
                 "SELECT bd.agent AS agent_key," +
                 "COALESCE(SUM(bd.receipt_amount),0) AS total_sales," +
-                "COUNT(*) AS sales_count," +
+                "SUM(CASE WHEN bd.sale_quantity < 0 THEN 0 ELSE 1 END) AS sales_count," +
                 "MIN(bd.agent_phone) AS agent_phone " +
                 "FROM ops_business_order_item bd WHERE bd.corp_id IN (" + scope + ") " +
                 "AND bd.delete_flag=0 " +
@@ -240,12 +240,16 @@ public class BattleMapEtlService {
                 "sales_count,rank_order) " +
                 "SELECT ?,x.category_key," +
                 "COALESCE((SELECT item_value FROM ai_platform.sys_dict_item WHERE type_id=9 AND item_key=x.category_key COLLATE utf8mb4_0900_ai_ci AND delete_flag=0 LIMIT 1),x.category_key) AS category_name," +
-                "COALESCE(SUM(x.amount),0),COUNT(*)," +
+                "COALESCE(SUM(x.amount),0)," +
+                "SUM(CASE WHEN x.is_return = 1 THEN 0 ELSE 1 END)," +
                 "ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(x.amount),0) DESC) " +
                 "FROM (" +
                 "SELECT bd.category AS category_key," +
-                "COALESCE(NULLIF(bd.order_no,''), NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__NULL__', bd.id)) AS grp," +
-                "bd.brand, bd.model, MAX(bd.receipt_amount) AS amount " +
+                "CASE WHEN bd.sale_quantity < 0 " +
+                "  THEN CONCAT('__RET__', COALESCE(bd.source_return_id, 0), '_', COALESCE(bd.order_id, bd.id)) " +
+                "  ELSE COALESCE(NULLIF(bd.order_no,''), NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__NULL__', bd.id)) END AS grp," +
+                "bd.brand, bd.model, MAX(bd.receipt_amount) AS amount, " +
+                "MAX(CASE WHEN bd.sale_quantity < 0 THEN 1 ELSE 0 END) AS is_return " +
                 "FROM ops_business_order_item bd " +
                 "WHERE bd.corp_id IN (" + scope + ") AND bd.delete_flag=0 " +
                 "AND bd.calc_status IN ('已计算','经办人已核对','已上报集团') " +

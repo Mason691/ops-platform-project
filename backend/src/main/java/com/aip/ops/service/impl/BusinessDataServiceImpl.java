@@ -4,7 +4,6 @@ import com.aip.sdk.exception.BusinessException;
 import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsBusinessOrder;
-import com.aip.ops.entity.OpsBusinessReturn;
 import com.aip.ops.entity.OpsPersonalCommissionRule;
 import com.aip.ops.entity.OpsValueAddedProduct;
 import com.aip.ops.entity.SysImportTask;
@@ -12,7 +11,6 @@ import com.aip.ops.imports.BusinessDataImportHandler;
 import com.aip.ops.imports.ImportResult;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsBusinessOrderMapper;
-import com.aip.ops.mapper.OpsBusinessReturnMapper;
 import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.BusinessDataService;
@@ -61,7 +59,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     private final OpsBusinessDataMapper mapper;
     private final OpsBusinessOrderMapper orderMapper;
-    private final OpsBusinessReturnMapper returnMapper;
     private final OpsValueAddedProductMapper productMapper;
     private final OpsPersonalCommissionRuleMapper ruleMapper;
     private final DataScopeService dataScopeService;
@@ -121,7 +118,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     public BusinessDataServiceImpl(
             OpsBusinessDataMapper mapper,
             OpsBusinessOrderMapper orderMapper,
-            OpsBusinessReturnMapper returnMapper,
             OpsValueAddedProductMapper productMapper,
             OpsPersonalCommissionRuleMapper ruleMapper,
             DataScopeService dataScopeService,
@@ -134,7 +130,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             BusinessOrderService orderService) {
         this.mapper = mapper;
         this.orderMapper = orderMapper;
-        this.returnMapper = returnMapper;
         this.productMapper = productMapper;
         this.ruleMapper = ruleMapper;
         this.dataScopeService = dataScopeService;
@@ -397,7 +392,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         OpsBusinessData first = rows.get(0);
         Map<String, List<OpsBusinessData>> productGroups = new LinkedHashMap<>();
         for (OpsBusinessData row : rows) {
-            String key = Objects.toString(row.getCategory(), "") + "|"
+            // 退货分录按退货单单独成组，保证正/负分录并列展示且金额各计一次
+            String key = (isReturnEntry(row) ? "RET|" + row.getSourceReturnId() + "|" : "")
+                    + Objects.toString(row.getCategory(), "") + "|"
                     + Objects.toString(row.getBrand(), "") + "|"
                     + Objects.toString(row.getModel(), "") + "|"
                     + priceKey(row.getSalePrice());
@@ -424,9 +421,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         BigDecimal totalCommission = computedCommission;
         String calcStatus = master != null && hasText(master.getCalcStatus())
                 ? master.getCalcStatus() : computeOrderStatus(rows);
-        boolean hasReturn = products.stream().anyMatch(p -> "是".equals(p.get("isReturn")));
-        boolean hasPendingReturn = products.stream()
-                .anyMatch(p -> "审批中".equals(p.get("returnStatus")));
+        boolean hasReturn = rows.stream().anyMatch(BusinessDataServiceImpl::isReturnEntry);
         boolean financeChecked = checkedCount > 0 && checkedCount == rows.size();
         Map<String, Object> order = new LinkedHashMap<>();
         order.put("orderId", master != null ? master.getId() : first.getOrderId());
@@ -480,8 +475,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         order.put("productCount", products.size());
         order.put("products", products);
         order.put("hasReturn", hasReturn);
-        order.put("hasPendingReturn", hasPendingReturn);
-        order.put("canReturn", !REPORTED_STATUS.equals(calcStatus) && !hasPendingReturn);
         order.put("category", products.isEmpty() ? null : products.get(0).get("category"));
         // 兼容财务核对弹窗/卡片的单产品字段：取首个产品；多产品以 productCount/totalAmount 提示
         if (!products.isEmpty()) {
@@ -524,17 +517,24 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private Map<String, Object> buildProductView(List<OpsBusinessData> rows) {
         rows.sort(Comparator.comparing(OpsBusinessData::getId));
         OpsBusinessData first = rows.get(0);
+        boolean isReturn = isReturnEntry(first);
+        // 多经办人行共享同一数量/金额：正数取 MAX、退货负数取 MIN，避免重复计数
+        Comparator<BigDecimal> amountOrder = isReturn
+                ? Comparator.reverseOrder() : Comparator.naturalOrder();
         BigDecimal amount = rows.stream().map(OpsBusinessData::getReceiptAmount)
-                .filter(Objects::nonNull).max(Comparator.naturalOrder())
+                .filter(Objects::nonNull).max(amountOrder)
                 .orElse(BigDecimal.ZERO);
         BigDecimal commission = rows.stream().map(OpsBusinessData::getCommissionAmount)
                 .filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal rate = rows.stream().map(OpsBusinessData::getCommissionRate)
                 .filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
         Integer quantity = rows.stream().map(OpsBusinessData::getSaleQuantity)
-                .filter(Objects::nonNull).max(Integer::compareTo).orElse(null);
+                .filter(Objects::nonNull)
+                .min(isReturn ? Comparator.naturalOrder() : Comparator.reverseOrder())
+                .orElse(null);
         Map<String, Object> product = new LinkedHashMap<>();
-        product.put("productKey", Objects.toString(first.getCategory(), "") + "|"
+        product.put("productKey", (isReturn ? "RET|" + first.getSourceReturnId() + "|" : "")
+                + Objects.toString(first.getCategory(), "") + "|"
                 + Objects.toString(first.getBrand(), "") + "|"
                 + Objects.toString(first.getModel(), "") + "|"
                 + priceKey(first.getSalePrice()));
@@ -551,15 +551,17 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 firstNonNull(rows, OpsBusinessData::getRetailFloorPrice));
         product.put("groupLowestPrice",
                 firstNonNull(rows, OpsBusinessData::getGroupLowestPrice));
-        // 退货信息（同产品多经办人行已同步，取首行展示）
-        product.put("isReturn", first.getIsReturn());
-        product.put("returnQuantity", first.getReturnQuantity());
-        product.put("returnAmount", first.getReturnAmount());
-        product.put("settleQuantity", first.getSettleQuantity());
-        product.put("returnStatus", first.getReturnStatus());
-        product.put("originalReceiptAmount", first.getOriginalReceiptAmount());
+        // 退货分录标记：负数数量 + SCM 退货单号，前端据此红色高亮并跳转
+        product.put("isReturnEntry", isReturn);
+        product.put("sourceReturnId", first.getSourceReturnId());
+        product.put("sourceReturnNo", first.getSourceReturnNo());
         product.put("rowIds", rows.stream().map(OpsBusinessData::getId).toList());
         return product;
+    }
+
+    /** 退货分录：数量为负（金额/提成随之为负）。 */
+    private static boolean isReturnEntry(OpsBusinessData row) {
+        return row != null && row.getSaleQuantity() != null && row.getSaleQuantity() < 0;
     }
 
     private static String firstText(List<OpsBusinessData> rows,
@@ -1013,7 +1015,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 BigDecimal amt = d.getSalePrice() == null ? BigDecimal.ZERO
                         : d.getSalePrice().multiply(rate)
                                 .divide(HUNDRED, 2, RoundingMode.HALF_UP);
-                results.put(d.getId(), new BigDecimal[]{rate, scaleBySettleQuantity(d, amt)});
+                results.put(d.getId(), new BigDecimal[]{rate, amt});
                 continue;
             }
             Long dCorpId = d.getCorpId() != null ? d.getCorpId() : 0L;
@@ -1022,16 +1024,18 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             OpsPersonalCommissionRule rule = corpRuleMap.get(d.getCategory());
             BigDecimal[] cr = calcCommissionAmount(d.getSalePrice(),
                     d.getRetailFloorPrice(), d.getGroupLowestPrice(), rule);
-            results.put(d.getId(), new BigDecimal[]{cr[0], scaleBySettleQuantity(d, cr[1])});
+            results.put(d.getId(), new BigDecimal[]{cr[0], cr[1]});
         }
 
-        // ── Phase 2: Split by receipt×customer×category×model group ──
+        // ── Phase 2: Split positive rows by receipt×customer×category×model group ──
         int splitGroups = splitCommissionByReceiptGroup(uncalcs, results);
+        // ── Phase 2.5: 退货分录按原销售分录提成金额比例冲减（负值）──
+        applyReturnCommission(uncalcs, results);
 
         // Count commissioned / zero AFTER splitting (results may have changed)
         int commissioned = 0, zero = 0;
         for (BigDecimal[] cr : results.values()) {
-            if (cr[1].compareTo(BigDecimal.ZERO) > 0) commissioned++; else zero++;
+            if (cr[1].signum() != 0) commissioned++; else zero++;
         }
 
         // ── Phase 3: Batch SQL update (preserves existing CASE WHEN pattern) ──
@@ -1081,15 +1085,190 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 "zero", zero, "splitGroups", splitGroups);
     }
 
-    /** 退货后按 结算数量/销售数量 等比缩放提成；无退货行原样返回。 */
-    private static BigDecimal scaleBySettleQuantity(OpsBusinessData d, BigDecimal amount) {
-        if (amount == null || amount.signum() == 0) return amount;
-        Integer settle = d.getSettleQuantity();
-        Integer sold = d.getSaleQuantity();
-        if (settle == null || sold == null || sold <= 0 || settle >= sold) return amount;
-        int effective = Math.max(settle, 0);
-        return amount.multiply(BigDecimal.valueOf(effective))
-                .divide(BigDecimal.valueOf(sold), 2, RoundingMode.HALF_UP);
+    /**
+     * 退货分录提成：按原销售分录**剩余提成**等比例冲减。
+     *
+     * <p>口径：冲减额 = -（原提成 + 已冲减负数）× 本次退货数量 ÷ 剩余数量。
+     * 用「当前提成」而非规则重算，历史退货已缩放的提成与新退货可连续正确冲减，
+     * 不会重复扣减；剩余提成为 0（未配置规则/已全额冲减）时负提成为 0。</p>
+     */
+    private void applyReturnCommission(List<OpsBusinessData> uncalcs,
+                                       Map<Long, BigDecimal[]> results) {
+        Map<String, List<OpsBusinessData>> groups = collectReturnGroups(uncalcs);
+        if (groups.isEmpty()) return;
+        Map<Long, List<OpsBusinessData>> orderCache = new HashMap<>();
+        // 按分录 id 升序处理：先算早期退货的冲减额，后续退货才能用「剩余提成」正确计算
+        List<List<OpsBusinessData>> ordered = new ArrayList<>(groups.values());
+        ordered.sort(Comparator.comparingLong(BusinessDataServiceImpl::minId));
+        for (List<OpsBusinessData> group : ordered) {
+            applyReturnGroup(group, orderCache, results);
+        }
+    }
+
+    private static Map<String, List<OpsBusinessData>> collectReturnGroups(
+            List<OpsBusinessData> uncalcs) {
+        Map<String, List<OpsBusinessData>> groups = new LinkedHashMap<>();
+        for (OpsBusinessData d : uncalcs) {
+            if (!isReturnEntry(d)) continue;
+            groups.computeIfAbsent(returnGroupKey(d), k -> new ArrayList<>()).add(d);
+        }
+        return groups;
+    }
+
+    /** 单个退货单×产品组的负提成计算：按剩余数量/剩余提成比例冲减并分摊到经办人。 */
+    private void applyReturnGroup(List<OpsBusinessData> group,
+                                  Map<Long, List<OpsBusinessData>> orderCache,
+                                  Map<Long, BigDecimal[]> results) {
+        OpsBusinessData first = group.get(0);
+        long groupMinId = minId(group);
+        List<OpsBusinessData> all = orderCache.computeIfAbsent(first.getOrderId(),
+                id -> id == null ? List.of() : orderMapper.selectItems(id));
+        List<OpsBusinessData> positives = all.stream()
+                .filter(r -> !isReturnEntry(r) && sameProduct(r, first)).toList();
+        int q = positives.stream().mapToInt(BusinessDataServiceImpl::positiveQty)
+                .max().orElse(0);
+        int r = Math.abs(positiveQty(first));
+        // 仅统计本次退货之前的退货；同一退货单多经办人行数量只计一次（MAX）
+        int returnedBefore = returnedQtyBefore(all, first, groupMinId);
+        // 历史异常数据可能已超退；分母至少取本次退货量，避免冲减额超过原提成
+        int remaining = Math.max(q - returnedBefore, r);
+        if (r <= 0 || q <= 0) {
+            zeroReturnCommission(group, results);
+            return;
+        }
+        Map<String, BigDecimal> posByAgent = new HashMap<>();
+        Map<String, BigDecimal> rateByAgent = new HashMap<>();
+        BigDecimal posTotal = BigDecimal.ZERO;
+        for (OpsBusinessData p : positives) {
+            BigDecimal amt = commissionOf(p, results);
+            posByAgent.merge(agentKeyOrEmpty(p), amt, BigDecimal::add);
+            BigDecimal[] pcr = results.get(p.getId());
+            BigDecimal pRate = pcr != null && pcr[0] != null ? pcr[0] : p.getCommissionRate();
+            if (pRate != null) {
+                rateByAgent.merge(agentKeyOrEmpty(p), pRate, BigDecimal::add);
+            }
+            posTotal = posTotal.add(amt);
+        }
+        BigDecimal remainingCommission = posTotal.add(
+                priorReturnCommission(all, first, groupMinId, results));
+        BigDecimal reversalTotal = returnReversalTotal(remainingCommission, r, remaining);
+        distributeReturn(group, posByAgent, rateByAgent, posTotal, reversalTotal, results);
+    }
+
+    /** 本次退货之前已冲减的负提成（多经办人逐行相加，金额本身按人拆分）。 */
+    private static BigDecimal priorReturnCommission(List<OpsBusinessData> all,
+                                                    OpsBusinessData ref, long beforeId,
+                                                    Map<Long, BigDecimal[]> results) {
+        return all.stream()
+                .filter(x -> isReturnEntry(x) && sameProduct(x, ref)
+                        && x.getId() != null && x.getId() < beforeId)
+                .map(x -> commissionOf(x, results))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /**
+     * 冲减总额 = -「剩余提成（原提成 + 已冲减负数）」× 本次退货数量 / 剩余数量。
+     * 原提成为 0（未配置规则/历史全额退货）时冲减 0，避免产生无依据的负提成。
+     */
+    private static BigDecimal returnReversalTotal(BigDecimal remainingCommission,
+                                                   int r, int remaining) {
+        if (remainingCommission.signum() == 0) {
+            return BigDecimal.ZERO;
+        }
+        return remainingCommission.negate().multiply(BigDecimal.valueOf(r))
+                .divide(BigDecimal.valueOf(remaining), 2, RoundingMode.HALF_UP);
+    }
+
+    /** 按经办人原提成占比分摊负提成；无原提成时组内均分，末行吸收舍入差。 */
+    private static void distributeReturn(List<OpsBusinessData> group,
+                                         Map<String, BigDecimal> posByAgent,
+                                         Map<String, BigDecimal> rateByAgent,
+                                         BigDecimal posTotal, BigDecimal reversalTotal,
+                                         Map<Long, BigDecimal[]> results) {
+        int n = group.size();
+        BigDecimal allocated = BigDecimal.ZERO;
+        for (int i = 0; i < n; i++) {
+            OpsBusinessData d = group.get(i);
+            String agent = agentKeyOrEmpty(d);
+            BigDecimal amt;
+            if (posTotal.signum() != 0) {
+                BigDecimal share = posByAgent.getOrDefault(agent, BigDecimal.ZERO);
+                amt = i == n - 1
+                        ? reversalTotal.subtract(allocated)
+                        : reversalTotal.multiply(share).divide(posTotal, 2, RoundingMode.HALF_UP);
+            } else {
+                amt = i == n - 1
+                        ? reversalTotal.subtract(allocated)
+                        : reversalTotal.divide(BigDecimal.valueOf(n), 2, RoundingMode.HALF_UP);
+            }
+            allocated = allocated.add(amt);
+            BigDecimal[] cr = results.get(d.getId());
+            BigDecimal rate = rateByAgent.get(agent);
+            if (rate == null) {
+                rate = cr != null && cr[0] != null
+                        ? cr[0].divide(BigDecimal.valueOf(n), 2, RoundingMode.HALF_UP)
+                        : BigDecimal.ZERO;
+            }
+            results.put(d.getId(), new BigDecimal[]{rate, amt});
+        }
+    }
+
+    private static void zeroReturnCommission(List<OpsBusinessData> group,
+                                             Map<Long, BigDecimal[]> results) {
+        for (OpsBusinessData d : group) {
+            BigDecimal[] cr = results.get(d.getId());
+            BigDecimal rate = cr != null && cr[0] != null ? cr[0] : BigDecimal.ZERO;
+            results.put(d.getId(), new BigDecimal[]{rate, BigDecimal.ZERO});
+        }
+    }
+
+    private static BigDecimal commissionOf(OpsBusinessData row, Map<Long, BigDecimal[]> results) {
+        BigDecimal[] cr = results.get(row.getId());
+        if (cr != null && cr[1] != null) return cr[1];
+        return row.getCommissionAmount() != null ? row.getCommissionAmount() : BigDecimal.ZERO;
+    }
+
+    private static int positiveQty(OpsBusinessData d) {
+        return d.getSaleQuantity() != null ? d.getSaleQuantity() : 1;
+    }
+
+    /** 本次退货之前的累计退货数量：同一退货单多经办人行只计一次（MAX）。 */
+    private static int returnedQtyBefore(List<OpsBusinessData> all, OpsBusinessData ref,
+                                         long beforeId) {
+        Map<String, Integer> perBill = new HashMap<>();
+        for (OpsBusinessData x : all) {
+            if (!isReturnEntry(x) || !sameProduct(x, ref)) continue;
+            if (x.getId() == null || x.getId() >= beforeId) continue;
+            String bill = Objects.toString(x.getSourceReturnId(), "0");
+            perBill.merge(bill, Math.abs(positiveQty(x)), Math::max);
+        }
+        return perBill.values().stream().mapToInt(Integer::intValue).sum();
+    }
+
+    private static long minId(List<OpsBusinessData> rows) {
+        return rows.stream().map(OpsBusinessData::getId)
+                .filter(Objects::nonNull).mapToLong(Long::longValue).min().orElse(0L);
+    }
+
+    private static String agentKeyOrEmpty(OpsBusinessData d) {
+        String key = agentKey(d);
+        return key != null ? key : "";
+    }
+
+    private static String returnGroupKey(OpsBusinessData d) {
+        return "T|" + Objects.toString(d.getSourceReturnId(), "0") + "|"
+                + Objects.toString(d.getOrderId(), "0") + "|"
+                + Objects.toString(d.getCategory(), "") + "|"
+                + Objects.toString(d.getBrand(), "") + "|"
+                + Objects.toString(d.getModel(), "") + "|"
+                + priceKey(d.getSalePrice());
+    }
+
+    private static boolean sameProduct(OpsBusinessData a, OpsBusinessData b) {
+        return Objects.equals(a.getCategory(), b.getCategory())
+                && Objects.equals(a.getBrand(), b.getBrand())
+                && Objects.equals(a.getModel(), b.getModel())
+                && sameAmount(a.getSalePrice(), b.getSalePrice());
     }
 
     /** 同步受影响订单头的 total_commission / calc_status。 */
@@ -1175,6 +1354,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
      * 再次收据号；品类/品牌/型号作为产品维度。品牌纳入键，避免不同品牌同型号文本被误合并。
      */
     private static String commissionGroupKey(OpsBusinessData d) {
+        // 退货分录不参与正向均分：按退货单+产品由 applyReturnCommission 单独冲减
+        if (isReturnEntry(d)) return null;
         String product = "|" + Objects.toString(d.getCategory(), "")
                 + "|" + Objects.toString(d.getBrand(), "")
                 + "|" + Objects.toString(d.getModel(), "");
@@ -1263,7 +1444,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             BigDecimal groupSum = BigDecimal.ZERO;
             for (OpsBusinessData d : group) {
                 BigDecimal[] cr = results.get(d.getId());
-                if (cr == null || cr[1] == null || cr[1].compareTo(BigDecimal.ZERO) < 0) {
+                // 负数仅允许出现在退货分录；正向组内出现负提成视为数据异常
+                boolean invalid = cr == null || cr[1] == null
+                        || (!isReturnEntry(d) && cr[1].compareTo(BigDecimal.ZERO) < 0);
+                if (invalid) {
                     String msg = "Receipt group " + entry.getKey()
                             + " row id=" + d.getId()
                             + " has invalid amount after split: "
@@ -1357,9 +1541,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     private static final String EXPORT_HEADER =
-            "批次\t公司\t客户\t客户手机\t小区\t详细地址\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t收据号\t备注\t是否特批\t是否退货\t退货数量\t实际结算数量\n";
+            "批次\t公司\t客户\t客户手机\t小区\t详细地址\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t收据号\t备注\t是否特批\t退货标识\n";
 
-    /** 单行 28 列 TSV 输出（与 EXPORT_HEADER 列序一致）；收款金额=库中 receipt_amount（空则 单价×数量 兜底） */
+    /** 单行 29 列 TSV 输出（与 EXPORT_HEADER 列序一致）；收款金额=库中 receipt_amount（空则 单价×数量 兜底） */
     private void appendExportRow(StringBuilder sb, OpsBusinessData d) {
         sb.append(fmt(d.getBatchNo())).append('\t')
           .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
@@ -1386,9 +1570,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
           .append(fmt(d.getReceiptNo())).append('\t')
           .append(fmt(d.getRemark())).append('\t')
           .append(fmt(d.getIsSpecial())).append('\t')
-          .append(fmt(d.getIsReturn())).append('\t')
-          .append(fmt(d.getReturnQuantity())).append('\t')
-          .append(fmt(d.getSettleQuantity())).append('\n');
+          .append(isReturnEntry(d) ? "是" : "否").append('\n');
     }
 
     /** TSV 单值清洗：自由文本（地址/备注等）中的制表符/换行会把导出 XLSX 的行列撕开。 */
@@ -1711,17 +1893,6 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         if (reported > 0) {
             throw BusinessException.of("所选数据包含" + reported + "条已上报集团记录，已上报数据禁止删除");
         }
-        LambdaQueryWrapper<OpsBusinessReturn> pendingQw = new LambdaQueryWrapper<OpsBusinessReturn>()
-                .in(OpsBusinessReturn::getItemId, ids)
-                .eq(OpsBusinessReturn::getStatus, OpsBusinessReturn.STATUS_PENDING)
-                .eq(OpsBusinessReturn::getDeleteFlag, 0);
-        if (visibleIds != null && !visibleIds.isEmpty()) {
-            pendingQw.in(OpsBusinessReturn::getCorpId, visibleIds);
-        }
-        Long pendingReturns = returnMapper.selectCount(pendingQw);
-        if (pendingReturns != null && pendingReturns > 0) {
-            throw BusinessException.of("所选数据包含" + pendingReturns + "条审批中的退货申请，请先处理");
-        }
         LambdaQueryWrapper<OpsBusinessData> itemsQw = new LambdaQueryWrapper<OpsBusinessData>()
                 .select(OpsBusinessData::getId, OpsBusinessData::getOrderId)
                 .in(OpsBusinessData::getId, ids);
@@ -1731,13 +1902,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         List<OpsBusinessData> items = mapper.selectList(itemsQw);
         Set<Long> orderIds = items.stream().map(OpsBusinessData::getOrderId)
                 .filter(Objects::nonNull).collect(Collectors.toSet());
-        // 退货申请随明细一起逻辑删除（限定可见 corp，防跨租户误删）
-        LambdaQueryWrapper<OpsBusinessReturn> returnDel = new LambdaQueryWrapper<OpsBusinessReturn>()
-                .in(OpsBusinessReturn::getItemId, ids);
-        if (visibleIds != null && !visibleIds.isEmpty()) {
-            returnDel.in(OpsBusinessReturn::getCorpId, visibleIds);
-        }
-        returnMapper.delete(returnDel);
+        lockAndAssertDeletable(orderIds);
         // physical DELETE bypassing @TableLogic, but enforce corp_id scope
         String in = ids.stream().map(Object::toString).reduce((a, b) -> a + "," + b).orElse("");
         StringBuilder sql = new StringBuilder("DELETE FROM ops_business_order_item WHERE id IN (").append(in).append(")");
@@ -1760,6 +1925,35 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             orderService.refreshAgentSummary(orderId);
         }
         orderService.deleteEmptyOrders(orderIds);
+    }
+
+    /**
+     * 删除前锁定订单明细并二次校验：与 SCM 退货反写统一按订单 id 升序加锁，
+     * 串行化「删除 vs 新增退货分录」，防止首次守卫后并发插入已上报/退货行。
+     */
+    private void lockAndAssertDeletable(Set<Long> orderIds) {
+        if (orderIds == null || orderIds.isEmpty()) return;
+        for (Long orderId : orderIds.stream().sorted().toList()) {
+            jdbcTemplate.queryForList(
+                    "SELECT id FROM ops_business_order_item WHERE order_id = ? "
+                            + "AND delete_flag = 0 ORDER BY id FOR UPDATE",
+                    Long.class, orderId);
+        }
+        Long reported = mapper.selectCount(new LambdaQueryWrapper<OpsBusinessData>()
+                .in(OpsBusinessData::getOrderId, orderIds)
+                .eq(OpsBusinessData::getCalcStatus, REPORTED_STATUS)
+                .eq(OpsBusinessData::getDeleteFlag, 0));
+        if (reported != null && reported > 0) {
+            throw BusinessException.of("所选订单包含已上报集团数据，禁止删除");
+        }
+        // 退货分录由 SCM 反写，删除订单前必须先在供应链管理反审核，避免账实不一致
+        Long returnRows = mapper.selectCount(new LambdaQueryWrapper<OpsBusinessData>()
+                .in(OpsBusinessData::getOrderId, orderIds)
+                .lt(OpsBusinessData::getSaleQuantity, 0)
+                .eq(OpsBusinessData::getDeleteFlag, 0));
+        if (returnRows != null && returnRows > 0) {
+            throw BusinessException.of("所选订单包含退货分录，请先在供应链管理反审核退货");
+        }
     }
 
     @Override

@@ -26,18 +26,21 @@
             <text v-if="d.detailedAddress" class="detail-address">详细地址: {{ d.detailedAddress }}</text>
             <text v-if="d.voucherUrl" class="detail-voucher"
                   @click.stop="previewVoucher(d.voucherUrl)">🧾 查看凭证</text>
-            <text v-if="d.returnStatus && d.returnStatus !== '未申请'" class="detail-return">
-              退货{{ d.returnStatus }}<template v-if="Number(d.returnQuantity) > 0"> · 已退{{ d.returnQuantity }} · 结算{{ d.settleQuantity }}</template>
+            <text v-if="d.isReturnEntry" class="detail-return">
+              退货冲减{{ d.sourceReturnNo ? ' · ' + d.sourceReturnNo : '' }}
             </text>
           </view>
           <view class="detail-money">
-            <text class="detail-sale">{{ formatMoney(d.receiptAmount != null ? d.receiptAmount : d.salePrice) }}</text>
-            <text class="detail-commission">提成 {{ formatMoney(d.commissionAmount) }}</text>
+            <text class="detail-sale" :class="{ 'negative-value': Number(d.receiptAmount) < 0 }">
+              {{ formatMoney(d.receiptAmount != null ? d.receiptAmount : d.salePrice) }}
+            </text>
+            <text class="detail-commission" :class="{ 'negative-value': Number(d.commissionAmount) < 0 }">
+              提成 {{ formatMoney(d.commissionAmount) }}
+            </text>
             <text v-if="d.commissionRate != null && d.commissionRate !== ''" class="detail-rate">比例 {{ formatRate(d.commissionRate) }}</text>
             <text class="detail-status" :class="statusClass(d.calcStatus)">
               {{ d.calcStatus || '未计算' }}
             </text>
-            <text v-if="canReturn(d)" class="detail-return-btn" @click.stop="requestReturn(d)">申请退货</text>
           </view>
         </view>
       </view>
@@ -48,12 +51,10 @@
 <script setup>
 import { reactive } from 'vue'
 import { assetUrl } from '@/utils/image'
-import { api } from '@/api/index'
 
 defineProps({
   months: { type: Array, default: () => [] }
 })
-const emit = defineEmits(['submitted'])
 
 const expanded = reactive({})
 
@@ -85,39 +86,6 @@ function previewVoucher(raw) {
   uni.previewImage({ urls, current: urls[0] })
 }
 
-/** 可申请退货：未上报集团、无审批中申请、仍有未退数量 */
-function canReturn(d) {
-  if (!d || !d.id) return false
-  if (d.calcStatus === '已上报集团') return false
-  if (d.returnStatus === '审批中') return false
-  const sold = Number(d.saleQuantity ?? 1)
-  const returned = Number(d.returnQuantity ?? 0)
-  return sold - returned > 0
-}
-
-function requestReturn(d) {
-  const max = Math.max(1, Number(d.saleQuantity ?? 1) - Number(d.returnQuantity ?? 0))
-  uni.showModal({
-    title: '申请退货',
-    editable: true,
-    placeholderText: `请输入退货数量（最多 ${max}）`,
-    success: async (res) => {
-      if (!res.confirm) return
-      const qty = parseInt(res.content, 10)
-      if (!qty || qty < 1 || qty > max) {
-        uni.showToast({ title: '请输入 1-' + max + ' 的退货数量', icon: 'none' })
-        return
-      }
-      try {
-        await api.employeeRequestReturn(d.id, { returnQuantity: qty })
-        uni.showToast({ title: '已提交，等待审批', icon: 'success' })
-        emit('submitted')
-      } catch (e) {
-        uni.showToast({ title: (e && e.msg) || '提交失败', icon: 'none' })
-      }
-    }
-  })
-}
 </script>
 
 <style scoped>
@@ -146,8 +114,8 @@ function requestReturn(d) {
 .detail-date { font-size: 22rpx; color: #bbb; }
 .detail-address { font-size: 22rpx; color: #666; word-break: break-all; }
 .detail-voucher { font-size: 22rpx; color: #2196F3; }
-.detail-return { font-size: 22rpx; color: #E6A23C; }
-.detail-return-btn { font-size: 22rpx; color: #FF6B35; border: 1rpx solid #FF6B35; border-radius: 8rpx; padding: 4rpx 12rpx; margin-top: 6rpx; }
+.detail-return { font-size: 22rpx; color: #F56C6C; }
+.negative-value { color: #F56C6C; }
 .detail-money { display: flex; flex-direction: column; align-items: flex-end; gap: 4rpx; }
 .detail-sale { font-size: 28rpx; color: #FF6B35; font-weight: 600; }
 .detail-commission { font-size: 22rpx; color: #4caf50; }

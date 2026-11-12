@@ -32,7 +32,8 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
     /** Group by category within a month — sum sale, commission, count orders. */
     @Select("<script>"
             + "SELECT category, COALESCE(SUM(receipt_amount),0) as totalSale, "
-            + "COALESCE(SUM(commission_amount),0) as totalCommission, COUNT(*) as orderCount "
+            + "COALESCE(SUM(commission_amount),0) as totalCommission, "
+            + "SUM(CASE WHEN sale_quantity < 0 THEN 0 ELSE 1 END) as orderCount "
             + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
             + "<if test='month != null and month != \"\"'>AND SUBSTRING(sale_date, 1, 7) = #{month}</if> "
@@ -48,8 +49,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
             + "sale_date as saleDate, customer, receipt_amount as receiptAmount, "
             + "community_name as communityName, detailed_address as detailedAddress, "
             + "sale_quantity as saleQuantity, "
-            + "is_return as isReturn, return_quantity as returnQuantity, "
-            + "settle_quantity as settleQuantity, return_status as returnStatus, "
+            + "source_return_id as sourceReturnId, source_return_no as sourceReturnNo, "
             + "calc_status as calcStatus, "
             + "is_received as isReceived, voucher_url as voucherUrl "
             + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
@@ -64,7 +64,8 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
 
     /** Aggregate totals for a single month (no category breakdown). */
     @Select("SELECT COALESCE(SUM(receipt_amount),0) as totalSale, "
-            + "COALESCE(SUM(commission_amount),0) as totalCommission, COUNT(*) as orderCount "
+            + "COALESCE(SUM(commission_amount),0) as totalCommission, "
+            + "SUM(CASE WHEN sale_quantity < 0 THEN 0 ELSE 1 END) as orderCount "
             + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
             + "AND SUBSTRING(sale_date, 1, 7) = #{month}")
@@ -76,8 +77,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
             + "commission_rate as commissionRate, "
             + "sale_date as saleDate, customer, category, "
             + "receipt_amount as receiptAmount, sale_quantity as saleQuantity, "
-            + "is_return as isReturn, return_quantity as returnQuantity, "
-            + "settle_quantity as settleQuantity, return_status as returnStatus, "
+            + "source_return_id as sourceReturnId, source_return_no as sourceReturnNo, "
             + "community_name as communityName, detailed_address as detailedAddress, "
             + "calc_status as calcStatus, batch_no as batchNo, "
             + "is_received as isReceived, voucher_url as voucherUrl "
@@ -88,7 +88,8 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
 
     /** All-time totals across all months. */
     @Select("SELECT COALESCE(SUM(receipt_amount),0) as totalSale, "
-            + "COALESCE(SUM(commission_amount),0) as totalCommission, COUNT(*) as orderCount "
+            + "COALESCE(SUM(commission_amount),0) as totalCommission, "
+            + "SUM(CASE WHEN sale_quantity < 0 THEN 0 ELSE 1 END) as orderCount "
             + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0")
     Map<String, Object> selectAllTimeTotals(@Param("agentPhone") String agentPhone);

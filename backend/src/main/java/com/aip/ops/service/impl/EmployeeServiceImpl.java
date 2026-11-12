@@ -248,6 +248,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         }
         BigDecimal allTimeSale = BigDecimal.ZERO;
         BigDecimal allTimeCommission = BigDecimal.ZERO;
+        int allTimeOrders = 0;
 
         // Group by month — monthKey → {monthLabel, totals, details[]}
         Map<String, MonthGroup> groups = new LinkedHashMap<>();
@@ -260,6 +261,9 @@ public class EmployeeServiceImpl implements EmployeeService {
             BigDecimal commission = toBigDecimal(row.get("commissionAmount"));
             allTimeSale = allTimeSale.add(sale);
             allTimeCommission = allTimeCommission.add(commission);
+            // 退货负数分录计入金额冲减，但不计为一条销售单
+            boolean returnEntry = row.get("saleQuantity") instanceof Number n && n.intValue() < 0;
+            if (!returnEntry) allTimeOrders++;
 
             String saleDate = row.get("saleDate") instanceof String
                     ? (String) row.get("saleDate") : "";
@@ -273,7 +277,7 @@ public class EmployeeServiceImpl implements EmployeeService {
             });
             g.totalSale = g.totalSale.add(sale);
             g.totalCommission = g.totalCommission.add(commission);
-            g.orderCount++;
+            if (!returnEntry) g.orderCount++;
 
             Map<String, Object> detail = new LinkedHashMap<>();
             if (row.get("id") != null) detail.put("id", row.get("id"));
@@ -282,11 +286,9 @@ public class EmployeeServiceImpl implements EmployeeService {
             detail.put("salePrice", salePrice);
             detail.put("receiptAmount", sale);
             if (row.get("saleQuantity") != null) detail.put("saleQuantity", row.get("saleQuantity"));
-            // 退货信息（员工端展示 + 申请退货按钮）
-            if (row.get("isReturn") != null) detail.put("isReturn", row.get("isReturn"));
-            if (row.get("returnQuantity") != null) detail.put("returnQuantity", row.get("returnQuantity"));
-            if (row.get("settleQuantity") != null) detail.put("settleQuantity", row.get("settleQuantity"));
-            if (row.get("returnStatus") != null) detail.put("returnStatus", row.get("returnStatus"));
+            // 退货负数分录（员工端红色展示，退货申请统一在供应链管理销售退货中办理）
+            detail.put("isReturnEntry", returnEntry);
+            if (row.get("sourceReturnNo") != null) detail.put("sourceReturnNo", row.get("sourceReturnNo"));
             detail.put("commissionAmount", commission);
             detail.put("commissionRate", toBigDecimal(row.get("commissionRate")));
             detail.put("saleDate", saleDate);
@@ -327,7 +329,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         result.put("allTime", Map.of(
                 "totalSale", allTimeSale.setScale(2, RoundingMode.HALF_UP),
                 "totalCommission", allTimeCommission.setScale(2, RoundingMode.HALF_UP),
-                "orderCount", all.size()));
+                "orderCount", allTimeOrders));
         result.put("months", months);
         return result;
     }

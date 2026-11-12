@@ -1,8 +1,6 @@
 package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
-import com.aip.ops.dto.BusinessReturnApproveRequest;
-import com.aip.ops.dto.BusinessReturnRequest;
 import com.aip.ops.dto.FinanceCheckRequest;
 import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.SysImportTask;
@@ -10,7 +8,6 @@ import com.aip.ops.entity.SysExportTask;
 import com.aip.ops.service.BusinessDataFinanceService;
 import com.aip.ops.service.BusinessDataReconcileService;
 import com.aip.ops.service.BusinessDataService;
-import com.aip.ops.service.BusinessReturnService;
 import com.aip.ops.service.ExportTaskService;
 import com.aip.ops.service.ImportTaskService;
 import com.aip.ops.service.OrgRoleService;
@@ -48,7 +45,6 @@ public class BusinessDataController {
     private final ExportTaskService taskService;
     private final ImportTaskService importTaskService;
     private final BusinessDataFinanceService financeService;
-    private final BusinessReturnService returnService;
     private final BusinessDataReconcileService reconcileService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final OrgRoleService orgRoleService;
@@ -121,7 +117,6 @@ public class BusinessDataController {
     public BusinessDataController(BusinessDataService service, ExportTaskService taskService,
                                   ImportTaskService importTaskService,
                                   BusinessDataFinanceService financeService,
-                                  BusinessReturnService returnService,
                                   BusinessDataReconcileService reconcileService,
                                   KafkaTemplate<String, String> kafkaTemplate,
                                   OrgRoleService orgRoleService,
@@ -130,7 +125,6 @@ public class BusinessDataController {
         this.taskService = taskService;
         this.importTaskService = importTaskService;
         this.financeService = financeService;
-        this.returnService = returnService;
         this.reconcileService = reconcileService;
         this.kafkaTemplate = kafkaTemplate;
         this.orgRoleService = orgRoleService;
@@ -498,37 +492,7 @@ public class BusinessDataController {
         return R.ok(financeService.financeCheck(id, request));
     }
 
-    /**
-     * 退货申请：经办人（仅本人经办行）或财务/运营商管理员发起。
-     * 审批通过后按实际结算数量调整收款金额与提成，并重算订单提成。
-     */
-    @OperationLog(module = "增值业务", action = "退货申请", targetTable = "ops_business_return")
-    @PostMapping("/{id}/returns")
-    public R<?> createReturn(@PathVariable Long id, @RequestBody BusinessReturnRequest request) {
-        return R.ok(returnService.create(id, request));
-    }
-
-    /** 某订单的全部退货申请（含已驳回）。 */
-    @GetMapping("/orders/{orderId}/returns")
-    public R<?> orderReturns(@PathVariable Long orderId) {
-        return R.ok(returnService.listByOrder(orderId));
-    }
-
-    /** 待审批退货申请（当前组织范围，最多 200 条）。 */
-    @GetMapping("/returns/pending")
-    public R<?> pendingReturns() {
-        return R.ok(returnService.listPending());
-    }
-
-    /** 退货审批：approved=true 通过并生效，false 驳回。仅财务/运营商管理员。 */
-    @OperationLog(module = "增值业务", action = "退货审批", targetTable = "ops_business_return")
-    @PutMapping("/returns/{requestId}/approve")
-    public R<?> approveReturn(@PathVariable Long requestId,
-                              @RequestBody BusinessReturnApproveRequest request) {
-        return R.ok(returnService.approve(requestId, request));
-    }
-
-    /** 主子表对账（只读）：主表合计 vs 子表聚合、结算数量 vs 退货数量。仅超管（全局口径）。 */
+    /** 主子表对账（只读）：主表合计 vs 子表聚合。仅超管（全局口径）。 */
     @GetMapping("/reconcile")
     public R<?> reconcile() {
         Long corpId = SecurityUtils.getCurrentCorpIdOrNull();

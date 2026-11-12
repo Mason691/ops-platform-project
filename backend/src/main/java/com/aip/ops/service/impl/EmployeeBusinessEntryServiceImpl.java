@@ -728,13 +728,6 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         entity.setCommissionRate(p.rate());
         entity.setIsReceived(v.received() ? "是" : "否");
         entity.setVoucherUrl(v.voucherUrl());
-        // 退货字段初始化：无退货时结算数量=销售数量，收款金额即为原始金额
-        entity.setIsReturn("否");
-        entity.setReturnQuantity(0);
-        entity.setReturnAmount(BigDecimal.ZERO);
-        entity.setSettleQuantity(p.qty());
-        entity.setReturnStatus("未申请");
-        entity.setOriginalReceiptAmount(p.amount());
         entity.setCalcStatus(INITIAL_CALC_STATUS);
         entity.setDeleteFlag(0);
         return entity;

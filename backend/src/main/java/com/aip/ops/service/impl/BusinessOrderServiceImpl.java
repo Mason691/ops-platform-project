@@ -91,13 +91,20 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
     @Override
     public void refreshTotals(Long orderId) {
         if (orderId == null) return;
-        // 派生表不引用 UPDATE 目标（MySQL 派生表不支持隐式关联），先查后写
+        // 派生表不引用 UPDATE 目标（MySQL 派生表不支持隐式关联），先查后写。
+        // 正数分录按「产品组」取 MAX 去重多经办人；退货负数分录按「退货单+产品组」
+        // 取 MAX 后作为独立冲减项，不参与正向去重（需求七.3）。
         BigDecimal amount = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(SUM(x.amount), 0) FROM ("
                         + "  SELECT MAX(i.receipt_amount) AS amount FROM ops_business_order_item i "
                         + "  WHERE i.order_id = ? AND i.delete_flag = 0 "
+                        + "    AND COALESCE(i.sale_quantity, 1) >= 0 "
                         + "  GROUP BY i.category, i.brand, i.model, i.sale_price"
-                        + ") x", BigDecimal.class, orderId);
+                        + "  UNION ALL "
+                        + "  SELECT MAX(i.receipt_amount) AS amount FROM ops_business_order_item i "
+                        + "  WHERE i.order_id = ? AND i.delete_flag = 0 AND i.sale_quantity < 0 "
+                        + "  GROUP BY COALESCE(i.source_return_id, 0), i.category, i.brand, i.model, i.sale_price"
+                        + ") x", BigDecimal.class, orderId, orderId);
         BigDecimal commission = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(SUM(i.commission_amount), 0) FROM ops_business_order_item i "
                         + "WHERE i.order_id = ? AND i.delete_flag = 0",
@@ -206,10 +213,7 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
         List<Object> args = new java.util.ArrayList<>();
         args.add(order.getId());
         args.addAll(ids);
-        jdbcTemplate.update("UPDATE ops_business_order_item SET order_id = ?, "
-                + "settle_quantity = GREATEST(COALESCE(settle_quantity, COALESCE(sale_quantity, 1)), 0), "
-                + "return_status = COALESCE(return_status, '未申请'), "
-                + "original_receipt_amount = COALESCE(original_receipt_amount, receipt_amount) "
+        jdbcTemplate.update("UPDATE ops_business_order_item SET order_id = ? "
                 + "WHERE id IN (" + placeholders + ")", args.toArray());
         item.setOrderId(order.getId());
         refreshTotals(order.getId());

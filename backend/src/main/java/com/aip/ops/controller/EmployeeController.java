@@ -1,10 +1,8 @@
 package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
-import com.aip.ops.dto.BusinessReturnRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.service.BusinessDataService;
-import com.aip.ops.service.BusinessReturnService;
 import com.aip.ops.service.EmployeeAuthService;
 import com.aip.ops.service.EmployeeBusinessEntryService;
 import com.aip.ops.service.EmployeeService;
@@ -48,7 +46,6 @@ public class EmployeeController {
     private final EmployeeAuthService employeeAuthService;
     private final BusinessDataService businessDataService;
     private final EmployeeBusinessEntryService employeeBusinessEntryService;
-    private final BusinessReturnService businessReturnService;
     private final PlatformInternalClient platformInternalClient;
 
     @Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
@@ -225,12 +222,5 @@ public class EmployeeController {
         int count = businessDataService.batchCheckOwned(batchNo,
                 SecurityUtils.getCurrentCorpId(), employeeService.getCurrentAgentPhone());
         return R.ok(Map.of("checkedCount", count, "message", "已核对 " + count + " 条数据"));
-    }
-
-    /** 员工对本人经办的商品明细发起退货申请（审批由财务/运营商完成）。 */
-    @OperationLog(module = "运营管理", action = "员工退货申请", targetTable = "ops_business_return")
-    @PostMapping("/business-data/{id}/return")
-    public R<?> requestReturn(@PathVariable Long id, @RequestBody BusinessReturnRequest request) {
-        return R.ok(businessReturnService.create(id, request));
     }
 }

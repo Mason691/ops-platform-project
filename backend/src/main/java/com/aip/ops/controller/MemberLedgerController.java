@@ -89,7 +89,8 @@ public class MemberLedgerController {
                            MAX(bd.create_time) AS active_ts,
                            CASE WHEN COUNT(DISTINCT NULLIF(bd.agent,'')) > 1 THEN 1 ELSE COUNT(*) END AS cnt
                     FROM ops_business_order_item bd
-                    WHERE bd.delete_flag = 0 AND bd.platform_member_id IS NOT NULL{scopeBiz}
+                    WHERE bd.delete_flag = 0 AND bd.platform_member_id IS NOT NULL
+                      AND (bd.sale_quantity IS NULL OR bd.sale_quantity >= 0){scopeBiz}
                     GROUP BY bd.platform_member_id,
                              COALESCE(NULLIF(bd.order_no,''), NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__row_', bd.id)),
                              bd.category, bd.brand, bd.model
@@ -398,7 +399,8 @@ public class MemberLedgerController {
                        bd.order_no, bd.business_group_no, bd.agent, bd.remark, bd.customer,
                        bd.receipt_date AS usage_date
                 FROM ops_business_order_item bd
-                WHERE bd.delete_flag = 0 AND bd.platform_member_id = ?""" + scopeBiz + """
+                WHERE bd.delete_flag = 0 AND bd.platform_member_id = ?
+                  AND (bd.sale_quantity IS NULL OR bd.sale_quantity >= 0)""" + scopeBiz + """
                  ORDER BY (bd.receipt_date IS NULL), bd.receipt_date DESC, bd.id DESC
                 """;
         return jdbcTemplate.queryForList(sql, platformMemberId);

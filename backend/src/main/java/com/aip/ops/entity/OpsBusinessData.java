@@ -101,6 +101,7 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("model")
     private String model;
 
+    /** 销售数量：正常分录恒为原始数量，退货由独立负数分录表达（&lt; 0） */
     @TableField("sale_quantity")
     private Integer saleQuantity;
 
@@ -174,29 +175,16 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("commission_amount")
     private BigDecimal commissionAmount;
 
-    /** 是否退货（是/否）；审批通过累计退货数量>0 后为“是” */
-    @TableField("is_return")
-    private String isReturn;
+    /**
+     * SCM 销售退货单ID（= scm_sale_return.id）。空=正常销售分录；
+     * 非空=退货负数分录（sale_quantity &lt; 0），同一退货单同一产品组的多个经办人行共享。
+     */
+    @TableField("source_return_id")
+    private Long sourceReturnId;
 
-    /** 累计退货数量（同一产品多经办人行同步累计，不超过销售数量） */
-    @TableField("return_quantity")
-    private Integer returnQuantity;
-
-    /** 累计退货金额 = 累计退货数量 × 销售单价 */
-    @TableField("return_amount")
-    private BigDecimal returnAmount;
-
-    /** 实际结算数量 = 销售数量 - 累计退货数量 */
-    @TableField("settle_quantity")
-    private Integer settleQuantity;
-
-    /** 退货审批状态：未申请/审批中/已通过/已驳回 */
-    @TableField("return_status")
-    private String returnStatus;
-
-    /** 退货前收款金额（首次退货审批通过时留存，用于导出/对账） */
-    @TableField("original_receipt_amount")
-    private BigDecimal originalReceiptAmount;
+    /** SCM 退货单号（冗余展示/跳转）；历史迁移生成的冲减分录为“历史退货” */
+    @TableField("source_return_no")
+    private String sourceReturnNo;
 
     @TableField("calc_status")
     private String calcStatus;
