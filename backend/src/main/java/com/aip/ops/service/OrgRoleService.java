@@ -65,9 +65,44 @@ public class OrgRoleService {
      * 查询指定 corpId 的 orgRoleId。结果缓存 60s。
      */
     private Long resolveOrgRoleId(Long corpId) {
+        return resolveCorpInfo(corpId).orgRoleId;
+    }
+
+    /** 指定组织是否为城市合伙人（orgRoleId=5）；平台不可达时按运营商处理（安全兜底）。 */
+    public boolean isCityPartner(Long corpId) {
+        if (corpId == null || corpId <= 0L) return false;
+        Long orgRoleId = resolveOrgRoleId(corpId);
+        return orgRoleId != null && orgRoleId == CITY_PARTNER_ROLE_ID;
+    }
+
+    /** 指定组织是否为运营商/顶级组织（非城市合伙人）。 */
+    public boolean isOperatorCorp(Long corpId) {
+        if (corpId == null || corpId <= 0L) return false;
+        Long orgRoleId = resolveOrgRoleId(corpId);
+        return orgRoleId == null || orgRoleId != CITY_PARTNER_ROLE_ID;
+    }
+
+    /**
+     * 指定组织的运营商（共享模板归属）：
+     * 城市合伙人 → parent_corp_id；运营商 → 自身；parent 缺失 → 自身。
+     */
+    public Long getOperatorCorpId(Long corpId) {
+        if (corpId == null || corpId <= 0L) return corpId;
+        if (!isCityPartner(corpId)) return corpId;
+        Long parent = resolveCorpInfo(corpId).parentCorpId;
+        return parent != null && parent > 0L ? parent : corpId;
+    }
+
+    /** 指定组织的上级组织ID（可能为 null）。 */
+    public Long getParentCorpId(Long corpId) {
+        if (corpId == null || corpId <= 0L) return null;
+        return resolveCorpInfo(corpId).parentCorpId;
+    }
+
+    private CacheEntry resolveCorpInfo(Long corpId) {
         CacheEntry entry = cache.get(corpId);
         if (entry != null && (System.currentTimeMillis() - entry.ts) < CACHE_TTL_MS) {
-            return entry.orgRoleId;
+            return entry;
         }
         try {
             @SuppressWarnings("unchecked")
@@ -76,25 +111,36 @@ public class OrgRoleService {
             @SuppressWarnings("unchecked")
             Map<String, Object> data = (Map<String, Object>) resp.get("data");
             if (data == null) {
-                cache.put(corpId, new CacheEntry(null));
-                return null;
+                CacheEntry fallback = new CacheEntry(null, null);
+                cache.put(corpId, fallback);
+                return fallback;
             }
             Object orgRoleIdObj = data.get("orgRoleId");
             Long orgRoleId = orgRoleIdObj instanceof Number
                     ? ((Number) orgRoleIdObj).longValue() : null;
-            cache.put(corpId, new CacheEntry(orgRoleId));
-            return orgRoleId;
+            Object parentIdObj = data.get("parentCorpId");
+            Long parentCorpId = parentIdObj instanceof Number
+                    ? ((Number) parentIdObj).longValue() : null;
+            CacheEntry resolved = new CacheEntry(orgRoleId, parentCorpId);
+            cache.put(corpId, resolved);
+            return resolved;
         } catch (Exception e) {
             log.warn("Failed to resolve orgRoleId for corpId={}: {}", corpId, e.getMessage());
             // 安全兜底：查询失败视为运营商（不阻断写操作）
-            cache.put(corpId, new CacheEntry(null));
-            return null;
+            CacheEntry fallback = new CacheEntry(null, null);
+            cache.put(corpId, fallback);
+            return fallback;
         }
     }
 
     private static class CacheEntry {
         final Long orgRoleId;
+        final Long parentCorpId;
         final long ts;
-        CacheEntry(Long orgRoleId) { this.orgRoleId = orgRoleId; this.ts = System.currentTimeMillis(); }
+        CacheEntry(Long orgRoleId, Long parentCorpId) {
+            this.orgRoleId = orgRoleId;
+            this.parentCorpId = parentCorpId;
+            this.ts = System.currentTimeMillis();
+        }
     }
 }

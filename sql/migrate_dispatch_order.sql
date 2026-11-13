@@ -131,15 +131,20 @@ CREATE TABLE IF NOT EXISTS ops_dispatch_message (
 -- ═══ 4. 公众号消息模板 ═══
 CREATE TABLE IF NOT EXISTS ops_wx_msg_template (
     id                  BIGINT        NOT NULL AUTO_INCREMENT,
-    corp_id             BIGINT        NOT NULL DEFAULT 0 COMMENT '0=平台全局，>0=组织覆盖',
+    owner_corp_id       BIGINT        NOT NULL DEFAULT 0 COMMENT '归属组织ID；0=平台全局',
+    corp_id             BIGINT        NOT NULL DEFAULT 0 COMMENT '兼容旧 JAR 的归属组织镜像；新代码以 owner_corp_id 为准',
+    share_scope         VARCHAR(20)   NOT NULL DEFAULT 'PRIVATE' COMMENT 'PRIVATE=仅本组织 / OPERATOR_TREE=运营商及下属共享 / PLATFORM=平台全局',
     scene_code          VARCHAR(50)   NOT NULL COMMENT '业务场景编码',
-    template_id         VARCHAR(128)  NOT NULL COMMENT '微信公众号模板ID',
+    template_id         VARCHAR(128)  NOT NULL COMMENT '微信公众号模板ID（默认/主公众号）',
     title               VARCHAR(100)  DEFAULT NULL COMMENT '模板标题',
     content             VARCHAR(2000) DEFAULT NULL COMMENT '模板内容（含变量占位符，供运营查看）',
     variable_desc       VARCHAR(1000) DEFAULT NULL COMMENT '变量字段说明',
     field_mapping       VARCHAR(1000) DEFAULT NULL COMMENT '逻辑变量 -> 微信模板字段 JSON，如 {"customerName":"thing1"}',
-    app_id              VARCHAR(64)   DEFAULT NULL COMMENT '指定公众号 appId；空=组织默认公众号',
+    app_id              VARCHAR(64)   DEFAULT NULL COMMENT '指定公众号 appId；空=按业务组织默认公众号',
+    template_id_map     VARCHAR(1000) DEFAULT NULL COMMENT '按公众号 appId 映射 template_id JSON',
     status              TINYINT       NOT NULL DEFAULT 1 COMMENT '1=启用 0=禁用',
+    use_count           INT           NOT NULL DEFAULT 0 COMMENT '累计使用次数',
+    last_used_time      DATETIME      DEFAULT NULL COMMENT '最近使用时间',
     update_key          VARCHAR(64)   DEFAULT NULL,
     unique_id           VARCHAR(64)   DEFAULT NULL,
     create_time         DATETIME      DEFAULT NULL,
@@ -153,6 +158,7 @@ CREATE TABLE IF NOT EXISTS ops_wx_msg_template (
     delete_flag         INT           NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     KEY idx_scene_status (scene_code, status),
+    KEY idx_owner_scope (owner_corp_id, share_scope, status),
     KEY idx_corp (corp_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='公众号消息模板';
 

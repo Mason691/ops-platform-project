@@ -108,6 +108,7 @@ ops:
       - short-name: 广河
         code: GH
     work-order-url: https://boss.jdzn99.com/ops/#/pages/employee/work-order-detail?id={id}
+    test-url: https://boss.jdzn99.com/ops/#/pages/employee/pending
 
 # 作战地图 ETL（单实例部署）：启动全量初始化 + 定时增量刷新
 battle-map:

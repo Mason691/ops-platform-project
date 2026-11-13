@@ -1,26 +1,20 @@
 package com.aip.ops.service.impl;
 
+import com.aip.ops.config.DispatchProperties;
 import com.aip.ops.entity.OpsDispatchMessage;
 import com.aip.ops.entity.OpsDispatchOrder;
 import com.aip.ops.entity.OpsWxMsgTemplate;
-import com.aip.ops.entity.PublicAccountConfig;
 import com.aip.ops.mapper.OpsDispatchMessageMapper;
 import com.aip.ops.mapper.OpsDispatchOrderMapper;
 import com.aip.ops.service.DispatchMessageService;
-import com.aip.ops.service.IPublicAccountConfigService;
-import com.aip.ops.service.WechatOfficialAccountClient;
 import com.aip.ops.service.WxMsgTemplateService;
-import com.aip.sdk.client.PlatformInternalClient;
+import com.aip.ops.service.WxTemplateMessageSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
@@ -31,8 +25,9 @@ import java.util.concurrent.Executor;
 /**
  * 派工单消息推送实现。
  *
- * <p>异步线程无 SecurityContext，所有查询显式按 corpId/dispatchId 过滤；
- * 微信 openid 由底座内部接口按 userId + appId 返回（不落地到前端）。</p>
+ * <p>异步线程无 SecurityContext，所有查询显式按 corpId/dispatchId 过滤。
+ * 模板按「当前组织自建 → 上级运营商共享 → 平台全局」选取；公众号/openid/
+ * 按公众号模板ID 由 {@link WxTemplateMessageSupport} 统一处理。</p>
  */
 @Slf4j
 @Service
@@ -43,38 +38,26 @@ public class DispatchMessageServiceImpl implements DispatchMessageService {
 
     private static final DateTimeFormatter TIME_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
-    private static final String DEFAULT_MAPPING =
-            "{\"customerName\":\"thing1\",\"dispatchType\":\"thing2\","
-                    + "\"expectTime\":\"time3\",\"dispatchNo\":\"character_string4\"}";
 
     private final Executor executor;
     private final OpsDispatchOrderMapper dispatchMapper;
     private final OpsDispatchMessageMapper messageMapper;
     private final WxMsgTemplateService templateService;
-    private final IPublicAccountConfigService accountConfigService;
-    private final WechatOfficialAccountClient wechatClient;
-    private final PlatformInternalClient platformClient;
-    private final ObjectMapper objectMapper;
-    private final com.aip.ops.config.DispatchProperties properties;
+    private final WxTemplateMessageSupport messageSupport;
+    private final DispatchProperties properties;
 
     public DispatchMessageServiceImpl(
             @Qualifier("dispatchMessageExecutor") Executor executor,
             OpsDispatchOrderMapper dispatchMapper,
             OpsDispatchMessageMapper messageMapper,
             WxMsgTemplateService templateService,
-            IPublicAccountConfigService accountConfigService,
-            WechatOfficialAccountClient wechatClient,
-            PlatformInternalClient platformClient,
-            ObjectMapper objectMapper,
-            com.aip.ops.config.DispatchProperties properties) {
+            WxTemplateMessageSupport messageSupport,
+            DispatchProperties properties) {
         this.executor = executor;
         this.dispatchMapper = dispatchMapper;
         this.messageMapper = messageMapper;
         this.templateService = templateService;
-        this.accountConfigService = accountConfigService;
-        this.wechatClient = wechatClient;
-        this.platformClient = platformClient;
-        this.objectMapper = objectMapper;
+        this.messageSupport = messageSupport;
         this.properties = properties;
     }
 
@@ -121,88 +104,22 @@ public class DispatchMessageServiceImpl implements DispatchMessageService {
         OpsWxMsgTemplate template = templateService.findActive(
                 dispatch.getCorpId(), scene);
         if (template == null) {
-            record(dispatch, scene, null, null, "SKIPPED",
-                    "未配置公众号消息模板（" + scene + "）", retry);
-            updateMainStatus(scene, dispatch.getId(), "SKIPPED",
-                    "未配置公众号消息模板（" + scene + "）");
+            String reason = "未配置可用公众号消息模板（当前组织、上级运营商、平台均无启用模板）";
+            record(dispatch, scene, null, null, "SKIPPED", reason, retry);
+            updateMainStatus(scene, dispatch.getId(), "SKIPPED", reason);
             return;
         }
 
-        PublicAccountConfig account = resolveAccount(dispatch.getCorpId(), template.getAppId());
-        if (account == null) {
-            record(dispatch, scene, template, null, "FAILED", "未配置可用公众号", retry);
-            updateMainStatus(scene, dispatch.getId(), "FAILED", "未配置可用公众号");
-            return;
-        }
-        String openid = fetchOpenid(dispatch.getAssigneeUserId(), account.getAppId());
-        if (openid == null) {
-            record(dispatch, scene, template, null, "FAILED",
-                    "员工未绑定微信或未关注公众号", retry);
-            updateMainStatus(scene, dispatch.getId(), "FAILED",
-                    "员工未绑定微信或未关注公众号");
-            return;
-        }
-
-        Map<String, String> data = buildTemplateData(dispatch, template);
+        Map<String, String> vars = buildVariables(dispatch);
         String url = properties.getWorkOrderUrl().replace("{id}", String.valueOf(dispatch.getId()));
-        WechatOfficialAccountClient.SendResult result = wechatClient.sendTemplateMessage(
-                account, openid, template.getTemplateId(), url, data);
-        record(dispatch, scene, template, openid,
+        WxTemplateMessageSupport.SendResult result = messageSupport.send(
+                template, dispatch.getCorpId(), dispatch.getAssigneeUserId(), vars, url);
+        record(dispatch, scene, result.templateId(), result.openid(),
                 result.success() ? "SUCCESS" : "FAILED", result.error(), retry);
         updateMainStatus(scene, dispatch.getId(),
                 result.success() ? "SUCCESS" : "FAILED", result.error());
-    }
-
-    private PublicAccountConfig resolveAccount(Long corpId, String appId) {
-        if (appId != null && !appId.isBlank()) {
-            PublicAccountConfig cfg = accountConfigService.getByAppId(appId, corpId);
-            if (cfg != null) return cfg;
-        }
-        return accountConfigService.getDefaultConfig(corpId);
-    }
-
-    @SuppressWarnings("unchecked")
-    private String fetchOpenid(Long userId, String appId) {
-        if (userId == null || appId == null || appId.isBlank()) return null;
-        try {
-            String path = "/api/internal/user/wechat/openid?userId=" + userId
-                    + "&appId=" + URLEncoder.encode(appId, StandardCharsets.UTF_8);
-            Map<String, Object> resp = platformClient.get(path, null);
-            Object data = resp == null ? null : resp.get("data");
-            if (data instanceof Map<?, ?> map) {
-                Object openid = map.get("openid");
-                return openid instanceof String s && !s.isBlank() ? s : null;
-            }
-        } catch (Exception e) {
-            log.warn("查询员工微信 openid 失败 userId={}: {}", userId, e.getMessage());
-        }
-        return null;
-    }
-
-    private Map<String, String> buildTemplateData(OpsDispatchOrder dispatch,
-                                                  OpsWxMsgTemplate template) {
-        Map<String, String> vars = buildVariables(dispatch);
-        Map<String, String> mapping = parseMapping(template.getFieldMapping());
-        Map<String, String> data = new LinkedHashMap<>();
-        mapping.forEach((logical, wxField) ->
-                data.put(wxField, vars.getOrDefault(logical, "")));
-        return data;
-    }
-
-    private Map<String, String> parseMapping(String json) {
-        String source = json == null || json.isBlank() ? DEFAULT_MAPPING : json;
-        try {
-            return objectMapper.readValue(source, new TypeReference<LinkedHashMap<String, String>>() {
-            });
-        } catch (Exception e) {
-            log.warn("消息模板字段映射解析失败，使用默认映射: {}", e.getMessage());
-            try {
-                return objectMapper.readValue(DEFAULT_MAPPING,
-                        new TypeReference<LinkedHashMap<String, String>>() {
-                        });
-            } catch (Exception ignored) {
-                return Map.of();
-            }
+        if (result.success()) {
+            templateService.recordUsage(template.getId());
         }
     }
 
@@ -222,13 +139,13 @@ public class DispatchMessageServiceImpl implements DispatchMessageService {
         return vars;
     }
 
-    private void record(OpsDispatchOrder dispatch, String scene, OpsWxMsgTemplate template,
+    private void record(OpsDispatchOrder dispatch, String scene, String templateId,
                         String openid, String status, String error, int retry) {
         OpsDispatchMessage message = new OpsDispatchMessage();
         message.setCorpId(dispatch.getCorpId());
         message.setDispatchId(dispatch.getId());
         message.setSceneCode(scene);
-        message.setTemplateId(template == null ? null : template.getTemplateId());
+        message.setTemplateId(templateId);
         message.setReceiverUserId(dispatch.getAssigneeUserId());
         message.setOpenid(openid);
         message.setSendStatus(status);

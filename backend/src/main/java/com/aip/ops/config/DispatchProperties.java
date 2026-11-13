@@ -29,6 +29,10 @@ public class DispatchProperties {
     private String workOrderUrl =
             "https://boss.jdzn99.com/ops/#/pages/employee/work-order-detail?id={id}";
 
+    /** 模板「测试发送」的点击跳转地址（员工待处理列表）。 */
+    private String testUrl =
+            "https://boss.jdzn99.com/ops/#/pages/employee/pending";
+
     @Data
     public static class CompanyCodeRule {
         private String shortName;
