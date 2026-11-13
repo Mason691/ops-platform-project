@@ -36,6 +36,10 @@ public class OpsDispatchOrder extends BaseEntity {
     @TableField("source_order_no")
     private String sourceOrderNo;
 
+    /** 来源订单经办人（仅展示/追溯；多个用「、」连接，不参与权限判断）。 */
+    @TableField("source_agent_names")
+    private String sourceAgentNames;
+
     @TableField("receipt_no")
     private String receiptNo;
 

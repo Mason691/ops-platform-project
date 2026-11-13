@@ -25,16 +25,14 @@
     <view v-else-if="!records.length" class="state">
       <text class="state-icon">🧾</text>
       <text class="state-text">暂无可派工订单</text>
-      <text class="state-hint">仅展示本组织已财务核对（或户内美装）且未派工的订单</text>
+      <text class="state-hint">仅展示可管辖组织内已完成财务核对、且未产生销售出库单的订单</text>
     </view>
 
     <view v-else class="list">
       <view v-for="o in records" :key="o.id" class="card" @click="openForm(o.id)">
         <view class="card-top">
           <text class="order-no">{{ o.orderNo || ('订单 #' + o.id) }}</text>
-          <text class="tag" :class="{ decor: !o.financeCheckTime }">
-            {{ o.financeCheckTime ? '已核对' : '户内美装' }}
-          </text>
+          <text class="tag">已核对</text>
         </view>
         <view class="row">
           <text class="label">客户</text>
@@ -45,11 +43,23 @@
           <text class="value">{{ addressText(o) }}</text>
         </view>
         <view class="row">
-          <text class="label">可施工</text>
-          <text class="value">{{ o.constructionItemCount || 0 }} 项商品</text>
+          <text class="label">公司</text>
+          <text class="value">{{ o.company || '—' }}</text>
+        </view>
+        <view class="row">
+          <text class="label">经办人</text>
+          <text class="value">{{ o.agentNames || '—' }}</text>
+        </view>
+        <view class="row">
+          <text class="label">批次/收据</text>
+          <text class="value">{{ o.batchNo || '—' }} / {{ o.receiptNo || '—' }}</text>
+        </view>
+        <view class="row">
+          <text class="label">合计</text>
+          <text class="value strong">{{ money(o.totalAmount) }} · {{ o.productCount || 0 }} 项商品</text>
         </view>
         <view class="card-foot">
-          <text class="hint">{{ o.financeCheckTime ? '核对时间 ' + o.financeCheckTime : '收据号 ' + (o.receiptNo || '—') }}</text>
+          <text class="hint">核对 {{ o.financeCheckUserName || '—' }} {{ o.financeCheckTime || '' }}</text>
           <text class="go">发起派工 ›</text>
         </view>
       </view>
@@ -139,6 +149,12 @@ function addressText(o) {
   const text = [o.communityName, o.detailedAddress].filter(Boolean).join(' ')
   return text || '—'
 }
+
+function money(value) {
+  if (value === null || value === undefined || value === '') return '—'
+  const n = Number(value)
+  return Number.isFinite(n) ? '¥' + n.toFixed(2) : String(value)
+}
 </script>
 
 <style scoped>
@@ -175,10 +191,10 @@ function addressText(o) {
 .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16rpx; }
 .order-no { font-size: 30rpx; font-weight: 700; color: #1D2129; }
 .tag { font-size: 22rpx; color: #00B42A; background: #E8F8E8; padding: 4rpx 14rpx; border-radius: 8rpx; }
-.tag.decor { color: #FF7D00; background: #FFF3E8; }
 .row { display: flex; align-items: flex-start; gap: 16rpx; padding: 8rpx 0; }
 .label { width: 96rpx; flex-shrink: 0; font-size: 24rpx; color: #86909C; }
 .value { flex: 1; font-size: 26rpx; color: #1D2129; line-height: 1.5; }
+.value.strong { font-weight: 600; }
 .card-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 16rpx; padding-top: 16rpx; border-top: 1rpx solid #F2F3F5; }
 .hint { font-size: 22rpx; color: #86909C; }
 .go { font-size: 26rpx; color: #FF6B35; font-weight: 600; }

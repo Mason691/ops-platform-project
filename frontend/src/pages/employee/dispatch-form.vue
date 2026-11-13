@@ -15,13 +15,16 @@
       <view class="summary">
         <view class="summary-top">
           <text class="order-no">{{ detail.orderNo || ('订单 #' + detail.id) }}</text>
-          <text class="tag">{{ detail.financeChecked ? '已财务核对' : '户内美装' }}</text>
+          <text class="tag" :class="{ pending: !detail.financeChecked }">
+            {{ detail.financeChecked ? '已财务核对' : '未核对' }}
+          </text>
         </view>
         <text class="summary-customer">{{ detail.customer || '—' }} {{ detail.customerPhone || '' }}</text>
         <text class="summary-address">{{ addressText }}</text>
-        <text v-if="!detail.dispatchable" class="warn">
-          该订单暂不可派工{{ detail.activeDispatchNo ? '（已存在进行中派工单 ' + detail.activeDispatchNo + '）' : '' }}
+        <text class="summary-meta">
+          经办人 {{ detail.agentNames || '—' }} · 合计 {{ money(detail.totalAmount) }}
         </text>
+        <text v-if="blockReason" class="warn">{{ blockReason }}</text>
       </view>
 
       <view class="card">
@@ -55,13 +58,7 @@
         </text>
       </view>
 
-      <view class="card">
-        <text class="section">客户信息（默认取来源订单，可修改）</text>
-        <view class="field"><text class="label">客户名称</text><input v-model="form.customerName" class="input" maxlength="100" /></view>
-        <view class="field"><text class="label">客户手机</text><input v-model="form.customerPhone" class="input" type="number" maxlength="11" /></view>
-        <view class="field"><text class="label">小区</text><input v-model="form.communityName" class="input" maxlength="200" /></view>
-        <view class="field"><text class="label">详细地址</text><input v-model="form.detailedAddress" class="input" maxlength="500" /></view>
-      </view>
+      <DispatchCustomerFields :form="form" />
 
       <DispatchProductList
         v-if="form.dispatchType === 'CONSTRUCTION'"
@@ -87,6 +84,7 @@
 import { computed, reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
+import DispatchCustomerFields from '@/components/DispatchCustomerFields.vue'
 import DispatchProductList from '@/components/DispatchProductList.vue'
 
 const orderId = ref(null)
@@ -115,6 +113,14 @@ const today = localDate(new Date())
 const addressText = computed(() => {
   const text = [detail.value.communityName, detail.value.detailedAddress].filter(Boolean).join(' ')
   return text || '—'
+})
+const blockReason = computed(() => {
+  if (detail.value.hasOutbound) return '该订单已产生销售出库单，不可重复派工'
+  if (detail.value.activeDispatchNo) {
+    return '该订单已有进行中的派工单：' + detail.value.activeDispatchNo
+  }
+  if (!detail.value.financeChecked) return '来源订单未完成财务核对，暂不可派工'
+  return ''
 })
 const employeeLabels = computed(() => employees.value.map(e => e.name + '（' + e.phone + '）'))
 const employeeIndex = computed(() => {
@@ -235,11 +241,16 @@ function localDate(date) {
   const pad = (n) => String(n).padStart(2, '0')
   return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
 }
+
+function money(value) {
+  if (value === null || value === undefined || value === '') return '—'
+  const n = Number(value)
+  return Number.isFinite(n) ? '¥' + n.toFixed(2) : String(value)
+}
 </script>
 
 <style scoped>
 .page { min-height: 100vh; background: #F5F6FA; padding: 20rpx 24rpx 160rpx; box-sizing: border-box; }
-
 .state { padding: 120rpx 48rpx; display: flex; flex-direction: column; align-items: center; gap: 18rpx; }
 .state-icon { font-size: 72rpx; }
 .state-text { font-size: 28rpx; color: #4E5969; text-align: center; }
@@ -250,15 +261,15 @@ function localDate(date) {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .retry-btn { margin-top: 8rpx; padding: 14rpx 40rpx; border-radius: 32rpx; background: #FF6B35; color: #fff; font-size: 26rpx; }
-
 .summary { background: #fff; border-radius: 20rpx; padding: 24rpx; display: flex; flex-direction: column; gap: 8rpx; }
 .summary-top { display: flex; align-items: center; justify-content: space-between; }
 .order-no { font-size: 30rpx; font-weight: 700; color: #1D2129; }
 .tag { font-size: 22rpx; color: #00B42A; background: #E8F8E8; padding: 4rpx 14rpx; border-radius: 8rpx; }
+.tag.pending { color: #FF7D00; background: #FFF3E8; }
 .summary-customer { font-size: 26rpx; color: #1D2129; }
 .summary-address { font-size: 24rpx; color: #86909C; }
+.summary-meta { font-size: 24rpx; color: #4E5969; }
 .warn { font-size: 24rpx; color: #FF7D00; margin-top: 8rpx; }
-
 .card { background: #fff; border-radius: 20rpx; padding: 24rpx; margin-top: 20rpx; }
 .section { display: block; font-size: 26rpx; color: #4E5969; font-weight: 600; margin-bottom: 12rpx; }
 .field { display: flex; align-items: center; gap: 16rpx; padding: 12rpx 0; }
@@ -280,10 +291,7 @@ function localDate(date) {
 .type.active { background: #FFF0EB; color: #FF6B35; font-weight: 600; }
 .time-row { flex: 1; display: flex; gap: 16rpx; }
 .time-row .picker { flex: 1; }
-.textarea {
-  width: 100%; height: 140rpx; padding: 16rpx 20rpx; border-radius: 12rpx;
-  background: #F7F8FA; font-size: 26rpx; box-sizing: border-box;
-}
+.textarea { width: 100%; height: 140rpx; padding: 16rpx 20rpx; border-radius: 12rpx; background: #F7F8FA; font-size: 26rpx; box-sizing: border-box; }
 .submit-bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 16rpx 24rpx calc(16rpx + env(safe-area-inset-bottom)); background: #fff; box-shadow: 0 -2rpx 12rpx rgba(0,0,0,.04); }
 .submit { height: 84rpx; border-radius: 42rpx; background: #FF6B35; color: #fff; font-size: 30rpx; font-weight: 600; display: flex; align-items: center; justify-content: center; }
 .submit.disabled { background: #FFC4AC; }

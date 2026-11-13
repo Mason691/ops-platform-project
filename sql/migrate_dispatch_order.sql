@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS ops_dispatch_order (
     dispatch_no         VARCHAR(64)  NOT NULL COMMENT '派工单号：{公司代码}-PG-{yyyyMMdd}-{3位流水}',
     source_order_id     BIGINT       NOT NULL COMMENT '来源业务订单头 ops_business_order.id',
     source_order_no     VARCHAR(64)  DEFAULT NULL COMMENT '来源订单编号（冗余）',
+    source_agent_names  VARCHAR(500) DEFAULT NULL COMMENT '来源订单经办人（展示/追溯）',
     receipt_no          VARCHAR(50)  DEFAULT NULL COMMENT '收据号（冗余）',
     corp_id             BIGINT       NOT NULL COMMENT '派工单归属组织',
     dispatch_type       VARCHAR(20)  NOT NULL DEFAULT 'CONSTRUCTION' COMMENT 'CONSTRUCTION=施工 / VISIT=入户随访',

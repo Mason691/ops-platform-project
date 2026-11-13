@@ -10,14 +10,8 @@ import java.util.Map;
  */
 public interface DispatchOrderService {
 
-    /** 发起派工（状态 PENDING），返回派工单摘要。 */
+    /** 发起派工（状态 PENDING），返回派工单摘要。订单须在可见组织范围内。 */
     Map<String, Object> create(DispatchCreateRequest request);
-
-    /**
-     * 发起派工并强制来源订单归属指定组织（员工 H5：城市合伙人只能对
-     * 本组织订单发起派工，不接受跨组织）。
-     */
-    Map<String, Object> createForCorp(DispatchCreateRequest request, Long requiredCorpId);
 
     /** 派工单分页列表（组织数据范围隔离）。 */
     Map<String, Object> list(int pageNum, int pageSize, String status,

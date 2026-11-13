@@ -1,5 +1,6 @@
 package com.aip.ops.service.impl;
 
+import com.aip.ops.client.ScmStockOutClient;
 import com.aip.ops.component.CompanyCodeResolver;
 import com.aip.ops.component.DispatchNoGenerator;
 import com.aip.ops.dto.DispatchCreateRequest;
@@ -36,13 +37,15 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * 派工单管理实现。
  *
- * <p>资格：来源订单已完成财务核对，或包含「户内美装」品类（6/8/9）；
- * 同一订单存在进行中派工时禁止重复派工。施工商品仅取燃气灶/抽油烟机/
- * 热水器/壁挂炉四类正数分录；入户随访不关联商品且说明必填。</p>
+ * <p>资格：来源订单已完成财务核对，且未产生销售出库单（派工自动出库 /
+ * 业务数据手工出库 / 同收据多订单合并出库）；同一订单存在进行中派工时
+ * 禁止重复派工。施工商品取订单全部正数销售分录（排除退货负数分录），
+ * 按「品类+品牌+型号」合并展示；入户随访不关联商品且说明必填。</p>
  *
  * <p>ops 无自动租户拦截器，所有查询显式按 corp_id 与可见组织集合过滤；
  * 超管可见集合为 null（全量），空集合表示无任何权限。</p>
@@ -57,8 +60,8 @@ public class DispatchOrderServiceImpl implements DispatchOrderService {
 
     private static final Set<String> ACTIVE_STATUSES =
             Set.of("PENDING", "ACCEPTED", "PROCESSING");
-    private static final Set<String> CONSTRUCTION_CATEGORIES = Set.of("1", "2", "3", "4");
-    private static final Set<String> HOME_DECOR_CATEGORIES = Set.of("6", "8", "9");
+    /** 家电类品类：普通商品单位显示「件」，仅家电四类显示「台」。 */
+    private static final Set<String> APPLIANCE_CATEGORIES = Set.of("1", "2", "3", "4");
     private static final Pattern PHONE = Pattern.compile("^1[3-9]\\d{9}$");
 
     private final OpsDispatchOrderMapper dispatchMapper;
@@ -70,34 +73,23 @@ public class DispatchOrderServiceImpl implements DispatchOrderService {
     private final FinancePermissionService financePermissionService;
     private final CompanyCodeResolver companyCodeResolver;
     private final DispatchNoGenerator dispatchNoGenerator;
+    private final ScmStockOutClient scmStockOutClient;
     private final ObjectMapper objectMapper;
 
     @Override
     @Transactional
     public Map<String, Object> create(DispatchCreateRequest request) {
-        return doCreate(request, null);
-    }
-
-    @Override
-    @Transactional
-    public Map<String, Object> createForCorp(DispatchCreateRequest request, Long requiredCorpId) {
-        return doCreate(request, requiredCorpId);
-    }
-
-    private Map<String, Object> doCreate(DispatchCreateRequest request, Long requiredCorpId) {
         requireDispatchPermission();
         validateRequest(request);
         OpsBusinessOrder order = loadOrder(request.getSourceOrderId());
-        if (requiredCorpId != null && !requiredCorpId.equals(order.getCorpId())) {
-            throw BusinessException.forbidden("只能对本组织的业务订单发起派工");
-        }
         assertCorpVisible(order.getCorpId());
         List<OpsBusinessData> rows = orderMapper.selectItems(order.getId());
         assertDispatchable(order, rows);
-        Assignee assignee = resolveAssignee(request.getAssigneeUserId(), order.getCorpId());
+        Assignee assignee = resolveAssignee(request.getAssigneeUserId());
         CustomerInfo customer = resolveCustomer(request, order);
         List<OpsDispatchOrderItem> items = buildItems(request, rows);
-        OpsDispatchOrder dispatch = newDispatch(request, order, assignee, customer);
+        OpsDispatchOrder dispatch = newDispatch(request, order, assignee, customer,
+                resolveAgentNames(order, rows));
         dispatchMapper.insert(dispatch);
         persistItems(dispatch.getId(), items);
         log.info("派工单已创建 dispatchNo={}, orderId={}, assignee={}",
@@ -178,25 +170,40 @@ public class DispatchOrderServiceImpl implements DispatchOrderService {
 
     @Override
     public List<Map<String, Object>> assignees(Long corpId) {
-        Long target = corpId == null ? SecurityUtils.getCurrentCorpId() : corpId;
-        if (target == null || target <= 0) {
+        Set<Long> visible = dataScopeService.getVisibleCorpIds();
+        if (visible != null && visible.isEmpty()) return List.of();
+        if (corpId != null && corpId <= 0) {
             throw BusinessException.of("请先选择组织");
         }
-        assertCorpVisible(target);
+        if (corpId != null) assertCorpVisible(corpId);
+
+        String sql = "SELECT u.id AS userId, u.real_name AS realName, u.username, u.phone "
+                + "FROM ai_platform.sys_user u "
+                + "WHERE u.status = 1 AND u.delete_flag = 0";
+        Object[] args;
+        if (corpId != null) {
+            sql += " AND (u.corp_id = ? OR EXISTS ("
+                    + "  SELECT 1 FROM ai_platform.sys_user_corp uc "
+                    + "  WHERE uc.user_id = u.id AND uc.corp_id = ? "
+                    + "  AND uc.status = 1 AND uc.delete_flag = 0))";
+            args = new Object[]{corpId, corpId};
+        } else if (visible != null) {
+            // 可管辖组织（运营商=自身+下属；城市合伙人=自身）
+            String in = visible.stream().map(String::valueOf).collect(Collectors.joining(","));
+            sql += " AND (u.corp_id IN (" + in + ") OR EXISTS ("
+                    + "  SELECT 1 FROM ai_platform.sys_user_corp uc "
+                    + "  WHERE uc.user_id = u.id AND uc.corp_id IN (" + in + ") "
+                    + "  AND uc.status = 1 AND uc.delete_flag = 0))";
+            args = new Object[]{};
+        } else {
+            args = new Object[]{};
+        }
+        sql += " ORDER BY u.real_name, u.id";
         List<Map<String, Object>> rows;
         try {
-            rows = jdbcTemplate.queryForList(
-                    "SELECT u.id AS userId, u.real_name AS realName, u.username, u.phone "
-                            + "FROM ai_platform.sys_user u "
-                            + "WHERE u.status = 1 AND u.delete_flag = 0 "
-                            + "AND (u.corp_id = ? OR EXISTS ("
-                            + "  SELECT 1 FROM ai_platform.sys_user_corp uc "
-                            + "  WHERE uc.user_id = u.id AND uc.corp_id = ? "
-                            + "  AND uc.status = 1 AND uc.delete_flag = 0)) "
-                            + "ORDER BY u.real_name, u.id",
-                    target, target);
+            rows = jdbcTemplate.queryForList(sql, args);
         } catch (Exception e) {
-            log.warn("加载派工可选员工失败 corpId={}: {}", target, e.getMessage());
+            log.warn("加载派工可选员工失败 corpId={}: {}", corpId, e.getMessage());
             return List.of();
         }
         List<Map<String, Object>> result = new ArrayList<>();
@@ -281,10 +288,13 @@ public class DispatchOrderServiceImpl implements DispatchOrderService {
         }
         boolean financeChecked = order.getFinanceCheckTime() != null
                 && rows.stream().allMatch(r -> r.getFinanceCheckTime() != null);
-        boolean homeDecor = rows.stream()
-                .anyMatch(r -> HOME_DECOR_CATEGORIES.contains(r.getCategory()));
-        if (!financeChecked && !homeDecor) {
+        if (!financeChecked) {
             throw BusinessException.of("来源订单未完成财务核对，不允许发起派工");
+        }
+        // 已产生销售出库单（派工自动出库/业务数据手工出库/同收据合并出库）不可再派工
+        Set<Long> outboundOrderIds = scmStockOutClient.outboundOrderIds(List.of(order.getId()));
+        if (outboundOrderIds.contains(order.getId())) {
+            throw BusinessException.of("该订单已产生销售出库单，不可重复派工");
         }
         // 锁定订单头，串行化同一订单的并发派工（否则两次请求可能同时通过“无进行中派工”检查）
         jdbcTemplate.queryForList(
@@ -301,24 +311,31 @@ public class DispatchOrderServiceImpl implements DispatchOrderService {
         }
     }
 
-    private Assignee resolveAssignee(Long userId, Long corpId) {
+    /** 被指派员工须属于当前账号可管辖组织（DataScope 可见范围），不要求是订单经办人。 */
+    private Assignee resolveAssignee(Long userId) {
+        Set<Long> visible = dataScopeService.getVisibleCorpIds();
+        if (visible != null && visible.isEmpty()) {
+            throw BusinessException.forbidden("当前账号无可管辖组织");
+        }
+        String sql = "SELECT u.id AS userId, u.real_name AS realName, u.username, u.phone "
+                + "FROM ai_platform.sys_user u "
+                + "WHERE u.id = ? AND u.status = 1 AND u.delete_flag = 0";
+        if (visible != null) {
+            String in = visible.stream().map(String::valueOf).collect(Collectors.joining(","));
+            sql += " AND (u.corp_id IN (" + in + ") OR EXISTS ("
+                    + "  SELECT 1 FROM ai_platform.sys_user_corp uc "
+                    + "  WHERE uc.user_id = u.id AND uc.corp_id IN (" + in + ") "
+                    + "  AND uc.status = 1 AND uc.delete_flag = 0))";
+        }
         List<Map<String, Object>> rows;
         try {
-            rows = jdbcTemplate.queryForList(
-                    "SELECT u.id AS userId, u.real_name AS realName, u.username, u.phone "
-                            + "FROM ai_platform.sys_user u "
-                            + "WHERE u.id = ? AND u.status = 1 AND u.delete_flag = 0 "
-                            + "AND (u.corp_id = ? OR EXISTS ("
-                            + "  SELECT 1 FROM ai_platform.sys_user_corp uc "
-                            + "  WHERE uc.user_id = u.id AND uc.corp_id = ? "
-                            + "  AND uc.status = 1 AND uc.delete_flag = 0)) LIMIT 1",
-                    userId, corpId, corpId);
+            rows = jdbcTemplate.queryForList(sql + " LIMIT 1", userId);
         } catch (Exception e) {
-            log.warn("校验派工员工失败 userId={}, corpId={}: {}", userId, corpId, e.getMessage());
+            log.warn("校验派工员工失败 userId={}: {}", userId, e.getMessage());
             throw BusinessException.of("员工信息查询失败，请稍后重试");
         }
         if (rows.isEmpty()) {
-            throw BusinessException.of("被指派员工不属于该订单组织或已停用");
+            throw BusinessException.of("被指派员工不在当前账号可管辖组织内或已停用");
         }
         Map<String, Object> row = rows.get(0);
         String username = str(row.get("username"));
@@ -372,22 +389,23 @@ public class DispatchOrderServiceImpl implements DispatchOrderService {
                 : new HashSet<>(request.getSourceItemIds());
         Map<String, List<OpsBusinessData>> groups = new LinkedHashMap<>();
         for (OpsBusinessData row : rows) {
+            // 仅正数销售分录；退货冲减（负数分录/带 source_return_id）不参与施工
             if (row.getSaleQuantity() == null || row.getSaleQuantity() <= 0) continue;
             if (row.getSourceReturnId() != null) continue;
-            if (!CONSTRUCTION_CATEGORIES.contains(row.getCategory())) continue;
             if (!selected.isEmpty() && !selected.contains(row.getId())) continue;
+            // 同一商品可能因多经办人拆行，按「品类+品牌+型号」合并
             String key = Objects.toString(row.getCategory(), "") + "|"
                     + Objects.toString(row.getBrand(), "") + "|"
-                    + Objects.toString(row.getModel(), "") + "|"
-                    + Objects.toString(row.getSalePrice(), "");
+                    + Objects.toString(row.getModel(), "");
             groups.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
         }
         if (groups.isEmpty()) {
-            throw BusinessException.of("请选择至少一个可施工商品（燃气灶/抽油烟机/热水器/壁挂炉）");
+            throw BusinessException.of("请选择至少一个施工商品（订单正数销售分录）");
         }
         List<OpsDispatchOrderItem> items = new ArrayList<>();
         for (List<OpsBusinessData> group : groups.values()) {
             OpsBusinessData first = group.get(0);
+            // 多经办人拆分的行数量相同（各自全额），取 MAX 合并，避免重复累加
             int qty = group.stream().mapToInt(r -> Math.max(1, r.getSaleQuantity()))
                     .max().orElse(1);
             OpsDispatchOrderItem item = new OpsDispatchOrderItem();
@@ -397,21 +415,34 @@ public class DispatchOrderServiceImpl implements DispatchOrderService {
             item.setCategory(first.getCategory());
             item.setModel(first.getModel());
             item.setSaleQuantity(qty);
-            item.setUnit("台");
+            item.setUnit(APPLIANCE_CATEGORIES.contains(first.getCategory()) ? "台" : "件");
             item.setSalePrice(first.getSalePrice());
             items.add(item);
         }
         return items;
     }
 
+    /** 订单经办人：优先订单头聚合字段，缺失时从分录 distinct 汇总（展示/追溯用）。 */
+    private String resolveAgentNames(OpsBusinessOrder order, List<OpsBusinessData> rows) {
+        String names = order.getAgentNames();
+        if (names != null && !names.isBlank()) return names;
+        return rows.stream()
+                .map(OpsBusinessData::getAgent)
+                .filter(a -> a != null && !a.isBlank())
+                .distinct()
+                .collect(Collectors.joining("、"));
+    }
+
     private OpsDispatchOrder newDispatch(DispatchCreateRequest request, OpsBusinessOrder order,
-                                         Assignee assignee, CustomerInfo customer) {
+                                         Assignee assignee, CustomerInfo customer,
+                                         String sourceAgentNames) {
         String companyCode = companyCodeResolver.resolve(order.getCorpId());
         String dispatchNo = dispatchNoGenerator.next(companyCode, order.getCorpId());
         OpsDispatchOrder dispatch = new OpsDispatchOrder();
         dispatch.setDispatchNo(dispatchNo);
         dispatch.setSourceOrderId(order.getId());
         dispatch.setSourceOrderNo(order.getOrderNo());
+        dispatch.setSourceAgentNames(truncate(sourceAgentNames, 500));
         dispatch.setReceiptNo(order.getReceiptNo());
         dispatch.setCorpId(order.getCorpId());
         dispatch.setDispatchType(request.getDispatchType());
@@ -484,6 +515,7 @@ public class DispatchOrderServiceImpl implements DispatchOrderService {
         map.put("dispatchNo", d.getDispatchNo());
         map.put("sourceOrderId", d.getSourceOrderId());
         map.put("sourceOrderNo", d.getSourceOrderNo());
+        map.put("sourceAgentNames", d.getSourceAgentNames());
         map.put("receiptNo", d.getReceiptNo());
         map.put("corpId", d.getCorpId());
         map.put("dispatchType", d.getDispatchType());

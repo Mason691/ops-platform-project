@@ -11,6 +11,7 @@ import com.aip.ops.mapper.OpsBusinessOrderMapper;
 import com.aip.ops.mapper.OpsDispatchOrderItemMapper;
 import com.aip.ops.mapper.OpsDispatchOrderMapper;
 import com.aip.ops.security.JwtTokenInspector;
+import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.DispatchMessageService;
 import com.aip.ops.service.DispatchOrderService;
 import com.aip.ops.service.EmployeeDispatchService;
@@ -35,6 +36,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * 员工端工单实现。
@@ -51,12 +53,20 @@ import java.util.function.Consumer;
 @RequiredArgsConstructor
 public class EmployeeDispatchServiceImpl implements EmployeeDispatchService {
 
-    /** 可施工品类：燃气灶/抽油烟机/热水器/壁挂炉。 */
-    private static final Set<String> CONSTRUCTION_CATEGORIES = Set.of("1", "2", "3", "4");
-    /** 户内美装品类：可免财务核对直接派工。 */
-    private static final Set<String> HOME_DECOR_CATEGORIES = Set.of("6", "8", "9");
     /** 进行中的派工状态（同一订单不可重复派工）。 */
     private static final Set<String> ACTIVE_STATUSES = Set.of("PENDING", "ACCEPTED", "PROCESSING");
+    /** PRODUCT_CATEGORY 字典 type_id（品类 key → 中文名），与会员台账口径一致。 */
+    private static final long CATEGORY_DICT_TYPE_ID = 9L;
+    /** 字典不可达时的品类兜底（仅已在字典中的 key；原始中文品类直接透传）。 */
+    private static final Map<String, String> FALLBACK_CATEGORY_LABELS = Map.ofEntries(
+            Map.entry("1", "燃气灶"), Map.entry("2", "抽油烟机"),
+            Map.entry("3", "热水器"), Map.entry("4", "壁挂炉"),
+            Map.entry("5", "壁挂炉以旧换新销售"), Map.entry("6", "户内美装销售"),
+            Map.entry("7", "定尺波纹管"), Map.entry("8", "户内美装工程"),
+            Map.entry("9", "户内美装运维"), Map.entry("10", "保险"),
+            Map.entry("11", "美装管道整改"), Map.entry("12", "美装安全评估"),
+            Map.entry("13", "厨具"), Map.entry("15", "商业报警器"),
+            Map.entry("qimi", "安全评估技术服务"));
 
     private final OpsDispatchOrderMapper dispatchMapper;
     private final OpsDispatchOrderItemMapper itemMapper;
@@ -67,6 +77,7 @@ public class EmployeeDispatchServiceImpl implements EmployeeDispatchService {
     private final DispatchMessageService messageService;
     private final DispatchOrderService dispatchOrderService;
     private final FinancePermissionService financePermissionService;
+    private final DataScopeService dataScopeService;
 
     /** 单实例按工单串行化接单；多实例部署需改为分布式锁/状态 CAS。 */
     private final ConcurrentHashMap<Long, Object> acceptLocks = new ConcurrentHashMap<>();
@@ -229,7 +240,7 @@ public class EmployeeDispatchServiceImpl implements EmployeeDispatchService {
         return view(requireOwned(id, emp.userId()));
     }
 
-    // ═══ 员工 H5 发起派工（任何员工；仅限本组织订单） ═══
+    // ═══ 员工 H5 发起派工（任何员工；可管辖组织范围） ═══
 
     @Override
     public Map<String, Object> canDispatch() {
@@ -242,29 +253,34 @@ public class EmployeeDispatchServiceImpl implements EmployeeDispatchService {
 
     @Override
     public Map<String, Object> listDispatchableOrders(int pageNum, int pageSize, String keyword) {
-        EmployeeIdentity emp = assertEmployee();
+        assertEmployee();
         assertCanDispatch();
         int size = Math.min(Math.max(pageSize, 1), 50);
-        int offset = (Math.max(pageNum, 1) - 1) * size;
+        int current = Math.max(pageNum, 1);
+        Set<Long> visible = dataScopeService.getVisibleCorpIds();
+        if (visible != null && visible.isEmpty()) {
+            return emptyPage(current, size);
+        }
 
         StringBuilder where = new StringBuilder(
-                " FROM ops_business_order o WHERE o.delete_flag = 0 AND o.corp_id = ?"
-                        + " AND ((o.finance_check_time IS NOT NULL AND NOT EXISTS ("
-                        + "   SELECT 1 FROM ops_business_order_item u"
+                " FROM ops_business_order o WHERE o.delete_flag = 0"
+                        + " AND o.finance_check_time IS NOT NULL"
+                        + " AND NOT EXISTS (SELECT 1 FROM ops_business_order_item u"
                         + "   WHERE u.order_id = o.id AND u.delete_flag = 0"
-                        + "     AND u.finance_check_time IS NULL))"
-                        + "   OR EXISTS ("
-                        + "   SELECT 1 FROM ops_business_order_item h"
-                        + "   WHERE h.order_id = o.id AND h.delete_flag = 0"
-                        + "     AND h.category IN ('6','8','9')))"
+                        + "     AND u.finance_check_time IS NULL)"
                         + " AND EXISTS (SELECT 1 FROM ops_business_order_item i"
-                        + "   WHERE i.order_id = o.id AND i.delete_flag = 0 AND i.sale_quantity > 0)"
+                        + "   WHERE i.order_id = o.id AND i.delete_flag = 0)"
                         + " AND NOT EXISTS (SELECT 1 FROM ops_dispatch_order d"
                         + "   WHERE d.source_order_id = o.id AND d.corp_id = o.corp_id"
                         + "     AND d.delete_flag = 0"
                         + "     AND d.status IN ('PENDING','ACCEPTED','PROCESSING'))");
+        if (visible != null) {
+            where.append(" AND o.corp_id IN (")
+                    .append(visible.stream().map(String::valueOf)
+                            .collect(Collectors.joining(",")))
+                    .append(")");
+        }
         List<Object> args = new ArrayList<>();
-        args.add(emp.corpId());
         if (keyword != null && !keyword.isBlank()) {
             String like = "%" + keyword.trim() + "%";
             where.append(" AND (o.order_no LIKE ? OR o.customer LIKE ?"
@@ -274,45 +290,59 @@ public class EmployeeDispatchServiceImpl implements EmployeeDispatchService {
             args.add(like);
             args.add(like);
         }
-        Long total = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*)" + where, Long.class, args.toArray());
-        args.add(size);
-        args.add(offset);
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT o.id, o.order_no AS orderNo, o.receipt_no AS receiptNo,"
-                        + " o.customer, o.customer_phone AS customerPhone,"
-                        + " o.community_id AS communityId, o.community_name AS communityName,"
-                        + " o.detailed_address AS detailedAddress,"
+        List<Map<String, Object>> candidates = jdbcTemplate.queryForList(
+                "SELECT o.id, o.order_no AS orderNo, o.batch_no AS batchNo,"
+                        + " o.receipt_no AS receiptNo, o.customer,"
+                        + " o.customer_phone AS customerPhone, o.community_id AS communityId,"
+                        + " o.community_name AS communityName,"
+                        + " o.detailed_address AS detailedAddress, o.company,"
+                        + " o.corp_id AS corpId,"
+                        + " COALESCE(NULLIF(o.agent_names, ''),"
+                        + "   (SELECT GROUP_CONCAT(DISTINCT i.agent ORDER BY i.agent SEPARATOR '、')"
+                        + "    FROM ops_business_order_item i WHERE i.order_id = o.id"
+                        + "      AND i.delete_flag = 0 AND i.agent IS NOT NULL AND i.agent <> ''))"
+                        + "   AS agentNames,"
+                        + " o.total_amount AS totalAmount,"
+                        + " o.finance_check_user_name AS financeCheckUserName,"
                         + " DATE_FORMAT(o.finance_check_time, '%Y-%m-%d %H:%i') AS financeCheckTime,"
-                        + " (SELECT COUNT(*) FROM ops_business_order_item i"
-                        + "   WHERE i.order_id = o.id AND i.delete_flag = 0"
-                        + "     AND i.sale_quantity > 0 AND i.source_return_id IS NULL"
-                        + "     AND i.category IN ('1','2','3','4')) AS constructionItemCount"
-                        + where + " ORDER BY o.id DESC LIMIT ? OFFSET ?", args.toArray());
+                        + " (SELECT COUNT(DISTINCT CONCAT(IFNULL(i.category,''), '|',"
+                        + "    IFNULL(i.brand,''), '|', IFNULL(i.model,'')))"
+                        + "  FROM ops_business_order_item i WHERE i.order_id = o.id"
+                        + "   AND i.delete_flag = 0 AND i.sale_quantity > 0"
+                        + "   AND i.source_return_id IS NULL) AS productCount"
+                        + where + " ORDER BY o.id DESC", args.toArray());
+
+        List<Long> orderIds = candidates.stream()
+                .map(r -> longVal(r, "id")).filter(Objects::nonNull).toList();
+        Set<Long> outbound = orderIds.isEmpty() ? Set.of() : scmClient.outboundOrderIds(orderIds);
+        List<Map<String, Object>> filtered = candidates.stream()
+                .filter(r -> !outbound.contains(longVal(r, "id"))).toList();
+        int total = filtered.size();
+        int from = Math.min((current - 1) * size, total);
+        int to = Math.min(from + size, total);
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("records", rows);
-        result.put("total", total == null ? 0L : total);
+        result.put("records", filtered.subList(from, to));
+        result.put("total", (long) total);
         result.put("size", size);
-        result.put("current", Math.max(pageNum, 1));
+        result.put("current", current);
         return result;
     }
 
     @Override
     public Map<String, Object> dispatchableOrder(Long orderId) {
-        EmployeeIdentity emp = assertEmployee();
+        assertEmployee();
         assertCanDispatch();
         OpsBusinessOrder order = orderMapper.selectById(orderId);
         if (order == null || Integer.valueOf(1).equals(order.getDeleteFlag())) {
             throw BusinessException.notFound("业务订单不存在");
         }
-        if (!emp.corpId().equals(order.getCorpId())) {
-            throw BusinessException.forbidden("只能查看本组织的业务订单");
+        Set<Long> visible = dataScopeService.getVisibleCorpIds();
+        if (visible != null && !visible.contains(order.getCorpId())) {
+            throw BusinessException.forbidden("无权查看该业务订单");
         }
         List<OpsBusinessData> rows = orderMapper.selectItems(orderId);
         boolean financeChecked = order.getFinanceCheckTime() != null
                 && rows.stream().allMatch(r -> r.getFinanceCheckTime() != null);
-        boolean homeDecor = rows.stream()
-                .anyMatch(r -> HOME_DECOR_CATEGORIES.contains(r.getCategory()));
         OpsDispatchOrder active = dispatchMapper.selectOne(
                 new LambdaQueryWrapper<OpsDispatchOrder>()
                         .eq(OpsDispatchOrder::getSourceOrderId, orderId)
@@ -320,40 +350,46 @@ public class EmployeeDispatchServiceImpl implements EmployeeDispatchService {
                         .in(OpsDispatchOrder::getStatus, ACTIVE_STATUSES)
                         .orderByDesc(OpsDispatchOrder::getId)
                         .last("LIMIT 1"));
-        boolean dispatchable = (financeChecked || homeDecor)
-                && !rows.isEmpty() && active == null;
+        boolean hasOutbound = scmClient.outboundOrderIds(List.of(orderId)).contains(orderId);
+        boolean dispatchable = financeChecked && !rows.isEmpty()
+                && active == null && !hasOutbound;
 
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("id", order.getId());
         view.put("orderNo", order.getOrderNo());
+        view.put("batchNo", order.getBatchNo());
         view.put("receiptNo", order.getReceiptNo());
         view.put("customer", order.getCustomer());
         view.put("customerPhone", order.getCustomerPhone());
         view.put("communityId", order.getCommunityId());
         view.put("communityName", order.getCommunityName());
         view.put("detailedAddress", order.getDetailedAddress());
+        view.put("company", order.getCompany());
         view.put("corpId", order.getCorpId());
+        view.put("agentNames", resolveAgentNames(order, rows));
+        view.put("totalAmount", order.getTotalAmount());
+        view.put("financeCheckUserName", order.getFinanceCheckUserName());
         view.put("financeCheckTime", order.getFinanceCheckTime());
         view.put("financeChecked", financeChecked);
-        view.put("homeDecor", homeDecor);
+        view.put("hasOutbound", hasOutbound);
         view.put("dispatchable", dispatchable);
         view.put("activeDispatchNo", active == null ? null : active.getDispatchNo());
-        view.put("products", groupConstructionProducts(rows));
+        view.put("products", groupSaleProducts(rows));
         return view;
     }
 
     @Override
     public List<Map<String, Object>> dispatchAssignees() {
-        EmployeeIdentity emp = assertEmployee();
+        assertEmployee();
         assertCanDispatch();
-        return dispatchOrderService.assignees(emp.corpId());
+        return dispatchOrderService.assignees(null);
     }
 
     @Override
     public Map<String, Object> createDispatch(DispatchCreateRequest request) {
-        EmployeeIdentity emp = assertEmployee();
+        assertEmployee();
         assertCanDispatch();
-        Map<String, Object> result = dispatchOrderService.createForCorp(request, emp.corpId());
+        Map<String, Object> result = dispatchOrderService.create(request);
         Object id = result.get("id");
         if (id instanceof Number n) {
             messageService.sendDispatchNoticeAsync(n.longValue());
@@ -367,27 +403,32 @@ public class EmployeeDispatchServiceImpl implements EmployeeDispatchService {
         }
     }
 
-    /** 按「品类+品牌+型号+单价」聚合可施工商品，同一分组共享 itemIds。 */
-    private List<Map<String, Object>> groupConstructionProducts(List<OpsBusinessData> rows) {
+    /**
+     * 订单全部正数销售分录按「品类+品牌+型号」聚合（排除退货负数分录）。
+     * 多经办人拆分行数量相同，取 MAX 合并，避免重复累加。
+     */
+    private List<Map<String, Object>> groupSaleProducts(List<OpsBusinessData> rows) {
         Map<String, List<OpsBusinessData>> groups = new LinkedHashMap<>();
         for (OpsBusinessData row : rows) {
             if (row.getSaleQuantity() == null || row.getSaleQuantity() <= 0) continue;
             if (row.getSourceReturnId() != null) continue;
-            if (!CONSTRUCTION_CATEGORIES.contains(row.getCategory())) continue;
             String key = Objects.toString(row.getCategory(), "") + "|"
                     + Objects.toString(row.getBrand(), "") + "|"
-                    + Objects.toString(row.getModel(), "") + "|"
-                    + Objects.toString(row.getSalePrice(), "");
+                    + Objects.toString(row.getModel(), "");
             groups.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
         }
+        Map<String, String> categoryLabels = loadCategoryLabels();
         List<Map<String, Object>> products = new ArrayList<>();
         groups.forEach((key, group) -> {
             OpsBusinessData first = group.get(0);
+            String category = first.getCategory();
             Map<String, Object> product = new LinkedHashMap<>();
             product.put("productKey", key);
             product.put("itemIds", group.stream().map(OpsBusinessData::getId).toList());
             product.put("brand", first.getBrand());
-            product.put("category", first.getCategory());
+            product.put("category", category);
+            product.put("categoryName", category == null
+                    ? "" : categoryLabels.getOrDefault(category, category));
             product.put("model", first.getModel());
             product.put("salePrice", first.getSalePrice());
             product.put("saleQuantity", group.stream()
@@ -397,6 +438,50 @@ public class EmployeeDispatchServiceImpl implements EmployeeDispatchService {
             products.add(product);
         });
         return products;
+    }
+
+    /** 品类 key → 中文名（PRODUCT_CATEGORY 字典，失败回退内置映射；原始中文品类透传）。 */
+    private Map<String, String> loadCategoryLabels() {
+        Map<String, String> labels = new LinkedHashMap<>(FALLBACK_CATEGORY_LABELS);
+        try {
+            jdbcTemplate.queryForList(
+                            "SELECT item_key, item_value FROM ai_platform.sys_dict_item"
+                                    + " WHERE type_id = ? AND delete_flag = 0",
+                            CATEGORY_DICT_TYPE_ID)
+                    .forEach(row -> {
+                        String key = str(row.get("item_key"));
+                        String value = str(row.get("item_value"));
+                        if (!key.isEmpty() && !value.isEmpty()) labels.put(key, value);
+                    });
+        } catch (Exception e) {
+            log.warn("加载品类字典失败，使用兜底品类: {}", e.getMessage());
+        }
+        return labels;
+    }
+
+    /** 订单经办人：优先订单头聚合字段，缺失时从分录 distinct 汇总（展示/追溯用）。 */
+    private String resolveAgentNames(OpsBusinessOrder order, List<OpsBusinessData> rows) {
+        String names = order.getAgentNames();
+        if (names != null && !names.isBlank()) return names;
+        return rows.stream()
+                .map(OpsBusinessData::getAgent)
+                .filter(a -> a != null && !a.isBlank())
+                .distinct()
+                .collect(Collectors.joining("、"));
+    }
+
+    private Map<String, Object> emptyPage(int current, int size) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("records", List.of());
+        result.put("total", 0L);
+        result.put("size", size);
+        result.put("current", current);
+        return result;
+    }
+
+    private static Long longVal(Map<String, Object> row, String key) {
+        Object value = row.get(key);
+        return value instanceof Number n ? n.longValue() : null;
     }
 
     private void transition(Long id, Long userId, Set<String> from,

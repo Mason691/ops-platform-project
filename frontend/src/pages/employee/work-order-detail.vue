@@ -45,6 +45,22 @@
         </view>
       </view>
 
+      <view class="card">
+        <view class="section-title"><text class="bar"></text>来源信息</view>
+        <view class="row">
+          <text class="label">来源订单</text>
+          <text class="value">{{ detail.sourceOrderNo || '—' }}</text>
+        </view>
+        <view class="row">
+          <text class="label">订单经办人</text>
+          <text class="value">{{ detail.sourceAgentNames || '—' }}</text>
+        </view>
+        <view class="row">
+          <text class="label">收据号</text>
+          <text class="value">{{ detail.receiptNo || '—' }}</text>
+        </view>
+      </view>
+
       <view v-if="detail.dispatchType === 'CONSTRUCTION'" class="card">
         <view class="section-title"><text class="bar"></text>施工商品</view>
         <view v-for="(item, index) in (detail.items || [])" :key="item.id || index" class="product">
@@ -100,7 +116,13 @@ import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { setLoginRedirect } from '@/utils/employeeSession'
 
-const CATEGORY_LABEL = { '1': '燃气灶', '2': '抽油烟机', '3': '热水器', '4': '壁挂炉' }
+const CATEGORY_LABEL = {
+  '1': '燃气灶', '2': '抽油烟机', '3': '热水器', '4': '壁挂炉',
+  '5': '壁挂炉以旧换新销售', '6': '户内美装销售', '7': '定尺波纹管',
+  '8': '户内美装工程', '9': '户内美装运维', '10': '保险',
+  '11': '美装管道整改', '12': '美装安全评估', '13': '厨具',
+  '15': '商业报警器', qimi: '安全评估技术服务'
+}
 
 const id = ref(null)
 const detail = ref(null)

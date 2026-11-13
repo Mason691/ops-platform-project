@@ -1,14 +1,14 @@
 <template>
   <view class="products">
     <view class="products-head">
-      <text class="title">施工商品（默认全选）</text>
+      <text class="title">施工商品（默认全选，不含退货）</text>
       <text v-if="products.length" class="toggle" @click="toggleAll">
         {{ allSelected ? '取消全选' : '全选' }}
       </text>
     </view>
 
     <view v-if="!products.length" class="empty">
-      该订单没有四类可施工商品（燃气灶/抽油烟机/热水器/壁挂炉），请改选「入户随访」
+      该订单没有正数销售商品，请改选「入户随访」
     </view>
 
     <view
@@ -23,7 +23,7 @@
       <view class="info">
         <text class="name">{{ p.productName || ((p.brand || '') + ' ' + (p.model || '')) }}</text>
         <text class="meta">
-          {{ categoryLabel(p.category) }} · 数量 {{ p.saleQuantity }} · ¥{{ money(p.salePrice) }}
+          {{ p.categoryName || categoryLabel(p.category) }} · 数量 {{ p.saleQuantity }} · ¥{{ money(p.salePrice) }}
         </text>
       </view>
     </view>

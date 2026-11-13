@@ -12,7 +12,11 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * SCM 销售出库单内部客户端。
@@ -59,6 +63,64 @@ public class ScmStockOutClient {
             log.warn("SCM 生成出库单异常 dispatchId={}: {}", request.dispatchId(), e.getMessage());
             throw BusinessException.of("供应链服务不可用，请稍后重试");
         }
+    }
+
+    private static final int OUTBOUND_QUERY_BATCH = 200;
+
+    /**
+     * 批量查询业务订单是否已产生销售出库单（未删除，含 DRAFT）。
+     * 覆盖派工自动出库、业务数据手工出库、多订单同收据合并制单。
+     *
+     * <p>SCM 不可达或返回异常时抛 {@link BusinessException}（fail-closed），
+     * 调用方不得在无法校验时继续发起派工。</p>
+     */
+    public Set<Long> outboundOrderIds(List<Long> orderIds) {
+        if (orderIds == null || orderIds.isEmpty()) return Set.of();
+        List<Long> ids = orderIds.stream().filter(Objects::nonNull).distinct().toList();
+        Set<Long> result = new LinkedHashSet<>();
+        for (int i = 0; i < ids.size(); i += OUTBOUND_QUERY_BATCH) {
+            List<Long> batch = ids.subList(i, Math.min(i + OUTBOUND_QUERY_BATCH, ids.size()));
+            result.addAll(queryOutboundBatch(batch));
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Set<Long> queryOutboundBatch(List<Long> orderIds) {
+        String url = baseUrl + "/api/internal/sale-outbound/outbound-orders";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Internal-Token", internalToken);
+        Map<String, Object> body = Map.of("orderIds", orderIds);
+        Map<String, Object> resp;
+        try {
+            resp = restTemplate.postForObject(url, new HttpEntity<>(body, headers), Map.class);
+        } catch (RestClientResponseException e) {
+            log.warn("SCM 查询出库状态失败 status={}, body={}",
+                    e.getStatusCode().value(), e.getResponseBodyAsString());
+            throw BusinessException.of("供应链服务不可用，暂无法校验销售出库状态");
+        } catch (Exception e) {
+            log.warn("SCM 查询出库状态异常: {}", e.getMessage());
+            throw BusinessException.of("供应链服务不可用，暂无法校验销售出库状态");
+        }
+        if (resp == null) {
+            throw BusinessException.of("供应链服务无响应，暂无法校验销售出库状态");
+        }
+        Object code = resp.get("code");
+        if (code instanceof Number n && n.intValue() != 200) {
+            Object msg = resp.get("msg");
+            throw BusinessException.of("查询销售出库状态失败："
+                    + (msg instanceof String s && !s.isBlank() ? s : "未知错误"));
+        }
+        Object data = resp.get("data");
+        if (!(data instanceof Map<?, ?> map)) return Set.of();
+        Object listObj = map.get("outboundOrderIds");
+        if (!(listObj instanceof List<?> list)) return Set.of();
+        Set<Long> result = new LinkedHashSet<>();
+        for (Object item : list) {
+            if (item instanceof Number n) result.add(n.longValue());
+        }
+        return result;
     }
 
     @SuppressWarnings("unchecked")
