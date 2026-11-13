@@ -23,6 +23,7 @@ const emit = defineEmits(['switch'])
 const tabs = [
   { key: 'ai',      icon: '🤖', label: 'AI助手' },
   { key: 'home',    icon: '🏠', label: '主页' },
+  { key: 'pending', icon: '📋', label: '待处理' },
   { key: 'profile', icon: '🧑', label: '我的' }
 ]
 

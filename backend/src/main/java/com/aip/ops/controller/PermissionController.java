@@ -31,12 +31,17 @@ public class PermissionController {
     public R<Map<String, Object>> profile() {
         String roleType = orgRoleService.getOrgRoleType();
         boolean canEdit = orgRoleService.isOperatorOrSuperAdmin();
+        boolean canDispatch = canEdit || financePermissionService.canFinanceCheck();
+        boolean canManageWxTemplate = SecurityUtils.isSuperAdmin()
+                || SecurityUtils.hasPermission("ops:wx-template:manage");
         return R.ok(Map.of(
                 "corpId", SecurityUtils.getCurrentCorpIdOrNull(),
                 "orgRoleType", roleType,
                 "canEditProducts", canEdit,
                 "canEditRules", canEdit,
-                "canFinanceCheck", financePermissionService.canFinanceCheck()
+                "canFinanceCheck", financePermissionService.canFinanceCheck(),
+                "canDispatch", canDispatch,
+                "canManageWxTemplate", canManageWxTemplate
         ));
     }
 }

@@ -28,6 +28,8 @@ const PAGE_TITLE_MAP = {
   'pages/employee/dashboard': '员工工作台',
   'pages/employee/business-data': '业务数据',
   'pages/employee/ai-chat': 'AI助手',
+  'pages/employee/pending': '待处理',
+  'pages/employee/work-order-detail': '工单详情',
 }
 
 /**

@@ -23,7 +23,11 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { api } from '@/api/index'
-import { saveEmployeeSession, isEmployeeLoggedIn } from '@/utils/employeeSession'
+import {
+  saveEmployeeSession,
+  isEmployeeLoggedIn,
+  consumeLoginRedirect
+} from '@/utils/employeeSession'
 
 const loading = ref(true)
 const success = ref(false)
@@ -69,7 +73,7 @@ async function handleCallback() {
     successText.value = '登录成功'
     message.value = '正在进入员工工作台...'
     setTimeout(() => {
-      uni.reLaunch({ url: '/pages/employee/dashboard' })
+      uni.reLaunch({ url: consumeLoginRedirect() })
     }, 700)
   } catch (e) {
     finishFail(e.msg || '微信授权失败，请重新发起')

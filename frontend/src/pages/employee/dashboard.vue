@@ -56,6 +56,14 @@
           </view>
           <text class="mc-arrow">›</text>
         </view>
+        <view class="menu-card" @click="goPending">
+          <view class="mc-icon mc-icon-pending"><text>📋</text></view>
+          <view class="mc-body">
+            <text class="mc-title">待处理工单</text>
+            <text class="mc-desc">查看派工与入户随访任务</text>
+          </view>
+          <text class="mc-arrow">›</text>
+        </view>
         <view class="menu-card" @click="goAiChat">
           <view class="mc-icon mc-icon-ai"><text>🤖</text></view>
           <view class="mc-body">
@@ -154,11 +162,12 @@ onMounted(async () => {
 })
 
 function goBusinessData() { uni.navigateTo({ url: '/pages/employee/business-data' }) }
+function goPending()      { uni.redirectTo({ url: '/pages/employee/pending' }) }
 function goAiChat()       { uni.redirectTo({ url: '/pages/employee/ai-chat' }) }
 function goProfile()      { uni.redirectTo({ url: '/pages/employee/profile' }) }
 
 function onTabSwitch(key) {
-  const routes = { ai: '/pages/employee/ai-chat', home: '', profile: '/pages/employee/profile' }
+  const routes = { ai: '/pages/employee/ai-chat', home: '', pending: '/pages/employee/pending', profile: '/pages/employee/profile' }
   if (routes[key]) uni.redirectTo({ url: routes[key] })
 }
 </script>
@@ -215,6 +224,7 @@ function onTabSwitch(key) {
 .menu-card:active { transform: scale(.985); box-shadow: 0 1rpx 6rpx rgba(0,0,0,.06); }
 .mc-icon { width: 80rpx; height: 80rpx; border-radius: 18rpx; display: flex; align-items: center; justify-content: center; font-size: 40rpx; flex-shrink: 0; }
 .mc-icon-data { background: #FFF3E8; }
+.mc-icon-pending { background: #E8F8E8; }
 .mc-icon-ai   { background: #E8F3FF; }
 .mc-icon-me   { background: #F0F1F5; }
 .mc-body { flex: 1; display: flex; flex-direction: column; gap: 4rpx; }

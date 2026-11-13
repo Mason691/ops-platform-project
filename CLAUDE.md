@@ -223,6 +223,18 @@ ops-platform-project/
 - **宽松历史导入（SQL 三件套，绕开 Excel 上传链路）**：2023~2025 各公司历史台账 15 批次共 5,324 条（另德保2025 33 条仅 SQL 无报告）经 `sql/gen_{company}{year}_import.py` 生成器入库：xlrd 读 .xls → 按公司定制解析（29~48 列、双/三/四收款组、月度台账、品牌跨行合并、中文量词拆分、占位空行剔除）→ `docker exec mysql` 直查生产 `ops_gas_user` **燃气用户查号**（无电话行按姓名匹配补回手机）+ 会员匹配/创建（phone→uk_phone 复用→建 `ai_platform.sys_member`）→ 产出 `sql/ops_business_data_import_{company}{year}.sql`（会员 INSERT + 业务数据 INSERT 含 platform_member_id，batch_no=`{公司}{年}-001`）与 `sql/{company}{year}_import_report.md`（源数据行/生成记录数/新建会员清单/提示警告/口径说明）。三件套入库存档供复盘，每批「0 未关联会员、0 空数量」为验收基线。member 表 INSERT 与业务行 INSERT 同文件但**跨库**（sys_member 在 ai_platform、业务表在 mall_db，SQL 首行 USE mall_db 后全限定名写会员表）。
 - 列表 API 直接返回实体，新增字段自动序列化给前端展示。
 
+### 派工单 / 待处理 / 公众号消息提醒（2026-11-13）
+
+闭环：财务核对完成（或户内美装订单）→ 后台发起派工 → 公众号模板消息 → 员工待处理接单 → SCM 自动生成未审核销售出库单。规格 `Specs/派工单与公众号消息提醒-规格说明.md`。
+
+- **表**（`sql/migrate_dispatch_order.sql`，先于新 ops JAR）：`ops_dispatch_order` / `ops_dispatch_order_item`（施工商品，仅品类 1/2/3/4 正数分录）/ `ops_dispatch_message` / `ops_wx_msg_template` / `ops_dispatch_sequence`。
+- **派工单号** `{公司代码}-PG-{yyyyMMdd}-{3位流水}`：`ops.dispatch.company-codes`（德保=DB/康乐=KL/广河=GH）→ `sys_corp.org_code` → `C{corpId}`；`ops_dispatch_sequence` 按 `(company_code, seq_date)` 原子递增，999 上限。
+- **后台**：`/api/ops/admin/dispatch-order`（创建/列表/详情/取消/员工下拉/按订单查进行中/重发/消息记录）+ `/api/ops/admin/wx-msg-template`（模板 CRUD，超管或 `ops:wx-template:manage`）；平台主站业务数据列表新增「发起派工」，菜单种子 `ai-native-platform/doc/add_dispatch_wx_template_menus.sql`。
+- **员工端**：`/api/ops/employee/dispatch/{pending,mine,detail,accept,start,complete,reject}`；H5 `pages/employee/pending.vue` + `work-order-detail.vue`，底部导航新增「待处理」；登录支持 `redirect` 回跳，公众号消息直达详情。
+- **消息**：`WechatOfficialAccountClient` 统一 access_token（`wechatRestTemplate` 防密钥日志）；openid 由底座内部接口 `GET /api/internal/user/wechat/openid`（X-Internal-Token）返回；异步线程池推送，失败/跳过落 `ops_dispatch_message` 并冗余到主表，支持重发；员工打开详情标记已读。
+- **SCM**：`scm_sale_outbound` 新增 `source_dispatch_id/source_dispatch_no`（`sql/migrate_sale_outbound_dispatch.sql`），`data_source=DISPATCH`；内部接口 `POST /api/internal/sale-outbound/from-dispatch`（X-Internal-Token + 重建 SecurityContext）按型号匹配物料、默认客户/仓库、批次自动选量，按 dispatchId 幂等生成 DRAFT；入户随访不生成出库单。
+- **限制**：施工工单接单失败（SCM 未配仓库/物料未匹配/批次不足）时状态保持待接单并返回原因；取消通知需另配 `DISPATCH_CANCELLED` 模板；接单串行化为单实例内存锁。
+
 ---
 
 ## 核心架构

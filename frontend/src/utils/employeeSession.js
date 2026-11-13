@@ -13,6 +13,7 @@ const SESSION_KEYS = [
   'ops_wechat_oauth_state',
   'ops_wechat_oauth_mode',
   'ops_wechat_oauth_expected_state',
+  'ops_login_redirect',
   // 清理可能并存的会员会话，避免 token 混用
   'token_type',
   'ops_token',
@@ -20,6 +21,20 @@ const SESSION_KEYS = [
   'ops_user',
   'corp_id'
 ]
+
+const LOGIN_REDIRECT_KEY = 'ops_login_redirect'
+
+/** 记录登录后要回的页面（公众号消息点击工单详情、未登录场景）。 */
+export function setLoginRedirect(url) {
+  if (url) uni.setStorageSync(LOGIN_REDIRECT_KEY, url)
+}
+
+/** 取出并清除登录回跳地址；无则回员工工作台。 */
+export function consumeLoginRedirect() {
+  const url = uni.getStorageSync(LOGIN_REDIRECT_KEY)
+  uni.removeStorageSync(LOGIN_REDIRECT_KEY)
+  return url || '/pages/employee/dashboard'
+}
 
 /** 当前是否存在员工登录态。 */
 export function isEmployeeLoggedIn() {

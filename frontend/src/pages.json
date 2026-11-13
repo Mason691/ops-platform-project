@@ -28,6 +28,8 @@
     {"path":"pages/employee/business-data","style":{"navigationBarTitleText":"业务数据","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/business-data-new","style":{"navigationBarTitleText":"新增业务","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/ai-chat","style":{"navigationBarTitleText":"AI助手","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
+    {"path":"pages/employee/pending","style":{"navigationBarTitleText":"待处理","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white","enablePullDownRefresh":true}},
+    {"path":"pages/employee/work-order-detail","style":{"navigationBarTitleText":"工单详情","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/admin/commission-rules","style":{"navigationBarTitleText":"个人提成规则","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/admin/gas-user","style":{"navigationBarTitleText":"燃气用户管理","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/admin/annual-plan","style":{"navigationBarTitleText":"年度任务","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},

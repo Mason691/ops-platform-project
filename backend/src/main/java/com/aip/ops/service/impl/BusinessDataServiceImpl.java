@@ -425,6 +425,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         boolean financeChecked = checkedCount > 0 && checkedCount == rows.size();
         Map<String, Object> order = new LinkedHashMap<>();
         order.put("orderId", master != null ? master.getId() : first.getOrderId());
+        order.put("corpId", master != null ? master.getCorpId() : first.getCorpId());
         order.put("orderKey", orderKey(first));
         order.put("orderNo", pick(master != null ? master.getOrderNo() : null,
                 rows, OpsBusinessData::getOrderNo));

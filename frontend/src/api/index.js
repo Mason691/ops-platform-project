@@ -240,6 +240,15 @@ export const api = {
   employeeLookupMember: (phone) => request({url:'/api/ops/employee/business-data/manual/member',data:{phone}}),
   employeeCreateBusiness: (data) => request({url:'/api/ops/employee/business-data/manual',method:'POST',data}),
 
+  // 员工待处理工单（派工单）
+  employeePendingDispatches: (params) => request({url:'/api/ops/employee/dispatch/pending',data:params}),
+  employeeMyDispatches: (params) => request({url:'/api/ops/employee/dispatch/mine',data:params}),
+  employeeDispatchDetail: (id) => request({url:'/api/ops/employee/dispatch/' + id}),
+  employeeAcceptDispatch: (id) => request({url:'/api/ops/employee/dispatch/' + id + '/accept',method:'POST'}),
+  employeeStartDispatch: (id) => request({url:'/api/ops/employee/dispatch/' + id + '/start',method:'POST'}),
+  employeeCompleteDispatch: (id) => request({url:'/api/ops/employee/dispatch/' + id + '/complete',method:'POST'}),
+  employeeRejectDispatch: (id, data) => request({url:'/api/ops/employee/dispatch/' + id + '/reject',method:'POST',data}),
+
   // 员工登录（独立于会员登录）
   employeeCaptcha: () => request({url:'/api/ops/auth/employee/captcha'}),
   employeeLogin: (data) => request({url:'/api/ops/auth/employee/login',method:'POST',data}),

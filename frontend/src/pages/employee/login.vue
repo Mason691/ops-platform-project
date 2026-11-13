@@ -38,16 +38,29 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
 import EmployeePasswordLogin from '@/components/EmployeePasswordLogin.vue'
 import EmployeeWechatLogin from '@/components/EmployeeWechatLogin.vue'
-import { isEmployeeLoggedIn, ensureActiveCompany } from '@/utils/employeeSession'
+import {
+  isEmployeeLoggedIn,
+  ensureActiveCompany,
+  setLoginRedirect,
+  consumeLoginRedirect
+} from '@/utils/employeeSession'
 
 const activeTab = ref('wechat')
+
+onLoad((options) => {
+  // 公众号消息/分享链接带入：登录后回跳原页面
+  if (options && options.redirect) {
+    setLoginRedirect(decodeURIComponent(options.redirect))
+  }
+})
 
 onMounted(() => {
   if (isEmployeeLoggedIn()) {
     ensureActiveCompany()
-    uni.redirectTo({ url: '/pages/employee/dashboard' })
+    uni.redirectTo({ url: consumeLoginRedirect() })
     return
   }
   // 兜底：若微信 OAuth 回调直接落到登录页，转入回调页统一处理
@@ -57,7 +70,7 @@ onMounted(() => {
 })
 
 function goDashboard() {
-  uni.redirectTo({ url: '/pages/employee/dashboard' })
+  uni.redirectTo({ url: consumeLoginRedirect() })
 }
 </script>
 

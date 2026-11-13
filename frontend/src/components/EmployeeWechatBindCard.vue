@@ -24,6 +24,7 @@
       <text>{{ binding ? '正在跳转微信...' : '绑定微信' }}</text>
     </view>
 
+    <text v-if="bound" class="bind-meta">公众号消息需已关注该公众号；未关注时派工通知将无法送达</text>
     <text v-if="bound" class="bind-meta">如需解绑，请联系管理员在底座平台操作</text>
     <text v-if="error" class="bind-error">{{ error }}</text>
   </view>
