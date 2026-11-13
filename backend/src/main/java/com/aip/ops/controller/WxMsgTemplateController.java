@@ -2,6 +2,7 @@ package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.OpsWxMsgTemplate;
+import com.aip.ops.service.OrgRoleService;
 import com.aip.ops.service.WxMsgTemplateService;
 import com.aip.sdk.exception.BusinessException;
 import com.aip.sdk.result.R;
@@ -13,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 公众号消息模板管理（仅运营管理员/超管）。
+ * 公众号消息模板管理（运营商组织员工/超管）。
  *
  * <p>模板消息限制：员工必须已关注公众号；未绑定微信或未关注时推送会失败，
  * 派工单侧记录原因并支持重发，不阻断派工。</p>
@@ -26,6 +27,7 @@ public class WxMsgTemplateController {
     private static final String PERMISSION = "ops:wx-template:manage";
 
     private final WxMsgTemplateService templateService;
+    private final OrgRoleService orgRoleService;
 
     @GetMapping
     public R<?> list() {
@@ -89,7 +91,10 @@ public class WxMsgTemplateController {
     }
 
     private void requirePermission() {
-        if (!SecurityUtils.isSuperAdmin() && !SecurityUtils.hasPermission(PERMISSION)) {
+        // 运营商组织员工（非城市合伙人）均可维护本组织模板；超管/显式权限码同样放行
+        if (!SecurityUtils.isSuperAdmin()
+                && !SecurityUtils.hasPermission(PERMISSION)
+                && !orgRoleService.isOperatorOrSuperAdmin()) {
             throw BusinessException.forbidden("无权限：" + PERMISSION);
         }
     }

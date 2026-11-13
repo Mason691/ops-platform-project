@@ -33,7 +33,8 @@ public class PermissionController {
         boolean canEdit = orgRoleService.isOperatorOrSuperAdmin();
         boolean canDispatch = canEdit || financePermissionService.canFinanceCheck();
         boolean canManageWxTemplate = SecurityUtils.isSuperAdmin()
-                || SecurityUtils.hasPermission("ops:wx-template:manage");
+                || SecurityUtils.hasPermission("ops:wx-template:manage")
+                || canEdit;
         return R.ok(Map.of(
                 "corpId", SecurityUtils.getCurrentCorpIdOrNull(),
                 "orgRoleType", roleType,
