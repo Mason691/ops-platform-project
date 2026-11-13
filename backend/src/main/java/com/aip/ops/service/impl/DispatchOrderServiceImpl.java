@@ -15,7 +15,6 @@ import com.aip.ops.mapper.OpsDispatchOrderMapper;
 import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.DispatchOrderService;
 import com.aip.ops.service.FinancePermissionService;
-import com.aip.ops.service.OrgRoleService;
 import com.aip.sdk.exception.BusinessException;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -68,7 +67,6 @@ public class DispatchOrderServiceImpl implements DispatchOrderService {
     private final OpsBusinessOrderMapper orderMapper;
     private final JdbcTemplate jdbcTemplate;
     private final DataScopeService dataScopeService;
-    private final OrgRoleService orgRoleService;
     private final FinancePermissionService financePermissionService;
     private final CompanyCodeResolver companyCodeResolver;
     private final DispatchNoGenerator dispatchNoGenerator;
@@ -77,9 +75,22 @@ public class DispatchOrderServiceImpl implements DispatchOrderService {
     @Override
     @Transactional
     public Map<String, Object> create(DispatchCreateRequest request) {
+        return doCreate(request, null);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> createForCorp(DispatchCreateRequest request, Long requiredCorpId) {
+        return doCreate(request, requiredCorpId);
+    }
+
+    private Map<String, Object> doCreate(DispatchCreateRequest request, Long requiredCorpId) {
         requireDispatchPermission();
         validateRequest(request);
         OpsBusinessOrder order = loadOrder(request.getSourceOrderId());
+        if (requiredCorpId != null && !requiredCorpId.equals(order.getCorpId())) {
+            throw BusinessException.forbidden("只能对本组织的业务订单发起派工");
+        }
         assertCorpVisible(order.getCorpId());
         List<OpsBusinessData> rows = orderMapper.selectItems(order.getId());
         assertDispatchable(order, rows);
@@ -455,9 +466,8 @@ public class DispatchOrderServiceImpl implements DispatchOrderService {
     }
 
     private void requireDispatchPermission() {
-        if (!orgRoleService.isOperatorOrSuperAdmin()
-                && !financePermissionService.canFinanceCheck()) {
-            throw BusinessException.forbidden("仅运营/财务角色可发起或取消派工");
+        if (!financePermissionService.canCreateDispatch()) {
+            throw BusinessException.forbidden("仅员工账号可发起或取消派工");
         }
     }
 

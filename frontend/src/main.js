@@ -30,6 +30,8 @@ const PAGE_TITLE_MAP = {
   'pages/employee/ai-chat': 'AI助手',
   'pages/employee/pending': '待处理',
   'pages/employee/work-order-detail': '工单详情',
+  'pages/employee/dispatch-create': '发起派工',
+  'pages/employee/dispatch-form': '新建派工单',
 }
 
 /**

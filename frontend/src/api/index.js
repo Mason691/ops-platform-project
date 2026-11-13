@@ -248,6 +248,12 @@ export const api = {
   employeeStartDispatch: (id) => request({url:'/api/ops/employee/dispatch/' + id + '/start',method:'POST'}),
   employeeCompleteDispatch: (id) => request({url:'/api/ops/employee/dispatch/' + id + '/complete',method:'POST'}),
   employeeRejectDispatch: (id, data) => request({url:'/api/ops/employee/dispatch/' + id + '/reject',method:'POST',data}),
+  // 员工 H5 发起派工（城市合伙人管理员/运营商/财务）
+  employeeCanDispatch: () => request({url:'/api/ops/employee/dispatch/manage/can-dispatch'}),
+  employeeDispatchableOrders: (params) => request({url:'/api/ops/employee/dispatch/manage/orders',data:params}),
+  employeeDispatchableOrder: (orderId) => request({url:'/api/ops/employee/dispatch/manage/orders/' + orderId}),
+  employeeDispatchAssignees: () => request({url:'/api/ops/employee/dispatch/manage/assignees'}),
+  employeeCreateDispatch: (data) => request({url:'/api/ops/employee/dispatch/manage/create',method:'POST',data}),
 
   // 员工登录（独立于会员登录）
   employeeCaptcha: () => request({url:'/api/ops/auth/employee/captcha'}),

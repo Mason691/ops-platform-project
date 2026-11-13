@@ -1,5 +1,6 @@
 package com.aip.ops.service;
 
+import com.aip.ops.security.JwtTokenInspector;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,23 @@ public class FinancePermissionService {
 
     private final JdbcTemplate jdbcTemplate;
     private final PlatformInternalClient platformClient;
+    private final JwtTokenInspector jwtTokenInspector;
+
+    /**
+     * 当前用户是否可发起/取消派工。
+     *
+     * <p>口径：<b>任何员工</b>均可（平台/子系统员工 JWT，无 token_type 或非 sso）。
+     * 会员 SSO 令牌（token_type=sso，sub=sys_member.id）仍拒绝，避免会员令牌
+     * 越权操作用户端功能。数据范围由 {@code DataScopeService} 控制：
+     * 城市合伙人仅本组织，运营商含下属组织。</p>
+     */
+    public boolean canCreateDispatch() {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) return false;
+        Long corpId = SecurityUtils.getCurrentCorpIdOrNull();
+        if (corpId == null) return false;
+        if (corpId == 0L) return true; // super admin
+        return SecurityUtils.getCurrentUserId() != null;
+    }
 
     /** 当前用户是否可执行财务核对（失败时 fail-closed）。 */
     public boolean canFinanceCheck() {

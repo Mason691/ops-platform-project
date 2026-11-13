@@ -64,6 +64,14 @@
           </view>
           <text class="mc-arrow">›</text>
         </view>
+        <view v-if="canDispatch" class="menu-card" @click="goDispatchCreate">
+          <view class="mc-icon mc-icon-dispatch"><text>🧾</text></view>
+          <view class="mc-body">
+            <text class="mc-title">发起派工</text>
+            <text class="mc-desc">为本组织已核对订单派单</text>
+          </view>
+          <text class="mc-arrow">›</text>
+        </view>
         <view class="menu-card" @click="goAiChat">
           <view class="mc-icon mc-icon-ai"><text>🤖</text></view>
           <view class="mc-body">
@@ -96,6 +104,7 @@ import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
 const company      = ref({})
 const employeeName = ref('')
 const roleName     = ref('员工')
+const canDispatch  = ref(false)
 const currentYear  = new Date().getFullYear().toString()
 
 const yearlyStats = ref({
@@ -136,6 +145,14 @@ onMounted(async () => {
     } catch (_) {}
   }
 
+  // ── 派工发起权限（运营商员工/城市合伙人管理员/财务） ──
+  try {
+    const perm = await api.employeeCanDispatch()
+    canDispatch.value = perm?.canDispatch === true
+  } catch (_) {
+    canDispatch.value = false
+  }
+
   // ── 全年统计 ──
   try {
     const data = await api.employeeOverview()
@@ -163,6 +180,7 @@ onMounted(async () => {
 
 function goBusinessData() { uni.navigateTo({ url: '/pages/employee/business-data' }) }
 function goPending()      { uni.redirectTo({ url: '/pages/employee/pending' }) }
+function goDispatchCreate() { uni.navigateTo({ url: '/pages/employee/dispatch-create' }) }
 function goAiChat()       { uni.redirectTo({ url: '/pages/employee/ai-chat' }) }
 function goProfile()      { uni.redirectTo({ url: '/pages/employee/profile' }) }
 
@@ -225,6 +243,7 @@ function onTabSwitch(key) {
 .mc-icon { width: 80rpx; height: 80rpx; border-radius: 18rpx; display: flex; align-items: center; justify-content: center; font-size: 40rpx; flex-shrink: 0; }
 .mc-icon-data { background: #FFF3E8; }
 .mc-icon-pending { background: #E8F8E8; }
+.mc-icon-dispatch { background: #FFF0EB; }
 .mc-icon-ai   { background: #E8F3FF; }
 .mc-icon-me   { background: #F0F1F5; }
 .mc-body { flex: 1; display: flex; flex-direction: column; gap: 4rpx; }
