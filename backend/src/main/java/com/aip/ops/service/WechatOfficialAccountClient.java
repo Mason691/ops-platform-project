@@ -1,11 +1,16 @@
 package com.aip.ops.service;
 
 import com.aip.ops.entity.PublicAccountConfig;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,12 +31,15 @@ public class WechatOfficialAccountClient {
             "https://api.weixin.qq.com/cgi-bin/message/template/send?access_token={token}";
 
     private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
     private final Map<String, String> tokenCache = new ConcurrentHashMap<>();
     private final Map<String, Long> tokenExpire = new ConcurrentHashMap<>();
 
     public WechatOfficialAccountClient(
-            @Qualifier("wechatRestTemplate") RestTemplate restTemplate) {
+            @Qualifier("wechatRestTemplate") RestTemplate restTemplate,
+            ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
+        this.objectMapper = objectMapper;
     }
 
     /** 获取 access_token（按 appId 缓存，提前 5 分钟过期）；失败返回 null。 */
@@ -106,8 +114,15 @@ public class WechatOfficialAccountClient {
         body.put("data", wxData);
 
         try {
+            // 微信网关拒绝 Transfer-Encoding: chunked（直接返回 412 空响应），
+            // 而 Spring 6.1 的 SimpleClientHttpRequestFactory 总是流式发送。
+            // 这里显式序列化并设置 Content-Length，让 HttpURLConnection 走定长模式。
+            byte[] payload = objectMapper.writeValueAsString(body).getBytes(StandardCharsets.UTF_8);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setContentLength(payload.length);
             Map<String, Object> resp = restTemplate.postForObject(
-                    TEMPLATE_SEND_URL, body, Map.class, token);
+                    TEMPLATE_SEND_URL, new HttpEntity<>(payload, headers), Map.class, token);
             if (resp == null) return SendResult.fail("微信接口无响应");
             Object errcode = resp.get("errcode");
             if (errcode instanceof Number n && n.intValue() == 0) {
@@ -132,7 +147,7 @@ public class WechatOfficialAccountClient {
         return switch (code) {
             case 43004 -> "（员工未关注公众号）";
             case 40003 -> "（openid 无效）";
-            case 40037 -> "（模板ID无效）";
+            case 40037 -> "（模板ID无效：需为当前公众号「模板消息」模板；订阅通知模板不能用于模板消息接口）";
             case 45009 -> "（接口调用超过限制）";
             default -> "";
         };
