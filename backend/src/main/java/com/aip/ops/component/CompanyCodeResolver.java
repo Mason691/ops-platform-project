@@ -40,9 +40,14 @@ public class CompanyCodeResolver {
 
     private String configuredCode(String shortName) {
         if (shortName == null || shortName.isBlank()) return null;
-        Map<String, String> codes = properties.getCompanyCodes();
-        if (codes == null || codes.isEmpty()) return null;
-        return normalize(codes.get(shortName.trim()));
+        String target = shortName.trim();
+        for (DispatchProperties.CompanyCodeRule rule : properties.getCompanyCodeRules()) {
+            if (rule != null && target.equals(rule.getShortName() == null
+                    ? null : rule.getShortName().trim())) {
+                return normalize(rule.getCode());
+            }
+        }
+        return null;
     }
 
     private String shortNameOf(Long corpId) {
