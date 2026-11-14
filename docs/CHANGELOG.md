@@ -2,6 +2,14 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-14（公众号消息区域地址改为客户地址，生产已发布）
+
+- **需求**：业务数据订单公众号消息「区域地址」（`thing13`）由订单摘要改为「客户名称 + 小区 + 详细地址」。
+- **底座**：`wf_instance` 新增 `business_address`（迁移 `doc/migration_workflow_instance_business_address.sql`）；`StartInstanceRequest`/内部发起接口透传 `businessAddress`；消息变量新增 `{businessAddress}`，存量实例或未传值时退回 `{businessSummary}`，避免空 `thing` 触发 47003；`thing13` 映射切换 SQL（`doc/update_workflow_message_template_address.sql`）；单测覆盖地址渲染与 20 字截断。
+- **ops**：`WorkflowPlatformClient.StartRequest` 透传；`BusinessOrderWorkflowService` 拼接 `customer + communityName + detailedAddress`（空白跳过，全空退回摘要，≤500 字）。
+- **生产**：备份 `/data2/boss-platform/backups/address-20261114_170755/`（两端旧 JAR、`wf_instance`/`wf_message_template` dump、平台前端 tgz）；回滚镜像 `boss-platform/backend:rollback-20261114c` / `boss-platform/ops:rollback-20261114b`；发布 `backend:address-20261114` / `ops:address-20261114`；4 条模板 `thing13` 已切换 `{businessAddress}`；平台前端重建部署并 reload nginx。
+- **验证**：平台单测 7/7、两端编译/打包、平台前端构建通过；两端 `/actuator/health` UP，主站 200、ops H5 标题「金地燃气」。**待业务真实验证**：下一笔新订单触发待办消息，确认区域地址为客户名称+小区+详细地址；存量在途实例按摘要兜底。
+
 ## 2026-11-14（工作流消息跳转修复，生产已发布）
 
 - **修复公众号工作流消息点击“缺少任务ID”且无法进入 H5 待办页**：①**根因**：TASK_CREATED 模板跳转链接配置为 PC 页 `/ops/business-data/flow-task?taskId={taskId}`，且 H5 无员工工作流待办/任务页；历史消息缺少 `instanceId`，页面在参数为空时直接抛技术错误。②**底座**：`MessageTemplateRenderer.validateJumpUrl` 发送前校验——TASK_CREATED 必须同时包含 `{taskId}`+`{instanceId}`，渲染后参数非空、无未替换占位符；不通过则不发消息，写 `wf_message_send_log`（新增 `url` 列，迁移 `doc/migration_workflow_message_log_url.sql`）+ `fail_reason` + 异常中心 `MESSAGE_URL_INVALID`；单测覆盖有效/缺参/空值/路径占位符场景。③**H5**：新增 `pages/employee/flow-todo.vue`（我的待办列表）与 `pages/employee/flow-task.vue`（任务处理，覆盖部长审核/财务核对/派工出库/施工中/施工完成/售后）；`pages.json` 注册；`EmployeeTabBar`/工作台新增「待办」入口；`App.vue` 支持 `?route=pages/employee/flow-task&taskId=..&instanceId=..` 深链并保留参数；`api/index.js` 增加 `/api/wf/task/**`、订单详情、派工员工、财务暂缓、字典接口。④**登录/缺参**：未登录跳 `login?redirect=<任务页完整参数>`，登录后回跳；缺参展示「链接缺少任务信息」+ 返回待办/工作台，不抛技术错误；财务/验收不通过走带 `formData` 的驳回。⑤**生产**：TASK_CREATED 模板 URL 改为 `https://boss.jdzn99.com/ops/?route=pages/employee/flow-task&taskId={taskId}&instanceId={instanceId}`，结果通知改为 H5 待办页；执行 `url` 列迁移；overlay 发布平台 JAR（`rollback-20261114b` 可回滚）；H5 已部署（`pages-employee-flow-task/todo` chunk 存在）；向任务 2/3 的已绑定部长补发带正确参数的微信消息（errcode=0），历史成功消息在 `wf_message_send_log.url/fail_reason` 标注为「跳转 PC 页，不追溯」。⑥**验证**：平台单测/编译通过；H5 `npm run build:h5` 通过；platform/ops 健康；H5 深链返回「金地燃气」且包含 flow-task/todo chunk；真实点击与登录回跳需部长在微信真机验证（生产未创建测试订单）。

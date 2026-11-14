@@ -47,6 +47,7 @@ public class WorkflowPlatformClient {
         body.put("businessType", request.businessType());
         body.put("businessId", request.businessId());
         body.put("businessSummary", request.businessSummary());
+        body.put("businessAddress", request.businessAddress());
         body.put("requestId", request.requestId());
         body.put("corpId", request.corpId());
         body.put("initiatorUserId", request.initiatorUserId());
@@ -85,7 +86,7 @@ public class WorkflowPlatformClient {
     }
 
     public record StartRequest(String definitionCode, String businessType, String businessId,
-                               String businessSummary, String requestId, Long corpId,
-                               Long initiatorUserId, String initiatorName) {
+                               String businessSummary, String businessAddress, String requestId,
+                               Long corpId, Long initiatorUserId, String initiatorName) {
     }
 }

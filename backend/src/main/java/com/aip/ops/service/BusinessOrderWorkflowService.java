@@ -98,7 +98,7 @@ public class BusinessOrderWorkflowService {
                 : BUSINESS_TYPE + ":" + orderId + ":1";
         Long instanceId = workflowClient.start(new WorkflowPlatformClient.StartRequest(
                 definitionCode, BUSINESS_TYPE, String.valueOf(orderId),
-                summary(order), requestId, order.getCorpId(),
+                summary(order), address(order), requestId, order.getCorpId(),
                 initiator.userId(), initiator.userName()));
         // 只回写实例ID：节点进入回调是平台事务提交后异步执行的，可能先于本更新到达，
         // 这里不能覆盖 biz_status/wf_node_*，否则会把已进入部长审核的状态冲回 0。
@@ -125,6 +125,33 @@ public class BusinessOrderWorkflowService {
         }
         String text = sb.toString();
         return text.length() > 200 ? text.substring(0, 200) : text;
+    }
+
+    /**
+     * 公众号消息「区域地址」内容：客户名称 + 小区 + 详细地址。
+     * 微信 thing 字段上限 20 字，平台渲染时按字段类型裁剪；此处只做拼接与兜底，
+     * 三项全空时退回订单摘要，避免 thing 字段为空导致消息被微信拒收（errcode 47003）。
+     */
+    private String address(OpsBusinessOrder order) {
+        StringBuilder sb = new StringBuilder();
+        appendPart(sb, order.getCustomer());
+        appendPart(sb, order.getCommunityName());
+        appendPart(sb, order.getDetailedAddress());
+        String text = sb.toString().trim();
+        if (text.isEmpty()) {
+            return summary(order);
+        }
+        return text.length() > 500 ? text.substring(0, 500) : text;
+    }
+
+    private void appendPart(StringBuilder sb, String part) {
+        if (part == null || part.isBlank()) {
+            return;
+        }
+        if (!sb.isEmpty()) {
+            sb.append(' ');
+        }
+        sb.append(part.trim());
     }
 
     /**
