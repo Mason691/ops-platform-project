@@ -10,6 +10,7 @@ import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.security.JwtTokenInspector;
 import com.aip.ops.service.BusinessOrderService;
+import com.aip.ops.service.BusinessOrderWorkflowService;
 import com.aip.ops.service.EmployeeBusinessEntryService;
 import com.aip.ops.service.GasMemberMatcher;
 import com.aip.sdk.client.PlatformInternalClient;
@@ -70,6 +71,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private final PlatformTransactionManager transactionManager;
     private final BusinessOrderService orderService;
     private final OrderNoGenerator orderNoGenerator;
+    private final BusinessOrderWorkflowService workflowService;
 
     private TransactionTemplate transactionTemplate;
 
@@ -231,7 +233,14 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         Validated v = validateRequest(request, ctx);
         // 平台/SCM 的 HTTP 查询在事务外完成；事务只包裹批次取号+行锁、会员创建、INSERT，
         // 避免 Hikari 连接在外部 HTTP 期间被长期占用（连接池耗尽风险）。
-        return transactionTemplate.execute(status -> persistManualEntry(request, ctx, v));
+        Map<String, Object> result = transactionTemplate.execute(
+                status -> persistManualEntry(request, ctx, v));
+        // 事务提交后异步发起审批流程（节点 0 → 1），失败不影响已落库业务数据
+        if (result != null && result.get("orderId") instanceof Number orderId) {
+            workflowService.startAsync(orderId.longValue(),
+                    ctx.employeeUserId(), ctx.employeeName());
+        }
+        return result;
     }
 
     private Map<String, Object> persistManualEntry(EmployeeBusinessEntryRequest request,
@@ -275,6 +284,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         // 防止「检查为空 → 并发上报 → 继续插入」产生已上报批次下的新行
         lockAndCheckBatch(ctx.corpId(), batchNo);
         Map<String, Object> result = new LinkedHashMap<>();
+        result.put("orderId", order.getId());
         result.put("ids", ids);
         result.put("detailCount", ids.size());
         result.put("productCount", v.products().size());

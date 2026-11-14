@@ -5,9 +5,11 @@ import com.aip.ops.dto.FinanceCheckRequest;
 import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.entity.SysExportTask;
+import com.aip.ops.service.BizStatusService;
 import com.aip.ops.service.BusinessDataFinanceService;
 import com.aip.ops.service.BusinessDataReconcileService;
 import com.aip.ops.service.BusinessDataService;
+import com.aip.ops.service.BusinessOrderWorkflowService;
 import com.aip.ops.service.ExportTaskService;
 import com.aip.ops.service.ImportTaskService;
 import com.aip.ops.service.OrgRoleService;
@@ -44,10 +46,13 @@ public class BusinessDataController {
     private final BusinessDataService service;
     private final ExportTaskService taskService;
     private final ImportTaskService importTaskService;
-    private final BusinessDataFinanceService financeService;
     private final BusinessDataReconcileService reconcileService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final OrgRoleService orgRoleService;
+    private final BizStatusService bizStatusService;
+    private final BusinessOrderWorkflowService workflowService;
+    private final BusinessDataFinanceService financeService;
+    private final com.aip.ops.service.WorkflowFinancePermissionService workflowFinancePermissionService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ExecutorService importExecutor;
 
@@ -116,18 +121,24 @@ public class BusinessDataController {
 
     public BusinessDataController(BusinessDataService service, ExportTaskService taskService,
                                   ImportTaskService importTaskService,
-                                  BusinessDataFinanceService financeService,
                                   BusinessDataReconcileService reconcileService,
                                   KafkaTemplate<String, String> kafkaTemplate,
                                   OrgRoleService orgRoleService,
+                                  BizStatusService bizStatusService,
+                                  BusinessOrderWorkflowService workflowService,
+                                  BusinessDataFinanceService financeService,
+                                  com.aip.ops.service.WorkflowFinancePermissionService workflowFinancePermissionService,
                                   @Qualifier("importExecutor") ExecutorService importExecutor) {
         this.service = service;
         this.taskService = taskService;
         this.importTaskService = importTaskService;
-        this.financeService = financeService;
         this.reconcileService = reconcileService;
         this.kafkaTemplate = kafkaTemplate;
         this.orgRoleService = orgRoleService;
+        this.bizStatusService = bizStatusService;
+        this.workflowService = workflowService;
+        this.financeService = financeService;
+        this.workflowFinancePermissionService = workflowFinancePermissionService;
         this.importExecutor = importExecutor;
     }
 
@@ -161,10 +172,81 @@ public class BusinessDataController {
                        @RequestParam(required = false) String brand,
                        @RequestParam(required = false) String model,
                        @RequestParam(required = false) String receiptDateStart,
-                       @RequestParam(required = false) String receiptDateEnd) {
+                       @RequestParam(required = false) String receiptDateEnd,
+                       @RequestParam(required = false) String bizStatus) {
         return R.ok(service.orderPage(pageNum, pageSize, company, batchNo, agent, receiptNo,
                 customer, orderNo, category, isSpecial, brand, model,
-                receiptDateStart, receiptDateEnd));
+                receiptDateStart, receiptDateEnd, bizStatus));
+    }
+
+    /** 业务订单详情：工作流节点处理页读取订单、商品明细与流程留痕。 */
+    @GetMapping("/orders/{orderId}")
+    public R<?> orderDetail(@PathVariable Long orderId) {
+        return R.ok(service.orderDetail(orderId));
+    }
+
+    /** 业务状态字典选项（工作流驱动，中文名来自数据字典）。 */
+    @GetMapping("/biz-statuses")
+    public R<?> bizStatuses() {
+        return R.ok(bizStatusService.options());
+    }
+
+    /** 工作流派工节点可选员工（可见组织范围内）。 */
+    @GetMapping("/flow/assignees")
+    public R<?> flowAssignees() {
+        return R.ok(service.flowAssignees());
+    }
+
+    /**
+     * 财务核对暂缓：保存核对字段但不推进流程（任务停留在财务核对节点）。
+     * 数据范围由 orderDetail 校验；任务归属由工作流保证。
+     */
+    @OperationLog(module = "增值业务", action = "财务核对暂缓", targetTable = "ops_business_order")
+    @PostMapping("/orders/{orderId}/flow/hold")
+    public R<?> holdFinance(@PathVariable Long orderId,
+                            @RequestBody FinanceCheckRequest request) {
+        if (!workflowFinancePermissionService.canHoldFinance()) {
+            return R.fail("仅财务角色或运营商管理员可执行财务暂缓");
+        }
+        service.orderDetail(orderId);
+        request.setCheckConclusion("HOLD");
+        return R.ok(financeService.financeCheckByOrder(orderId, request,
+                SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentUser().getUsername()));
+    }
+
+    /**
+     * 重新发起流程：驳回退回经办人后重新提交，或首次发起失败后人工重试。
+     * 仅允许在业务状态为 0（经办人上报）或尚未发起实例时操作。
+     */
+    @OperationLog(module = "增值业务", action = "重新发起流程", targetTable = "ops_business_order")
+    @PostMapping("/orders/{orderId}/start-flow")
+    public R<?> startFlow(@PathVariable Long orderId) {
+        Map<String, Object> detail = service.orderDetail(orderId);
+        Object corpObj = detail.get("corpId");
+        long orderCorpId = corpObj instanceof Number n ? n.longValue() : -1L;
+        if (!orgRoleService.isOperatorOrSuperAdmin()) {
+            // 非运营商管理员：仅限订单归属组织内的经办人本人重新提交
+            if (!Objects.equals(SecurityUtils.getCurrentCorpId(), orderCorpId)) {
+                return R.forbidden();
+            }
+            String username = SecurityUtils.getCurrentUser().getUsername();
+            Object agentPhones = detail.get("agentPhones");
+            boolean isAgent = agentPhones != null && Arrays.stream(
+                            String.valueOf(agentPhones).split("、"))
+                    .map(String::trim)
+                    .anyMatch(phone -> phone.equals(username));
+            if (!isAgent) {
+                return R.forbidden();
+            }
+        }
+        Object status = detail.get("bizStatus");
+        Object instanceId = detail.get("wfInstanceId");
+        if (instanceId != null && !"0".equals(String.valueOf(status))) {
+            return R.fail("当前业务状态不允许重新发起流程");
+        }
+        Long newInstanceId = workflowService.start(orderId,
+                SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentUser().getUsername(), true);
+        return R.ok(Map.of("instanceId", newInstanceId));
     }
 
     @GetMapping("/batches")
@@ -350,6 +432,8 @@ public class BusinessDataController {
         if (model != null && !model.isBlank()) filters.put("model", model);
         if (receiptDateStart != null && !receiptDateStart.isBlank()) filters.put("receiptDateStart", receiptDateStart);
         if (receiptDateEnd != null && !receiptDateEnd.isBlank()) filters.put("receiptDateEnd", receiptDateEnd);
+        String bizStatus = params.get("bizStatus");
+        if (bizStatus != null && !bizStatus.isBlank()) filters.put("bizStatus", bizStatus);
         String filtersJson;
         try { filtersJson = objectMapper.writeValueAsString(filters); } catch (Exception e) { filtersJson = "{}"; }
 
@@ -364,7 +448,8 @@ public class BusinessDataController {
             log.info("Export task submitted: id={} type=business_data kafka=sent", task.getId());
         } catch (Exception e) {
             log.warn("Kafka unavailable, fallback to sync export for taskId={}", task.getId());
-            return syncExportFallback(task, company, batchNo, agent, category, brand, model, receiptDateStart, receiptDateEnd);
+            return syncExportFallback(task, company, batchNo, agent, category, brand, model,
+                    receiptDateStart, receiptDateEnd, bizStatus);
         }
 
         return R.ok(Map.of("taskId", task.getId(), "status", "PENDING"));
@@ -373,13 +458,15 @@ public class BusinessDataController {
     /** Kafka 不可用时的同步导出：直接生成 XLSX 落盘并复用下载链路（真实路径+真实大小） */
     private R<Map<String, Object>> syncExportFallback(SysExportTask task, String company, String batchNo,
                                                       String agent, String category, String brand, String model,
-                                                      String receiptDateStart, String receiptDateEnd) {
+                                                      String receiptDateStart, String receiptDateEnd,
+                                                      String bizStatus) {
         Path outFile = null;
         try {
             taskService.updateStatus(task.getId(), "PROCESSING", "Kafka不可用，同步导出中...");
             String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
             outFile = Path.of(uploadBaseDir, "exports", "业务数据_" + ts + "_" + task.getId() + ".xlsx");
-            service.exportExcel(company, batchNo, agent, category, brand, model, receiptDateStart, receiptDateEnd, outFile);
+            service.exportExcel(company, batchNo, agent, category, brand, model,
+                    receiptDateStart, receiptDateEnd, bizStatus, outFile);
             if (!Files.exists(outFile) || Files.size(outFile) == 0) {
                 throw new IOException("导出文件生成失败: " + outFile);
             }
@@ -480,16 +567,6 @@ public class BusinessDataController {
             return;
         }
         service.exportCommissionSummary(company, batchNo, agent, receiptNo, category, response);
-    }
-
-    /**
-     * 财务核对：补充/修改收据号、财务收款日期、资金动态表横排数、是否收款，
-     * 并记录核对人与核对时间。仅财务角色/运营商管理员可操作；已上报集团拒绝。
-     */
-    @OperationLog(module = "增值业务", action = "财务核对", targetTable = "ops_business_order_item")
-    @PutMapping("/{id}/finance-check")
-    public R<?> financeCheck(@PathVariable Long id, @RequestBody FinanceCheckRequest request) {
-        return R.ok(financeService.financeCheck(id, request));
     }
 
     /** 主子表对账（只读）：主表合计 vs 子表聚合。仅超管（全局口径）。 */

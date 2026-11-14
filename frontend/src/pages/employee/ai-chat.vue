@@ -779,7 +779,7 @@ function goBusinessData() {
   uni.navigateTo({ url: '/pages/employee/business-data' })
 }
 function onTabSwitch(key) {
-  const routes = { ai: '', home: '/pages/employee/dashboard', pending: '/pages/employee/pending', profile: '/pages/employee/profile' }
+  const routes = { ai: '', home: '/pages/employee/dashboard', todo: '/pages/employee/flow-todo', profile: '/pages/employee/profile' }
   if (routes[key]) uni.redirectTo({ url: routes[key] })
 }
 </script>

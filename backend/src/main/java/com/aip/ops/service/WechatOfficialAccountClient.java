@@ -1,25 +1,21 @@
 package com.aip.ops.service;
 
 import com.aip.ops.entity.PublicAccountConfig;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 公众号服务端调用（access_token 缓存 + 模板消息发送）。
+ * 公众号服务端调用（access_token 缓存，供 JSSDK 等使用）。
  *
  * <p>统一收口 access_token，避免多个控制器各自缓存导致互相刷新。使用
- * {@code wechatRestTemplate}（不挂日志拦截器），防止异常时 URI 中的 appSecret 落入日志。</p>
+ * {@code wechatRestTemplate}（不挂日志拦截器），防止异常时 URI 中的 appSecret 落入日志。
+ * 模板消息发送已统一由底座工作流组件承担，本类不再提供推送能力。</p>
  */
 @Slf4j
 @Service
@@ -27,19 +23,14 @@ public class WechatOfficialAccountClient {
 
     private static final String TOKEN_URL =
             "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={appid}&secret={secret}";
-    private static final String TEMPLATE_SEND_URL =
-            "https://api.weixin.qq.com/cgi-bin/message/template/send?access_token={token}";
 
     private final RestTemplate restTemplate;
-    private final ObjectMapper objectMapper;
     private final Map<String, String> tokenCache = new ConcurrentHashMap<>();
     private final Map<String, Long> tokenExpire = new ConcurrentHashMap<>();
 
     public WechatOfficialAccountClient(
-            @Qualifier("wechatRestTemplate") RestTemplate restTemplate,
-            ObjectMapper objectMapper) {
+            @Qualifier("wechatRestTemplate") RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
-        this.objectMapper = objectMapper;
     }
 
     /** 获取 access_token（按 appId 缓存，提前 5 分钟过期）；失败返回 null。 */
@@ -84,86 +75,7 @@ public class WechatOfficialAccountClient {
         return result;
     }
 
-    /**
-     * 发送模板消息。
-     *
-     * @param data 微信模板字段 -> 值（如 thing1 -> "张三"）
-     * @return 发送结果；失败时带可读原因
-     */
-    @SuppressWarnings("unchecked")
-    public SendResult sendTemplateMessage(PublicAccountConfig cfg, String openid,
-                                          String templateId, String url,
-                                          Map<String, String> data) {
-        if (cfg == null) return SendResult.fail("未配置公众号");
-        if (isBlank(openid)) return SendResult.fail("员工未绑定微信");
-        if (isBlank(templateId)) return SendResult.fail("未配置公众号消息模板");
-        String token = accessToken(cfg);
-        if (token == null) return SendResult.fail("获取 access_token 失败");
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("touser", openid);
-        body.put("template_id", templateId);
-        if (!isBlank(url)) body.put("url", url);
-        Map<String, Object> wxData = new LinkedHashMap<>();
-        data.forEach((key, value) -> {
-            if (isBlank(key)) return;
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("value", value == null ? "" : value);
-            wxData.put(key, item);
-        });
-        body.put("data", wxData);
-
-        try {
-            // 微信网关拒绝 Transfer-Encoding: chunked（直接返回 412 空响应），
-            // 而 Spring 6.1 的 SimpleClientHttpRequestFactory 总是流式发送。
-            // 这里显式序列化并设置 Content-Length，让 HttpURLConnection 走定长模式。
-            byte[] payload = objectMapper.writeValueAsString(body).getBytes(StandardCharsets.UTF_8);
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setContentLength(payload.length);
-            Map<String, Object> resp = restTemplate.postForObject(
-                    TEMPLATE_SEND_URL, new HttpEntity<>(payload, headers), Map.class, token);
-            if (resp == null) return SendResult.fail("微信接口无响应");
-            Object errcode = resp.get("errcode");
-            if (errcode instanceof Number n && n.intValue() == 0) {
-                return SendResult.ok();
-            }
-            int code = errcode instanceof Number n ? n.intValue() : -1;
-            if (code == 40001 || code == 42001) {
-                // access_token 失效：清缓存，下次发送重新获取
-                tokenCache.remove(cfg.getAppId());
-                tokenExpire.remove(cfg.getAppId());
-            }
-            String errmsg = String.valueOf(resp.getOrDefault("errmsg", "未知错误"));
-            return SendResult.fail("微信推送失败(" + code + ")：" + errmsg
-                    + describeErrcode(code));
-        } catch (Exception e) {
-            log.warn("发送公众号模板消息异常 openid={}: {}", openid, e.getMessage());
-            return SendResult.fail("微信推送异常：" + e.getMessage());
-        }
-    }
-
-    private static String describeErrcode(int code) {
-        return switch (code) {
-            case 43004 -> "（员工未关注公众号）";
-            case 40003 -> "（openid 无效）";
-            case 40037 -> "（模板ID无效：需为当前公众号「模板消息」模板；订阅通知模板不能用于模板消息接口）";
-            case 45009 -> "（接口调用超过限制）";
-            default -> "";
-        };
-    }
-
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
-    }
-
-    public record SendResult(boolean success, String error) {
-        static SendResult ok() {
-            return new SendResult(true, null);
-        }
-
-        static SendResult fail(String error) {
-            return new SendResult(false, error);
-        }
     }
 }

@@ -63,7 +63,16 @@ export default {
 
         if (route) {
           // Direct route: ?route=pages/employee/login
-          uni.navigateTo({ url: '/' + route })
+          // 公众号消息深链：?route=pages/employee/flow-task&taskId=..&instanceId=..
+          // 保留除 route/code/state 外的查询参数，供任务页读取 taskId/instanceId
+          const extra = []
+          params.forEach((value, key) => {
+            if (key !== 'route' && key !== 'code' && key !== 'state' && value) {
+              extra.push(encodeURIComponent(key) + '=' + encodeURIComponent(value))
+            }
+          })
+          const target = '/' + route + (extra.length ? '?' + extra.join('&') : '')
+          uni.navigateTo({ url: target })
           return
         }
 

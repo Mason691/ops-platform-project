@@ -1,9 +1,9 @@
 package com.aip.ops.mapper;
 
-import com.aip.ops.entity.OpsWxMsgTemplate;
+import com.aip.ops.entity.OpsBusinessFlowRecord;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
-public interface OpsWxMsgTemplateMapper extends BaseMapper<OpsWxMsgTemplate> {
+public interface OpsBusinessFlowRecordMapper extends BaseMapper<OpsBusinessFlowRecord> {
 }

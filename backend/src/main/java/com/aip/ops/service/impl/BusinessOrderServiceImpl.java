@@ -137,8 +137,9 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
 
     @Override
     public void updateFinanceFields(Long orderId, String receiptNo, LocalDate financeReceiptDate,
-                                    Integer fundDynamicRows, String isReceived, Long userId,
-                                    String userName, LocalDateTime time) {
+                                    Integer fundDynamicRows, String isReceived, String conclusion,
+                                    String checkRemark, Long userId, String userName,
+                                    LocalDateTime time) {
         if (orderId == null) return;
         LambdaUpdateWrapper<OpsBusinessOrder> uw = new LambdaUpdateWrapper<>();
         uw.eq(OpsBusinessOrder::getId, orderId)
@@ -147,6 +148,8 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
                 .set(OpsBusinessOrder::getFinanceReceiptDate, financeReceiptDate)
                 .set(OpsBusinessOrder::getFundDynamicRows, fundDynamicRows)
                 .set(OpsBusinessOrder::getIsReceived, isReceived)
+                .set(OpsBusinessOrder::getFinanceCheckConclusion, conclusion)
+                .set(OpsBusinessOrder::getFinanceCheckRemark, checkRemark)
                 .set(OpsBusinessOrder::getFinanceCheckUserId, userId)
                 .set(OpsBusinessOrder::getFinanceCheckUserName, userName)
                 .set(OpsBusinessOrder::getFinanceCheckTime, time)

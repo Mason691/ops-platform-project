@@ -37,10 +37,11 @@ public interface BusinessOrderService {
     /** 重算主表经办人姓名/手机号汇总（、分隔）。 */
     void refreshAgentSummary(Long orderId);
 
-    /** 财务核对字段回写主表。 */
+    /** 财务核对字段回写主表（含核对结论/备注）。 */
     void updateFinanceFields(Long orderId, String receiptNo, LocalDate financeReceiptDate,
-                             Integer fundDynamicRows, String isReceived, Long userId,
-                             String userName, java.time.LocalDateTime time);
+                             Integer fundDynamicRows, String isReceived, String conclusion,
+                             String checkRemark, Long userId, String userName,
+                             java.time.LocalDateTime time);
 
     /** 删除已无子表行的主表（物理删除，仅限传入的订单集合）。 */
     void deleteEmptyOrders(Collection<Long> orderIds);

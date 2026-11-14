@@ -23,4 +23,10 @@ public class FinanceCheckRequest {
 
     /** 是否收款（是/否，必填） */
     private String isReceived;
+
+    /** 核对结论：PASS=通过 / REJECT=不通过 / HOLD=暂缓（工作流节点表单必填）。 */
+    private String checkConclusion;
+
+    /** 核对备注 / 不通过原因。 */
+    private String checkRemark;
 }

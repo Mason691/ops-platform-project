@@ -56,19 +56,11 @@
           </view>
           <text class="mc-arrow">›</text>
         </view>
-        <view class="menu-card" @click="goPending">
+        <view class="menu-card" @click="goTodo">
           <view class="mc-icon mc-icon-pending"><text>📋</text></view>
           <view class="mc-body">
-            <text class="mc-title">待处理工单</text>
-            <text class="mc-desc">查看派工与入户随访任务</text>
-          </view>
-          <text class="mc-arrow">›</text>
-        </view>
-        <view v-if="canDispatch" class="menu-card" @click="goDispatchCreate">
-          <view class="mc-icon mc-icon-dispatch"><text>🧾</text></view>
-          <view class="mc-body">
-            <text class="mc-title">发起派工</text>
-            <text class="mc-desc">为本组织已核对订单派单</text>
+            <text class="mc-title">待办任务</text>
+            <text class="mc-desc">审核、核对、派工与施工任务</text>
           </view>
           <text class="mc-arrow">›</text>
         </view>
@@ -104,7 +96,6 @@ import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
 const company      = ref({})
 const employeeName = ref('')
 const roleName     = ref('员工')
-const canDispatch  = ref(false)
 const currentYear  = new Date().getFullYear().toString()
 
 const yearlyStats = ref({
@@ -145,14 +136,6 @@ onMounted(async () => {
     } catch (_) {}
   }
 
-  // ── 派工发起权限（运营商员工/城市合伙人管理员/财务） ──
-  try {
-    const perm = await api.employeeCanDispatch()
-    canDispatch.value = perm?.canDispatch === true
-  } catch (_) {
-    canDispatch.value = false
-  }
-
   // ── 全年统计 ──
   try {
     const data = await api.employeeOverview()
@@ -179,13 +162,12 @@ onMounted(async () => {
 })
 
 function goBusinessData() { uni.navigateTo({ url: '/pages/employee/business-data' }) }
-function goPending()      { uni.redirectTo({ url: '/pages/employee/pending' }) }
-function goDispatchCreate() { uni.navigateTo({ url: '/pages/employee/dispatch-create' }) }
+function goTodo()         { uni.redirectTo({ url: '/pages/employee/flow-todo' }) }
 function goAiChat()       { uni.redirectTo({ url: '/pages/employee/ai-chat' }) }
 function goProfile()      { uni.redirectTo({ url: '/pages/employee/profile' }) }
 
 function onTabSwitch(key) {
-  const routes = { ai: '/pages/employee/ai-chat', home: '', pending: '/pages/employee/pending', profile: '/pages/employee/profile' }
+  const routes = { ai: '/pages/employee/ai-chat', home: '', todo: '/pages/employee/flow-todo', profile: '/pages/employee/profile' }
   if (routes[key]) uni.redirectTo({ url: routes[key] })
 }
 </script>

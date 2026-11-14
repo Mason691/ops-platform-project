@@ -11,11 +11,9 @@ import java.util.Map;
 public interface BusinessDataFinanceService {
 
     /**
-     * 财务核对保存。
-     *
-     * @param id      业务数据 id
-     * @param request 四项财务信息
-     * @return 更新后的财务核对字段
+     * 工作流节点动作调用：按订单整单核对，操作人/权限由工作流任务保证，
+     * 不再读取当前 JWT 权限（内部回调线程没有 SecurityContext）。
      */
-    Map<String, Object> financeCheck(Long id, FinanceCheckRequest request);
+    Map<String, Object> financeCheckByOrder(Long orderId, FinanceCheckRequest request,
+                                            Long operatorId, String operatorName);
 }

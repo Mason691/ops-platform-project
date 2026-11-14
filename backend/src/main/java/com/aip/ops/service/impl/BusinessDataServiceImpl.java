@@ -13,6 +13,7 @@ import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsBusinessOrderMapper;
 import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
+import com.aip.ops.service.BizStatusService;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.BusinessOrderService;
 import com.aip.ops.service.DataScopeService;
@@ -69,6 +70,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final ImportTaskService importTaskService;
     private final GasMemberMatcher memberMatcher;
     private final BusinessOrderService orderService;
+    private final BizStatusService bizStatusService;
+    private final com.aip.ops.mapper.OpsBusinessFlowRecordMapper flowRecordMapper;
 
     /** 锁定状态：已上报集团的数据禁止删除/修改/重新计算（所有组织一致） */
     public static final String REPORTED_STATUS = "已上报集团";
@@ -127,7 +130,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             BusinessDataImportHandler importHandler,
             ImportTaskService importTaskService,
             GasMemberMatcher memberMatcher,
-            BusinessOrderService orderService) {
+            BusinessOrderService orderService,
+            BizStatusService bizStatusService,
+            com.aip.ops.mapper.OpsBusinessFlowRecordMapper flowRecordMapper) {
         this.mapper = mapper;
         this.orderMapper = orderMapper;
         this.productMapper = productMapper;
@@ -140,6 +145,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         this.importTaskService = importTaskService;
         this.memberMatcher = memberMatcher;
         this.orderService = orderService;
+        this.bizStatusService = bizStatusService;
+        this.flowRecordMapper = flowRecordMapper;
     }
     public static String getCategoryDisplayName(String key) {
         if (key == null || key.isEmpty()) return "";
@@ -264,7 +271,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                                          String agent, String receiptNo, String customer,
                                          String orderNo, String category, String isSpecial,
                                          String brand, String model, String receiptDateStart,
-                                         String receiptDateEnd) {
+                                         String receiptDateEnd, String bizStatus) {
         Set<Long> visibleIds = dataScopeService.getVisibleCorpIds();
         if (noVisibleCorp(visibleIds)) {
             Map<String, Object> empty = new LinkedHashMap<>();
@@ -319,6 +326,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         for (List<OpsBusinessData> group : grouped.values()) {
             Map<String, Object> order = buildOrderView(group,
                     masters.get(group.get(0).getOrderId()));
+            // 业务状态筛选在订单级生效（主表 biz_status）
+            if (hasText(bizStatus)
+                    && !bizStatus.trim().equals(String.valueOf(order.get("bizStatus")))) {
+                continue;
+            }
             orders.add(order);
             totalSale = totalSale.add((BigDecimal) order.get("totalAmount"));
             totalCommission = totalCommission.add((BigDecimal) order.get("totalCommission"));
@@ -362,6 +374,63 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         result.put("totalCommission", totalCommission.setScale(2, RoundingMode.HALF_UP));
         result.put("categoryStats", categoryStats);
         return result;
+    }
+
+    @Override
+    public Map<String, Object> orderDetail(Long orderId) {
+        OpsBusinessOrder order = orderId == null ? null : orderMapper.selectById(orderId);
+        if (order == null || Integer.valueOf(1).equals(order.getDeleteFlag())) {
+            throw com.aip.sdk.exception.BusinessException.notFound("业务订单不存在");
+        }
+        Set<Long> visible = dataScopeService.getVisibleCorpIds();
+        if (visible != null && (visible.isEmpty() || !visible.contains(order.getCorpId()))) {
+            throw com.aip.sdk.exception.BusinessException.forbidden("无权查看该业务订单");
+        }
+        List<OpsBusinessData> items = orderMapper.selectItems(orderId);
+        Map<String, Object> view = items.isEmpty()
+                ? new LinkedHashMap<>() : buildOrderView(items, order);
+        view.putIfAbsent("orderId", order.getId());
+        String status = order.getBizStatus() == null || order.getBizStatus().isBlank()
+                ? "0" : order.getBizStatus();
+        view.put("bizStatus", status);
+        view.put("bizStatusName", bizStatusService.label(status));
+        List<com.aip.ops.entity.OpsBusinessFlowRecord> records = flowRecordMapper.selectList(
+                new LambdaQueryWrapper<com.aip.ops.entity.OpsBusinessFlowRecord>()
+                        .eq(com.aip.ops.entity.OpsBusinessFlowRecord::getOrderId, orderId)
+                        .eq(com.aip.ops.entity.OpsBusinessFlowRecord::getDeleteFlag, 0)
+                        .orderByDesc(com.aip.ops.entity.OpsBusinessFlowRecord::getId));
+        view.put("flowRecords", records);
+        return view;
+    }
+
+    @Override
+    public List<Map<String, Object>> flowAssignees() {
+        Set<Long> visible = dataScopeService.getVisibleCorpIds();
+        if (noVisibleCorp(visible)) {
+            return List.of();
+        }
+        StringBuilder sql = new StringBuilder(
+                "SELECT u.id AS userId, COALESCE(u.real_name, u.username) AS name, "
+                        + "u.username AS phone, u.corp_id AS corpId "
+                        + "FROM ai_platform.sys_user u WHERE u.status = 1 AND u.delete_flag = 0");
+        List<Object> args = new ArrayList<>();
+        if (visible != null && !visible.isEmpty()) {
+            sql.append(" AND (u.corp_id IN (")
+                    .append(String.join(",", Collections.nCopies(visible.size(), "?")))
+                    .append(") OR EXISTS (SELECT 1 FROM ai_platform.sys_user_corp uc "
+                            + "WHERE uc.user_id = u.id AND uc.corp_id IN (")
+                    .append(String.join(",", Collections.nCopies(visible.size(), "?")))
+                    .append(") AND uc.status = 1 AND uc.delete_flag = 0))");
+            args.addAll(visible);
+            args.addAll(visible);
+        }
+        sql.append(" ORDER BY u.corp_id, u.id LIMIT 500");
+        try {
+            return jdbcTemplate.queryForList(sql.toString(), args.toArray());
+        } catch (Exception e) {
+            log.warn("加载工作流派工可选员工失败：{}", e.getMessage());
+            return List.of();
+        }
     }
 
     private static boolean hasText(String value) {
@@ -460,6 +529,18 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         order.put("voucherUrl", pick(master != null ? master.getVoucherUrl() : null,
                 rows, OpsBusinessData::getVoucherUrl));
         order.put("calcStatus", calcStatus);
+        // 业务状态与计算状态完全解耦：业务状态只看主表工作流字段
+        String bizStatus = master != null && hasText(master.getBizStatus())
+                ? master.getBizStatus() : "0";
+        order.put("bizStatus", bizStatus);
+        order.put("bizStatusName", bizStatusService.label(bizStatus));
+        order.put("wfInstanceId", master != null ? master.getWfInstanceId() : null);
+        order.put("wfNodeOrder", master != null ? master.getWfNodeOrder() : null);
+        order.put("wfNodeName", master != null ? master.getWfNodeName() : null);
+        order.put("financeCheckConclusion",
+                master != null ? master.getFinanceCheckConclusion() : null);
+        order.put("financeCheckRemark",
+                master != null ? master.getFinanceCheckRemark() : null);
         order.put("financeChecked", financeChecked);
         order.put("financeCheckedCount", checkedCount);
         order.put("financeCheckedTotal", rows.size());
@@ -1502,7 +1583,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     @Override
     public void exportExcel(String company, String batchNo, String agent, String category,
-                            String brand, String model, String receiptDateStart, String receiptDateEnd, Path outFile) {
+                            String brand, String model, String receiptDateStart, String receiptDateEnd,
+                            String bizStatus, Path outFile) {
         try {
             if (noVisibleCorp(dataScopeService.getVisibleCorpIds())) {
                 log.warn("导出被拒绝：当前用户无可见组织 scope");
@@ -1519,13 +1601,25 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             if (receiptDateEnd != null && !receiptDateEnd.isEmpty()) qw.le(OpsBusinessData::getReceiptDate, receiptDateEnd);
             applyCorpScope(qw);
             List<OpsBusinessData> all = mapper.selectList(qw);
+            // 业务状态筛选（订单级）：先载主表状态，再过滤行
+            Map<Long, String> bizStatusMap = new HashMap<>();
+            Set<Long> orderIds = all.stream().map(OpsBusinessData::getOrderId)
+                    .filter(Objects::nonNull).collect(Collectors.toSet());
+            if (!orderIds.isEmpty()) {
+                for (OpsBusinessOrder order : orderMapper.selectBatchIds(orderIds)) {
+                    bizStatusMap.put(order.getId(), order.getBizStatus());
+                }
+            }
+            if (bizStatus != null && !bizStatus.isBlank()) {
+                all.removeIf(row -> !bizStatus.trim().equals(
+                        bizStatusMap.getOrDefault(row.getOrderId(), "0")));
+            }
             sortByReceiptNo(all);
             // 型号关键字行（如武山）兜底填充 零售底价/集团最低价（仅导出文件）
             fillExportPrices(all, productMapper.selectList(null));
-
             Path tsvFile = Files.createTempFile("export_", ".tsv");
             StringBuilder sb = new StringBuilder(EXPORT_HEADER);
-            for (OpsBusinessData d : all) appendExportRow(sb, d);
+            for (OpsBusinessData d : all) appendExportRow(sb, d, bizStatusMap);
             Files.writeString(tsvFile, sb.toString());
             Files.createDirectories(outFile.toAbsolutePath().getParent());
             // Convert TSV → XLSX using Python
@@ -1542,10 +1636,16 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     private static final String EXPORT_HEADER =
-            "批次\t公司\t客户\t客户手机\t小区\t详细地址\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例\t提成金额\t状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t收据号\t备注\t是否特批\t退货标识\n";
+            "批次\t公司\t客户\t客户手机\t小区\t详细地址\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例\t提成金额\t业务状态\t计算状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t订单编号/收据号\t备注\t是否特批\t退货标识\n";
 
-    /** 单行 29 列 TSV 输出（与 EXPORT_HEADER 列序一致）；收款金额=库中 receipt_amount（空则 单价×数量 兜底） */
-    private void appendExportRow(StringBuilder sb, OpsBusinessData d) {
+    /** 单行 TSV 输出（与 EXPORT_HEADER 列序一致）；收款金额=库中 receipt_amount（空则 单价×数量 兜底） */
+    private void appendExportRow(StringBuilder sb, OpsBusinessData d, Map<Long, String> bizStatusMap) {
+        String bizStatus = d.getOrderId() == null ? "0"
+                : bizStatusMap.getOrDefault(d.getOrderId(), "0");
+        String no = fmt(d.getOrderNo());
+        String receipt = fmt(d.getReceiptNo());
+        String orderReceipt = no.isEmpty() ? receipt
+                : (receipt.isEmpty() ? no : no + "（" + receipt + "）");
         sb.append(fmt(d.getBatchNo())).append('\t')
           .append(fmt(d.getCompany())).append('\t').append(fmt(d.getCustomer())).append('\t')
           .append(fmt(d.getCustomerPhone())).append('\t')
@@ -1563,12 +1663,12 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                       : null)).append('\t')
           .append(fmt(d.getRetailFloorPrice())).append('\t').append(fmt(d.getGroupLowestPrice())).append('\t')
           .append(fmt(d.getCommissionRate())).append('\t').append(fmt(d.getCommissionAmount())).append('\t')
+          .append(fmt(bizStatusService.label(bizStatus))).append('\t')
           .append(fmt(d.getCalcStatus())).append('\t').append(fmt(d.getAgent())).append('\t')
           .append(fmt(d.getAgentPhone())).append('\t')
           .append(fmt(d.getSaleDate())).append('\t').append(fmt(d.getReceiptDate())).append('\t')
           .append(fmt(d.getFinanceReceiptDate())).append('\t').append(fmt(d.getFundDynamicRows())).append('\t')
-          .append(fmt(d.getIsReceived())).append('\t')
-          .append(fmt(d.getReceiptNo())).append('\t')
+          .append(fmt(orderReceipt)).append('\t')
           .append(fmt(d.getRemark())).append('\t')
           .append(fmt(d.getIsSpecial())).append('\t')
           .append(isReturnEntry(d) ? "是" : "否").append('\n');

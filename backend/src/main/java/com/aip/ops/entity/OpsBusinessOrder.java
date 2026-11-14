@@ -99,6 +99,20 @@ public class OpsBusinessOrder extends BaseEntity {
     @TableField("calc_status")
     private String calcStatus;
 
+    /** 业务状态（工作流驱动，字典 business_order_status：0~6）。 */
+    @TableField("biz_status")
+    private String bizStatus;
+
+    /** 当前工作流实例 ID（wf_instance.id，平台工作流组件）。 */
+    @TableField("wf_instance_id")
+    private Long wfInstanceId;
+
+    @TableField("wf_node_order")
+    private Integer wfNodeOrder;
+
+    @TableField("wf_node_name")
+    private String wfNodeName;
+
     @TableField("finance_check_user_id")
     private Long financeCheckUserId;
 
@@ -107,4 +121,11 @@ public class OpsBusinessOrder extends BaseEntity {
 
     @TableField("finance_check_time")
     private LocalDateTime financeCheckTime;
+
+    /** 财务核对结论：PASS / REJECT / HOLD。 */
+    @TableField("finance_check_conclusion")
+    private String financeCheckConclusion;
+
+    @TableField("finance_check_remark")
+    private String financeCheckRemark;
 }

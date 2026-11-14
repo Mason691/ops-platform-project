@@ -1,10 +1,13 @@
 package com.aip.ops.export;
 
 import com.aip.ops.entity.OpsBusinessData;
+import com.aip.ops.entity.OpsBusinessOrder;
 import com.aip.ops.entity.OpsValueAddedProduct;
 import com.aip.ops.entity.SysExportTask;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
+import com.aip.ops.mapper.OpsBusinessOrderMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
+import com.aip.ops.service.BizStatusService;
 import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.impl.BusinessDataServiceImpl;
 import com.aip.sdk.exception.BusinessException;
@@ -31,17 +34,23 @@ import java.util.Set;
 public class BusinessDataExportHandler implements ExportHandler {
 
     private final OpsBusinessDataMapper mapper;
+    private final OpsBusinessOrderMapper orderMapper;
     private final OpsValueAddedProductMapper productMapper;
     private final DataScopeService dataScopeService;
+    private final BizStatusService bizStatusService;
     private final ObjectMapper objectMapper;
 
     public BusinessDataExportHandler(OpsBusinessDataMapper mapper,
+                                     OpsBusinessOrderMapper orderMapper,
                                      OpsValueAddedProductMapper productMapper,
                                      DataScopeService dataScopeService,
+                                     BizStatusService bizStatusService,
                                      ObjectMapper objectMapper) {
         this.mapper = mapper;
+        this.orderMapper = orderMapper;
         this.productMapper = productMapper;
         this.dataScopeService = dataScopeService;
+        this.bizStatusService = bizStatusService;
         this.objectMapper = objectMapper;
     }
 
@@ -54,7 +63,7 @@ public class BusinessDataExportHandler implements ExportHandler {
     public void export(SysExportTask task, OutputStream out) throws Exception {
         // 解析筛选条件
         String company = null, batchNo = null, agent = null, brand = null, category = null, model = null;
-        String receiptDateStart = null, receiptDateEnd = null;
+        String receiptDateStart = null, receiptDateEnd = null, bizStatus = null;
         if (task.getFilters() != null && !task.getFilters().isEmpty()) {
             @SuppressWarnings("unchecked")
             Map<String, String> filters = objectMapper.readValue(task.getFilters(), Map.class);
@@ -66,6 +75,7 @@ public class BusinessDataExportHandler implements ExportHandler {
             model = filters.get("model");
             receiptDateStart = filters.get("receiptDateStart");
             receiptDateEnd = filters.get("receiptDateEnd");
+            bizStatus = filters.get("bizStatus");
         }
 
         // 构建查询
@@ -97,11 +107,27 @@ public class BusinessDataExportHandler implements ExportHandler {
         List<OpsValueAddedProduct> products = productMapper.selectList(null);
         BusinessDataServiceImpl.fillExportPrices(rows, products);
 
+        // 订单级业务状态（主表 biz_status），用于导出「业务状态」列
+        java.util.Set<Long> orderIds = rows.stream().map(OpsBusinessData::getOrderId)
+                .filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        Map<Long, String> bizStatusMap = new java.util.HashMap<>();
+        if (!orderIds.isEmpty()) {
+            for (OpsBusinessOrder order : orderMapper.selectBatchIds(orderIds)) {
+                bizStatusMap.put(order.getId(), order.getBizStatus());
+            }
+        }
+        final String statusFilter = bizStatus;
+        if (statusFilter != null && !statusFilter.isBlank()) {
+            rows.removeIf(row -> !statusFilter.trim().equals(
+                    bizStatusMap.getOrDefault(row.getOrderId(), "0")));
+        }
         // 写 TSV
         try (BufferedWriter writer = new BufferedWriter(
                 new OutputStreamWriter(out, StandardCharsets.UTF_8))) {
-            writer.write("公司\t批次号\t客户\t客户手机\t小区\t详细地址\t部门\t经办人\t经办人手机号\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t销售日期\t收据号\t市场收款日期\t财务收款日期\t资金动态表横排数\t是否收款\t提成比例\t提成金额\t状态\t备注\t是否特批\t退货标识\n");
+            writer.write("公司\t批次号\t客户\t客户手机\t小区\t详细地址\t部门\t经办人\t经办人手机号\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t销售日期\t订单编号/收据号\t市场收款日期\t财务收款日期\t资金动态表横排数\t提成比例\t提成金额\t业务状态\t计算状态\t备注\t是否特批\t退货标识\n");
             for (OpsBusinessData row : rows) {
+                String rowBizStatus = row.getOrderId() == null ? "0"
+                        : bizStatusMap.getOrDefault(row.getOrderId(), "0");
                 writer.write(String.join("\t",
                         nvl(row.getCompany()),
                         nvl(row.getBatchNo()),
@@ -125,13 +151,13 @@ public class BusinessDataExportHandler implements ExportHandler {
                         row.getRetailFloorPrice() != null ? row.getRetailFloorPrice().toString() : "",
                         row.getGroupLowestPrice() != null ? row.getGroupLowestPrice().toString() : "",
                         nvl(row.getSaleDate()),
-                        nvl(row.getReceiptNo()),
+                        orderReceipt(row.getOrderNo(), row.getReceiptNo()),
                         nvl(row.getReceiptDate()),
                         row.getFinanceReceiptDate() != null ? row.getFinanceReceiptDate().toString() : "",
                         row.getFundDynamicRows() != null ? row.getFundDynamicRows().toString() : "",
-                        nvl(row.getIsReceived()),
                         row.getCommissionRate() != null ? row.getCommissionRate().toString() : "",
                         row.getCommissionAmount() != null ? row.getCommissionAmount().toString() : "",
+                        nvl(bizStatusService.label(rowBizStatus)),
                         nvl(row.getCalcStatus()),
                         nvl(row.getRemark()),
                         nvl(row.getIsSpecial()),
@@ -139,6 +165,15 @@ public class BusinessDataExportHandler implements ExportHandler {
                 writer.newLine();
             }
         }
+    }
+
+    /** 订单编号/收据号合并展示：订单编号（收据号），两者都可检索。 */
+    private static String orderReceipt(String orderNo, String receiptNo) {
+        String no = nvl(orderNo);
+        String receipt = nvl(receiptNo);
+        if (no.isEmpty()) return receipt;
+        if (receipt.isEmpty()) return no;
+        return no + "（" + receipt + "）";
     }
 
     /** TSV 单值清洗：自由文本（地址/备注等）中的制表符/换行会把导出 XLSX 的行列撕开。 */

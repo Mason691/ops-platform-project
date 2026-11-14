@@ -13,7 +13,13 @@ public interface BusinessDataService {
     Map<String, Object> orderPage(int pageNum, int pageSize, String company, String batchNo,
                                   String agent, String receiptNo, String customer, String orderNo,
                                   String category, String isSpecial, String brand, String model,
-                                  String receiptDateStart, String receiptDateEnd);
+                                  String receiptDateStart, String receiptDateEnd, String bizStatus);
+
+    /** 订单详情（工作流节点处理页使用）：订单视图 + 商品明细 + 流程处理留痕。 */
+    Map<String, Object> orderDetail(Long orderId);
+
+    /** 工作流派工节点可选的上门员工（可见组织范围内的在职员工）。 */
+    java.util.List<Map<String, Object>> flowAssignees();
     List<String> getBatches();
     /** 导入阶段一（异步工作线程）：文件校验 + 品牌型号匹配解析，结果 JSON（fail/confirm/ready）写入任务 progressMsg */
     void runAsyncCheck(SysImportTask task);
@@ -34,7 +40,8 @@ public interface BusinessDataService {
     Map<String, Object> recalculateOrder(Long orderId);
     /** 同步导出：按筛选条件查询并生成 XLSX 文件到 outFile（Kafka 不可用时的降级路径） */
     void exportExcel(String company, String batchNo, String agent, String category,
-                     String brand, String model, String receiptDateStart, String receiptDateEnd, Path outFile);
+                     String brand, String model, String receiptDateStart, String receiptDateEnd,
+                     String bizStatus, Path outFile);
     /** 提成上报集团：将当前筛选条件下非"已上报集团"的数据锁定为"已上报集团"，返回受影响行数 */
     int reportToGroup(String company, String batchNo, String agent, String receiptNo, String category);
     /** 手工重匹配会员：按行 corp 的燃气公司范围，以 客户手机→客户名称 重匹配并回写 platform_member_id（已上报集团行跳过） */

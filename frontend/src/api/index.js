@@ -240,20 +240,17 @@ export const api = {
   employeeLookupMember: (phone) => request({url:'/api/ops/employee/business-data/manual/member',data:{phone}}),
   employeeCreateBusiness: (data) => request({url:'/api/ops/employee/business-data/manual',method:'POST',data}),
 
-  // 员工待处理工单（派工单）
-  employeePendingDispatches: (params) => request({url:'/api/ops/employee/dispatch/pending',data:params}),
-  employeeMyDispatches: (params) => request({url:'/api/ops/employee/dispatch/mine',data:params}),
-  employeeDispatchDetail: (id) => request({url:'/api/ops/employee/dispatch/' + id}),
-  employeeAcceptDispatch: (id) => request({url:'/api/ops/employee/dispatch/' + id + '/accept',method:'POST'}),
-  employeeStartDispatch: (id) => request({url:'/api/ops/employee/dispatch/' + id + '/start',method:'POST'}),
-  employeeCompleteDispatch: (id) => request({url:'/api/ops/employee/dispatch/' + id + '/complete',method:'POST'}),
-  employeeRejectDispatch: (id, data) => request({url:'/api/ops/employee/dispatch/' + id + '/reject',method:'POST',data}),
-  // 员工 H5 发起派工（城市合伙人管理员/运营商/财务）
-  employeeCanDispatch: () => request({url:'/api/ops/employee/dispatch/manage/can-dispatch'}),
-  employeeDispatchableOrders: (params) => request({url:'/api/ops/employee/dispatch/manage/orders',data:params}),
-  employeeDispatchableOrder: (orderId) => request({url:'/api/ops/employee/dispatch/manage/orders/' + orderId}),
-  employeeDispatchAssignees: () => request({url:'/api/ops/employee/dispatch/manage/assignees'}),
-  employeeCreateDispatch: (data) => request({url:'/api/ops/employee/dispatch/manage/create',method:'POST',data}),
+  // 工作流待办 / 审批（平台 /api/wf，员工 JWT）
+  workflowTodo: (params) => request({url:'/api/wf/task/todo', data:params}),
+  workflowTaskDetail: (taskId) => request({url:'/api/wf/task/' + taskId}),
+  workflowApprove: (data) => request({url:'/api/wf/task/approve', method:'POST', data}),
+  workflowReject: (data) => request({url:'/api/wf/task/reject', method:'POST', data}),
+  // 业务订单详情 / 派工可选员工 / 财务暂缓（ops，员工 JWT + 数据范围）
+  businessOrderDetail: (orderId) => request({url:'/api/ops/admin/business-data/orders/' + orderId}),
+  businessFlowAssignees: () => request({url:'/api/ops/admin/business-data/flow/assignees'}),
+  businessHoldFinance: (orderId, data) => request({url:'/api/ops/admin/business-data/orders/' + orderId + '/flow/hold', method:'POST', data}),
+  // 平台公开字典
+  getDictData: (typeCode) => request({url:'/api/dict/data', data:{typeCode}}),
 
   // 员工登录（独立于会员登录）
   employeeCaptcha: () => request({url:'/api/ops/auth/employee/captcha'}),

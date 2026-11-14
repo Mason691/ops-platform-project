@@ -97,19 +97,6 @@ wechat:
 ops:
   remind:
     hours-before: 24,1
-  # 派工单：公司代码覆盖（键为 sys_corp.short_name）+ 模板消息跳转地址
-  # 未配置的组织回退 sys_corp.org_code，再兜底 C{corpId}
-  dispatch:
-    company-code-rules:
-      - short-name: 德保
-        code: DB
-      - short-name: 康乐
-        code: KL
-      - short-name: 广河
-        code: GH
-    work-order-url: https://boss.jdzn99.com/ops/#/pages/employee/work-order-detail?id={id}
-    test-url: https://boss.jdzn99.com/ops/#/pages/employee/pending
-
 # 作战地图 ETL（单实例部署）：启动全量初始化 + 定时增量刷新
 battle-map:
   etl:

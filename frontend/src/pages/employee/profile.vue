@@ -187,7 +187,7 @@ async function changePassword() {
 }
 
 function onTabSwitch(key) {
-  const routes = { ai: '/pages/employee/ai-chat', home: '/pages/employee/dashboard', pending: '/pages/employee/pending', profile: '' }
+  const routes = { ai: '/pages/employee/ai-chat', home: '/pages/employee/dashboard', todo: '/pages/employee/flow-todo', profile: '' }
   if (routes[key]) uni.redirectTo({ url: routes[key] })
 }
 function doLogout() {

@@ -7,8 +7,6 @@ import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsBusinessOrderMapper;
 import com.aip.ops.service.BusinessDataFinanceService;
 import com.aip.ops.service.BusinessOrderService;
-import com.aip.ops.service.DataScopeService;
-import com.aip.ops.service.FinancePermissionService;
 import com.aip.sdk.exception.BusinessException;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -59,23 +57,28 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
     private final OpsBusinessOrderMapper orderMapper;
     private final BusinessOrderService orderService;
     private final JdbcTemplate jdbcTemplate;
-    private final DataScopeService dataScopeService;
-    private final FinancePermissionService financePermissionService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Map<String, Object> financeCheck(Long id, FinanceCheckRequest request) {
-        if (id == null) throw BusinessException.of("数据ID不能为空");
-        if (!financePermissionService.canFinanceCheck()) {
-            throw BusinessException.forbidden("仅财务角色或运营商管理员可执行财务核对");
+    public Map<String, Object> financeCheckByOrder(Long orderId, FinanceCheckRequest request,
+                                                   Long operatorId, String operatorName) {
+        OpsBusinessOrder order = orderId == null ? null : orderMapper.selectById(orderId);
+        if (order == null || Integer.valueOf(1).equals(order.getDeleteFlag())) {
+            throw BusinessException.notFound("业务订单不存在");
         }
-        OpsBusinessData row = businessDataMapper.selectById(id);
-        if (row == null) throw BusinessException.notFound("业务数据不存在");
-        assertScope(row);
-        // 订单头可能因旧 JAR/历史数据缺失，先补建并回填 order_id
-        OpsBusinessOrder order = orderService.ensureOrderForItem(row);
-        // 财务核对为业务级字段：同一订单/业务组的所有明细必须一起核对，
-        // 避免部分明细已核对、部分未核对的状态混乱
+        List<OpsBusinessData> items = orderMapper.selectItems(orderId);
+        if (items.isEmpty()) {
+            throw BusinessException.of("订单没有业务明细，不能财务核对");
+        }
+        String name = operatorName == null || operatorName.isBlank()
+                ? resolveUserName(operatorId) : operatorName.trim();
+        return doCheck(items.get(0), order, request, operatorId, name);
+    }
+
+    /** 财务核对公共实现：整单一起核对，避免部分明细已核对、部分未核对。 */
+    private Map<String, Object> doCheck(OpsBusinessData row, OpsBusinessOrder order,
+                                        FinanceCheckRequest request, Long userId,
+                                        String userName) {
         List<OpsBusinessData> group = loadFinanceGroup(row, order);
         for (OpsBusinessData item : group) {
             if (REPORTED_STATUS.equals(item.getCalcStatus())) {
@@ -83,19 +86,24 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
             }
         }
         List<Long> groupIds = group.stream().map(OpsBusinessData::getId).toList();
-
         ValidatedFinance v = validate(request, row, order, groupIds);
-        Long userId = SecurityUtils.getCurrentUserId();
-        String userName = resolveUserName(userId);
+        String conclusion = normalizeConclusion(request == null ? null : request.getCheckConclusion());
+        String remark = request == null ? null : trimToNull(request.getCheckRemark());
+        if ("REJECT".equals(conclusion) && (remark == null || remark.isEmpty())) {
+            throw BusinessException.of("核对不通过时必须填写原因");
+        }
         LocalDateTime now = LocalDateTime.now();
         int updated = updateFinance(groupIds, v, userId, userName, now);
         if (updated != groupIds.size()) {
             throw BusinessException.of("订单内部分数据已上报集团或状态已变更，请刷新后重试");
         }
-        // 订单级字段以主表为准，同时回写主表
+        // 订单级字段以主表为准，同时回写主表（含核对结论/备注）
         orderService.updateFinanceFields(order.getId(), v.receiptNo(), v.financeReceiptDate(),
-                v.fundDynamicRows(), v.isReceived(), userId, userName, now);
-        return result(id, order.getId(), v, userId, userName, now);
+                v.fundDynamicRows(), v.isReceived(), conclusion, remark, userId, userName, now);
+        Map<String, Object> result = result(row.getId(), order.getId(), v, userId, userName, now);
+        result.put("checkConclusion", conclusion);
+        result.put("checkRemark", remark);
+        return result;
     }
 
     /** 同一订单的全部明细（order_id 优先）；无 order_id 时按订单编号/业务组号/收据号+客户回退。 */
@@ -124,14 +132,6 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
         }
         List<OpsBusinessData> rows = businessDataMapper.selectList(qw);
         return rows.isEmpty() ? List.of(row) : rows;
-    }
-
-    private void assertScope(OpsBusinessData row) {
-        Set<Long> visible = dataScopeService.getVisibleCorpIds();
-        if (visible == null) return; // super admin
-        if (row.getCorpId() == null || !visible.contains(row.getCorpId())) {
-            throw BusinessException.forbidden("无权操作该业务数据");
-        }
     }
 
     private ValidatedFinance validate(FinanceCheckRequest req, OpsBusinessData row,
@@ -268,8 +268,9 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
                 .set(OpsBusinessData::getModifyTime, now)
                 .set(OpsBusinessData::getModifyUser, userId)
                 .set(OpsBusinessData::getModifyUserName, userName);
-        Set<Long> visible = dataScopeService.getVisibleCorpIds();
-        if (visible != null) uw.in(OpsBusinessData::getCorpId, visible);
+        // 不在这里叠加数据范围：调用前已校验订单归属（公开入口 assertScope，
+        // 工作流入口由任务归属保证）；内部回调线程没有 SecurityContext，
+        // 叠加可见范围会退化为空集合导致 0 行更新。
         return businessDataMapper.update(null, uw);
     }
 
@@ -284,8 +285,12 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
         } catch (Exception e) {
             log.debug("财务核对人姓名查询失败 userId={}: {}", userId, e.getMessage());
         }
-        String username = SecurityUtils.getCurrentUser().getUsername();
-        return username != null ? username : "";
+        try {
+            String username = SecurityUtils.getCurrentUser().getUsername();
+            return username != null ? username : "";
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private Map<String, Object> result(Long id, Long orderId, ValidatedFinance v, Long userId,
@@ -301,6 +306,21 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
         result.put("financeCheckUserName", userName);
         result.put("financeCheckTime", now);
         return result;
+    }
+
+    private static String normalizeConclusion(String raw) {
+        String value = str(raw).toUpperCase();
+        if (value.isEmpty()) return "PASS";
+        if (!"PASS".equals(value) && !"REJECT".equals(value) && !"HOLD".equals(value)) {
+            throw BusinessException.of("核对结论必须是 PASS / REJECT / HOLD");
+        }
+        return value;
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private static String str(Object value) {

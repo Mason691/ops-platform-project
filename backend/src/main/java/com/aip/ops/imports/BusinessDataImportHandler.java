@@ -13,6 +13,7 @@ import com.aip.ops.mapper.OpsBusinessModelAliasMapper;
 import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.BusinessOrderService;
+import com.aip.ops.service.BusinessOrderWorkflowService;
 import com.aip.ops.service.GasMemberMatcher;
 import com.aip.sdk.client.PlatformInternalClient;
 import lombok.extern.slf4j.Slf4j;
@@ -21,6 +22,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.sql.DataSource;
 import java.math.BigDecimal;
@@ -60,6 +63,7 @@ public class BusinessDataImportHandler implements ImportHandler {
     private final GasMemberMatcher memberMatcher;
     private final BusinessOrderService orderService;
     private final OrderNoGenerator orderNoGenerator;
+    private final BusinessOrderWorkflowService workflowService;
 
     private static final String CATEGORY_TYPE_CODE = "PRODUCT_CATEGORY";
     private static final Set<String> VALID_COMPANIES =
@@ -89,7 +93,8 @@ public class BusinessDataImportHandler implements ImportHandler {
                                      JdbcTemplate jdbcTemplate,
                                      GasMemberMatcher memberMatcher,
                                      BusinessOrderService orderService,
-                                     OrderNoGenerator orderNoGenerator) {
+                                     OrderNoGenerator orderNoGenerator,
+                                     BusinessOrderWorkflowService workflowService) {
         this.mapper = mapper;
         this.productMapper = productMapper;
         this.aliasMapper = aliasMapper;
@@ -100,6 +105,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         this.memberMatcher = memberMatcher;
         this.orderService = orderService;
         this.orderNoGenerator = orderNoGenerator;
+        this.workflowService = workflowService;
     }
 
     @Override
@@ -667,6 +673,23 @@ public class BusinessDataImportHandler implements ImportHandler {
             ir.setOrderCount((int) p.rows.stream()
                     .map(r -> r.orderId).filter(Objects::nonNull).distinct().count());
             ir.setDetailedAddressEmptyCount(emptyAddressCount(p));
+            // 事务提交后异步发起工作流，避免在导入事务内调用平台 HTTP；
+            // 发起失败只记日志，管理端可对单笔订单手动重试。
+            List<Long> orderIds = p.rows.stream().map(r -> r.orderId)
+                    .filter(Objects::nonNull).distinct().toList();
+            if (!orderIds.isEmpty()) {
+                if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                    TransactionSynchronizationManager.registerSynchronization(
+                            new TransactionSynchronization() {
+                                @Override
+                                public void afterCommit() {
+                                    workflowService.startBatchAsync(orderIds);
+                                }
+                            });
+                } else {
+                    workflowService.startBatchAsync(orderIds);
+                }
+            }
             return ir;
         } finally {
             ps.close();
