@@ -29,6 +29,7 @@
     {"path":"pages/employee/business-data-new","style":{"navigationBarTitleText":"新增业务","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/flow-todo","style":{"navigationBarTitleText":"待办任务","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white","enablePullDownRefresh":true}},
     {"path":"pages/employee/flow-task","style":{"navigationBarTitleText":"任务处理","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
+    {"path":"pages/employee/purchase-order","style":{"navigationBarTitleText":"采购订单","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white","enablePullDownRefresh":true}},
     {"path":"pages/employee/ai-chat","style":{"navigationBarTitleText":"AI助手","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/admin/commission-rules","style":{"navigationBarTitleText":"个人提成规则","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/admin/gas-user","style":{"navigationBarTitleText":"燃气用户管理","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},

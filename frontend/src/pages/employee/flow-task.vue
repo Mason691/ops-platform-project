@@ -23,10 +23,24 @@
     </view>
 
     <template v-else>
-      <view class="card">
+      <view v-if="isPurchase" class="card">
+        <view class="card-title">
+          <text>采购订单</text>
+          <text class="node">{{ detailNodeName }}</text>
+        </view>
+        <view class="info-row"><text class="k">单据编号</text><text class="v">{{ order.billNo || '-' }}</text></view>
+        <view class="info-row"><text class="k">供应商</text><text class="v">{{ order.supplierName || order.supplierNumber || '-' }}</text></view>
+        <view class="info-row"><text class="k">单据日期</text><text class="v">{{ order.billDate || '-' }}</text></view>
+        <view class="info-row"><text class="k">金额合计</text><text class="v money">{{ money(order.totalAmount) }}</text></view>
+        <view class="info-row"><text class="k">数据来源</text><text class="v">{{ sourceLabel(order.dataSource) }}</text></view>
+        <view class="info-row"><text class="k">审批状态</text><text class="v">{{ approvalLabel(order.approvalStatus) }}</text></view>
+        <view class="info-row"><text class="k">提交时间</text><text class="v">{{ fmtTime(order.approvalSubmittedAt) }}</text></view>
+      </view>
+
+      <view v-if="!isPurchase" class="card">
         <view class="card-title">
           <text>{{ order.bizStatusName || '业务订单' }}</text>
-          <text class="node">{{ task.nodeName || detailNodeName }}</text>
+          <text class="node">{{ detailNodeName }}</text>
         </view>
         <view class="info-row"><text class="k">订单编号</text><text class="v">{{ order.orderNo || '-' }}</text></view>
         <view class="info-row"><text class="k">收据号</text><text class="v">{{ order.receiptNo || '-' }}</text></view>
@@ -36,7 +50,7 @@
         <view class="info-row"><text class="k">计算状态</text><text class="v">{{ order.calcStatus || '未计算' }}</text></view>
       </view>
 
-      <view v-if="(order.products || []).length" class="card">
+      <view v-if="!isPurchase && (order.products || []).length" class="card">
         <text class="card-title">商品明细</text>
         <view v-for="(p, i) in order.products" :key="i" class="product">
           <view class="product-main">
@@ -208,6 +222,11 @@ const conclusions = [
 
 const actionType = computed(() => (detail.value && detail.value.node && detail.value.node.actionType) || '')
 const detailNodeName = computed(() => (detail.value && detail.value.task && detail.value.task.nodeName) || '')
+/** SCM 采购订单：同一底座工作流 H5 页面通过 businessType 分支展示与审批 */
+const isPurchase = computed(() => {
+  const instance = detail.value && detail.value.instance
+  return !!instance && instance.businessType === 'PUR_ORDER'
+})
 const actionTitle = computed(() => ({
   OPS_FINANCE_CHECK: '财务核对',
   OPS_DISPATCH_OUTBOUND: '派工出库',
@@ -253,6 +272,11 @@ async function loadData() {
     detail.value = await api.workflowTaskDetail(taskId.value)
     const businessId = detail.value && detail.value.instance ? detail.value.instance.businessId : ''
     if (!businessId) throw { msg: '任务未关联业务单据' }
+    if (isPurchase.value) {
+      // 采购审批：订单详情走 SCM，审批动作走 SCM 代理（回写审批人后由底座回调驱动）
+      order.value = await api.scmPurOrderDetail(businessId)
+      return
+    }
     order.value = await api.businessOrderDetail(businessId)
     const r = order.value || {}
     form.receiptNo = r.receiptNo || ''
@@ -295,6 +319,16 @@ function normalizeDate(raw) {
 }
 
 function categoryLabel(key) { return categoryMap.value[String(key)] || key }
+/** 采购订单审批页展示用（不依赖字典，避免 H5 额外请求） */
+function sourceLabel(v) {
+  return { DIRECT: '直接采购', BUSINESS_DATA: '业务数据', MALL_ORDER: '商城订单' }[v] || v || '-'
+}
+function approvalLabel(v) {
+  return { NONE: '无需审批', IN_APPROVAL: '审批中', APPROVED: '已通过', REJECTED: '已驳回' }[v] || v || '-'
+}
+function fmtTime(v) {
+  return v ? String(v).replace('T', ' ').slice(0, 19) : '-'
+}
 function money(v) {
   if (v === null || v === undefined || v === '') return '-'
   const n = Number(v)
@@ -353,6 +387,12 @@ async function submit() {
   if (error) return toast(error)
   submitting.value = true
   try {
+    if (isPurchase.value) {
+      await api.scmPurOrderApprove({ taskId: Number(taskId.value), opinion: opinion.value })
+      toast('审批已通过')
+      goTodo()
+      return
+    }
     const formData = buildFormData()
     if (actionType.value === 'OPS_FINANCE_CHECK' && form.checkConclusion === 'HOLD') {
       await api.businessHoldFinance(order.value.orderId, formData)
@@ -399,7 +439,12 @@ async function confirmReject() {
   if (text.length < 5) return toast('驳回意见至少5个字')
   submitting.value = true
   try {
-    await api.workflowReject({ taskId: Number(taskId.value), opinion: text })
+    const payload = { taskId: Number(taskId.value), opinion: text }
+    if (isPurchase.value) {
+      await api.scmPurOrderReject(payload)
+    } else {
+      await api.workflowReject(payload)
+    }
     toast('已驳回')
     goTodo()
   } catch (e) {

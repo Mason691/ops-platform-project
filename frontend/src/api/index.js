@@ -245,6 +245,19 @@ export const api = {
   workflowTaskDetail: (taskId) => request({url:'/api/wf/task/' + taskId}),
   workflowApprove: (data) => request({url:'/api/wf/task/approve', method:'POST', data}),
   workflowReject: (data) => request({url:'/api/wf/task/reject', method:'POST', data}),
+  // SCM 采购订单（城市合伙人 H5 制单 / 总经办 H5 核审；nginx /api/scm/ → 8084）
+  scmPurOrderList: (params) => request({url:'/api/scm/pur-order/h5/list', data:params}),
+  scmPurOrderDetail: (id) => request({url:'/api/scm/pur-order/h5/' + id}),
+  scmPurOrderCreate: (data) => request({url:'/api/scm/pur-order/h5', method:'POST', data}),
+  scmPurOrderUpdate: (id, data) => request({url:'/api/scm/pur-order/' + id, method:'PUT', data}),
+  scmPurOrderSubmit: (id) => request({url:'/api/scm/pur-order/h5/' + id + '/submit', method:'POST'}),
+  scmPurOrderRefresh: (id) => request({url:'/api/scm/pur-order/h5/' + id + '/approval-refresh', method:'POST'}),
+  scmPurOrderApprove: (data) => request({url:'/api/scm/pur-order/h5/workflow/approve', method:'POST', data}),
+  scmPurOrderReject: (data) => request({url:'/api/scm/pur-order/h5/workflow/reject', method:'POST', data}),
+  // SCM 基础资料（采购制单下拉；员工 JWT 共享域）
+  scmSuppliers: (params) => request({url:'/api/scm/supplier/page', data:params}),
+  scmWarehouses: () => request({url:'/api/scm/warehouse/list', data:{pageNum:1,pageSize:200}}),
+  scmMaterials: (params) => request({url:'/api/bd/material/page', data:params}),
   // 业务订单详情 / 派工可选员工 / 财务暂缓（ops，员工 JWT + 数据范围）
   businessOrderDetail: (orderId) => request({url:'/api/ops/admin/business-data/orders/' + orderId}),
   businessFlowAssignees: () => request({url:'/api/ops/admin/business-data/flow/assignees'}),

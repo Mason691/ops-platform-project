@@ -56,6 +56,14 @@
           </view>
           <text class="mc-arrow">›</text>
         </view>
+        <view class="menu-card" @click="goPurchaseOrder">
+          <view class="mc-icon mc-icon-data"><text>🧾</text></view>
+          <view class="mc-body">
+            <text class="mc-title">采购订单</text>
+            <text class="mc-desc">城市合伙人制单与审批进度</text>
+          </view>
+          <text class="mc-arrow">›</text>
+        </view>
         <view class="menu-card" @click="goTodo">
           <view class="mc-icon mc-icon-pending"><text>📋</text></view>
           <view class="mc-body">
@@ -162,6 +170,7 @@ onMounted(async () => {
 })
 
 function goBusinessData() { uni.navigateTo({ url: '/pages/employee/business-data' }) }
+function goPurchaseOrder() { uni.navigateTo({ url: '/pages/employee/purchase-order' }) }
 function goTodo()         { uni.redirectTo({ url: '/pages/employee/flow-todo' }) }
 function goAiChat()       { uni.redirectTo({ url: '/pages/employee/ai-chat' }) }
 function goProfile()      { uni.redirectTo({ url: '/pages/employee/profile' }) }
