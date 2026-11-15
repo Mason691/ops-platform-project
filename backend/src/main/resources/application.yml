@@ -130,6 +130,10 @@ management:
     web:
       exposure:
         include: health,info
+  health:
+    # SDK 引入 Redis starter 后，Redis 未配置凭据时不能拖垮 /actuator/health
+    redis:
+      enabled: false
 
 logging:
   level:
