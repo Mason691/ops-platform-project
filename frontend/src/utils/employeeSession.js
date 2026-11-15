@@ -8,6 +8,9 @@ const SESSION_KEYS = [
   'ops_employee_info',
   'ops_employee_companies',
   'ops_employee_active_company',
+  'ops_employee_permissions',
+  'ops_employee_roles',
+  'ops_employee_no_permission',
   'ops_employee_login_mode',
   'ops_wechat_oauth_code',
   'ops_wechat_oauth_state',
@@ -60,17 +63,96 @@ export function saveEmployeeSession(r, loginMode) {
     corpId: r.corpId,
     avatar: r.avatar || ''
   }))
+  const roleNames = r.roleNames || r.roles || []
+  const role = r.role || roleNames[0] || '员工'
   // 默认公司直接用登录返回的 corpId/corpName（不依赖可选的 companies 列表）
   uni.setStorageSync('ops_employee_active_company', JSON.stringify({
     corpId: r.corpId,
     corpName: r.corpName || '',
-    roleName: r.role || '员工'
+    roleName: role
   }))
-  const companies = Array.isArray(r.companies) ? r.companies : []
+  const companies = (Array.isArray(r.companies) ? r.companies : []).map(c => ({
+    ...c,
+    roleName: c.roleName || (c.roleNames || [])[0] || '员工'
+  }))
   uni.setStorageSync('ops_employee_companies', JSON.stringify(companies))
+  const permissions = r.permissions || []
+  uni.setStorageSync('ops_employee_permissions', JSON.stringify(permissions))
+  uni.setStorageSync('ops_employee_roles', JSON.stringify(roleNames))
+  uni.setStorageSync('ops_employee_no_permission', permissions.length ? '0' : '1')
   if (loginMode) {
     uni.setStorageSync('ops_employee_login_mode', loginMode)
   }
+}
+
+function readJson(key, fallback) {
+  try {
+    const raw = uni.getStorageSync(key)
+    return raw ? JSON.parse(raw) : fallback
+  } catch (_) {
+    return fallback
+  }
+}
+
+/** 当前组织（工作台顶部/我的页展示）。 */
+export function getActiveCompany() {
+  return readJson('ops_employee_active_company', {})
+}
+
+/** 登录时返回的全部组织（切换接口不可用时的兜底列表）。 */
+export function getEmployeeCompanies() {
+  return readJson('ops_employee_companies', [])
+}
+
+export function getEmployeeInfo() {
+  return readJson('ops_employee_info', {})
+}
+
+export function getEmployeePermissions() {
+  return readJson('ops_employee_permissions', [])
+}
+
+/**
+ * 应用切换组织响应：替换 token、当前组织、角色与权限缓存。
+ * 切换接口返回 orgs 时同步刷新 companies，保证下次打开面板立即正确。
+ */
+export function applyOrgSwitch(data) {
+  const token = data && (data.accessToken || data.token)
+  if (!token) throw new Error('切换响应缺少 token')
+  const info = getEmployeeInfo()
+  const roleNames = data.roleNames || data.roles || []
+  const role = roleNames[0] || info.role || '员工'
+
+  uni.setStorageSync('token_type', 'employee')
+  uni.setStorageSync('ops_employee_token', token)
+  uni.setStorageSync('corp_id', String(data.corpId))
+  uni.setStorageSync('ops_employee_info', JSON.stringify({
+    ...info,
+    employeeId: info.employeeId || data.userId,
+    name: data.realName || info.name || '',
+    phone: data.phone || info.phone || '',
+    role,
+    corpId: data.corpId,
+    avatar: data.avatar || info.avatar || ''
+  }))
+  uni.setStorageSync('ops_employee_active_company', JSON.stringify({
+    corpId: data.corpId,
+    corpName: data.corpName || '',
+    roleName: role
+  }))
+  const companies = (data.orgs || data.companies || []).map(c => ({
+    corpId: c.corpId,
+    corpName: c.corpName || '',
+    roleName: (c.roleNames || [])[0] || c.roleName || '员工'
+  }))
+  if (companies.length) {
+    uni.setStorageSync('ops_employee_companies', JSON.stringify(companies))
+  }
+  const permissions = data.permissions || []
+  uni.setStorageSync('ops_employee_permissions', JSON.stringify(permissions))
+  uni.setStorageSync('ops_employee_roles', JSON.stringify(roleNames))
+  uni.setStorageSync('ops_employee_no_permission', permissions.length ? '0' : '1')
+  return data
 }
 
 /** 无选中组织时，从缓存的 companies 取第一个作为默认组织。 */

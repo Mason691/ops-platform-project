@@ -32,6 +32,9 @@ public final class EmployeeLoginResultMapper {
         result.put("corpName", data.getOrDefault("corpName", ""));           // 组织名称
         result.put("expiresIn", data.getOrDefault("expiresIn", jwtExpiration));
         result.put("companies", data.getOrDefault("companies", List.of()));  // 多组织列表
+        result.put("permissions", data.getOrDefault("permissions", List.of())); // 按钮权限
+        result.put("roleNames", data.getOrDefault("roleNames", List.of()));     // 当前组织角色
+        result.put("roles", data.getOrDefault("roles", result.get("roleNames")));
         result.put("avatar", data.getOrDefault("avatar", ""));               // sys_user 头像
         return result;
     }

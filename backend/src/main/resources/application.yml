@@ -9,6 +9,9 @@ server:
 spring:
   application:
     name: ops-platform
+  # 平台开启 Redis 时，子系统同步检查 blacklist:{jti}；默认关闭不改变现网行为
+  redis:
+    enabled: ${SPRING_REDIS_ENABLED:false}
   servlet:
     multipart:
       max-file-size: 50MB

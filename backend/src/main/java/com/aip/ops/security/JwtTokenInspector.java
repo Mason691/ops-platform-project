@@ -15,7 +15,7 @@ import java.nio.charset.StandardCharsets;
  * 读取当前请求 JWT 的 {@code token_type} claim。
  *
  * <p>平台两种 JWT 共用同一签名密钥、且 subject 语义不同：
- * 员工 JWT（{@code JwtUtils.generateToken}）sub=sys_user.id，无 token_type；
+ * 员工 JWT（{@code JwtUtils.generateToken}）sub=sys_user.id，token_type=employee（旧 token 无该 claim）；
  * 会员 SSO JWT（{@code JwtUtils.generateSsoToken}）sub=sys_member.id，
  * token_type=sso。两套自增 ID 可能撞号，员工专用接口若只按 id 判断，
  * 会员令牌有机会被误认为员工。此工具在签名校验通过后读取 token_type，
@@ -31,7 +31,7 @@ public class JwtTokenInspector {
         this.secretBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
     }
 
-    /** 当前请求的 token_type；无该 claim（员工 JWT）或解析失败返回 null。 */
+    /** 当前请求的 token_type；旧员工 JWT 无该 claim 或解析失败返回 null。 */
     public String currentTokenType() {
         String header = currentAuthorizationHeader();
         if (header == null) return null;

@@ -2,8 +2,16 @@
   <view class="page">
     <!-- Brand Header -->
     <view class="brand-bar">
-      <text class="brand-name">金地燃气</text>
-      <text class="brand-sub">员工工作台</text>
+      <view class="brand-left">
+        <text class="brand-name">金地燃气</text>
+        <text class="brand-sub">员工工作台</text>
+      </view>
+      <OrgSwitcher :corp-name="company.corpName" :org-count="orgs.length" @open="openSheet" />
+    </view>
+
+    <view v-if="noPermissionTip" class="org-empty-card">
+      <text class="empty-title">当前组织暂无可用功能</text>
+      <text class="empty-sub">请联系管理员为该组织角色配置菜单权限</text>
     </view>
 
     <!-- Profile Card -->
@@ -45,7 +53,7 @@
     </view>
 
     <!-- Menu -->
-    <view class="menu-section">
+    <view v-if="!noPermissionTip" class="menu-section">
       <text class="section-title">常用功能</text>
       <view class="menu-grid">
         <view class="menu-card" @click="goBusinessData">
@@ -91,19 +99,33 @@
       </view>
     </view>
 
+    <OrgSwitchSheet
+      v-model:visible="sheetVisible"
+      :orgs="orgs"
+      :current-corp-id="Number(company.corpId) || 0"
+      :loading="switching"
+      @select="confirmSwitch"
+    />
+
     <!-- Bottom Tab Bar -->
     <EmployeeTabBar active-key="home" @switch="onTabSwitch" />
   </view>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index.js'
 import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
+import OrgSwitcher from '@/components/OrgSwitcher.vue'
+import OrgSwitchSheet from '@/components/OrgSwitchSheet.vue'
+import { useOrgSwitch } from '@/hooks/useOrgSwitch'
+import { getActiveCompany, getEmployeeInfo } from '@/utils/employeeSession'
 
 const company      = ref({})
 const employeeName = ref('')
 const roleName     = ref('员工')
+const noPermissionTip = ref(uni.getStorageSync('ops_employee_no_permission') === '1')
 const currentYear  = new Date().getFullYear().toString()
 
 const yearlyStats = ref({
@@ -112,43 +134,52 @@ const yearlyStats = ref({
   totalSale: '¥0'
 })
 
+const {
+  orgs, sheetVisible, switching, loadOrgs, openSheet, confirmSwitch
+} = useOrgSwitch({ onChanged: onOrgChanged })
+
 const avatarChar = computed(() => (employeeName.value || '员').charAt(0))
 
-onMounted(async () => {
-  const empToken = uni.getStorageSync('ops_employee_token')
-  if (!empToken) {
+onShow(async () => {
+  await loadDashboard()
+  await loadOrgs()
+})
+
+function refreshCompany() {
+  noPermissionTip.value = uni.getStorageSync('ops_employee_no_permission') === '1'
+  const info = getEmployeeInfo()
+  const active = getActiveCompany()
+  employeeName.value = info.name || ''
+  if (active.corpId) {
+    company.value = active
+    roleName.value = active.roleName || info.role || '员工'
+    return
+  }
+  // 兜底：active_company 丢失时用员工信息恢复
+  if (info.corpId) {
+    company.value = {
+      corpId: info.corpId, corpName: '', roleName: info.role || '员工'
+    }
+    uni.setStorageSync('ops_employee_active_company', JSON.stringify(company.value))
+    roleName.value = company.value.roleName
+  }
+}
+
+async function loadDashboard() {
+  if (!uni.getStorageSync('ops_employee_token')) {
     uni.redirectTo({ url: '/pages/employee/login' })
     return
   }
+  refreshCompany()
+  await loadStats()
+}
 
-  // ── 员工信息 ──
-  const info = uni.getStorageSync('ops_employee_info')
-  if (info) {
-    try {
-      const p = JSON.parse(info)
-      employeeName.value = p.name || ''
-      roleName.value = p.role || '员工'
-    } catch (_) {}
-  }
-
-  // ── 公司 ──
-  const active = uni.getStorageSync('ops_employee_active_company')
-  if (active) {
-    try { company.value = JSON.parse(active) } catch (_) {}
-  }
-  if (!company.value.corpId && info) {
-    try {
-      const p = JSON.parse(info)
-      company.value = { corpId: p.corpId, corpName: '', roleName: p.role || '员工' }
-      uni.setStorageSync('ops_employee_active_company', JSON.stringify(company.value))
-    } catch (_) {}
-  }
-
-  // ── 全年统计 ──
+async function loadStats() {
+  // 先归零，避免切换组织后短暂显示上一个组织的数据
+  yearlyStats.value = { orderCount: '0', totalCommission: '¥0', totalSale: '¥0' }
   try {
     const data = await api.employeeOverview()
     const months = Array.isArray(data?.months) ? data.months : []
-    // Sum only current-year months
     let yearOrders = 0, yearCommission = 0, yearSale = 0
     for (const m of months) {
       if (m.month && m.month.startsWith(currentYear)) {
@@ -165,9 +196,15 @@ onMounted(async () => {
       totalSale: '¥' + (yearSale / 10000).toFixed(2) + '万'
     }
   } catch (_) {
-    // keep defaults showing 0
+    // 保留归零后的占位，避免残留旧组织数据
   }
-})
+}
+
+async function onOrgChanged(data) {
+  noPermissionTip.value = !(data.permissions || []).length
+  refreshCompany()
+  await loadStats()
+}
 
 function goBusinessData() { uni.navigateTo({ url: '/pages/employee/business-data' }) }
 function goVerifiedBusiness() { uni.navigateTo({ url: '/pages/employee/verified-business' }) }
@@ -188,7 +225,11 @@ function onTabSwitch(key) {
   padding-bottom: 130rpx;
 }
 
-.brand-bar { padding: 48rpx 36rpx 0; display: flex; align-items: baseline; gap: 16rpx; }
+.brand-bar { padding: 48rpx 36rpx 0; display: flex; align-items: center; justify-content: space-between; gap: 16rpx; }
+.brand-left { display: flex; align-items: baseline; gap: 16rpx; min-width: 0; }
+.org-empty-card { margin: 24rpx; padding: 40rpx 32rpx; background: #fff; border-radius: 20rpx; text-align: center; box-shadow: 0 2rpx 16rpx rgba(0,0,0,.04); }
+.empty-title { display: block; font-size: 30rpx; font-weight: 600; color: #1D2129; }
+.empty-sub { display: block; margin-top: 12rpx; font-size: 24rpx; color: #86909C; }
 .brand-name { font-size: 34rpx; font-weight: 700; color: #1D2129; }
 .brand-sub { font-size: 24rpx; color: #86909C; }
 

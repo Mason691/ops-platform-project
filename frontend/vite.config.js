@@ -14,6 +14,8 @@ export default defineConfig(({ mode }) => ({
     cors: true,
     headers: { 'Access-Control-Allow-Origin': '*' },
     proxy: {
+      // 组织切换复用底座 /api/auth/**；必须放在 /api 之前，避免被 ops 后端吞掉
+      '/api/auth': { target: 'http://localhost:8080', changeOrigin: true },
       '/api': { target: 'http://localhost:8084', changeOrigin: true },
       '/uploads': { target: 'http://localhost:8084', changeOrigin: true }
     }

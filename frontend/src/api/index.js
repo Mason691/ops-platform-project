@@ -228,6 +228,13 @@ export const api = {
 
   // 员工身份 & 业务数据
   employeeIdentity: () => request({url:'/api/ops/employee/identity'}),
+  // 复用底座组织接口：公众号 H5 与平台同域，/api/auth/** 由 platform-nginx 承载
+  employeeOrgs: () => request({url:'/api/auth/orgs'}),
+  employeeSwitchOrg: (corpId) => request({
+    url: '/api/auth/switch-org',
+    method: 'POST',
+    data: { corpId }
+  }),
   employeeMonths: () => request({url:'/api/ops/employee/business-data/months'}),
   employeeSummary: (month) => request({url:'/api/ops/employee/business-data/summary',data:{month}}),
   employeeDetail: (month, category) => request({url:'/api/ops/employee/business-data/detail',data:{month, category}}),
