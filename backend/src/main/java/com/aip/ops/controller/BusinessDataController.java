@@ -185,6 +185,12 @@ public class BusinessDataController {
         return R.ok(service.orderDetail(orderId));
     }
 
+    /** 业务订单详情（按订单编号）：列表双击查看，兼容历史无主表行。 */
+    @GetMapping("/orders/by-no")
+    public R<?> orderDetailByNo(@RequestParam String orderNo) {
+        return R.ok(service.orderDetailByNo(orderNo));
+    }
+
     /** 业务状态字典选项（工作流驱动，中文名来自数据字典）。 */
     @GetMapping("/biz-statuses")
     public R<?> bizStatuses() {

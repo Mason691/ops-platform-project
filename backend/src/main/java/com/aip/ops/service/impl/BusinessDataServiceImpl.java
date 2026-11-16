@@ -404,6 +404,60 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
+    public Map<String, Object> orderDetailByNo(String orderNo) {
+        String no = orderNo == null ? null : orderNo.trim();
+        if (!hasText(no)) {
+            throw com.aip.sdk.exception.BusinessException.notFound("业务订单不存在");
+        }
+        Set<Long> visible = dataScopeService.getVisibleCorpIds();
+        if (visible != null && visible.isEmpty()) {
+            throw com.aip.sdk.exception.BusinessException.forbidden("无权查看该业务订单");
+        }
+        OpsBusinessOrder master = findOrderByNo(no);
+        if (master != null) {
+            requireVisibleOrder(visible, master.getCorpId());
+            // 主表存在时复用订单ID查询，保持与工作流节点页同一口径
+            return orderDetail(master.getId());
+        }
+        List<OpsBusinessData> group = latestItemGroupByNo(no);
+        if (group.isEmpty()) {
+            throw com.aip.sdk.exception.BusinessException.notFound("业务订单不存在");
+        }
+        requireVisibleOrder(visible, group.get(0).getCorpId());
+        Map<String, Object> view = buildOrderView(group, null);
+        view.put("bizStatus", "0");
+        view.put("bizStatusName", bizStatusService.label("0"));
+        view.put("flowRecords", List.of());
+        return view;
+    }
+
+    private OpsBusinessOrder findOrderByNo(String orderNo) {
+        LambdaQueryWrapper<OpsBusinessOrder> qw = new LambdaQueryWrapper<>();
+        qw.eq(OpsBusinessOrder::getOrderNo, orderNo)
+                .orderByDesc(OpsBusinessOrder::getId)
+                .last("LIMIT 1");
+        return orderMapper.selectOne(qw);
+    }
+
+    /** 历史行可能未生成主表：按订单编号取最新一组子表行，避免多组混拼。 */
+    private List<OpsBusinessData> latestItemGroupByNo(String orderNo) {
+        LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
+        qw.eq(OpsBusinessData::getOrderNo, orderNo).orderByDesc(OpsBusinessData::getId);
+        List<OpsBusinessData> rows = mapper.selectList(qw);
+        if (rows.isEmpty()) return List.of();
+        Map<String, List<OpsBusinessData>> groups = rows.stream()
+                .collect(Collectors.groupingBy(BusinessDataServiceImpl::orderKey,
+                        LinkedHashMap::new, Collectors.toList()));
+        return groups.values().iterator().next();
+    }
+
+    private void requireVisibleOrder(Set<Long> visible, Long corpId) {
+        if (visible != null && !visible.contains(corpId)) {
+            throw com.aip.sdk.exception.BusinessException.forbidden("无权查看该业务订单");
+        }
+    }
+
+    @Override
     public List<Map<String, Object>> flowAssignees() {
         Set<Long> visible = dataScopeService.getVisibleCorpIds();
         if (noVisibleCorp(visible)) {

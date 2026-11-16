@@ -18,6 +18,9 @@ public interface BusinessDataService {
     /** 订单详情（工作流节点处理页使用）：订单视图 + 商品明细 + 流程处理留痕。 */
     Map<String, Object> orderDetail(Long orderId);
 
+    /** 订单详情（按订单编号）：历史无主表行回退子表分组，供列表双击查看。 */
+    Map<String, Object> orderDetailByNo(String orderNo);
+
     /** 工作流派工节点可选的上门员工（可见组织范围内的在职员工）。 */
     java.util.List<Map<String, Object>> flowAssignees();
     List<String> getBatches();
