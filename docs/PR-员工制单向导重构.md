@@ -68,7 +68,17 @@
 - **提成比例粒度**：需求文档第 3 步描述为单个「提成比例」，但后端 `commission_rate` 以产品行为粒度（特批时每行独立）。本次保留逐产品录入，在收款信息页以产品列表展开，不弱化既有能力；如需改为整单一个比例，需要另行确认业务口径。
 - **草稿本地存储**：按 `corp_id + 员工 userId` 隔离，含客户手机/姓名/地址等 PII，7 天过期，提交成功即清除；同设备不同员工不会串读。若安全规范要求更短 TTL 或加密，可在后续调整。
 - **依赖列**：`ops_business_order.remark` 列已在生产确认存在；若其他环境建表脚本未包含该列，需要先补列。
-- **未执行项**：本次未做生产部署，也未在真机微信中验证键盘遮挡/拍照上传；这两项需发布后由用户完成。
+- **未执行项**：本次已完成生产部署（提交 `ce939f4`，2026-11-16 15:26），但尚未在真机微信中验证键盘遮挡/拍照上传与真实员工制单；这两项需由用户完成。
+
+## 生产发布记录（2026-11-16 15:26）
+
+- 提交：`ce939f4 feat(ops-h5): 员工新增业务订单改为 4 步向导`
+- 后端：JAR sha `0dab53e9d7b7e468600a6ca9236fe4ce8b98d37580f5dd3b5065ff5d7faccdc9`；镜像 `boss-platform/ops:wizard-20261116_152621`（`sha256:b3857c98…`），容器 `boss-ops-backend` healthy。
+- 前端：`index-D_T91--V.js`、`pages-employee-business-data-new.CFQJ8p6i.js`；`boss-ops-nginx` reload。
+- 备份：`ops-backend/app.jar.bak-wizard-20261116_152621`、镜像 `boss-platform/ops:rollback-wizard-20261116_152621`、前端 `html/ops.bak-wizard-20261116_152621.tgz`。
+- 冒烟：`/actuator/health` UP；`https://boss.jdzn99.com/ops/` 200（标题「金地燃气」）；新 chunk 200 且包含「待补充事项」；`/api/ops/employee/business-data/manual/options` 无 token 返回 401（路由正常）。
+- 回滚：重新 tag `rollback-wizard-20261116_152621` 为 `latest` 后 `docker compose up -d ops-backend`；前端解压备份 tgz 并 reload `boss-ops-nginx`。
+- 注意：生产 `/data2` 磁盘使用率 98%（余约 2.0G），后续发布前建议清理旧备份。
 
 ## 验证记录（本地）
 

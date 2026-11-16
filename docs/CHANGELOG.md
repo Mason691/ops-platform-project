@@ -2,12 +2,13 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
-## 2026-11-16（员工手工新增业务：4 步向导制单界面，待部署）
+## 2026-11-16（员工手工新增业务：4 步向导制单界面，生产已发布）
 
 - **前端**：`pages/employee/business-data-new.vue` 由单页长表单改为「基础信息 → 商品明细 → 收款信息 → 确认提交」4 步向导；新增 `useBusinessWizard` 状态机、吸顶步骤条、直接点选标签组、底部弹层搜索、分段选择器、数量步进器、金额滚动动效与成功页；删除被替代的 `BusinessEntryForm/BusinessAgentSelector/BusinessProductList/BusinessProductForm/BusinessReceiptForm`。
 - **校验**：下一步只拦截当前步骤并高亮/滚动/震动；确认页全量校验，缺失项「待补充事项」卡片就地补填（800ms 防抖避免输入中断）；草稿按 corp+员工暂存并可恢复；提交中遮罩防重复，失败不清空。
 - **后端**：手工新增请求新增可选 `remark`（≤500 字）并落库 `ops_business_order.remark`（复用 `BaseEntity.remark`，列已存在，无迁移）；同时写子表 `ops_business_order_item.remark` 供导出，订单列表/详情返回备注；`createOrder` 增参同步手工/Excel 导入/历史补建 3 处调用；手工新增接口将小区改为必填。
-- **验证**：后端 `mvn package -DskipTests`、前端 `npm run build:h5` / `build:mp-weixin` 通过；Puppeteer 无头端到端覆盖分步拦截、就地补填、多经办人 4 条明细、批次/品牌/型号弹层、凭证上传/删除、提交失败重试、继续制单、草稿恢复，页面无 JS 错误。生产尚未部署。
+- **验证**：后端 `mvn package -DskipTests`、前端 `npm run build:h5` / `build:mp-weixin` 通过；Puppeteer 无头端到端覆盖分步拦截、就地补填、多经办人 4 条明细、批次/品牌/型号弹层、凭证上传/删除、提交失败重试、继续制单、草稿恢复，页面无 JS 错误。
+- **生产发布（2026-11-16 15:26）**：提交 `ce939f4`；备份旧 JAR `ops-backend/app.jar.bak-wizard-20261116_152621`（sha `c040279f…`）、旧镜像 `boss-platform/ops:rollback-wizard-20261116_152621`、旧前端 `html/ops.bak-wizard-20261116_152621.tgz`；发布镜像 `boss-platform/ops:wizard-20261116_152621`（`sha256:b3857c98…`，容器内 JAR sha `0dab53e9…`），H5 资源 `index-D_T91--V.js` / `pages-employee-business-data-new.CFQJ8p6i.js`；`/actuator/health` UP、H5 200、`/api/ops/employee/business-data/manual/options` 返回 401（路由正常）、`boss-ops-nginx` 已 reload；无数据库迁移。**待真机业务验证**：员工登录后完成一笔制单，确认备注落库/订单视图展示、小区必填提示与凭证上传。
 
 ## 2026-11-14（公众号消息区域地址改为客户地址，生产已发布）
 
