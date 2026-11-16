@@ -3,7 +3,7 @@
     <!-- Brand Header -->
     <view class="brand-bar">
       <view class="brand-left">
-        <text class="brand-name">金地燃气</text>
+        <text class="brand-name">金地美家</text>
         <text class="brand-sub">员工工作台</text>
       </view>
       <OrgSwitcher :corp-name="company.corpName" :org-count="orgs.length" @open="openSheet" />

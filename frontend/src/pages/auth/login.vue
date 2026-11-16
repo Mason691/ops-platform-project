@@ -2,7 +2,7 @@
   <view class="page">
     <view class="brand">
       <text class="brand-icon">⛽</text>
-      <text class="brand-name">金地燃气</text>
+      <text class="brand-name">金地美家</text>
       <text class="brand-desc">便民服务 · 积分商城</text>
     </view>
 

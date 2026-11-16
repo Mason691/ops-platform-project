@@ -3,7 +3,7 @@
     <!-- Header -->
     <view class="header">
       <text class="header-logo">⛽</text>
-      <text class="header-title">金地燃气</text>
+      <text class="header-title">金地美家</text>
       <text class="header-sub">员工工作台</text>
     </view>
 
