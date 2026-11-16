@@ -2,6 +2,15 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-16（生产发布：业务数据双击查看订单详情）
+
+- **发布顺序**：先 ops 后端起效 `/orders/by-no`，再平台主站前端；ops 提交 `9ecb034`、平台提交 `0f72773`。
+- **后端**：本地 `mvn clean package -DskipTests -o`，overlay 构建 `boss-platform/ops:dblclick-20261116_1805`（`43141a26cd30`）并 tag 为 `latest`，`docker compose up -d ops-backend` 重建容器；容器内 JAR sha `e2f40f8c…`，`/actuator/health` 200，新路由 `/api/ops/admin/business-data/orders/by-no` 返回 401（已注册），既有 `/orders/{id}` 同为 401，无异常日志。
+- **前端**：从已推送提交 `0f72773` 的干净 worktree 构建（**未包含工作区未提交的 checkPhone/组织创建改动**），`rsync --delete` 同步到 `/data2/boss-platform/html/platform/`（218 个 assets，旧 chunk 已清除），`boss-platform-nginx` reload；入口 `index-DqPM3F5K.js`、`BusinessData-Ds7rGZnh.js` 公网 200。
+- **冒烟**：`/ops/business-data` 标题「协同平台」、首页 200、`/ops/` 标题「金地美家」（Ops H5 未受影响）；新 API 经 https 返回 401。
+- **备份/回滚**：旧 JAR `ops-backend/app.jar.bak-dblclick-20261116_1805`（旧 sha `90813674…`）、旧镜像 `boss-platform/ops:rollback-dblclick-20261116_1805`（`a7d0fb569cd6`）、旧前端 `backups/html-platform-dblclick-20261116_1805.tgz`；回滚后端 `docker tag boss-platform/ops:rollback-dblclick-20261116_1805 boss-platform/ops:latest && docker compose up -d ops-backend`，前端解压备份后 reload。
+- **未执行**：登录态浏览器双击端到端、移动端真机手势、真实订单数据核对（需有效 JWT 与生产数据）；建议业务侧抽一笔订单验证详情字段与权限。
+
 ## 2026-11-16（业务数据列表双击查看订单详情）
 
 - **平台主站**：`/ops/business-data` 列表数据行支持桌面双击、移动端（粗指针）单击打开「业务订单详情」抽屉；操作列/复选框/展开图标不触发；双击清除文本选中；单实例抽屉 + 请求序号防止连点多行竞态；详情 404 自动刷新列表，关闭不重置筛选/分页/滚动。
