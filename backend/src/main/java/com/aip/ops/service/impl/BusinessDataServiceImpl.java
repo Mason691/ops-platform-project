@@ -541,6 +541,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 master != null ? master.getFinanceCheckConclusion() : null);
         order.put("financeCheckRemark",
                 master != null ? master.getFinanceCheckRemark() : null);
+        // 订单备注：手工录入选填，导入单沿用子表备注；主表为空时取子表首行兜底
+        order.put("remark", master != null && master.getRemark() != null
+                ? master.getRemark()
+                : (rows.isEmpty() ? null : rows.get(0).getRemark()));
         order.put("financeChecked", financeChecked);
         order.put("financeCheckedCount", checkedCount);
         order.put("financeCheckedTotal", rows.size());

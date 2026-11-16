@@ -6,8 +6,11 @@
         <view class="voucher-del" @click.stop="remove(index)">×</view>
       </view>
       <view v-if="modelValue.length < max" class="voucher-add" :class="{ disabled: uploading }" @click="choose">
-        <text class="add-icon">{{ uploading ? '…' : '＋' }}</text>
+        <text class="add-icon">{{ uploading ? progress + '%' : '＋' }}</text>
         <text class="add-text">{{ uploading ? '上传中' : '上传凭证' }}</text>
+        <view v-if="uploading" class="upload-progress">
+          <view class="upload-progress-fill" :style="{ width: progress + '%' }"></view>
+        </view>
       </view>
     </view>
     <text class="voucher-hint">最多 {{ max }} 张，支持拍照或相册，图片自动压缩</text>
@@ -15,7 +18,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { BASE_URL } from '@/config'
 import { assetUrl } from '@/utils/image'
 
@@ -25,7 +28,17 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue'])
 const uploading = ref(false)
+const progress = ref(0)
 const displayUrls = computed(() => props.modelValue.map(assetUrl))
+let disposed = false
+const activeXhrs = new Set()
+
+onBeforeUnmount(() => {
+  // 切步/确认页补填卡片消失时中止进行中的上传，避免孤儿文件与卸载后回写
+  disposed = true
+  activeXhrs.forEach(xhr => { try { xhr.abort() } catch (e) { /* 已结束 */ } })
+  activeXhrs.clear()
+})
 
 function choose() {
   if (uploading.value) return
@@ -40,17 +53,27 @@ function choose() {
     sourceType: ['album', 'camera'],
     success: async (res) => {
       uploading.value = true
+      progress.value = 0
+      const next = [...props.modelValue]
+      let uploaded = 0
       try {
-        const next = [...props.modelValue]
         for (const path of res.tempFilePaths) {
+          progress.value = 0
           next.push(await uploadOne(path))
-          emit('update:modelValue', [...next])
+          uploaded += 1
+          progress.value = 100
         }
-        uni.showToast({ title: '上传成功', icon: 'success' })
       } catch (e) {
-        uni.showToast({ title: e.message || '上传失败', icon: 'none' })
+        if (!disposed) uni.showToast({ title: e.message || '上传失败', icon: 'none' })
       } finally {
         uploading.value = false
+        progress.value = 0
+        // 全部上传完成后只回写一次：避免第一张完成就触发父级校验，
+        // 使确认页“待补充事项”卡片卸载，后续图片写进已销毁的实例。
+        if (!disposed && uploaded) emit('update:modelValue', next)
+        if (!disposed && uploaded === res.tempFilePaths.length) {
+          uni.showToast({ title: '上传成功', icon: 'success' })
+        }
       }
     },
     fail: (e) => {
@@ -119,8 +142,19 @@ function uploadBlob(blob) {
   formData.append('file', blob, 'voucher_' + Date.now() + '.jpg')
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
+    activeXhrs.add(xhr)
     xhr.open('POST', BASE_URL + '/api/ops/files/upload')
     if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token)
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        progress.value = Math.min(99, Math.round((event.loaded * 100) / event.total))
+      }
+    }
+    xhr.onloadend = () => activeXhrs.delete(xhr)
+    xhr.onabort = () => {
+      activeXhrs.delete(xhr)
+      reject(new Error('上传已取消'))
+    }
     xhr.onload = () => {
       try {
         const body = JSON.parse(xhr.responseText)
@@ -142,7 +176,7 @@ function uploadBlob(blob) {
 function uploadFile(filePath) {
   const token = uni.getStorageSync('ops_employee_token') || ''
   return new Promise((resolve, reject) => {
-    uni.uploadFile({
+    const task = uni.uploadFile({
       url: BASE_URL + '/api/ops/files/upload',
       filePath,
       name: 'file',
@@ -158,6 +192,11 @@ function uploadFile(filePath) {
       },
       fail: reject
     })
+    if (task && typeof task.onProgressUpdate === 'function') {
+      task.onProgressUpdate((res) => {
+        progress.value = Math.min(99, Number(res.progress) || 0)
+      })
+    }
   })
 }
 </script>
@@ -182,6 +221,13 @@ function uploadFile(filePath) {
   gap: 8rpx; box-sizing: border-box;
 }
 .voucher-add.disabled { opacity: .6; }
+.upload-progress {
+  width: 120rpx; height: 6rpx; background: #eee; border-radius: 3rpx; overflow: hidden;
+}
+.upload-progress-fill {
+  height: 100%; background: #FF6B35; border-radius: 3rpx;
+  transition: width .2s ease;
+}
 .add-icon { font-size: 48rpx; color: #bbb; line-height: 1; }
 .add-text { font-size: 22rpx; color: #999; }
 .voucher-hint { display: block; margin-top: 12rpx; font-size: 22rpx; color: #999; line-height: 1.5; }

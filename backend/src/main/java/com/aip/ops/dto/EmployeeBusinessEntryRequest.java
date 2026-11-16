@@ -24,7 +24,7 @@ public class EmployeeBusinessEntryRequest {
 
     private String customer;
 
-    /** 小区 ID（ai_platform.sys_community.id，选填；服务端校验属于当前组织） */
+    /** 小区 ID（ai_platform.sys_community.id，必填；服务端校验属于当前组织） */
     private Long communityId;
 
     /** 详细地址/门牌号（必填，≤200 字，如“3栋2单元501号”） */
@@ -47,6 +47,9 @@ public class EmployeeBusinessEntryRequest {
 
     /** 收款凭证 URL 列表（最多 3 张，整笔业务共用） */
     private List<String> voucherUrls;
+
+    /** 订单备注（选填，≤500 字，落库 ops_business_order.remark） */
+    private String remark;
 
     /** 单个产品明细。 */
     @Data

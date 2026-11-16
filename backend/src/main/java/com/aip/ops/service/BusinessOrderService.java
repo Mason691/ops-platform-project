@@ -20,7 +20,7 @@ public interface BusinessOrderService {
                                  Long communityId, String communityName, String detailedAddress,
                                  String receiptDate, LocalDate financeReceiptDate,
                                  Integer fundDynamicRows, String isReceived, String voucherUrl,
-                                 BigDecimal totalAmount, String calcStatus);
+                                 BigDecimal totalAmount, String calcStatus, String remark);
 
     OpsBusinessOrder findByOrderKey(Long corpId, String orderKey);
 

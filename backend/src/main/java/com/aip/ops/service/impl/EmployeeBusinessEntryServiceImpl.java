@@ -60,6 +60,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private static final int MAX_DETAIL_ADDRESS_LENGTH = 200;
     /** sys_member.real_name / nickname 为 VARCHAR(50)，自动建会员时不能超长 */
     private static final int MAX_CUSTOMER_LENGTH = 50;
+    private static final int MAX_REMARK_LENGTH = 500;
 
     private final JdbcTemplate jdbcTemplate;
     private final PlatformInternalClient platformInternalClient;
@@ -264,7 +265,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 null, ctx.company(), v.customer(), v.phone(), member.id(),
                 community.id(), community.name(), v.detailAddress(), v.receiptDate(),
                 null, null, v.received() ? "是" : "否", v.voucherUrl(),
-                totalAmount, INITIAL_CALC_STATUS);
+                totalAmount, INITIAL_CALC_STATUS, v.remark());
         // 多经办人按「产品 × 经办人」拆行：每行独立 agent_phone 归属，
         // 提成计算沿用「同收据号+客户+品类+型号」组内均分规则。
         for (ValidatedProduct product : v.products()) {
@@ -488,11 +489,24 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         String voucherUrl = normalizeVouchers(received, req.getVoucherUrls());
         Long communityId = req.getCommunityId();
         if (communityId != null && communityId <= 0) communityId = null;
-        // 小区选填（会员查询可自动带出），详细地址必填 —— 地址拆分后必须能定位到具体门牌
+        // 小区必填：订单需归属到具体小区，便于后续网格/台账统计
+        if (communityId == null) {
+            throw BusinessException.of("请选择小区");
+        }
         String detailAddress = requireText(
                 req.getDetailAddress(), "详细地址", MAX_DETAIL_ADDRESS_LENGTH);
+        String remark = normalizeRemark(req.getRemark());
         return new Validated(phone, customer, special, products, agents,
-                receiptDate, received, voucherUrl, communityId, detailAddress);
+                receiptDate, received, voucherUrl, communityId, detailAddress, remark);
+    }
+
+    /** 备注选填：去首尾空白，超长拒绝，空串落库为 null。 */
+    private static String normalizeRemark(String value) {
+        String remark = value == null ? "" : value.trim();
+        if (remark.length() > MAX_REMARK_LENGTH) {
+            throw BusinessException.of("备注不能超过" + MAX_REMARK_LENGTH + "个字");
+        }
+        return remark.isEmpty() ? null : remark;
     }
 
     /** 产品明细：至少一行；每行独立校验品牌/品类/型号、单价、数量与特批提成比例。 */
@@ -738,13 +752,15 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         entity.setCommissionRate(p.rate());
         entity.setIsReceived(v.received() ? "是" : "否");
         entity.setVoucherUrl(v.voucherUrl());
+        // 备注同时写子表：导出「备注」列读取的是子表 remark，保证手工单与导入单口径一致
+        entity.setRemark(v.remark());
         entity.setCalcStatus(INITIAL_CALC_STATUS);
         entity.setDeleteFlag(0);
         return entity;
     }
 
     /**
-     * 小区选填；有值时按 id + corp 校验归属并取名称（不接受前端传来的名称，防止跨租户引用）。
+     * 小区必填；按 id + corp 校验归属并取名称（不接受前端传来的名称，防止跨租户引用）。
      * 小区名称落库为冗余字段，供列表/导出/出库打印直接展示。
      */
     private CommunityInfo resolveCommunity(Long communityId, Long corpId) {
@@ -834,7 +850,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private record Validated(String phone, String customer, boolean special,
                              List<ValidatedProduct> products, List<AgentInfo> agents,
                              String receiptDate, boolean received, String voucherUrl,
-                             Long communityId, String detailAddress) {}
+                             Long communityId, String detailAddress, String remark) {}
 
     private record ValidatedProduct(String brand, String categoryKey, String model,
                                     BigDecimal price, int qty, BigDecimal amount,

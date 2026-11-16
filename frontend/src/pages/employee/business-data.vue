@@ -28,7 +28,8 @@
         </view>
         <!-- Batch selector -->
         <view class="batch-row">
-          <picker mode="selector" :range="batchList" range-key="label" @change="onBatchChange">
+          <picker mode="selector" :range="batchList" range-key="label"
+                  :value="selectedBatchIndex" @change="onBatchChange">
             <view class="batch-picker">
               <text>{{ selectedBatchLabel }}</text>
               <text class="batch-arrow">▼</text>
@@ -77,7 +78,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import BusinessMonthList from '@/components/BusinessMonthList.vue'
@@ -90,6 +91,10 @@ const months = ref([])
 const batchList = reactive([{ label: '全部批次', value: '' }])
 const selectedBatch = ref('')
 const selectedBatchLabel = ref('全部批次')
+const selectedBatchIndex = computed(() => {
+  const index = batchList.findIndex(item => item.value === selectedBatch.value)
+  return index >= 0 ? index : 0
+})
 
 async function loadBatches() {
   try {
@@ -138,15 +143,29 @@ onMounted(() => { loadBatches();
     return
   }
   ready.value = true
+  applyPendingBatch()
   loadData()
 })
 
-// 从「新增业务」返回时刷新批次与明细
+// 从「新增业务」返回时刷新批次与明细；
+// 成功页「查看订单」通过本地标记传入批次，回到列表后直接定位该批次。
 onShow(() => {
   if (!ready.value) return
+  applyPendingBatch()
   loadBatches()
   loadData()
 })
+
+/** 消费成功页写入的批次定位标记；60 秒内有效，避免陈旧标记误选。 */
+function applyPendingBatch() {
+  const pendingBatch = uni.getStorageSync('ops_employee_view_batch')
+  if (pendingBatch && pendingBatch.batchNo
+    && Date.now() - Number(pendingBatch.ts || 0) < 60000) {
+    selectedBatch.value = pendingBatch.batchNo
+    selectedBatchLabel.value = pendingBatch.batchNo
+  }
+  if (pendingBatch) uni.removeStorageSync('ops_employee_view_batch')
+}
 
 async function loadData() {
   loading.value = true; errorMsg.value = ''

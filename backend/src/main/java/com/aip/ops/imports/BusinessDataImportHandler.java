@@ -717,7 +717,8 @@ public class BusinessDataImportHandler implements ImportHandler {
                     first.customerPhone, first.platformMemberId, first.communityId,
                     emptyToNull(first.communityName), emptyToNull(first.detailedAddress),
                     first.receiptDate, parseLocalDate(first.financeReceiptDate),
-                    first.fundDynamicRows, null, null, totalAmount, "未计算");
+                    first.fundDynamicRows, null, null, totalAmount, "未计算",
+                    emptyToNull(first.remark));
             for (ParsedRow pr : group) {
                 pr.orderId = order.getId();
                 pr.orderNo = orderNo;

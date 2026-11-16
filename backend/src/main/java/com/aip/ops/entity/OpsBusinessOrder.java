@@ -99,6 +99,8 @@ public class OpsBusinessOrder extends BaseEntity {
     @TableField("calc_status")
     private String calcStatus;
 
+    // 订单备注使用 BaseEntity.remark（ops_business_order.remark 列已存在），不重复声明
+
     /** 业务状态（工作流驱动，字典 business_order_status：0~6）。 */
     @TableField("biz_status")
     private String bizStatus;
