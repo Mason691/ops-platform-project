@@ -62,6 +62,14 @@ public class ScmBaseDataClient {
             Map.entry("美装管道整改", "11"), Map.entry("美装安全评估", "12"),
             Map.entry("气密性检测", "qimi"));
 
+    /**
+     * SCM 商品类别名称与 PRODUCT_CATEGORY 字典名称不一致时的别名。
+     * 生产 SCM 类别为「灶具/烟机/燃气热水器」等，若不映射会落库非字典 key，
+     * 导致提成规则/统计按品类匹配失败。
+     */
+    private static final Map<String, String> CATEGORY_ALIASES = Map.of(
+            "灶具", "1", "烟机", "2", "燃气热水器", "3", "热水器", "3", "壁挂炉", "4");
+
     private final RestTemplate restTemplate;
     private final CommissionRuleService commissionRuleService;
     private final String baseUrl;
@@ -233,6 +241,7 @@ public class ScmBaseDataClient {
         if (nameToKey.isEmpty()) {
             nameToKey.putAll(FALLBACK_CATEGORY_KEYS);
         }
+        CATEGORY_ALIASES.forEach(nameToKey::putIfAbsent);
         return nameToKey;
     }
 

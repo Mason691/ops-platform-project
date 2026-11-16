@@ -261,6 +261,15 @@ public class ProductPriceServiceImpl implements ProductPriceService {
     private String categoryKeyOrNull(String raw) {
         String value = raw == null ? "" : raw.trim();
         if (value.isEmpty()) return null;
+        // SCM 类别名与字典名称不一致的兼容（与 ScmBaseDataClient 别名保持一致）
+        String alias = switch (value) {
+            case "灶具" -> "1";
+            case "烟机" -> "2";
+            case "燃气热水器", "热水器" -> "3";
+            case "壁挂炉" -> "4";
+            default -> null;
+        };
+        if (alias != null) return alias;
         try {
             for (Map<String, String> item : commissionRuleService.getCategories()) {
                 String key = item.get("itemKey");
