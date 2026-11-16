@@ -2,6 +2,15 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-16（品牌文案统一：金地燃气 → 金地美家，生产已发布）
+
+- **员工 H5**：`index.html` 标题、`manifest.json` 名称/描述、`pages.json` 导航标题、`main.js` 路由标题、员工登录/会员登录/员工工作台品牌名统一改为「金地美家」。
+- **平台主站**：公众号配置示例 placeholder 改为「金地美家服务号」。
+- **商城前端**：公众号名称示例 placeholder 改为「金地美家」。
+- **数据**：`sys_public_account_config` 中遗留公众号 id=1 名称 `金地燃气` → `金地美家`；`sys_platform_config` 原本已是「金地美家业务平台」，未改。
+- **发布**：ops H5、平台主站、商城前端均已重建发布（H5 清 assets、三套 nginx reload 中 mall-nginx `docker exec` 出现运行时错误但静态文件已由 volume 生效，URL 200）；备份 `backups/html/html-ops-brand-20261116_1650.tgz`、`html-platform-brand-20261116_1650.tgz`、`html-mall-brand-20261116_1650.tgz`。活动前端目录 `html/ops|platform|mall` 已无「金地燃气」字符串。
+- **未改**：`sys_corp.name`「武山金地燃气公司」为法人主体名称，保留；如要求连法人名称一并改为「武山金地美家公司」，需业务确认后单独执行。平台/商城后端兜底文案与 AI 示例中的「金地燃气」不在本次前端页面范围内，未发布后端。
+
 ## 2026-11-16（产品售价管控 / 低价特批 / 支付方式与收款码防篡改，生产已发布）
 
 - **数据库**：新增 `sql/migrate_product_price_payment_qr.sql`（**必须先于新 ops JAR 执行**）——`ops_product_price`（按 `corp_id+product_id` 唯一）、`ops_business_special_file`、`ops_payment_qr_config`；`ops_business_order`/`ops_business_order_item` 增 `payment_method`、`standard_sale_price`、`special_file_id/url/name` 与索引；MySQL 8.0.46 条件化 DDL，可重复执行。
