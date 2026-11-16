@@ -6,7 +6,7 @@
       <text>暂无待补充的产品信息</text>
     </view>
 
-    <BusinessProductCard v-for="row in visibleRows" :key="row.index"
+    <BusinessProductCard v-for="row in visibleRows" :key="row.product.uid || row.index"
                          :product="row.product" :meta="meta" :index="row.index"
                          :errors="rowErrors(row.index)"
                          :removable="form.products.length > 1"
@@ -44,9 +44,9 @@ const props = defineProps({
   onlyErrors: { type: Boolean, default: false }
 })
 
-// 产品卡片不渲染 commissionRate（在收款信息步骤单独录入），
-// 这里排除它，避免确认页把“只缺提成比例”的行渲染成一张看似完整的空卡片。
-const ROW_FIELDS = ['category', 'brand', 'model', 'salePrice', 'saleQuantity']
+// 产品卡片渲染的全部字段：标准价查询错误、特批文件与提成比例都在卡片内处理
+const ROW_FIELDS = ['category', 'brand', 'model', 'standardPrice', 'salePrice',
+  'saleQuantity', 'specialFileId', 'commissionRate']
 
 const totalAmount = computed(() => computeProductsTotal(props.form.products))
 

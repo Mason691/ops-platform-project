@@ -52,6 +52,16 @@
         <text class="product-meta">
           {{ product.category }} ｜ 单价 ¥{{ money(product.salePrice) }} × {{ product.saleQuantity || 0 }}
         </text>
+        <text v-if="product.standardSalePrice != null" class="product-sub">
+          标准价 ¥{{ money(product.standardSalePrice) }}
+        </text>
+        <view v-if="product.isSpecial" class="product-special">
+          <text class="special-tag">特批</text>
+          <text class="product-sub">提成 {{ product.commissionRate || '—' }}%</text>
+          <text v-if="product.specialFileName" class="product-sub">
+            ｜ {{ product.specialFileName }}
+          </text>
+        </view>
       </view>
     </view>
 
@@ -60,18 +70,9 @@
         <text class="block-title">收款信息</text>
         <text class="edit" @click="$emit('edit', 2)">修改</text>
       </view>
-      <view class="kv"><text class="k">是否特批</text><text class="v">{{ form.isSpecial ? '是' : '否' }}</text></view>
-      <view v-if="form.isSpecial" class="kv">
-        <text class="k">提成比例</text>
-        <view class="tags">
-          <text v-for="(product, index) in form.products" :key="index" class="tag">
-            第{{ index + 1 }}个 {{ product.commissionRate || '—' }}%
-          </text>
-        </view>
-      </view>
+      <view class="kv"><text class="k">支付方式</text><text class="v">{{ paymentLabel }}</text></view>
       <view class="kv"><text class="k">市场收款日期</text><text class="v">{{ form.receiptDate || '—' }}</text></view>
-      <view class="kv"><text class="k">是否收款</text><text class="v">{{ form.isReceived ? '是' : '否' }}</text></view>
-      <view v-if="form.isReceived" class="kv">
+      <view v-if="form.voucherUrls && form.voucherUrls.length" class="kv">
         <text class="k">收款凭证</text>
         <view class="vouchers">
           <image v-for="(url, index) in form.voucherUrls" :key="url + index" class="voucher-thumb"
@@ -101,7 +102,7 @@ import BusinessStepProducts from '@/components/BusinessStepProducts.vue'
 import BusinessStepReceipt from '@/components/BusinessStepReceipt.vue'
 import AnimatedAmount from '@/components/AnimatedAmount.vue'
 import {
-  computeProductAmount, computeProductsTotal, hasStepErrors, normalizeMoney
+  PAYMENT_METHODS, computeProductAmount, computeProductsTotal, hasStepErrors, normalizeMoney
 } from '@/utils/businessForm'
 import { assetUrl } from '@/utils/image'
 
@@ -142,6 +143,10 @@ const agentNames = computed(() => {
 })
 
 const totalAmount = computed(() => computeProductsTotal(props.form.products))
+const paymentLabel = computed(() => {
+  const found = PAYMENT_METHODS.find(item => item.value === props.form.paymentMethod)
+  return found ? found.label : '—'
+})
 const detailCount = computed(() => {
   const products = (props.form.products || []).length
   const agents = Math.max(1, (props.form.agentUserIds || []).length)
@@ -208,6 +213,12 @@ function previewVoucher(index) {
 }
 .product-amount { font-size: 27rpx; color: #FF6B35; font-weight: 700; white-space: nowrap; }
 .product-meta { display: block; font-size: 22rpx; color: #999; margin-top: 6rpx; }
+.product-sub { display: block; font-size: 21rpx; color: #999; margin-top: 4rpx; }
+.product-special { display: flex; align-items: center; flex-wrap: wrap; gap: 8rpx; margin-top: 6rpx; }
+.special-tag {
+  font-size: 20rpx; color: #C2410C; background: #FFF0E8;
+  border-radius: 6rpx; padding: 2rpx 8rpx;
+}
 .vouchers { flex: 1; display: flex; flex-wrap: wrap; gap: 12rpx; }
 .voucher-thumb {
   width: 96rpx; height: 96rpx; border-radius: 8rpx; background: #f5f5f5;

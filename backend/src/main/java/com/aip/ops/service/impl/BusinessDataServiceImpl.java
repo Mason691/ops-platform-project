@@ -526,6 +526,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 rows, OpsBusinessData::getFundDynamicRows));
         order.put("isReceived", pick(master != null ? master.getIsReceived() : null,
                 rows, OpsBusinessData::getIsReceived));
+        String paymentMethod = master != null && hasText(master.getPaymentMethod())
+                ? master.getPaymentMethod() : firstText(rows, OpsBusinessData::getPaymentMethod);
+        order.put("paymentMethod", paymentMethod);
+        order.put("paymentMethodName", com.aip.ops.util.PaymentMethod.labelOf(paymentMethod));
         order.put("voucherUrl", pick(master != null ? master.getVoucherUrl() : null,
                 rows, OpsBusinessData::getVoucherUrl));
         order.put("calcStatus", calcStatus);
@@ -633,6 +637,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         product.put("commissionAmount", commission.setScale(2, RoundingMode.HALF_UP));
         product.put("commissionRate", rate.setScale(2, RoundingMode.HALF_UP));
         product.put("isSpecial", first.getIsSpecial());
+        product.put("standardSalePrice",
+                firstNonNull(rows, OpsBusinessData::getStandardSalePrice));
+        product.put("specialFileId", firstNonNull(rows, OpsBusinessData::getSpecialFileId));
+        product.put("specialFileUrl", firstText(rows, OpsBusinessData::getSpecialFileUrl));
+        product.put("specialFileName", firstText(rows, OpsBusinessData::getSpecialFileName));
         product.put("retailFloorPrice",
                 firstNonNull(rows, OpsBusinessData::getRetailFloorPrice));
         product.put("groupLowestPrice",
@@ -1640,7 +1649,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     private static final String EXPORT_HEADER =
-            "批次\t公司\t客户\t客户手机\t小区\t详细地址\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例\t提成金额\t业务状态\t计算状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t订单编号/收据号\t备注\t是否特批\t退货标识\n";
+            "批次\t公司\t客户\t客户手机\t小区\t详细地址\t部门\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t提成比例\t提成金额\t业务状态\t计算状态\t经办人\t经办人手机号\t销售日期\t市场收款日期\t财务收款日期\t资金动态表横排数\t订单编号/收据号\t备注\t支付方式\t是否特批\t特批文件\t退货标识\n";
 
     /** 单行 TSV 输出（与 EXPORT_HEADER 列序一致）；收款金额=库中 receipt_amount（空则 单价×数量 兜底） */
     private void appendExportRow(StringBuilder sb, OpsBusinessData d, Map<Long, String> bizStatusMap) {
@@ -1674,7 +1683,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
           .append(fmt(d.getFinanceReceiptDate())).append('\t').append(fmt(d.getFundDynamicRows())).append('\t')
           .append(fmt(orderReceipt)).append('\t')
           .append(fmt(d.getRemark())).append('\t')
+          .append(fmt(com.aip.ops.util.PaymentMethod.labelOf(d.getPaymentMethod()))).append('\t')
           .append(fmt(d.getIsSpecial())).append('\t')
+          .append(fmt(d.getSpecialFileName())).append('\t')
           .append(isReturnEntry(d) ? "是" : "否").append('\n');
     }
 

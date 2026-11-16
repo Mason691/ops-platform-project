@@ -124,7 +124,7 @@ public class BusinessDataExportHandler implements ExportHandler {
         // 写 TSV
         try (BufferedWriter writer = new BufferedWriter(
                 new OutputStreamWriter(out, StandardCharsets.UTF_8))) {
-            writer.write("公司\t批次号\t客户\t客户手机\t小区\t详细地址\t部门\t经办人\t经办人手机号\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t销售日期\t订单编号/收据号\t市场收款日期\t财务收款日期\t资金动态表横排数\t提成比例\t提成金额\t业务状态\t计算状态\t备注\t是否特批\t退货标识\n");
+            writer.write("公司\t批次号\t客户\t客户手机\t小区\t详细地址\t部门\t经办人\t经办人手机号\t品牌\t品类\t型号\t销售单价\t销售数量\t收款金额\t零售底价\t集团最低价\t销售日期\t订单编号/收据号\t市场收款日期\t财务收款日期\t资金动态表横排数\t提成比例\t提成金额\t业务状态\t计算状态\t备注\t支付方式\t是否特批\t特批文件\t退货标识\n");
             for (OpsBusinessData row : rows) {
                 String rowBizStatus = row.getOrderId() == null ? "0"
                         : bizStatusMap.getOrDefault(row.getOrderId(), "0");
@@ -160,7 +160,9 @@ public class BusinessDataExportHandler implements ExportHandler {
                         nvl(bizStatusService.label(rowBizStatus)),
                         nvl(row.getCalcStatus()),
                         nvl(row.getRemark()),
+                        nvl(com.aip.ops.util.PaymentMethod.labelOf(row.getPaymentMethod())),
                         nvl(row.getIsSpecial()),
+                        nvl(row.getSpecialFileName()),
                         row.getSaleQuantity() != null && row.getSaleQuantity() < 0 ? "是" : "否"));
                 writer.newLine();
             }

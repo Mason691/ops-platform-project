@@ -108,6 +108,10 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("sale_price")
     private BigDecimal salePrice;
 
+    /** 制单时产品售价表的标准销售价（审计留存；手工单写入） */
+    @TableField("standard_sale_price")
+    private BigDecimal standardSalePrice;
+
     @TableField("receipt_amount")
     private BigDecimal receiptAmount;
 
@@ -129,9 +133,13 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("receipt_no")
     private String receiptNo;
 
-    /** 是否收款（是/否）——员工手工录入时采集，财务核对可补充/修改 */
+    /** 是否收款（是/否）——历史字段，新单不再使用（改由 payment_method） */
     @TableField("is_received")
     private String isReceived;
+
+    /** 支付方式：QR=二维码 / CASH=现金 / TRANSFER=转账 */
+    @TableField("payment_method")
+    private String paymentMethod;
 
     /** 财务核对人ID（ai_platform.sys_user.id） */
     @TableField("finance_check_user_id")
@@ -171,6 +179,18 @@ public class OpsBusinessData extends BaseEntity {
 
     @TableField("commission_rate")
     private BigDecimal commissionRate;
+
+    /** 低价特批文件ID（ops_business_special_file.id） */
+    @TableField("special_file_id")
+    private Long specialFileId;
+
+    /** 特批文件访问地址 */
+    @TableField("special_file_url")
+    private String specialFileUrl;
+
+    /** 特批文件原始文件名 */
+    @TableField("special_file_name")
+    private String specialFileName;
 
     @TableField("commission_amount")
     private BigDecimal commissionAmount;

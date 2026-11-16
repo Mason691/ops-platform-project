@@ -42,10 +42,13 @@ public class EmployeeBusinessEntryRequest {
     /** 市场收款日期 yyyy-MM-dd；空默认当天 */
     private String receiptDate;
 
-    /** 是否收款（是/否） */
+    /** 是否收款（是/否）——历史字段保留兼容，新前端不再传值 */
     private Boolean isReceived;
 
-    /** 收款凭证 URL 列表（最多 3 张，整笔业务共用） */
+    /** 支付方式：QR=二维码 / CASH=现金 / TRANSFER=转账（必填） */
+    private String paymentMethod;
+
+    /** 收款凭证 URL 列表（最多 3 张，整笔业务共用，选填） */
     private List<String> voucherUrls;
 
     /** 订单备注（选填，≤500 字，落库 ops_business_order.remark） */
@@ -54,6 +57,9 @@ public class EmployeeBusinessEntryRequest {
     /** 单个产品明细。 */
     @Data
     public static class ProductItem {
+
+        /** SCM 商品信息ID（用于产品售价查询；旧前端可不传，服务端按品牌/品类/型号兜底） */
+        private Long productId;
 
         /** 供应链品牌名称 */
         private String brand;
@@ -68,7 +74,13 @@ public class EmployeeBusinessEntryRequest {
 
         private Integer saleQuantity;
 
-        /** 提成比例（0-100，仅特批时生效；非特批按 0 处理） */
+        /** 特批标记（前端展示用；服务端以“售价是否低于标准价”重新判定） */
+        private Boolean isSpecial;
+
+        /** 特批文件ID（低价场景必填，ops_business_special_file.id） */
+        private Long specialFileId;
+
+        /** 提成比例（0-100，仅低价特批时生效；非特批按 0 处理） */
         private BigDecimal commissionRate;
     }
 }

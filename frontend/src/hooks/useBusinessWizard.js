@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { api } from '@/api/index'
 import {
-  PHONE_RE, STEPS, emptyBusinessForm, emptyProduct, missingItems,
+  PHONE_RE, STEPS, emptyBusinessForm, emptyProduct, missingItems, newProductUid,
   normalizeMoney, normalizePhone, validateBusinessForm, validateStep
 } from '@/utils/businessForm'
 import { focusField, scrollToField, vibrateLight } from '@/utils/fieldFocus'
@@ -316,19 +316,21 @@ export function useBusinessWizard() {
       customer: String(form.customer || '').trim(),
       communityId: form.communityId || null,
       detailAddress: String(form.detailAddress || '').trim(),
-      isSpecial: !!form.isSpecial,
+      paymentMethod: form.paymentMethod,
       agentUserIds: (form.agentUserIds || []).map(id => Number(id)),
       products: (form.products || []).map(product => ({
+        productId: product.productId || null,
         brand: product.brand,
         category: product.category,
         model: product.model,
         salePrice: normalizeMoney(product.salePrice),
         saleQuantity: Number(product.saleQuantity),
-        commissionRate: form.isSpecial ? Number(product.commissionRate) : 0
+        isSpecial: !!product.isSpecial,
+        specialFileId: product.isSpecial ? (product.specialFileId || null) : null,
+        commissionRate: product.isSpecial ? Number(product.commissionRate) : 0
       })),
       receiptDate: form.receiptDate,
-      isReceived: !!form.isReceived,
-      voucherUrls: form.isReceived ? form.voucherUrls : [],
+      voucherUrls: form.voucherUrls || [],
       remark: String(form.remark || '').trim()
     }
   }
@@ -494,6 +496,10 @@ export function useBusinessWizard() {
     if (!Array.isArray(form.products) || !form.products.length) {
       form.products = [emptyProduct()]
     }
+    // 旧版草稿没有稳定 uid：补一个，避免删除行后价格状态串到相邻行
+    form.products.forEach(product => {
+      if (product && !product.uid) product.uid = newProductUid()
+    })
     // 草稿可能跨天/跨组织：剔除已离岗或不在当前组织员工列表中的经办人，
     // 否则界面上无法取消、提交时会被后端整体拒绝。
     const validIds = new Set((meta.employees || []).map(item => String(item.userId)))
@@ -505,6 +511,7 @@ export function useBusinessWizard() {
     if (!uniqueIds.length && meta.employeeUserId) uniqueIds.push(meta.employeeUserId)
     form.agentUserIds = uniqueIds
     if (!Array.isArray(form.voucherUrls)) form.voucherUrls = []
+    if (!form.paymentMethod) form.paymentMethod = 'QR'
     step.value = Math.min(Math.max(Number(draft.step) || 0, 0), steps.length - 1)
     maxVisited.value = step.value
     if (step.value === 3) refreshConfirmErrors()

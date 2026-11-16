@@ -285,8 +285,12 @@ public class ScmSaleReturnSyncServiceImpl implements ScmSaleReturnSyncService {
         item.setReceiptAmount(amountOf(src.getSalePrice(), qty).negate());
         item.setRetailFloorPrice(src.getRetailFloorPrice());
         item.setGroupLowestPrice(src.getGroupLowestPrice());
+        item.setStandardSalePrice(src.getStandardSalePrice());
         item.setIsSpecial(src.getIsSpecial());
         item.setCommissionRate(src.getCommissionRate());
+        item.setSpecialFileId(src.getSpecialFileId());
+        item.setSpecialFileUrl(src.getSpecialFileUrl());
+        item.setSpecialFileName(src.getSpecialFileName());
         item.setCommissionAmount(BigDecimal.ZERO);
         item.setCalcStatus("未计算");
     }
@@ -299,6 +303,7 @@ public class ScmSaleReturnSyncServiceImpl implements ScmSaleReturnSyncService {
         item.setFundDynamicRows(src.getFundDynamicRows());
         item.setReceiptNo(src.getReceiptNo());
         item.setIsReceived(src.getIsReceived());
+        item.setPaymentMethod(src.getPaymentMethod());
         item.setVoucherUrl(src.getVoucherUrl());
         item.setDepartment(src.getDepartment());
         item.setAgent(src.getAgent());

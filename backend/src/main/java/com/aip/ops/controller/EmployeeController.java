@@ -2,10 +2,13 @@ package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
+import com.aip.ops.security.JwtTokenInspector;
 import com.aip.ops.service.BusinessDataService;
+import com.aip.ops.service.BusinessSpecialFileService;
 import com.aip.ops.service.EmployeeAuthService;
 import com.aip.ops.service.EmployeeBusinessEntryService;
 import com.aip.ops.service.EmployeeService;
+import com.aip.ops.service.ProductPriceService;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.LoginUser;
@@ -46,6 +49,9 @@ public class EmployeeController {
     private final EmployeeAuthService employeeAuthService;
     private final BusinessDataService businessDataService;
     private final EmployeeBusinessEntryService employeeBusinessEntryService;
+    private final ProductPriceService productPriceService;
+    private final BusinessSpecialFileService businessSpecialFileService;
+    private final JwtTokenInspector jwtTokenInspector;
     private final PlatformInternalClient platformInternalClient;
 
     @Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
@@ -204,6 +210,34 @@ public class EmployeeController {
     @GetMapping("/business-data/manual/member")
     public R<?> manualMember(@RequestParam String phone) {
         return R.ok(employeeBusinessEntryService.lookupMember(phone));
+    }
+
+    /**
+     * 制单时按商品查询标准售价：优先 productId（SCM 商品ID），
+     * 旧前端仅传品牌/品类/型号时按字段兜底。
+     */
+    @GetMapping("/business-data/product-price")
+    public R<?> manualProductPrice(@RequestParam(required = false) Long productId,
+                                   @RequestParam(required = false) String brand,
+                                   @RequestParam(required = false) String category,
+                                   @RequestParam(required = false) String model) {
+        // 与员工手工制单一致：拒绝会员 SSO 令牌（token_type=sso）
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可查询产品售价");
+        }
+        return R.ok(productPriceService.lookupForEmployee(
+                SecurityUtils.getCurrentCorpIdOrNull(), productId, brand, category, model));
+    }
+
+    /**
+     * 低价特批文件上传：PDF/JPG/PNG ≤10MB；文件信息落库供提交引用与审计。
+     */
+    @PostMapping("/business-data/special-file")
+    public R<?> uploadSpecialFile(@RequestParam("file") MultipartFile file) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可上传特批文件");
+        }
+        return R.ok(businessSpecialFileService.upload(file));
     }
 
     /** 保存手工录入业务数据：组织/经办人由服务端从 JWT 派生。 */

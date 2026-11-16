@@ -1,7 +1,5 @@
 <template>
   <view class="segmented" :class="{ disabled }">
-    <view v-if="activeIndex >= 0" class="seg-indicator"
-          :class="'seg-pos-' + activeIndex"></view>
     <view v-for="(option, index) in normalized" :key="String(option.value)"
           class="seg-btn" :class="{ on: index === activeIndex }"
           @click="pick(option)">
@@ -52,20 +50,14 @@ function pick(option) {
   overflow: hidden;
 }
 .segmented.disabled { opacity: .6; }
-.seg-indicator {
-  position: absolute; top: 6rpx; bottom: 6rpx; left: 6rpx;
-  width: calc(50% - 8rpx);
-  background: #fff; border-radius: 10rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, .08);
-  transition: transform .2s ease;
-}
-/* 两段式选择器（是/否）：用类切换位置，避免内联 calc 样式不刷新 */
-.seg-indicator.seg-pos-0 { transform: translateX(0); }
-.seg-indicator.seg-pos-1 { transform: translateX(calc(100% + 8rpx)); }
 .seg-btn {
   position: relative; z-index: 1; flex: 1;
   height: 64rpx; line-height: 64rpx; text-align: center;
-  font-size: 27rpx; color: #777;
+  font-size: 27rpx; color: #777; border-radius: 10rpx;
+  transition: background-color .18s ease, color .18s ease, box-shadow .18s ease;
 }
-.seg-btn.on { color: #FF6B35; font-weight: 600; }
+.seg-btn.on {
+  background: #fff; color: #FF6B35; font-weight: 600;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, .08);
+}
 </style>

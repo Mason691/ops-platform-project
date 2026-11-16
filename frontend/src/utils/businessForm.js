@@ -16,6 +16,13 @@ export const MAX_AGENTS = 20
 /** 备注最大长度（与后端 MAX_REMARK_LENGTH 保持一致） */
 export const MAX_REMARK = 500
 
+/** 支付方式（与后端 PaymentMethod 保持一致） */
+export const PAYMENT_METHODS = [
+  { value: 'QR', label: '二维码' },
+  { value: 'CASH', label: '现金' },
+  { value: 'TRANSFER', label: '转账' }
+]
+
 /** 向导步骤定义：key 用于组件切换，title 用于步骤条。 */
 export const STEPS = [
   { key: 'basic', title: '基础信息' },
@@ -26,13 +33,15 @@ export const STEPS = [
 
 const BASIC_FIELDS = ['batchNo', 'customerPhone', 'customer', 'communityId',
   'detailAddress', 'agentUserIds']
-const RECEIPT_FIELDS = ['receiptDate', 'voucherUrls']
+const RECEIPT_FIELDS = ['paymentMethod', 'receiptDate', 'voucherUrls']
 const PRODUCT_FIELD_LABELS = {
   category: '品类',
   brand: '品牌',
   model: '型号',
   salePrice: '销售单价',
   saleQuantity: '销售数量',
+  standardPrice: '标准售价',
+  specialFileId: '特批文件',
   commissionRate: '提成比例'
 }
 const FIELD_LABELS = {
@@ -43,6 +52,7 @@ const FIELD_LABELS = {
   detailAddress: '详细地址',
   agentUserIds: '经办人',
   products: '产品明细',
+  paymentMethod: '支付方式',
   receiptDate: '市场收款日期',
   voucherUrls: '收款凭证',
   remark: '备注'
@@ -66,11 +76,24 @@ export function computeReceiptAmount(price, quantity) {
   return normalizeMoney(p * q)
 }
 
+let productUidSeed = 0
+
+/** 产品行的稳定 key：删除中间行后组件仍绑定原产品对象，避免价格状态写错行。 */
+export function newProductUid() {
+  productUidSeed += 1
+  return `p${Date.now().toString(36)}-${productUidSeed}`
+}
+
 /** 新增一行空白产品。 */
 export function emptyProduct() {
   return {
-    category: '', brand: '', model: '',
-    salePrice: '', saleQuantity: '1', commissionRate: ''
+    uid: newProductUid(),
+    productId: null, category: '', brand: '', model: '',
+    salePrice: '', saleQuantity: '1',
+    standardSalePrice: null, priceConfigured: null, priceLoading: false,
+    priceError: '', priceLocked: true,
+    isSpecial: false, specialFileId: null, specialFileUrl: '', specialFileName: '',
+    commissionRate: ''
   }
 }
 
@@ -98,8 +121,8 @@ export function emptyBusinessForm() {
   return {
     batchNo: '', newBatch: true, customerPhone: '', customer: '',
     communityId: null, communityName: '', detailAddress: '',
-    isSpecial: false, products: [emptyProduct()],
-    receiptDate: today(), isReceived: false, voucherUrls: [], remark: '',
+    products: [emptyProduct()],
+    paymentMethod: 'QR', receiptDate: today(), voucherUrls: [], remark: '',
     agentUserIds: []
   }
 }
@@ -166,21 +189,39 @@ export function validateBusinessForm(form, meta = {}) {
     if (!Number.isInteger(qty) || qty < 1) {
       errors[key('saleQuantity')] = prefix + '销售数量必须为正整数'
     }
-    if (form.isSpecial) {
-      const raw = product && product.commissionRate
-      const empty = String(raw ?? '').trim() === ''
-      const rate = Number(raw)
-      if (empty || !Number.isFinite(rate) || rate < 0 || rate > 100) {
+
+    // 标准售价：未配置/停用/未查询到均阻止制单（与后端一致）
+    const standard = Number(product && product.standardSalePrice)
+    if (product && product.priceLoading) {
+      errors[key('standardPrice')] = prefix + '正在查询标准售价，请稍候'
+    } else if (product && product.priceConfigured === false) {
+      errors[key('standardPrice')] = prefix
+        + (product.priceError || '该商品未配置售价，请联系管理员')
+    } else if (product && product.model && product.priceConfigured === true && !(standard > 0)) {
+      errors[key('standardPrice')] = prefix + '标准售价无效，请重新选择型号'
+    } else if (product && product.model && product.priceConfigured !== true) {
+      errors[key('standardPrice')] = prefix + '尚未获取标准售价，请重新选择型号'
+    }
+
+    // 低于标准售价 = 特批：特批文件 + 提成比例均必填（按产品行独立）
+    const belowStandard = standard > 0 && price > 0 && price < standard
+    if (belowStandard) {
+      if (!product.specialFileId) {
+        errors[key('specialFileId')] = prefix + '低于标准售价，请上传特批文件'
+      }
+      const rawRate = product && product.commissionRate
+      const emptyRate = String(rawRate ?? '').trim() === ''
+      const rate = Number(rawRate)
+      if (emptyRate || !Number.isFinite(rate) || rate < 0 || rate > 100) {
         errors[key('commissionRate')] = prefix + '请输入0-100的提成比例'
       }
     }
   })
 
-  if (!form.receiptDate) errors.receiptDate = '请选择市场收款日期'
-
-  if (form.isReceived && (!Array.isArray(form.voucherUrls) || form.voucherUrls.length === 0)) {
-    errors.voucherUrls = '请上传至少1张收款凭证'
+  if (!PAYMENT_METHODS.some(item => item.value === form.paymentMethod)) {
+    errors.paymentMethod = '请选择支付方式'
   }
+  if (!form.receiptDate) errors.receiptDate = '请选择市场收款日期'
   if (String(form.remark || '').trim().length > MAX_REMARK) {
     errors.remark = `备注不能超过${MAX_REMARK}个字`
   }
@@ -188,10 +229,11 @@ export function validateBusinessForm(form, meta = {}) {
   const order = ['batchNo', 'customerPhone', 'customer', 'communityId', 'detailAddress',
     'agentUserIds', 'products']
   products.forEach((_, index) => {
-    ['category', 'brand', 'model', 'salePrice', 'saleQuantity', 'commissionRate']
+    ['category', 'brand', 'model', 'standardPrice', 'salePrice', 'saleQuantity',
+      'specialFileId', 'commissionRate']
       .forEach(field => order.push(`products.${index}.${field}`))
   })
-  order.push('receiptDate', 'voucherUrls', 'remark')
+  order.push('paymentMethod', 'receiptDate', 'voucherUrls', 'remark')
   const firstError = order.map(key => errors[key]).find(Boolean) || ''
   return { valid: Object.keys(errors).length === 0, errors, firstError }
 }
@@ -199,10 +241,7 @@ export function validateBusinessForm(form, meta = {}) {
 /** 错误键归属的步骤：0 基础信息 / 1 商品明细 / 2 收款信息 / 3 确认页。 */
 export function stepOfErrorKey(key) {
   if (BASIC_FIELDS.includes(key)) return 0
-  if (key === 'products') return 1
-  if (key.startsWith('products.')) {
-    return key.endsWith('.commissionRate') ? 2 : 1
-  }
+  if (key === 'products' || key.startsWith('products.')) return 1
   if (RECEIPT_FIELDS.includes(key) || key === 'remark') return 2
   return 3
 }

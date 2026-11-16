@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.util.UriUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -128,6 +129,29 @@ public class ScmBaseDataClient {
             throw BusinessException.of("品牌/品类/型号未在供应链商品资料中找到："
                     + brand + " / " + categoryName + " / " + model);
         }
+    }
+
+    /**
+     * 按 SCM 商品ID校验提交的品牌/品类/型号确实属于该商品，防止客户端
+     * 用低价商品的 productId 套高价商品的品牌型号绕过售价特批校验。
+     * 复用 options 的 5 分钟缓存，不额外放大 SCM 压力。
+     */
+    public MaterialOption requireMaterialById(Long corpId, Long productId, String brand,
+                                              String categoryName, String model) {
+        if (productId == null || productId <= 0) {
+            throw BusinessException.of("商品ID不能为空");
+        }
+        ScmOptions opts = options(corpId);
+        MaterialOption material = opts.materials().stream()
+                .filter(m -> productId.equals(m.id()))
+                .findFirst()
+                .orElseThrow(() -> BusinessException.of(
+                        "供应链商品不存在或已停用，请重新选择型号"));
+        if (!material.brand().equals(brand) || !material.category().equals(categoryName)
+                || !material.model().equals(model)) {
+            throw BusinessException.of("商品与品牌/品类/型号不一致，请重新选择型号");
+        }
+        return material;
     }
 
     // ── fetch ──
@@ -257,10 +281,65 @@ public class ScmBaseDataClient {
             if (brand.isEmpty() || category.isEmpty() || model.isEmpty()) continue;
             if (!brands.contains(brand) || !categories.contains(category)) continue;
             if (seen.add(brand + "\u0001" + category + "\u0001" + model)) {
-                out.add(new MaterialOption(brand, category, model));
+                Long id = toLong(row.get("id"));
+                out.add(new MaterialOption(id, brand, category, model, str(row.get("name"))));
             }
         }
     }
+
+    // ── 管理端商品选择（产品售价） ──────────────────────────────────────
+
+    /** SCM 商品分页搜索：产品售价选择商品时使用。 */
+    public ScmMaterialPage searchMaterials(String keyword, long pageNum, long pageSize) {
+        String auth = currentBearerToken();
+        StringBuilder path = new StringBuilder("/api/bd/material/page?pageNum=")
+                .append(Math.max(1, pageNum)).append("&pageSize=").append(Math.max(1, pageSize));
+        if (keyword != null && !keyword.isBlank()) {
+            path.append("&keyword=").append(UriUtils.encodeQueryParam(keyword.trim(),
+                    java.nio.charset.StandardCharsets.UTF_8));
+        }
+        Map<String, Object> body = getJson(auth, path.toString());
+        Object data = body.get("data");
+        List<ScmMaterial> records = new ArrayList<>();
+        long total = 0;
+        if (data instanceof Map<?, ?> pageMap) {
+            Object rawRecords = pageMap.get("records");
+            if (rawRecords instanceof List<?> list) {
+                for (Object item : list) {
+                    if (item instanceof Map<?, ?> row) records.add(toMaterial(row));
+                }
+            }
+            Object rawTotal = pageMap.get("total");
+            Long parsedTotal = toLong(rawTotal);
+            total = parsedTotal != null ? parsedTotal : records.size();
+        }
+        return new ScmMaterialPage(records, total);
+    }
+
+    /** 按 SCM 商品ID查询权威商品资料（品牌/型号/品类/名称）。 */
+    public ScmMaterial getMaterial(Long productId) {
+        if (productId == null || productId <= 0) {
+            throw BusinessException.of("请选择供应链商品");
+        }
+        String auth = currentBearerToken();
+        Map<String, Object> body = getJson(auth, "/api/bd/material/get?id=" + productId);
+        Object data = body.get("data");
+        if (!(data instanceof Map<?, ?> row)) {
+            throw BusinessException.of("供应链商品不存在或已删除");
+        }
+        return toMaterial(row);
+    }
+
+    private ScmMaterial toMaterial(Map<?, ?> row) {
+        Long id = toLong(row.get("id"));
+        String name = str(row.get("name"));
+        String model = str(row.get("model"));
+        // 与型号下拉一致：SCM 部分商品未填规格型号时以商品名称兜底
+        if (model.isEmpty()) model = name;
+        return new ScmMaterial(id, str(row.get("number")), name,
+                str(row.get("brandName")), str(row.get("groupName")), model);
+    }
+
 
     private boolean isLastPage(Map<?, ?> pageMap, int recordCount, int page) {
         Object total = pageMap.get("total");
@@ -339,11 +418,29 @@ public class ScmBaseDataClient {
         return value == null ? "" : value.toString().trim();
     }
 
+    /** SCM/金蝶 JSON 的 ID 可能是数字或字符串，统一转 Long。 */
+    private static Long toLong(Object value) {
+        if (value instanceof Number n) return n.longValue();
+        if (value instanceof String s && !s.isBlank()) {
+            try {
+                return Long.parseLong(s.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
     // ── records ──
 
     public record CategoryOption(String key, String name) {}
 
-    public record MaterialOption(String brand, String category, String model) {}
+    public record MaterialOption(Long id, String brand, String category, String model, String name) {}
+
+    public record ScmMaterial(Long id, String number, String name, String brand,
+                              String category, String model) {}
+
+    public record ScmMaterialPage(List<ScmMaterial> records, long total) {}
 
     public record ScmOptions(List<String> brands, List<CategoryOption> categories,
                              List<MaterialOption> materials) {}

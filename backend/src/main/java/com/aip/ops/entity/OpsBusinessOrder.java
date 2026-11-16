@@ -85,6 +85,10 @@ public class OpsBusinessOrder extends BaseEntity {
     @TableField("is_received")
     private String isReceived;
 
+    /** 支付方式：QR=二维码 / CASH=现金 / TRANSFER=转账（新单使用；is_received 保留历史）。 */
+    @TableField("payment_method")
+    private String paymentMethod;
+
     @TableField("voucher_url")
     private String voucherUrl;
 

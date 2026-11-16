@@ -2,6 +2,17 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-16（产品售价管控 / 低价特批 / 支付方式与收款码防篡改，待发布）
+
+- **数据库**：新增 `sql/migrate_product_price_payment_qr.sql`（**必须先于新 ops JAR 执行**）——`ops_product_price`（按 `corp_id+product_id` 唯一）、`ops_business_special_file`、`ops_payment_qr_config`；`ops_business_order`/`ops_business_order_item` 增 `payment_method`、`standard_sale_price`、`special_file_id/url/name` 与索引；MySQL 8.0.46 条件化 DDL，可重复执行。
+- **后端**：新增产品售价 CRUD/SCM 商品搜索、特批文件上传留痕、收款码配置与鉴权取图、`PaymentMethod` 枚举；员工制单按 SCM 商品查标准价（未配置阻止），低价自动判定特批并强制特批文件 + 提成比例（服务端二次校验，`productId` 必须与品牌/品类/型号同源），底价统一取售价表；订单/明细写入支付方式，订单视图与导出（31 列）展示支付方式/特批文件。
+- **H5**：商品卡片标准价自动带出并锁定、可改价、低价特批区（文件/比例）自动显隐；新增特批文件上传与预览、鉴权收款码组件；收款信息步骤移除“是否收款”，改为支付方式（二维码/现金/转账，默认二维码）；草稿/确认页/校验同步。
+- **平台主站**：新增 `/ops/product-price`（产品售价列表/筛选/新增/编辑/启停/删除 + 收款码配置 Tab）、SCM 商品选择器、收款码面板；订单列表展开明细增加标准售价/特批文件、订单列增加支付方式；菜单脚本 `doc/add_product_price_menu.sql`（需 host nginx 白名单 `/ops/product-price`）。
+- **安全**：售价归属运营商组织，城市合伙人只读；员工接口拒绝会员 SSO 令牌；特批文件按组织校验归属；收款码存私有目录（不在 `/uploads` 静态映射下），每次取图重算 SHA-256，不一致拒绝并告警，禁止直接替换服务器文件绕过。
+- **代码审查修复**：特批文件 URL 改 `/uploads/ops/...`（生产 nginx 仅反代此前缀）；新代码异常统一 `com.aip.sdk.exception.BusinessException`（避免被 500 兜底）；商品行稳定 `uid` + 查价请求 token；草稿回显按最新标准价重判但保留价格/附件；售价编辑改 `LambdaUpdateWrapper` 支持清空备注；同异步导出统一 31 列；退货负数分录继承新字段；3 个新实体补入 `ops_entity_config_seed.sql`。
+- **验证**：后端 `mvn package -DskipTests -o`、H5 `build:h5`/`build:mp-weixin`、平台 `npm run build` 通过；两套 Puppeteer 审计覆盖标准价锁定/修改/恢复、特批上传、未配置拦截、支付方式切换、收款码篡改提示与重试、提交载荷、鉴权头、多经办人明细、平台列表/表单/收款码面板与 1440/1024 无溢出，页面无 JS 错误。**未执行**：真实 MySQL 迁移与 API 落库、生产 SCM 调用、生产部署/真机验证（见 `docs/PR-产品售价-收款码-2026-11-16.md`）。
+- **部署顺序**：备份 → 迁移 → 新 ops JAR → 平台主站 → 菜单 SQL → host nginx 白名单 → H5；配置 `PAYMENT_QR_BASE_DIR` 持久卷并在平台后台上传收款码、完成核心商品售价配置后再放开员工制单。
+
 ## 2026-11-16（员工手工新增业务：4 步向导制单界面，生产已发布）
 
 - **前端**：`pages/employee/business-data-new.vue` 由单页长表单改为「基础信息 → 商品明细 → 收款信息 → 确认提交」4 步向导；新增 `useBusinessWizard` 状态机、吸顶步骤条、直接点选标签组、底部弹层搜索、分段选择器、数量步进器、金额滚动动效与成功页；删除被替代的 `BusinessEntryForm/BusinessAgentSelector/BusinessProductList/BusinessProductForm/BusinessReceiptForm`。

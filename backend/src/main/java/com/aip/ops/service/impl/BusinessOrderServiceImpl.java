@@ -39,7 +39,8 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
                                         Long communityId, String communityName, String detailedAddress,
                                         String receiptDate, LocalDate financeReceiptDate,
                                         Integer fundDynamicRows, String isReceived, String voucherUrl,
-                                        BigDecimal totalAmount, String calcStatus, String remark) {
+                                        BigDecimal totalAmount, String calcStatus, String remark,
+                                        String paymentMethod) {
         OpsBusinessOrder order = new OpsBusinessOrder();
         order.setCorpId(corpId);
         order.setOrderKey(orderKey);
@@ -63,6 +64,7 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
         order.setTotalCommission(BigDecimal.ZERO);
         order.setCalcStatus(calcStatus != null ? calcStatus : INITIAL_STATUS);
         order.setRemark(remark);
+        order.setPaymentMethod(paymentMethod);
         order.setDeleteFlag(0);
         orderMapper.insert(order);
         return order;
@@ -193,7 +195,8 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
                         item.getReceiptDate(), item.getFinanceReceiptDate(), item.getFundDynamicRows(),
                         item.getIsReceived(), item.getVoucherUrl(),
                         item.getReceiptAmount() != null ? item.getReceiptAmount() : BigDecimal.ZERO,
-                        item.getCalcStatus() != null ? item.getCalcStatus() : INITIAL_STATUS, null);
+                        item.getCalcStatus() != null ? item.getCalcStatus() : INITIAL_STATUS,
+                        null, item.getPaymentMethod());
                 log.info("补建订单头 itemId={} orderId={} key={}", item.getId(), order.getId(), key);
             } catch (org.springframework.dao.DuplicateKeyException e) {
                 // 并发补建同一订单：唯一键兜底，读取胜出者

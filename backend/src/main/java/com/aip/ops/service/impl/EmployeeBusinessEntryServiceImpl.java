@@ -3,16 +3,19 @@ package com.aip.ops.service.impl;
 import com.aip.ops.client.ScmBaseDataClient;
 import com.aip.ops.component.OrderNoGenerator;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
+import com.aip.ops.dto.ProductPriceDtos;
 import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsBusinessOrder;
-import com.aip.ops.entity.OpsValueAddedProduct;
+import com.aip.ops.entity.OpsBusinessSpecialFile;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
-import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.security.JwtTokenInspector;
 import com.aip.ops.service.BusinessOrderService;
 import com.aip.ops.service.BusinessOrderWorkflowService;
+import com.aip.ops.service.BusinessSpecialFileService;
 import com.aip.ops.service.EmployeeBusinessEntryService;
 import com.aip.ops.service.GasMemberMatcher;
+import com.aip.ops.service.ProductPriceService;
+import com.aip.ops.util.PaymentMethod;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.exception.BusinessException;
 import com.aip.sdk.security.SecurityUtils;
@@ -65,7 +68,6 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private final JdbcTemplate jdbcTemplate;
     private final PlatformInternalClient platformInternalClient;
     private final OpsBusinessDataMapper businessDataMapper;
-    private final OpsValueAddedProductMapper valueAddedProductMapper;
     private final GasMemberMatcher memberMatcher;
     private final ScmBaseDataClient scmClient;
     private final JwtTokenInspector jwtTokenInspector;
@@ -73,6 +75,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private final BusinessOrderService orderService;
     private final OrderNoGenerator orderNoGenerator;
     private final BusinessOrderWorkflowService workflowService;
+    private final ProductPriceService productPriceService;
+    private final BusinessSpecialFileService specialFileService;
 
     private TransactionTemplate transactionTemplate;
 
@@ -249,7 +253,6 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         String batchNo = resolveBatch(request, ctx);
         MemberResolution member = resolveOrCreateMember(v.phone(), v.customer(), ctx.corpId());
         CommunityInfo community = resolveCommunity(v.communityId(), ctx.corpId());
-        List<OpsValueAddedProduct> valueAddedProducts = loadValueAddedProducts();
         // 订单编号由独立事务生成（REQUIRES_NEW），避免长事务持有流水行锁；回滚可能产生号段空洞
         String orderNo = orderNoGenerator.next();
         // 订单编号即业务组号：提成/统计/财务核对均以订单为维度；
@@ -264,16 +267,14 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 ctx.corpId(), "O|" + orderNo, orderNo, batchNo, businessGroupNo,
                 null, ctx.company(), v.customer(), v.phone(), member.id(),
                 community.id(), community.name(), v.detailAddress(), v.receiptDate(),
-                null, null, v.received() ? "是" : "否", v.voucherUrl(),
-                totalAmount, INITIAL_CALC_STATUS, v.remark());
+                null, null, null, v.voucherUrl(),
+                totalAmount, INITIAL_CALC_STATUS, v.remark(), v.paymentMethod());
         // 多经办人按「产品 × 经办人」拆行：每行独立 agent_phone 归属，
         // 提成计算沿用「同收据号+客户+品类+型号」组内均分规则。
         for (ValidatedProduct product : v.products()) {
-            OpsValueAddedProduct matched =
-                    matchValueAddedProduct(product, valueAddedProducts);
             for (AgentInfo agent : v.agents()) {
                 OpsBusinessData entity = buildEntity(ctx, v, product, agent,
-                        batchNo, orderNo, businessGroupNo, member.id(), community, matched);
+                        batchNo, orderNo, businessGroupNo, member.id(), community);
                 entity.setOrderId(order.getId());
                 businessDataMapper.insert(entity);
                 ids.add(entity.getId());
@@ -480,13 +481,11 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
             throw BusinessException.of("客户手机号须为11位大陆手机号");
         }
         String customer = requireText(req.getCustomer(), "客户名称", MAX_CUSTOMER_LENGTH);
-        boolean special = Boolean.TRUE.equals(req.getIsSpecial());
-        List<ValidatedProduct> products =
-                validateProducts(req.getProducts(), special, ctx.corpId());
+        List<ValidatedProduct> products = validateProducts(req.getProducts(), ctx.corpId());
         List<AgentInfo> agents = validateAgents(req.getAgentUserIds(), ctx);
         String receiptDate = normalizeDate(req.getReceiptDate());
-        boolean received = Boolean.TRUE.equals(req.getIsReceived());
-        String voucherUrl = normalizeVouchers(received, req.getVoucherUrls());
+        PaymentMethod paymentMethod = PaymentMethod.normalize(req.getPaymentMethod());
+        String voucherUrl = normalizeVouchers(req.getVoucherUrls());
         Long communityId = req.getCommunityId();
         if (communityId != null && communityId <= 0) communityId = null;
         // 小区必填：订单需归属到具体小区，便于后续网格/台账统计
@@ -496,8 +495,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         String detailAddress = requireText(
                 req.getDetailAddress(), "详细地址", MAX_DETAIL_ADDRESS_LENGTH);
         String remark = normalizeRemark(req.getRemark());
-        return new Validated(phone, customer, special, products, agents,
-                receiptDate, received, voucherUrl, communityId, detailAddress, remark);
+        return new Validated(phone, customer, products, agents,
+                receiptDate, paymentMethod.name(), voucherUrl, communityId, detailAddress, remark);
     }
 
     /** 备注选填：去首尾空白，超长拒绝，空串落库为 null。 */
@@ -509,9 +508,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         return remark.isEmpty() ? null : remark;
     }
 
-    /** 产品明细：至少一行；每行独立校验品牌/品类/型号、单价、数量与特批提成比例。 */
+    /** 产品明细：至少一行；每行独立校验品牌/品类/型号、标准售价、单价、数量与低价特批。 */
     private List<ValidatedProduct> validateProducts(
-            List<EmployeeBusinessEntryRequest.ProductItem> items, boolean special, Long corpId) {
+            List<EmployeeBusinessEntryRequest.ProductItem> items, Long corpId) {
         if (items == null || items.isEmpty()) {
             throw BusinessException.of("请至少添加一行产品");
         }
@@ -521,7 +520,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         List<ValidatedProduct> result = new ArrayList<>();
         Map<String, Integer> seenModels = new LinkedHashMap<>();
         for (int i = 0; i < items.size(); i++) {
-            ValidatedProduct product = validateProduct(items.get(i), i + 1, special, corpId);
+            ValidatedProduct product = validateProduct(items.get(i), i + 1, corpId);
             // 同一型号重复成行会被提成均分逻辑误判为多经办人/重复订单，要求合并数量
             String key = product.brand() + "|" + product.categoryKey() + "|" + product.model();
             Integer firstRow = seenModels.putIfAbsent(key, i + 1);
@@ -535,7 +534,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     }
 
     private ValidatedProduct validateProduct(EmployeeBusinessEntryRequest.ProductItem item,
-                                             int rowNo, boolean special, Long corpId) {
+                                             int rowNo, Long corpId) {
         String prefix = "第" + rowNo + "个产品：";
         if (item == null) throw BusinessException.of(prefix + "信息不能为空");
         String brand = requireText(item.getBrand(), prefix + "品牌");
@@ -546,15 +545,43 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         if (qty < 1) throw BusinessException.of(prefix + "销售数量必须为正整数");
         BigDecimal amount = price.multiply(BigDecimal.valueOf(qty))
                 .setScale(2, RoundingMode.HALF_UP);
-        BigDecimal rate = validateCommissionRate(special, item.getCommissionRate(), prefix);
+
+        // 标准售价：以产品售价表为准；未配置/停用直接拒绝制单（后端二次校验防绕过）
+        ProductPriceDtos.ProductPriceInfo priceInfo = productPriceService.lookupForEmployee(
+                corpId, item.getProductId(), brand, categoryName, model);
+        if (!priceInfo.configured()) {
+            throw BusinessException.of(prefix + priceInfo.message());
+        }
+        boolean special = price.compareTo(priceInfo.salePrice()) < 0;
+        BigDecimal rate = BigDecimal.ZERO;
+        Long specialFileId = null;
+        String specialFileUrl = null;
+        String specialFileName = null;
+        if (special) {
+            OpsBusinessSpecialFile file = specialFileService.requireOwned(
+                    item.getSpecialFileId(), corpId);
+            specialFileId = file.getId();
+            specialFileUrl = file.getFileUrl();
+            specialFileName = file.getFileName();
+            rate = validateCommissionRate(true, item.getCommissionRate(), prefix);
+        }
         String categoryKey;
         try {
             categoryKey = scmClient.requireCategoryKey(corpId, categoryName);
-            scmClient.requireMaterial(corpId, brand, categoryName, model);
+            if (item.getProductId() != null && item.getProductId() > 0) {
+                // productId 是售价主键：必须与提交的品牌/品类/型号同源，
+                // 否则可用低价商品ID套高价商品绕过特批校验。
+                scmClient.requireMaterialById(corpId, item.getProductId(), brand,
+                        categoryName, model);
+            } else {
+                scmClient.requireMaterial(corpId, brand, categoryName, model);
+            }
         } catch (BusinessException e) {
             throw BusinessException.of(prefix + e.getMessage());
         }
-        return new ValidatedProduct(brand, categoryKey, model, price, qty, amount, rate);
+        return new ValidatedProduct(item.getProductId(), brand, categoryKey, model, price, qty,
+                amount, rate, priceInfo.salePrice(), special, specialFileId, specialFileUrl,
+                specialFileName, priceInfo.retailFloorPrice(), priceInfo.groupLowestPrice());
     }
 
     /**
@@ -651,11 +678,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         }
     }
 
-    private String normalizeVouchers(boolean received, List<String> urls) {
-        if (!received) return null;
-        if (urls == null || urls.isEmpty()) {
-            throw BusinessException.of("是否收款为是时必须上传收款凭证");
-        }
+    private String normalizeVouchers(List<String> urls) {
+        if (urls == null || urls.isEmpty()) return null;
         List<String> cleaned = new ArrayList<>();
         for (String url : urls) {
             String value = str(url);
@@ -666,9 +690,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
             }
             cleaned.add(value);
         }
-        if (cleaned.isEmpty()) {
-            throw BusinessException.of("是否收款为是时必须上传收款凭证");
-        }
+        if (cleaned.isEmpty()) return null;
         if (cleaned.size() > MAX_VOUCHERS) {
             throw BusinessException.of("收款凭证最多上传" + MAX_VOUCHERS + "张");
         }
@@ -718,8 +740,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private OpsBusinessData buildEntity(EmployeeContext ctx, Validated v, ValidatedProduct p,
                                         AgentInfo agent, String batchNo, String orderNo,
                                         String businessGroupNo,
-                                        Long memberId, CommunityInfo community,
-                                        OpsValueAddedProduct product) {
+                                        Long memberId, CommunityInfo community) {
         OpsBusinessData entity = new OpsBusinessData();
         entity.setCorpId(ctx.corpId());
         entity.setOperatorId(ctx.corpId());
@@ -739,18 +760,22 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         entity.setSalePrice(p.price());
         entity.setSaleQuantity(p.qty());
         entity.setReceiptAmount(p.amount());
-        // 复用导入口径匹配增值产品底价；未命中则留空，提成按规则全额比例（与导入未匹配行一致）
-        entity.setRetailFloorPrice(product != null ? product.getRetailFloorPrice() : null);
-        entity.setGroupLowestPrice(product != null ? product.getGroupLowestPrice() : null);
+        // 底价统一取产品售价表（制单已强制要求配置），保证提成分档与售价配置同源
+        entity.setRetailFloorPrice(p.retailFloorPrice());
+        entity.setGroupLowestPrice(p.groupLowestPrice());
         // 销售日期取市场收款日期：员工业务数据列表按 sale_date 分月，避免新数据落入「未知」
         entity.setSaleDate(v.receiptDate());
         entity.setReceiptDate(v.receiptDate());
         entity.setFinanceReceiptDate(null);
         entity.setAgent(agent.name());
         entity.setAgentPhone(agent.phone());
-        entity.setIsSpecial(v.special() ? "是" : "否");
+        entity.setIsSpecial(p.special() ? "是" : "否");
         entity.setCommissionRate(p.rate());
-        entity.setIsReceived(v.received() ? "是" : "否");
+        entity.setStandardSalePrice(p.standardPrice());
+        entity.setSpecialFileId(p.specialFileId());
+        entity.setSpecialFileUrl(p.specialFileUrl());
+        entity.setSpecialFileName(p.specialFileName());
+        entity.setPaymentMethod(v.paymentMethod());
         entity.setVoucherUrl(v.voucherUrl());
         // 备注同时写子表：导出「备注」列读取的是子表 remark，保证手工单与导入单口径一致
         entity.setRemark(v.remark());
@@ -777,27 +802,6 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
             throw BusinessException.of("小区名称为空，请重新选择");
         }
         return new CommunityInfo(communityId, name);
-    }
-
-    private List<OpsValueAddedProduct> loadValueAddedProducts() {
-        try {
-            return valueAddedProductMapper.selectList(null);
-        } catch (Exception e) {
-            log.warn("加载增值产品失败: {}", e.getMessage());
-            return List.of();
-        }
-    }
-
-    /** 复用导入的精确/关键字匹配口径，命中增值产品时写入底价，保证提成分档与导入一致。 */
-    private OpsValueAddedProduct matchValueAddedProduct(ValidatedProduct p,
-                                                        List<OpsValueAddedProduct> products) {
-        try {
-            return BusinessDataServiceImpl.matchProductExactOrKeyword(
-                    p.brand(), p.categoryKey(), p.model(), products);
-        } catch (Exception e) {
-            log.warn("匹配增值产品底价失败: {}", e.getMessage());
-            return null;
-        }
     }
 
     private void fillProductOptions(Map<String, Object> result, Long corpId) {
@@ -847,14 +851,17 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     private record CorpInfo(String corpName, String company) {}
 
-    private record Validated(String phone, String customer, boolean special,
+    private record Validated(String phone, String customer,
                              List<ValidatedProduct> products, List<AgentInfo> agents,
-                             String receiptDate, boolean received, String voucherUrl,
+                             String receiptDate, String paymentMethod, String voucherUrl,
                              Long communityId, String detailAddress, String remark) {}
 
-    private record ValidatedProduct(String brand, String categoryKey, String model,
+    private record ValidatedProduct(Long productId, String brand, String categoryKey, String model,
                                     BigDecimal price, int qty, BigDecimal amount,
-                                    BigDecimal rate) {}
+                                    BigDecimal rate, BigDecimal standardPrice, boolean special,
+                                    Long specialFileId, String specialFileUrl,
+                                    String specialFileName, BigDecimal retailFloorPrice,
+                                    BigDecimal groupLowestPrice) {}
 
     private record AgentInfo(Long userId, String name, String phone) {}
 

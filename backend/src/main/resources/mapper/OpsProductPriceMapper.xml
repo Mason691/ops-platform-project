@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aip.ops.mapper.OpsProductPriceMapper">
+
+    <sql id="priceColumns">
+        id, corp_id, product_id, product_name, brand, model, category,
+        sale_price, retail_floor_price, group_lowest_price, status,
+        update_key, unique_id, create_time, modify_time, create_user, modify_user,
+        create_user_name, modify_user_name, sort, remark, delete_flag
+    </sql>
+
+    <sql id="pageWhere">
+        WHERE delete_flag = 0
+        <if test="corpId != null">AND corp_id = #{corpId}</if>
+        <if test="brand != null and brand != ''">AND brand = #{brand}</if>
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        <if test="model != null and model != ''">AND model LIKE CONCAT('%', #{model}, '%')</if>
+        <if test="status != null">AND status = #{status}</if>
+    </sql>
+
+    <select id="selectPageByCorp" resultType="com.aip.ops.entity.OpsProductPrice">
+        SELECT <include refid="priceColumns"/>
+        FROM ops_product_price
+        <include refid="pageWhere"/>
+        ORDER BY modify_time DESC, id DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countByCorp" resultType="long">
+        SELECT COUNT(*) FROM ops_product_price
+        <include refid="pageWhere"/>
+    </select>
+
+    <select id="selectActiveByProduct" resultType="com.aip.ops.entity.OpsProductPrice">
+        SELECT <include refid="priceColumns"/>
+        FROM ops_product_price
+        WHERE delete_flag = 0 AND status = 1 AND corp_id = #{corpId} AND product_id = #{productId}
+        ORDER BY id DESC LIMIT 1
+    </select>
+
+    <select id="selectActiveByFields" resultType="com.aip.ops.entity.OpsProductPrice">
+        SELECT <include refid="priceColumns"/>
+        FROM ops_product_price
+        WHERE delete_flag = 0 AND status = 1 AND corp_id = #{corpId}
+          AND brand = #{brand} AND model = #{model}
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        ORDER BY id DESC LIMIT 1
+    </select>
+
+    <select id="selectByCorpAndProductIncludingDeleted"
+            resultType="com.aip.ops.entity.OpsProductPrice">
+        SELECT <include refid="priceColumns"/>
+        FROM ops_product_price
+        WHERE corp_id = #{corpId} AND product_id = #{productId}
+        ORDER BY delete_flag ASC, id DESC LIMIT 1
+    </select>
+
+    <update id="restoreDeleted" parameterType="com.aip.ops.entity.OpsProductPrice">
+        UPDATE ops_product_price SET
+            product_name = #{productName},
+            brand = #{brand},
+            model = #{model},
+            category = #{category},
+            sale_price = #{salePrice},
+            retail_floor_price = #{retailFloorPrice},
+            group_lowest_price = #{groupLowestPrice},
+            status = #{status},
+            remark = #{remark},
+            modify_time = NOW(),
+            delete_flag = 0
+        WHERE id = #{id} AND corp_id = #{corpId}
+    </update>
+</mapper>
