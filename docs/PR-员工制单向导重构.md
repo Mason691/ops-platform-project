@@ -78,7 +78,7 @@
 - 备份：`ops-backend/app.jar.bak-wizard-20261116_152621`、镜像 `boss-platform/ops:rollback-wizard-20261116_152621`、前端 `html/ops.bak-wizard-20261116_152621.tgz`。
 - 冒烟：`/actuator/health` UP；`https://boss.jdzn99.com/ops/` 200（标题「金地燃气」）；新 chunk 200 且包含「待补充事项」；`/api/ops/employee/business-data/manual/options` 无 token 返回 401（路由正常）。
 - 回滚：重新 tag `rollback-wizard-20261116_152621` 为 `latest` 后 `docker compose up -d ops-backend`；前端解压备份 tgz 并 reload `boss-ops-nginx`。
-- 注意：生产 `/data2` 磁盘使用率 98%（余约 2.0G），后续发布前建议清理旧备份。
+- 注意：发布后已清理旧 JAR/镜像/构建产物，`/data2` 使用率由 98% 降至 **79%**（余约 21G）；保留 ops `orgswitch`/`wizard`、平台 `orgcreate`/`orgswitch` 的 JAR 备份，ops `rollback-wizard` 与平台 `rollback-orgcreate` 回滚镜像，以及近期 DB dump。Docker 构建缓存保留以加速后续发布。
 
 ## 验证记录（本地）
 

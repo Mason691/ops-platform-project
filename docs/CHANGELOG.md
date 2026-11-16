@@ -9,6 +9,7 @@
 - **后端**：手工新增请求新增可选 `remark`（≤500 字）并落库 `ops_business_order.remark`（复用 `BaseEntity.remark`，列已存在，无迁移）；同时写子表 `ops_business_order_item.remark` 供导出，订单列表/详情返回备注；`createOrder` 增参同步手工/Excel 导入/历史补建 3 处调用；手工新增接口将小区改为必填。
 - **验证**：后端 `mvn package -DskipTests`、前端 `npm run build:h5` / `build:mp-weixin` 通过；Puppeteer 无头端到端覆盖分步拦截、就地补填、多经办人 4 条明细、批次/品牌/型号弹层、凭证上传/删除、提交失败重试、继续制单、草稿恢复，页面无 JS 错误。
 - **生产发布（2026-11-16 15:26）**：提交 `ce939f4`；备份旧 JAR `ops-backend/app.jar.bak-wizard-20261116_152621`（sha `c040279f…`）、旧镜像 `boss-platform/ops:rollback-wizard-20261116_152621`、旧前端 `html/ops.bak-wizard-20261116_152621.tgz`；发布镜像 `boss-platform/ops:wizard-20261116_152621`（`sha256:b3857c98…`，容器内 JAR sha `0dab53e9…`），H5 资源 `index-D_T91--V.js` / `pages-employee-business-data-new.CFQJ8p6i.js`；`/actuator/health` UP、H5 200、`/api/ops/employee/business-data/manual/options` 返回 401（路由正常）、`boss-ops-nginx` 已 reload；无数据库迁移。**待真机业务验证**：员工登录后完成一笔制单，确认备注落库/订单视图展示、小区必填提示与凭证上传。
+- **发布后磁盘清理（2026-11-16 15:35）**：清理旧 JAR 备份/旧镜像/旧构建产物与旧前端 tgz，`/data2` 使用率 98% → **79%**（余约 21G）；保留 ops `orgswitch`/`wizard` 两份 JAR、平台 `orgcreate`/`orgswitch` 两份 JAR、ops `rollback-wizard` 与平台 `rollback-orgcreate` 回滚镜像，以及 `backups` 下近期 DB dump。Docker 构建缓存未全量清空，保留以加速后续发布。
 
 ## 2026-11-14（公众号消息区域地址改为客户地址，生产已发布）
 
