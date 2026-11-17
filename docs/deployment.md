@@ -40,6 +40,19 @@ cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/op
 
 生产 Nginx：`/ops/` → `boss-ops-nginx:80`，`/api/ops/**` → `ops-backend:8082`
 
+### 收款码上线检查（强制）
+
+收款码不是静态文件，必须由运营商管理员在平台后台上传并登记 SHA-256；漏传时员工 H5 收款信息步骤会显示“收款码未配置，请联系管理员”，后端日志出现 `Business exception ... 收款码未配置`。
+
+1. 平台后台 `/ops/product-price` → “收款码配置” Tab → 上传收款码（JPG/PNG，≤5MB），确认“配置状态=已配置”且预览可见。
+2. 或部署后核对：
+   ```sql
+   SELECT corp_id, file_path, file_hash, file_size, status
+   FROM mall_db.ops_payment_qr_config WHERE delete_flag=0;
+   ```
+   至少存在所属运营商 `corp_id` 的记录；文件 `$PAYMENT_QR_BASE_DIR/<file_path>` 存在且 `sha256sum` 与 `file_hash` 一致。
+3. 员工 H5（支付方式=二维码）应显示收款码；直接替换私有目录文件会被哈希校验拒绝，必须重走后台上传。
+
 ### 生产数据库定时备份（2026-09-04 上线，落盘本机）
 
 - **任务**：**本机**（开发机 WSL）crontab `0 2 * * *` 每日凌晨 2:00 全量备份生产 `ai_platform` + `mall_db`（CST）。本机需开机且 cron 服务运行，否则当天无备份。2026-10-15 起增 `@reboot` 补跑（`db-backup-if-stale.sh`：超 20h 未备份即补，幂等）
