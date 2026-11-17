@@ -14,7 +14,7 @@
         </text>
         <text class="arrow">›</text>
       </view>
-      <text class="hint">可选择商品库旧品，或选择“其他旧品”手工填写</text>
+      <text class="hint">仅可选择品牌为「旧品」的商品，或选择“其他旧品”手工填写</text>
     </view>
 
     <view v-if="!item.isManual" class="readonly-row">
@@ -61,7 +61,7 @@
     <text v-if="errors.productName" class="ferr">{{ errors.productName }}</text>
 
     <BottomSheetSelect v-model:visible="sheetVisible" title="选择旧品" :options="materialOptions"
-                       :model-value="pickerValue" placeholder="搜索品牌/型号/品类"
+                       :model-value="pickerValue" placeholder="搜索品牌=旧品的商品"
                        @select="onSelect" />
   </view>
 </template>

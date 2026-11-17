@@ -154,8 +154,8 @@ import BusinessSpecialApproval from '@/components/BusinessSpecialApproval.vue'
 import BusinessTradeInSection from '@/components/BusinessTradeInSection.vue'
 import { useProductPrice } from '@/hooks/useProductPrice'
 import {
-  computeProductAmount, computeProductDeduction, computeProductPayable,
-  emptyTradeInItem
+  computeProductAmount, computeProductDeduction,
+  computeProductPayable, emptyTradeInItem, isOldGoodsBrand
 } from '@/utils/businessForm'
 import { focusField, keepFieldVisible } from '@/utils/fieldFocus'
 
@@ -197,6 +197,8 @@ const brands = computed(() => {
   const result = []
   for (const material of props.meta.materials || []) {
     if (material.category !== props.product.category) continue
+    // “旧品”品牌只用于以旧换新旧品选择，不作为正常销售商品
+    if (isOldGoodsBrand(material.brand)) continue
     if (seen.has(material.brand)) continue
     seen.add(material.brand)
     result.push(material.brand)
@@ -213,6 +215,7 @@ const models = computed(() => {
   for (const material of props.meta.materials || []) {
     if (material.brand !== props.product.brand
       || material.category !== props.product.category) continue
+    if (isOldGoodsBrand(material.brand)) continue
     if (seen.has(material.model)) continue
     seen.add(material.model)
     result.push(material.model)

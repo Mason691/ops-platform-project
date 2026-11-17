@@ -10,6 +10,14 @@ export const PHONE_RE = /^1[3-9]\d{9}$/
 /** 单笔业务最多产品行（与后端 MAX_PRODUCTS 保持一致） */
 export const MAX_PRODUCTS = 50
 
+/** 旧品专用品牌：以旧换新旧品只能从该品牌商品中选择 */
+export const OLD_GOODS_BRAND = '旧品'
+
+/** 判断商品品牌是否为旧品品牌（去空格，防止基础资料尾部空白）。 */
+export function isOldGoodsBrand(brand) {
+  return String(brand || '').trim() === OLD_GOODS_BRAND
+}
+
 /** 每个商品行最多旧品数（与后端 MAX_TRADE_IN_ITEMS 保持一致） */
 export const MAX_TRADE_IN_ITEMS = 50
 

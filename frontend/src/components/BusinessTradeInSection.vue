@@ -24,6 +24,7 @@
       <text class="items-title">旧品明细 <text class="req">*</text></text>
       <text class="items-count">{{ totalQuantity }} 件</text>
     </view>
+    <text class="hint">仅列出品牌为「旧品」的商品；未找到请选择“其他旧品”手工填写。</text>
     <text v-if="errors.tradeInItems" class="ferr">{{ errors.tradeInItems }}</text>
 
     <view v-if="!items.length" class="empty-items">
@@ -49,7 +50,7 @@ import BusinessTradeInItemCard from '@/components/BusinessTradeInItemCard.vue'
 import { keepFieldVisible } from '@/utils/fieldFocus'
 import {
   MAX_TRADE_IN_ITEMS, computeProductAmount, computeProductDeduction,
-  computeProductPayable, emptyTradeInItem
+  computeProductPayable, emptyTradeInItem, isOldGoodsBrand
 } from '@/utils/businessForm'
 
 /**
@@ -77,6 +78,8 @@ const materialOptions = computed(() => {
   const result = [{ value: '__manual__', label: '其他旧品（手工填写）', material: null }]
   for (const material of props.meta.materials || []) {
     if (!material || material.id == null || seen.has(material.id)) continue
+    // 旧品选择只允许“旧品”品牌，普通销售商品不能混入
+    if (!isOldGoodsBrand(material.brand)) continue
     seen.add(material.id)
     result.push({
       value: String(material.id),

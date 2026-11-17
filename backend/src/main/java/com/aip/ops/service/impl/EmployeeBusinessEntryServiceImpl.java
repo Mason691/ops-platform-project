@@ -72,6 +72,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private static final int MAX_CUSTOMER_LENGTH = 50;
     private static final int MAX_REMARK_LENGTH = 500;
     private static final int MAX_TRADE_IN_ITEMS = 50;
+    /** 旧品专用品牌：以旧换新旧品只能选择该品牌商品，正常销售商品不能使用 */
+    private static final String OLD_GOODS_BRAND = "旧品";
     /** 与 SCM 自动采购单单笔最多 100 条旧品分录保持一致，避免订单保存成功但采购单永远建不出来 */
     private static final int MAX_TOTAL_TRADE_IN_ITEMS = 100;
     private static final int MAX_TRADE_IN_NAME_LENGTH = 200;
@@ -1035,6 +1037,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         String prefix = "第" + rowNo + "个产品：";
         if (item == null) throw BusinessException.of(prefix + "信息不能为空");
         String brand = requireText(item.getBrand(), prefix + "品牌");
+        if (OLD_GOODS_BRAND.equals(brand)) {
+            throw BusinessException.of(prefix + "旧品品牌不能作为销售商品，请选择正常商品");
+        }
         String categoryName = requireText(item.getCategory(), prefix + "品类");
         String model = requireText(item.getModel(), prefix + "型号");
         BigDecimal price = normalizePrice(item.getSalePrice(), prefix);
@@ -1144,6 +1149,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
             }
             if (name.isEmpty()) {
                 throw BusinessException.of(rowPrefix + "旧品名称不能为空");
+            }
+            if (!OLD_GOODS_BRAND.equals(str(material.brand()).trim())) {
+                throw BusinessException.of(rowPrefix + "旧品只能选择品牌为「旧品」的商品");
             }
             return new ValidatedTradeIn(material.id(), str(material.number()),
                     truncate(name, MAX_TRADE_IN_NAME_LENGTH),
