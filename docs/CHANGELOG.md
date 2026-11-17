@@ -2,6 +2,15 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-17（并行 WIP 批次发布：物资审批/待办角标/货款备注 + SCM 派工拦截 + 平台组织手机号）
+
+- **发布内容**：ops `e73c4ed`（物资领用/核销审批人详情、H5 任务页物料详情、工作台待办角标、货款补录备注必填、已核对业务待发起统计）、SCM `0dbc5ad`（已核对业务返回 `dispatched/pendingCount`、发起采购申请拦截已派工出库、已驳回申请允许重新发起）、平台 `16b1d5e`（组织创建复用自然人手机号、随机初始密码 + 强制改密、手机号全局查重、前端查重提示；平台后端该改动已于 18:04 运行，本次补部署平台前端）。
+- **构建/验证**：ops 后端、ops H5、SCM 后端、平台前端均构建通过；平台 34 项单测通过；ops 审批详情 `taskId` fail-closed 校验、SCM 后端最终拦截、平台随机密码/脱敏日志均经代码审查。
+- **生产发布（2026-11-17 18:38-18:40）**：①**备份** `scm-backend/app.jar.bak-wip-20261117_183840`、`ops-backend/app.jar.bak-wip-20261117_183840`、`backups/html-ops-wip-20261117_183840.tgz`、`backups/html-platform-wip-20261117_183840.tgz`；回滚镜像 `boss-platform/scm:rollback-wip-20261117_183840`（`41b1d2663a28`）、`boss-platform/ops:rollback-wip-20261117_183840`（`9137d6993788`）。②**SCM 后端**：overlay `boss-platform/scm:wip-20261117_183840`（`2c5c4e6c8c25`）→ latest，容器 JAR sha `b0fe79fa…`，healthy，8084 health 200。③**ops 后端**：overlay `boss-platform/ops:wip-20261117_183840`（`6a15beb1d1e6`）→ latest，容器 JAR sha `db0cf6af…`，healthy，8082 health 200。④**ops H5**：部署 121 个 assets，入口 `index-Bn86N-wb.js`，`boss-ops-nginx` reload。⑤**平台前端**：部署 225 个 assets，入口 `index-CtI9Edkb.js`，含 `CorpFormDialog-CCPf2hWC.js`（手机号查重提示），`boss-platform-nginx` reload。⑥**冒烟**：`/`、`/ops/business-data` 标题「协同平台」200，`/ops/` 标题「金地美家」200；平台入口/CorpFormDialog、ops 入口/flow-task chunk 公网 200；`/api/ops/employee/material/requisitions/{id}/approval`、`/api/scm/pur-order/h5/finance-checked-orders`、`/api/ops/employee/business-data/orders` 未认证均 401；platform/ops/scm 三容器 healthy，health 8080/8082/8084 均 200。
+- **回滚**：`docker tag boss-platform/scm:rollback-wip-20261117_183840 boss-platform/scm:latest && docker tag boss-platform/ops:rollback-wip-20261117_183840 boss-platform/ops:latest && cd /data2/boss-platform && docker compose up -d scm-backend ops-backend`；前端解压对应 `html-*-wip-20261117_183840.tgz` 后 reload 对应 nginx。
+- **未执行**：登录态真实审批/采购申请/组织创建端到端、微信真机验证；平台组织手机号 WIP 的只读核查 SQL 需 DBA 按需执行（DDL 默认注释）。
+- 无数据库迁移；临时 overlay 目录已清理。
+
 ## 2026-11-17（工作业务日志与订单流程进度，生产已发布）
 
 - **底座日志接口**：新增 `GET /api/wf/log/my`（当前员工发起/处理的流程操作，业务类型/动作/日期筛选 + 分页，返回 `businessTypeOptions/actionOptions`）与 `GET /api/wf/log/detail?key=L:<logId>|I:<instanceId>`（详情、意见、附件、业务单据信息）。日志来源 `wf_log + wf_instance + wf_task`；**发起记录由 `wf_instance` 合成**（`I:`，历史实例可见）；审批操作人优先取 `wf_task.approver_name`（避免 `wf_log.operator_name` 为手机号）；日志/实例逻辑删除仍可查并返回 `deleted` 标记；从 `detail_json.formData` 提取附件 URL。
