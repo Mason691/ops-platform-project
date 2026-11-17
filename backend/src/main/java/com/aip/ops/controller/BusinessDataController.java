@@ -182,7 +182,23 @@ public class BusinessDataController {
     /** 业务订单详情：工作流节点处理页读取订单、商品明细与流程留痕。 */
     @GetMapping("/orders/{orderId}")
     public R<?> orderDetail(@PathVariable Long orderId) {
-        return R.ok(service.orderDetail(orderId));
+        Map<String, Object> detail = service.orderDetail(orderId);
+        // 详情页审批人兜底：有实例时按员工/管理员 JWT 查询当前待办人
+        Object instanceId = detail.get("wfInstanceId");
+        if (instanceId != null && !String.valueOf(instanceId).isBlank()) {
+            try {
+                var approver = workflowService.currentApprover(
+                        Long.valueOf(String.valueOf(instanceId)));
+                detail.put("currentApproverName", approver.approverName());
+                detail.put("currentApproverRole", approver.approverRole());
+                detail.put("currentApproverResolved", approver.resolved());
+                detail.put("currentApproverMessage", approver.message());
+            } catch (Exception e) {
+                detail.put("currentApproverResolved", false);
+                detail.put("currentApproverMessage", "审批人信息获取失败，请稍后重试");
+            }
+        }
+        return R.ok(detail);
     }
 
     /** 业务订单详情（按订单编号）：列表双击查看，兼容历史无主表行。 */
@@ -250,9 +266,9 @@ public class BusinessDataController {
         if (instanceId != null && !"0".equals(String.valueOf(status))) {
             return R.fail("当前业务状态不允许重新发起流程");
         }
-        Long newInstanceId = workflowService.start(orderId,
+        var started = workflowService.start(orderId,
                 SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentUser().getUsername(), true);
-        return R.ok(Map.of("instanceId", newInstanceId));
+        return R.ok(Map.of("instanceId", started.instanceId()));
     }
 
     @GetMapping("/batches")

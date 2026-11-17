@@ -1,6 +1,7 @@
 package com.aip.ops.service.impl;
 
 import com.aip.ops.client.ScmBaseDataClient;
+import com.aip.ops.client.WorkflowPlatformClient;
 import com.aip.ops.component.OrderNoGenerator;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.dto.ProductPriceDtos;
@@ -40,6 +41,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -244,11 +246,47 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         // 避免 Hikari 连接在外部 HTTP 期间被长期占用（连接池耗尽风险）。
         Map<String, Object> result = transactionTemplate.execute(
                 status -> persistManualEntry(request, ctx, v));
-        // 事务提交后异步发起审批流程（节点 0 → 1），失败不影响已落库业务数据
+        // 事务提交后同步发起审批流程：成功页必须拿到下一审批人；
+        // 发起失败不阻塞制单，返回 resolved=false + 兜底文案由前端展示。
         if (result != null && result.get("orderId") instanceof Number orderId) {
-            workflowService.startAsync(orderId.longValue(),
-                    ctx.employeeUserId(), ctx.employeeName());
+            try {
+                WorkflowPlatformClient.StartResult started = workflowService.start(
+                        orderId.longValue(), ctx.employeeUserId(), ctx.employeeName(), false);
+                result.put("wfInstanceId", started.instanceId());
+                result.put("currentApproverName", started.approverName());
+                result.put("currentApproverRole", started.approverRole());
+                result.put("approverResolved", started.resolved());
+                result.put("approverMessage", started.message());
+            } catch (Exception e) {
+                log.warn("订单 {} 发起工作流失败：{}", orderId, e.getMessage());
+                result.put("approverResolved", false);
+                result.put("approverMessage", "审批流程发起失败，请联系管理员");
+            }
         }
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> currentApprover(Long orderId) {
+        EmployeeIdentity identity = assertEmployee();
+        OpsBusinessOrder order = orderService.getById(orderId);
+        if (order == null || !Objects.equals(order.getCorpId(), identity.corpId())) {
+            throw BusinessException.notFound("业务订单不存在");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("orderId", orderId);
+        if (order.getWfInstanceId() == null) {
+            result.put("resolved", false);
+            result.put("message", "审批流程尚未发起，请联系管理员");
+            return result;
+        }
+        WorkflowPlatformClient.StartResult started =
+                workflowService.currentApprover(order.getWfInstanceId());
+        result.put("instanceId", started.instanceId());
+        result.put("approverName", started.approverName());
+        result.put("approverRole", started.approverRole());
+        result.put("resolved", started.resolved());
+        result.put("message", started.message());
         return result;
     }
 

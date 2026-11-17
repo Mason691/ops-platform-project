@@ -301,11 +301,53 @@ export function useBusinessWizard() {
       clearTimeout(draftTimer)
       clearDraft()
       success.value = created || {}
+      // 发起成功但审批人未即时解析（组件延迟/解析失败）时异步补齐，避免成功页空白
+      if (success.value.orderId && success.value.approverResolved === false) {
+        pollApprover(success.value.orderId)
+      }
     } catch (e) {
       showBanner((e && e.msg) || '保存失败，请重试')
     } finally {
       submitting.value = false
     }
+  }
+
+  /** 成功页审批人异步补齐：最多 3 次，拿到后刷新；仍失败展示明确兜底文案。 */
+  async function pollApprover(orderId) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await sleep(1000 * (attempt + 1))
+      if (!success.value || success.value.orderId !== orderId) return
+      try {
+        const info = await api.employeeOrderApprover(orderId)
+        if (!success.value || success.value.orderId !== orderId) return
+        if (info && info.resolved) {
+          success.value = {
+            ...success.value,
+            currentApproverName: info.approverName || '',
+            currentApproverRole: info.approverRole || '',
+            approverResolved: true,
+            approverMessage: ''
+          }
+          return
+        }
+        if (info && info.message) {
+          success.value = { ...success.value, approverMessage: info.message }
+        }
+      } catch (e) {
+        // 单次失败继续重试
+      }
+    }
+    if (success.value && success.value.orderId === orderId && !success.value.approverResolved) {
+      success.value = {
+        ...success.value,
+        approverResolved: false,
+        approverMessage: '审批人信息获取失败，请到订单详情查看'
+      }
+    }
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms))
   }
 
   function buildPayload() {

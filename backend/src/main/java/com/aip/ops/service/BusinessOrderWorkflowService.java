@@ -47,6 +47,11 @@ public class BusinessOrderWorkflowService {
         this.definitionCode = definitionCode;
     }
 
+    /** 结果页轮询/详情兜底：按实例查询当前审批人（失败返回 resolved=false）。 */
+    public WorkflowPlatformClient.StartResult currentApprover(Long instanceId) {
+        return workflowClient.getCurrentApprover(instanceId);
+    }
+
     /** 异步发起（导入/手工新增提交后调用，失败只记日志，可由管理端重试）。 */
     public void startAsync(Long orderId, Long initiatorUserId, String initiatorName) {
         if (orderId == null) {
@@ -80,13 +85,15 @@ public class BusinessOrderWorkflowService {
      *
      * @param force true=忽略已有实例，重新发起（驳回后重新提交）
      */
-    public Long start(Long orderId, Long initiatorUserId, String initiatorName, boolean force) {
+    public WorkflowPlatformClient.StartResult start(Long orderId, Long initiatorUserId,
+                                                    String initiatorName, boolean force) {
         OpsBusinessOrder order = orderMapper.selectById(orderId);
         if (order == null || Integer.valueOf(1).equals(order.getDeleteFlag())) {
             throw com.aip.sdk.exception.BusinessException.notFound("业务订单不存在");
         }
         if (order.getWfInstanceId() != null && !force) {
-            return order.getWfInstanceId();
+            // 已有实例：返回当前审批人（成功页/详情页兜底查询）
+            return workflowClient.getCurrentApprover(order.getWfInstanceId());
         }
         Initiator initiator = resolveInitiator(order, initiatorUserId, initiatorName);
         if (initiator == null) {
@@ -96,18 +103,20 @@ public class BusinessOrderWorkflowService {
         String requestId = force
                 ? BUSINESS_TYPE + ":" + orderId + ":retry:" + System.currentTimeMillis()
                 : BUSINESS_TYPE + ":" + orderId + ":1";
-        Long instanceId = workflowClient.start(new WorkflowPlatformClient.StartRequest(
-                definitionCode, BUSINESS_TYPE, String.valueOf(orderId),
-                summary(order), address(order), requestId, order.getCorpId(),
-                initiator.userId(), initiator.userName()));
+        WorkflowPlatformClient.StartResult started = workflowClient.start(
+                new WorkflowPlatformClient.StartRequest(
+                        definitionCode, BUSINESS_TYPE, String.valueOf(orderId),
+                        summary(order), address(order), requestId, order.getCorpId(),
+                        initiator.userId(), initiator.userName()));
         // 只回写实例ID：节点进入回调是平台事务提交后异步执行的，可能先于本更新到达，
         // 这里不能覆盖 biz_status/wf_node_*，否则会把已进入部长审核的状态冲回 0。
         orderMapper.update(null, new LambdaUpdateWrapper<OpsBusinessOrder>()
                 .eq(OpsBusinessOrder::getId, orderId)
-                .set(OpsBusinessOrder::getWfInstanceId, instanceId)
+                .set(OpsBusinessOrder::getWfInstanceId, started.instanceId())
                 .set(OpsBusinessOrder::getModifyTime, LocalDateTime.now()));
-        log.info("订单 {} 已发起工作流 instanceId={}", orderId, instanceId);
-        return instanceId;
+        log.info("订单 {} 已发起工作流 instanceId={} approver={}",
+                orderId, started.instanceId(), started.approverName());
+        return started;
     }
 
     private String summary(OpsBusinessOrder order) {

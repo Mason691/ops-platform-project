@@ -260,6 +260,12 @@ public class EmployeeController {
         return R.ok(employeeBusinessEntryService.createManualEntry(request));
     }
 
+    /** 制单成功页轮询/详情兜底：查询订单当前审批人。 */
+    @GetMapping("/business-data/manual/{orderId}/approver")
+    public R<?> manualApprover(@PathVariable Long orderId) {
+        return R.ok(employeeBusinessEntryService.currentApprover(orderId));
+    }
+
     /** 经办人核对：仅将本组织 + 本人批次下已计算数据标记为已核对 */
     @OperationLog(module = "运营管理", action = "核对", targetTable = "ops_business_order_item")
     @PostMapping("/business-data/batch/check")

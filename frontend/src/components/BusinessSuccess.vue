@@ -12,6 +12,10 @@
         <text class="v order-no">{{ result.orderNo || '—' }}</text>
       </view>
       <view class="result-row">
+        <text class="k">下一审批人</text>
+        <text class="v approver" :class="{ fallback: !result.currentApproverName }">{{ approverText }}</text>
+      </view>
+      <view class="result-row">
         <text class="k">批次</text>
         <text class="v">{{ result.batchNo || '—' }}</text>
       </view>
@@ -52,6 +56,17 @@ const amount = computed(() => {
 const detailCount = computed(() => Number(props.result && props.result.detailCount) || 0)
 const productCount = computed(() => Number(props.result && props.result.productCount) || 0)
 const agentCount = computed(() => Number(props.result && props.result.agentCount) || 1)
+/** 审批人展示：有姓名显示“已提交给 角色：姓名 审批”；否则显示明确兜底文案。 */
+const approverText = computed(() => {
+  const result = props.result || {}
+  if (result.currentApproverName) {
+    const who = result.currentApproverRole
+      ? `${result.currentApproverRole}：${result.currentApproverName}`
+      : result.currentApproverName
+    return `已提交给 ${who} 审批`
+  }
+  return result.approverMessage || '审批人信息加载中，请稍后查看'
+})
 </script>
 
 <style scoped>
@@ -82,6 +97,8 @@ const agentCount = computed(() => Number(props.result && props.result.agentCount
 .v { flex: 1; font-size: 27rpx; color: #333; line-height: 1.5; }
 .order-no { font-weight: 700; color: #FF6B35; letter-spacing: 1rpx; }
 .amount { font-size: 32rpx; font-weight: 700; color: #FF6B35; }
+.approver { color: #07C160; font-weight: 600; }
+.approver.fallback { color: #FF7D00; font-weight: 400; line-height: 1.5; }
 .actions { display: flex; gap: 20rpx; width: 100%; margin-top: 48rpx; }
 .btn {
   flex: 1; height: 88rpx; line-height: 88rpx; text-align: center;

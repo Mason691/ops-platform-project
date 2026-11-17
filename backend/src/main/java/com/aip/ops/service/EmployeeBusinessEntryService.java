@@ -18,8 +18,11 @@ public interface EmployeeBusinessEntryService {
     /** 按客户手机号查询平台会员姓名（仅返回会员 id + 姓名）。 */
     Map<String, Object> lookupMember(String phone);
 
-    /** 保存手工录入的业务数据。 */
+    /** 保存手工录入的业务数据（同步发起工作流并带回下一审批人）。 */
     Map<String, Object> createManualEntry(EmployeeBusinessEntryRequest request);
+
+    /** 结果页轮询/详情兜底：查询订单当前审批人。 */
+    Map<String, Object> currentApprover(Long orderId);
 
     /**
      * 收据号查重（制单阶段失焦提示）：同组织内仅允许同一客户复用，
