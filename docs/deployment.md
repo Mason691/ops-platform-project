@@ -36,22 +36,19 @@ cd frontend && npm run build:h5        # ops H5 → /data2/boss-platform/html/op
 - Volume: `/data2/boss-platform/uploads:/app/uploads`
 - `PLATFORM_BASE_URL=http://localhost:8080`（host 网络直连平台）
 - `MALL_SERVICE_BASE_URL=http://localhost:8083`
-- `PAYMENT_QR_BASE_DIR=/app/payment-qr` + 持久卷（收款码私有目录，2026-11-16 起）
+- 不再需要 `PAYMENT_QR_BASE_DIR` / 收款码持久卷（2026-11-17 起改为 jar 内置 + ECDSA 验签；旧卷可在发布后删除）
 
 生产 Nginx：`/ops/` → `boss-ops-nginx:80`，`/api/ops/**` → `ops-backend:8082`
 
 ### 收款码上线检查（强制）
 
-收款码不是静态文件，必须由运营商管理员在平台后台上传并登记 SHA-256；漏传时员工 H5 收款信息步骤会显示“收款码未配置，请联系管理员”，后端日志出现 `Business exception ... 收款码未配置`。
+收款码图片与签名打包在 ops jar 的 `secure/qr/` 下（**不是 static 目录**），后台无上传入口；员工只能经 `/api/ops/employee/business-data/payment-qr` 取图，后端验签通过才返回。
 
-1. 平台后台 `/ops/product-price` → “收款码配置” Tab → 上传收款码（JPG/PNG，≤5MB），确认“配置状态=已配置”且预览可见。
-2. 或部署后核对：
-   ```sql
-   SELECT corp_id, file_path, file_hash, file_size, status
-   FROM mall_db.ops_payment_qr_config WHERE delete_flag=0;
-   ```
-   至少存在所属运营商 `corp_id` 的记录；文件 `$PAYMENT_QR_BASE_DIR/<file_path>` 存在且 `sha256sum` 与 `file_hash` 一致。
-3. 员工 H5（支付方式=二维码）应显示收款码；直接替换私有目录文件会被哈希校验拒绝，必须重走后台上传。
+1. 更新二维码：按 `tools/qr-signature/README.md` 用离线私钥签名，提交 `payment-qr.png` + `payment-qr.png.sig`，走代码发布。
+2. 发布后检查启动日志：应出现 `PAYMENT_QR_INTEGRITY_OK`；若出现 `PAYMENT_QR_INTEGRITY_FAILED`，生产会拒绝启动。
+3. 员工 H5（支付方式=二维码）应显示收款码；直接访问 `https://boss.jdzn99.com/secure/qr/payment-qr.png` **不能返回 `image/png`**（资源在 jar 内，不在静态目录；返回 404 或 SPA 的 `text/html` 均正常，说明未暴露图片）。
+4. 禁止在服务器上手改 jar 内图片或 `.sig`；任何替换都会导致验签失败并拒绝展示。
+5. 旧表 `ops_payment_qr_config` 仅保留历史审计，应用不再读取；执行 `sql/deprecate_payment_qr_config.sql` 标记废弃并移除 AI 实体注册。
 
 ### 生产数据库定时备份（2026-09-04 上线，落盘本机）
 

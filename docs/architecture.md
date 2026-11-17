@@ -21,8 +21,7 @@
 | `CommissionRuleController` | `/api/ops/admin/commission` | 个人/公司提成规则 CRUD（支持组织层级继承） |
 | `ValueAddedProductController` | `/api/ops/admin/value-added/product` | 增值产品 CRUD + 列表按品类/品牌/型号(like)/状态筛选；2026-10-15 整表清空后重建为 95 个型号（万和15/万家乐21/美的18/小松鼠41，id 144-238，`sql/ops_value_added_product_import_20261015*.sql`），同日补入万和壁挂炉 32 个型号（id 239-270，`sql/ops_value_added_product_import_20261015_wanhe_wallboiler.sql`），现共 127 个型号 |
 | `ProductPriceController` | `/api/ops/admin/product-price` | **产品售价**：按 SCM 商品维护销售价/零售底价/集团最低价，运营商可维护、城市合伙人只读；SCM 商品搜索 + 品类映射 `PRODUCT_CATEGORY` |
-| `AdminPaymentQrController` | `/api/ops/admin/payment-qr` | **收款码配置**：元数据/上传/鉴权取图（运营商维护，取图逐次 SHA-256 校验） |
-| `EmployeePaymentQrController` | `/api/ops/employee/business-data/payment-qr` | **员工收款码取图**：员工 JWT 鉴权，按员工组织解析所属运营商，逐次哈希校验 |
+| `EmployeePaymentQrController` | `/api/ops/employee/business-data/payment-qr` | **员工收款码取图（唯一出口）**：员工 JWT 鉴权，`QrCodeIntegrityService` 对 jar 内置图片做 ECDSA 验签；失败返回 503，响应 `Cache-Control: no-store`；后台已无上传入口 |
 | `MemberController` | `/api/ops/admin/members` | 会员管理：分页查询/详情/启用禁用 |
 | `ExportTaskController` | `/api/ops/admin/export` | 通用异步导出：提交/状态轮询/下载/历史 |
 | `PermissionController` | `/api/ops/admin/permission` | 权限概要查询 |

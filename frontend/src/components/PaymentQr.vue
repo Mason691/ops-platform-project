@@ -7,7 +7,7 @@
     </view>
     <image v-else-if="src" class="qr-image" :src="src" mode="widthFix"
            @click="preview" @error="onImageError" />
-    <view v-else class="qr-state"><text>收款码未配置，请联系管理员</text></view>
+    <view v-else class="qr-state"><text>收款码暂不可用，请联系工作人员</text></view>
     <text v-if="src && !loading && !error" class="qr-hint">请使用微信扫描上方收款码完成支付</text>
   </view>
 </template>
@@ -17,8 +17,9 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { BASE_URL } from '@/config'
 
 /**
- * 收款码展示：通过员工鉴权接口取图；后端每次重算 SHA-256，
- * 文件被篡改时返回业务错误，这里直接展示错误文案（不暴露文件路径）。
+ * 收款码展示：通过员工鉴权接口取图；后端对 jar 内置图片做 ECDSA 验签，
+ * 校验失败返回 503 + 统一文案，这里直接展示错误文案（不暴露文件路径）。
+ * 图片资源不在 static 目录，前端无法绕过接口直连静态文件。
  */
 const loading = ref(true)
 const error = ref('')
@@ -46,12 +47,13 @@ async function load() {
   // #ifdef H5
   try {
     const res = await fetch(BASE_URL + '/api/ops/employee/business-data/payment-qr', {
-      headers: { Authorization: 'Bearer ' + token }
+      headers: { Authorization: 'Bearer ' + token },
+      cache: 'no-store'
     })
     const contentType = res.headers.get('content-type') || ''
     if (!res.ok || contentType.includes('application/json')) {
       const body = await res.json().catch(() => ({}))
-      if (!disposed) error.value = body.msg || '收款码加载失败，请重试'
+      if (!disposed) error.value = body.msg || '收款码暂不可用，请联系工作人员'
       return
     }
     const blob = await res.blob()
@@ -59,7 +61,7 @@ async function load() {
     objectUrl = URL.createObjectURL(blob)
     src.value = objectUrl
   } catch (e) {
-    if (!disposed) error.value = '收款码加载失败，请重试'
+    if (!disposed) error.value = '收款码暂不可用，请联系工作人员'
   } finally {
     if (!disposed) loading.value = false
   }
@@ -73,10 +75,10 @@ async function load() {
       if (res.statusCode === 200 && res.tempFilePath) {
         src.value = res.tempFilePath
       } else {
-        error.value = '收款码加载失败，请重试'
+        error.value = '收款码暂不可用，请联系工作人员'
       }
     },
-    fail: () => { if (!disposed) error.value = '收款码加载失败，请重试' },
+    fail: () => { if (!disposed) error.value = '收款码暂不可用，请联系工作人员' },
     complete: () => { if (!disposed) loading.value = false }
   })
   // #endif
@@ -91,7 +93,7 @@ function preview() {
 function onImageError() {
   revoke()
   src.value = ''
-  error.value = '收款码加载失败，请重试'
+  error.value = '收款码暂不可用，请联系工作人员'
 }
 
 function revoke() {

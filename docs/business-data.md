@@ -27,7 +27,7 @@
 - **产品售价**：`ops_product_price` 按 `(corp_id, product_id)` 唯一，品牌/型号取自 SCM 商品信息，品类落 `PRODUCT_CATEGORY` itemKey；价格关系 `销售价 ≥ 零售底价 ≥ 集团最低价 > 0`。运营商维护，城市合伙人只读；员工制单按 `productId` 查价，并校验 `productId` 与提交品牌/品类/型号同源（防低价商品ID套高价商品绕过特批）。未配置/停用商品**阻止制单**。
 - **低价特批**：销售价 < 标准价时自动特批，必须上传特批文件（PDF/JPG/PNG ≤10MB，`ops_business_special_file` 留痕）并填写提成比例 0~100；后端二次校验，忽略前端 `isSpecial`。底价统一取售价表（手工单不再匹配旧 `ops_value_added_product` 底价）。
 - **支付方式**：`QR/CASH/TRANSFER`，订单头 + 明细双写；员工 H5 移除“是否收款”（财务核对节点仍保留 `is_received` 历史资金到账确认）。
-- **收款码防篡改**：`ops_payment_qr_config` 登记 SHA-256；文件存 `app.payment-qr.base-dir`**私有目录**（不在 `/uploads` 静态映射下）；每次取图重算哈希，不一致拒绝并告警；替换仅可通过平台后台 `POST /api/ops/admin/payment-qr/upload`。**2026-11-17**：哈希校验失败文案统一为“收款码校验失败，请联系管理员”，H5 图片渲染失败兜底为“收款码加载失败，请重试”。**生产待办**：`ops_payment_qr_config` 仍为 0 行、私有目录为空，需平台管理员在 `/ops/product-price` →「收款码配置」上传后，员工端收款码才会显示。
-- **发布顺序**：`sql/migrate_product_price_payment_qr.sql` → 新 ops JAR → 平台主站（`/ops/product-price` + host nginx 白名单）→ 菜单 `doc/add_product_price_menu.sql` → H5；配置 `PAYMENT_QR_BASE_DIR` 持久卷，上线前完成核心商品售价配置。
+- **收款码防篡改（2026-11-17 重构）**：后台上传入口已移除；图片与 `.sig` 打包在 ops jar 的 `secure/qr/`（非 static，Nginx 无法直出），公钥硬编码在 `QrCodeIntegrityService`，私钥离线保管。员工只能经 `GET /api/ops/employee/business-data/payment-qr` 取图；服务端 ECDSA 验签失败返回 503 + “收款码暂不可用，请联系工作人员”，并记 `PAYMENT_QR_INTEGRITY_FAILED` ERROR 日志。响应 `Cache-Control: no-store`；前端 fetch+blob、`@error` 兜底。更新只能走发布流程（`tools/qr-signature/`）。
+- **发布顺序**：新 ops JAR（含图片+签名）→ 平台主站（移除收款码配置 Tab）→ H5；执行 `sql/deprecate_payment_qr_config.sql` 废弃旧表记录并移除 AI 实体注册；生产不再需要 `PAYMENT_QR_BASE_DIR` 卷。
 - **验证**：H5/平台 Puppeteer 审计 + 三端构建通过；真实 DB/API 与生产 SCM 调用待部署验证。详见 `docs/PR-产品售价-收款码-2026-11-16.md`。
 

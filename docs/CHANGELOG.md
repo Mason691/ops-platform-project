@@ -2,6 +2,15 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-17（收款码安全改造：jar 内置 + ECDSA 验签）
+
+- **移除后台配置入口**：删除 `AdminPaymentQrController`、`PaymentQrService/Impl`、`OpsPaymentQrConfig`/Mapper、平台 `PaymentQrPanel.vue` 与 `paymentQrApi`；`/ops/product-price` 移除“收款码配置” Tab。任何角色（含超管）都不能通过 UI 上传/替换收款码。
+- **存储**：图片 `backend/src/main/resources/secure/qr/payment-qr.png` + 签名 `.sig` 打包进 jar；**不在 `static/` 下**，Spring Boot/Nginx 均无法静态直出。公钥硬编码在 `QrCodeIntegrityService.PUBLIC_KEY_BASE64`，私钥离线保管（`tools/qr-signature/`）。
+- **校验**：`QrCodeIntegrityService` 读图片 → ECDSA `SHA256withECDSA` 验签；成功缓存 5 分钟（指纹=图片/签名长度+lastModified），失败缓存 30 秒；失败记 `PAYMENT_QR_INTEGRITY_FAILED` ERROR，绝不返回图片。`QrCodeStartupValidator` 启动验签（生产 `security.qr.fail-fast=true` 失败拒绝启动）；`QrCodeIntegrityScheduler` 每日 03:00 绕过缓存巡检。
+- **接口**：`GET /api/ops/employee/business-data/payment-qr` 保留员工 JWT 鉴权，成功返回 `image/png` + `Cache-Control: no-store`；失败 503 + “收款码暂不可用，请联系工作人员”。每次访问记 `PAYMENT_QR_ACCESS`（用户/组织/IP/哈希）。
+- **前端**：H5 `PaymentQr.vue` 保持 fetch+blob（带 Bearer），增加 `cache: 'no-store'` 与统一兜底文案；不直接引用静态 URL。
+- **DB/运维**：新增 `sql/deprecate_payment_qr_config.sql`（旧表记录置废弃、删除 AI 实体注册）；移除 `app.payment-qr.base-dir` 与 `PAYMENT_QR_BASE_DIR` 卷依赖。新增签名工具 `tools/qr-signature/`。
+
 ## 2026-11-17（员工制单价格交互 / 收款凭证说明 / 收据号填报与财务核对留痕）
 
 - **价格卡片**：商品卡片销售单价由文字链（修改/用标准价）改为价格卡片——大号当前单价 + 「修改单价」「恢复标准价」两个按钮（填充/描边、图标、按压反馈）；「恢复标准价」与标准价一致时置灰并提示“当前已是标准价”；编辑态使用数字键盘并展示标准价参考；未配置标准价显示“未配置标准价/请联系管理员”；低价仍自动展开特批文件与提成比例。删除 `priceLocked` 旧状态与 `unlockPrice`。
