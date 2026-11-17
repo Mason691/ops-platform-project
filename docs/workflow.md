@@ -18,3 +18,14 @@
 
 ---
 
+## 工作业务日志与订单流程进度（2026-11-17）
+
+- **底座日志接口**：`GET /api/wf/log/my`（当前员工发起/处理的流程操作，业务类型/动作/日期筛选 + 分页）、`GET /api/wf/log/detail?key=L:<logId>|I:<instanceId>`（详情，含 `formData` 附件提取）。发起记录由 `wf_instance` 合成（`I:`），历史实例无需补日志；审批操作人优先取 `wf_task.approver_name` 真实姓名；日志/实例逻辑删除仍可查并返回 `deleted` 标记。
+- **底座内部进度接口**：`POST /api/internal/wf/instance/progress`（X-Internal-Token，批量 ≤100）返回当前/下一节点 ID、名称、`biz_status`、当前/下一处理人；供子系统订单列表一次取数，避免逐单调用。
+- **节点表单留痕**：`WorkflowEngineService.publishLog` 将审批/驳回提交的 `formData` 写入 `wf_log.detail_json`，日志详情可展示附件。
+- **ops 员工端**：`GET /api/ops/employee/business-data/orders`（当前组织 + 当前经办人，订单主行 + `flow` 进度）、`GET .../orders/{orderId}`（详情 + `flowRecords`）；H5 业务数据页由月度汇总改为订单主行 + 展开明细 + `BusinessFlowProgress` 步骤条；工作台新增「工作业务日志」卡片，新增日志列表/详情/订单详情三页。
+- **权限**：日志只按 JWT 用户过滤；订单固定 `corp_id + agent_phone`；业务单据跳转按对应单据接口二次校验。
+- **无 DDL**：不新增表；`wf_log.action` 枚举不变（发起由查询合成）。
+
+---
+

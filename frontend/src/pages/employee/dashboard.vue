@@ -52,6 +52,9 @@
       </view>
     </view>
 
+    <!-- Work log -->
+    <WorkLogCard ref="logCardRef" />
+
     <!-- Menu -->
     <view v-if="!noPermissionTip" class="menu-section">
       <text class="section-title">常用功能</text>
@@ -162,6 +165,7 @@ import { api } from '@/api/index.js'
 import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
 import OrgSwitcher from '@/components/OrgSwitcher.vue'
 import OrgSwitchSheet from '@/components/OrgSwitchSheet.vue'
+import WorkLogCard from '@/components/WorkLogCard.vue'
 import { useOrgSwitch } from '@/hooks/useOrgSwitch'
 import { getActiveCompany, getEmployeeInfo } from '@/utils/employeeSession'
 
@@ -177,6 +181,8 @@ const yearlyStats = ref({
   totalSale: '¥0'
 })
 const balancePendingCount = ref(0)
+const logCardRef = ref(null)
+let dashboardShown = false
 
 const {
   orgs, sheetVisible, switching, loadOrgs, openSheet, confirmSwitch
@@ -188,6 +194,9 @@ onShow(async () => {
   await loadDashboard()
   loadBalancePending()
   await loadOrgs()
+  // 卡片自身在 mounted 已加载一次；后续回到工作台（含查看全部返回）再刷新
+  if (dashboardShown) logCardRef.value?.reload()
+  dashboardShown = true
 })
 
 function refreshCompany() {
@@ -249,6 +258,7 @@ async function onOrgChanged(data) {
   noPermissionTip.value = !(data.permissions || []).length
   refreshCompany()
   await loadStats()
+  logCardRef.value?.reload()
 }
 
 function goBusinessData() { uni.navigateTo({ url: '/pages/employee/business-data' }) }

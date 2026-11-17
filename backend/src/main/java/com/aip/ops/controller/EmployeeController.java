@@ -98,6 +98,34 @@ public class EmployeeController {
         return R.ok(employeeService.getOverview(batchNo));
     }
 
+    /**
+     * 员工端订单列表：订单主行 + 本人参与的商品明细 + 工作流进度
+     * （当前/下一节点、当前/下一处理人）。仅当前组织 + 当前经办人。
+     */
+    @GetMapping("/business-data/orders")
+    public R<?> employeeOrders(@RequestParam(required = false) String batchNo,
+                               @RequestParam(required = false) String orderNo,
+                               @RequestParam(required = false) String bizStatus,
+                               @RequestParam(defaultValue = "1") int pageNum,
+                               @RequestParam(defaultValue = "10") int pageSize) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可查看业务订单");
+        }
+        return R.ok(businessDataService.employeeOrderPage(
+                SecurityUtils.getCurrentCorpId(), employeeService.getCurrentAgentPhone(),
+                batchNo, orderNo, bizStatus, pageNum, pageSize));
+    }
+
+    /** 员工端订单详情：本人参与的商品明细 + 流程进度 + 工作流处理留痕。 */
+    @GetMapping("/business-data/orders/{orderId}")
+    public R<?> employeeOrderDetail(@PathVariable Long orderId) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可查看业务订单");
+        }
+        return R.ok(businessDataService.employeeOrderDetail(
+                SecurityUtils.getCurrentCorpId(), employeeService.getCurrentAgentPhone(), orderId));
+    }
+
     private static final int AVATAR_SIZE = 200;
     private static final float AVATAR_JPEG_QUALITY = 0.7f;
 

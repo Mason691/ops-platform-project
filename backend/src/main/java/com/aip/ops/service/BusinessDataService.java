@@ -15,6 +15,14 @@ public interface BusinessDataService {
                                   String category, String isSpecial, String brand, String model,
                                   String receiptDateStart, String receiptDateEnd, String bizStatus);
 
+    /** 员工端订单列表：仅当前组织 + 当前经办人的明细，附工作流进度（当前/下一节点、处理人）。 */
+    Map<String, Object> employeeOrderPage(Long corpId, String agentPhone, String batchNo,
+                                          String orderNo, String bizStatus,
+                                          int pageNum, int pageSize);
+
+    /** 员工端订单详情：仅当前组织 + 当前经办人参与的行，附流程进度与工作流处理留痕。 */
+    Map<String, Object> employeeOrderDetail(Long corpId, String agentPhone, Long orderId);
+
     /** 订单详情（工作流节点处理页使用）：订单视图 + 商品明细 + 流程处理留痕。 */
     Map<String, Object> orderDetail(Long orderId);
 

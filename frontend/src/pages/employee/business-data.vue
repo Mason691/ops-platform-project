@@ -12,7 +12,7 @@
     </view>
 
     <!-- Empty -->
-    <view class="empty" v-else-if="!loading && months.length === 0">
+    <view class="empty" v-else-if="ordersLoaded && !orders.length">
       <text class="empty-icon">📋</text>
       <text class="empty-text">暂无业务数据</text>
       <view class="add-btn empty-add" @click="goAddBusiness"><text>＋ 新增业务</text></view>
@@ -55,8 +55,20 @@
         </view>
       </view>
 
-      <!-- Monthly Breakdown -->
-      <BusinessMonthList :months="months" />
+      <!-- Order list: 订单主行 + 展开明细 + 流程进度 -->
+      <view class="orders-section">
+        <view class="section-head">
+          <text class="section-title">📦 业务订单</text>
+          <text class="order-total">共 {{ orderTotal }} 单</text>
+        </view>
+        <BusinessOrderList v-if="orders.length" :orders="orders"
+                           :status-options="statusOptions"
+                           :loading="orderLoadingMore" :has-more="hasMore"
+                           @load-more="loadMore" />
+        <view v-else-if="orderLoading" class="orders-loading">
+          <text>加载订单...</text>
+        </view>
+      </view>
     </template>
 
     <!-- Bottom Bar -->
@@ -81,13 +93,21 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
-import BusinessMonthList from '@/components/BusinessMonthList.vue'
+import BusinessOrderList from '@/components/BusinessOrderList.vue'
 
 const loading = ref(true)
 const ready = ref(false)
 const errorMsg = ref('')
 const allTime = reactive({ totalSale: 0, totalCommission: 0, orderCount: 0 })
-const months = ref([])
+const orders = ref([])
+const statusOptions = ref([])
+const orderTotal = ref(0)
+const orderPage = ref(1)
+const orderLoading = ref(false)
+const orderLoadingMore = ref(false)
+const ordersLoaded = ref(false)
+const PAGE_SIZE = 10
+const hasMore = computed(() => orders.value.length < orderTotal.value)
 const batchList = reactive([{ label: '全部批次', value: '' }])
 const selectedBatch = ref('')
 const selectedBatchLabel = ref('全部批次')
@@ -170,13 +190,48 @@ function applyPendingBatch() {
 async function loadData() {
   loading.value = true; errorMsg.value = ''
   try {
-    const params = selectedBatch.value ? { batchNo: selectedBatch.value } : {}
-    const data = await api.employeeOverview(params)
-    if (data?.allTime) Object.assign(allTime, data.allTime)
-    months.value = Array.isArray(data?.months) ? data.months : []
+    await loadTotals()
+    await loadOrders(true)
   } catch (e) {
     errorMsg.value = (e && e.msg) || '加载失败'
   } finally { loading.value = false }
+}
+
+async function loadTotals() {
+  const params = selectedBatch.value ? { batchNo: selectedBatch.value } : {}
+  const data = await api.employeeOverview(params)
+  if (data?.allTime) Object.assign(allTime, data.allTime)
+}
+
+async function loadOrders(reset) {
+  if (reset) {
+    orderPage.value = 1
+    orderLoading.value = true
+    ordersLoaded.value = false
+  } else {
+    orderLoadingMore.value = true
+  }
+  try {
+    const params = { pageNum: orderPage.value, pageSize: PAGE_SIZE }
+    if (selectedBatch.value) params.batchNo = selectedBatch.value
+    const data = await api.employeeOrders(params)
+    const records = Array.isArray(data?.records) ? data.records : []
+    orders.value = reset ? records : orders.value.concat(records)
+    orderTotal.value = Number(data?.total) || 0
+    statusOptions.value = Array.isArray(data?.bizStatusOptions) ? data.bizStatusOptions : []
+    ordersLoaded.value = true
+  } finally {
+    orderLoading.value = false
+    orderLoadingMore.value = false
+  }
+}
+
+function loadMore() {
+  if (!hasMore.value || orderLoadingMore.value) return
+  orderPage.value += 1
+  loadOrders(false).catch(e => {
+    uni.showToast({ title: (e && e.msg) || '加载失败', icon: 'none' })
+  })
 }
 
 function formatMoney(val) {
@@ -242,4 +297,13 @@ function goAddBusiness() { uni.navigateTo({ url: '/pages/employee/business-data-
 .batch-picker { display:flex; align-items:center; padding:12rpx 20rpx; background:#f5f5f5; border-radius:8rpx; font-size:26rpx; color:#333; flex:1; }
 .batch-arrow { font-size:20rpx; color:#999; margin-left:8rpx; }
 .check-btn { padding:12rpx 20rpx; background:#07C160; color:#fff; border-radius:8rpx; font-size:26rpx; white-space:nowrap; }
+
+/* 业务订单列表（订单主行 + 展开明细 + 流程进度） */
+.orders-section { padding: 0 24rpx; }
+.orders-section .section-head { padding-left: 0; padding-right: 0; }
+.order-total { font-size: 23rpx; color: #86909C; }
+.orders-loading {
+  text-align: center; padding: 40rpx; font-size: 24rpx; color: #86909C;
+  background: #fff; border-radius: 16rpx;
+}
 </style>

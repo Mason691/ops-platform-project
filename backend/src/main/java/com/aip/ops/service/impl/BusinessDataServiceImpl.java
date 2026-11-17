@@ -1,6 +1,7 @@
 package com.aip.ops.service.impl;
 
 import com.aip.sdk.exception.BusinessException;
+import com.aip.ops.client.WorkflowPlatformClient;
 import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsBusinessOrder;
@@ -74,6 +75,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final BizStatusService bizStatusService;
     private final com.aip.ops.mapper.OpsBusinessFlowRecordMapper flowRecordMapper;
     private final DispatchEligibilityService dispatchEligibilityService;
+    private final WorkflowPlatformClient workflowClient;
 
     /** 锁定状态：已上报集团的数据禁止删除/修改/重新计算（所有组织一致） */
     public static final String REPORTED_STATUS = "已上报集团";
@@ -135,7 +137,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             BusinessOrderService orderService,
             BizStatusService bizStatusService,
             com.aip.ops.mapper.OpsBusinessFlowRecordMapper flowRecordMapper,
-            DispatchEligibilityService dispatchEligibilityService) {
+            DispatchEligibilityService dispatchEligibilityService,
+            WorkflowPlatformClient workflowClient) {
         this.mapper = mapper;
         this.orderMapper = orderMapper;
         this.productMapper = productMapper;
@@ -151,6 +154,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         this.bizStatusService = bizStatusService;
         this.flowRecordMapper = flowRecordMapper;
         this.dispatchEligibilityService = dispatchEligibilityService;
+        this.workflowClient = workflowClient;
     }
     public static String getCategoryDisplayName(String key) {
         if (key == null || key.isEmpty()) return "";
@@ -378,6 +382,184 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         result.put("totalCommission", totalCommission.setScale(2, RoundingMode.HALF_UP));
         result.put("categoryStats", categoryStats);
         return result;
+    }
+
+    @Override
+    public Map<String, Object> employeeOrderPage(Long corpId, String agentPhone, String batchNo,
+                                                 String orderNo, String bizStatus,
+                                                 int pageNum, int pageSize) {
+        if (corpId == null || corpId <= 0 || !hasText(agentPhone)) {
+            throw BusinessException.forbidden("缺少员工组织信息，请重新登录");
+        }
+        String phone = agentPhone.trim();
+        LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
+        qw.eq(OpsBusinessData::getCorpId, corpId)
+                .eq(OpsBusinessData::getAgentPhone, phone)
+                .eq(OpsBusinessData::getDeleteFlag, 0)
+                .eq(hasText(batchNo), OpsBusinessData::getBatchNo, batchNo)
+                .eq(hasText(orderNo), OpsBusinessData::getOrderNo, orderNo)
+                .orderByDesc(OpsBusinessData::getId);
+        List<OpsBusinessData> rows = mapper.selectList(qw);
+        Map<String, List<OpsBusinessData>> grouped = new LinkedHashMap<>();
+        for (OpsBusinessData row : rows) {
+            grouped.computeIfAbsent(orderKey(row), k -> new ArrayList<>()).add(row);
+        }
+        Set<Long> orderIds = grouped.values().stream()
+                .map(group -> group.get(0).getOrderId())
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, OpsBusinessOrder> masters = orderService.findByIds(orderIds).stream()
+                .filter(order -> corpId.equals(order.getCorpId()))
+                .collect(Collectors.toMap(OpsBusinessOrder::getId, x -> x, (a, b) -> a));
+        List<Map<String, Object>> orders = new ArrayList<>();
+        BigDecimal totalSale = BigDecimal.ZERO;
+        BigDecimal totalCommission = BigDecimal.ZERO;
+        for (List<OpsBusinessData> group : grouped.values()) {
+            Map<String, Object> order = buildOrderView(group,
+                    masters.get(group.get(0).getOrderId()));
+            if (hasText(bizStatus)
+                    && !bizStatus.trim().equals(String.valueOf(order.get("bizStatus")))) {
+                continue;
+            }
+            orders.add(order);
+            totalSale = totalSale.add((BigDecimal) order.get("totalAmount"));
+            totalCommission = totalCommission.add((BigDecimal) order.get("totalCommission"));
+        }
+        orders.sort((a, b) -> Long.compare((Long) b.get("_maxId"), (Long) a.get("_maxId")));
+        int total = orders.size();
+        int safePage = Math.max(1, pageNum);
+        int safeSize = Math.min(Math.max(1, pageSize), 100);
+        int from = Math.min(total, (safePage - 1) * safeSize);
+        int to = Math.min(total, from + safeSize);
+        // 只对当前页订单查流程进度：避免一次把全部订单实例传给底座（上限100）
+        List<Map<String, Object>> pageOrders = orders.subList(from, to);
+        Set<Long> instanceIds = pageOrders.stream()
+                .map(order -> order.get("wfInstanceId"))
+                .filter(value -> value instanceof Number)
+                .map(value -> ((Number) value).longValue())
+                .collect(Collectors.toSet());
+        Map<Long, WorkflowPlatformClient.InstanceProgress> progress =
+                workflowClient.instanceProgressBatch(new ArrayList<>(instanceIds));
+        for (Map<String, Object> order : pageOrders) {
+            order.put("flow", buildEmployeeFlow(order, progress));
+            order.remove("_maxId");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("records", pageOrders);
+        result.put("total", total);
+        result.put("size", safeSize);
+        result.put("current", safePage);
+        result.put("totalSale", totalSale.setScale(2, RoundingMode.HALF_UP));
+        result.put("totalCommission", totalCommission.setScale(2, RoundingMode.HALF_UP));
+        result.put("bizStatusOptions", bizStatusService.options());
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> employeeOrderDetail(Long corpId, String agentPhone, Long orderId) {
+        if (corpId == null || corpId <= 0 || !hasText(agentPhone) || orderId == null) {
+            throw BusinessException.forbidden("缺少员工组织信息，请重新登录");
+        }
+        OpsBusinessOrder master = orderService.getById(orderId);
+        if (master == null || Integer.valueOf(1).equals(master.getDeleteFlag())
+                || !corpId.equals(master.getCorpId())) {
+            throw BusinessException.notFound("业务订单不存在");
+        }
+        LambdaQueryWrapper<OpsBusinessData> qw = new LambdaQueryWrapper<>();
+        qw.eq(OpsBusinessData::getOrderId, orderId)
+                .eq(OpsBusinessData::getCorpId, corpId)
+                .eq(OpsBusinessData::getAgentPhone, agentPhone.trim())
+                .eq(OpsBusinessData::getDeleteFlag, 0)
+                .orderByAsc(OpsBusinessData::getId);
+        List<OpsBusinessData> rows = mapper.selectList(qw);
+        if (rows.isEmpty()) {
+            // 员工只能查看自己参与（经办）的订单，避免跨经办人/跨组织越权
+            throw BusinessException.forbidden("无权查看该业务订单");
+        }
+        Map<String, Object> view = buildOrderView(rows, master);
+        Set<Long> instanceIds = new LinkedHashSet<>();
+        if (view.get("wfInstanceId") instanceof Number n) {
+            instanceIds.add(n.longValue());
+        }
+        Map<Long, WorkflowPlatformClient.InstanceProgress> progress =
+                workflowClient.instanceProgressBatch(new ArrayList<>(instanceIds));
+        view.put("flow", buildEmployeeFlow(view, progress));
+        view.put("bizStatusOptions", bizStatusService.options());
+        view.remove("_maxId");
+        List<com.aip.ops.entity.OpsBusinessFlowRecord> records = flowRecordMapper.selectList(
+                new LambdaQueryWrapper<com.aip.ops.entity.OpsBusinessFlowRecord>()
+                        .eq(com.aip.ops.entity.OpsBusinessFlowRecord::getOrderId, orderId)
+                        .eq(com.aip.ops.entity.OpsBusinessFlowRecord::getDeleteFlag, 0)
+                        .orderByDesc(com.aip.ops.entity.OpsBusinessFlowRecord::getId));
+        view.put("flowRecords", records);
+        return view;
+    }
+
+    /**
+     * 订单流程进度：当前/下一节点取自工作流实例，业务状态名统一走字典；
+     * 未发起/底座不可达分别给出明确文案，不影响订单其它字段展示。
+     */
+    private Map<String, Object> buildEmployeeFlow(Map<String, Object> order,
+                                                  Map<Long, WorkflowPlatformClient.InstanceProgress> progress) {
+        Map<String, Object> flow = new LinkedHashMap<>();
+        Object raw = order.get("wfInstanceId");
+        if (!(raw instanceof Number number)) {
+            flow.put("status", "NOT_STARTED");
+            flow.put("statusName", "未发起");
+            flow.put("message", "流程未发起");
+            flow.put("nextStatusName", "流程未发起");
+            return flow;
+        }
+        Long instanceId = number.longValue();
+        flow.put("instanceId", instanceId);
+        WorkflowPlatformClient.InstanceProgress p = progress.get(instanceId);
+        if (p == null) {
+            flow.put("status", "UNKNOWN");
+            flow.put("statusName", "待同步");
+            flow.put("message", "流程信息待同步");
+            flow.put("nextStatusName", "流程信息待同步");
+            return flow;
+        }
+        String status = p.status() == null ? "" : p.status();
+        flow.put("status", status);
+        flow.put("statusName", employeeInstanceStatusLabel(status));
+        flow.put("definitionName", p.definitionName());
+        flow.put("currentNodeId", p.currentNodeId());
+        flow.put("currentNodeName", p.currentNodeName());
+        flow.put("currentNodeOrder", p.currentNodeOrder());
+        flow.put("currentBizStatus", p.currentBizStatus());
+        flow.put("currentBizStatusName", bizStatusService.label(p.currentBizStatus()));
+        flow.put("nextNodeId", p.nextNodeId());
+        flow.put("nextNodeName", p.nextNodeName());
+        flow.put("nextNodeOrder", p.nextNodeOrder());
+        flow.put("nextBizStatus", p.nextBizStatus());
+        flow.put("nextStatusName", employeeNextStatusName(status, p.nextBizStatus(), p.nextNodeName()));
+        flow.put("currentApprovers", p.currentApprovers());
+        flow.put("nextApprovers", p.nextApprovers());
+        flow.put("resolveStatus", p.resolveStatus());
+        flow.put("resolveMessage", p.resolveMessage());
+        flow.put("startedTime", p.startedTime());
+        flow.put("finishedTime", p.finishedTime());
+        return flow;
+    }
+
+    private String employeeNextStatusName(String status, String nextBizStatus, String nextNodeName) {
+        if ("COMPLETED".equals(status)) return "流程已结束";
+        if ("REJECTED".equals(status)) return "已驳回";
+        if ("TERMINATED".equals(status)) return "已终止";
+        if (hasText(nextBizStatus)) return bizStatusService.label(nextBizStatus);
+        if (hasText(nextNodeName)) return nextNodeName;
+        return "无下一状态";
+    }
+
+    private static String employeeInstanceStatusLabel(String status) {
+        return switch (status) {
+            case "RUNNING" -> "进行中";
+            case "COMPLETED" -> "已完成";
+            case "REJECTED" -> "已驳回";
+            case "TERMINATED" -> "已终止";
+            default -> status;
+        };
     }
 
     @Override
@@ -729,6 +911,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 + priceKey(first.getSalePrice()));
         product.put("brand", first.getBrand());
         product.put("category", first.getCategory());
+        product.put("categoryName", KEY_TO_CN.getOrDefault(
+                Objects.toString(first.getCategory(), ""), first.getCategory()));
         product.put("model", first.getModel());
         product.put("salePrice", first.getSalePrice());
         product.put("saleQuantity", quantity);

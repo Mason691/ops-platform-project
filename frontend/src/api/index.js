@@ -240,6 +240,8 @@ export const api = {
   employeeDetail: (month, category) => request({url:'/api/ops/employee/business-data/detail',data:{month, category}}),
   employeeStats: (month) => request({url:'/api/ops/employee/business-data/stats',data:{month}}),
   employeeOverview: (params) => request({url:'/api/ops/employee/business-data/overview',data:params}),
+  employeeOrders: (params) => request({url:'/api/ops/employee/business-data/orders',data:params}),
+  employeeOrderDetail: (orderId) => request({url:'/api/ops/employee/business-data/orders/' + orderId}),
   employeeBatches: () => request({url:'/api/ops/employee/business-data/batches'}),
   employeeBatchCheck: (data) => request({url:'/api/ops/employee/business-data/batch/check',method:'POST',data}),
   // 员工手工新增业务数据
@@ -261,6 +263,8 @@ export const api = {
   workflowTaskDetail: (taskId) => request({url:'/api/wf/task/' + taskId}),
   workflowApprove: (data) => request({url:'/api/wf/task/approve', method:'POST', data}),
   workflowReject: (data) => request({url:'/api/wf/task/reject', method:'POST', data}),
+  workflowMyLogs: (params) => request({url:'/api/wf/log/my', data:params}),
+  workflowLogDetail: (key) => request({url:'/api/wf/log/detail', data:{key}}),
   // SCM 采购（已核对业务 → 发起采购申请；总经办 H5 核审）
   scmFinanceCheckedOrders: () => request({url:'/api/scm/pur-order/h5/finance-checked-orders'}),
   scmCreatePurchaseRequest: (data) => request({url:'/api/scm/pur-order/h5/purchase-requests', method:'POST', data}),

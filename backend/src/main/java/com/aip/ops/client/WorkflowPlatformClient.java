@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 平台工作流组件客户端。
@@ -140,6 +141,114 @@ public class WorkflowPlatformClient {
     }
 
     /**
+     * 批量查询流程进度（当前/下一节点、状态、处理人）。供员工订单列表一次取数，
+     * 避免逐单调用底座；底座不可达/未返回时返回空 Map，由调用方展示“流程信息待同步”。
+     */
+    @SuppressWarnings("unchecked")
+    public Map<Long, InstanceProgress> instanceProgressBatch(List<Long> instanceIds) {
+        if (instanceIds == null || instanceIds.isEmpty()) return Map.of();
+        List<Long> ids = instanceIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .limit(100)
+                .toList();
+        if (ids.isEmpty()) return Map.of();
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("X-Internal-Token", internalToken);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("instanceIds", ids);
+            ResponseEntity<Map> resp = restTemplate.postForEntity(
+                    baseUrl + "/api/internal/wf/instance/progress",
+                    new HttpEntity<>(body, headers), Map.class);
+            Map<String, Object> respBody = resp.getBody();
+            if (respBody == null || !(respBody.get("code") instanceof Number n)
+                    || n.intValue() != 200) {
+                log.warn("查询工作流进度失败 instanceIds={} resp={}", ids, respBody);
+                return Map.of();
+            }
+            Object data = respBody.get("data");
+            if (!(data instanceof List<?> list)) return Map.of();
+            Map<Long, InstanceProgress> result = new LinkedHashMap<>();
+            for (Object item : list) {
+                if (!(item instanceof Map<?, ?> row)) continue;
+                Long instanceId = row.get("instanceId") instanceof Number num
+                        ? num.longValue() : null;
+                if (instanceId == null) continue;
+                result.put(instanceId, new InstanceProgress(
+                        instanceId,
+                        longOrNull(row.get("currentNodeId")),
+                        str(row.get("status")),
+                        str(row.get("definitionName")),
+                        str(row.get("currentNodeName")),
+                        intOrNull(row.get("currentNodeOrder")),
+                        str(row.get("currentBizStatus")),
+                        longOrNull(row.get("nextNodeId")),
+                        str(row.get("nextNodeName")),
+                        intOrNull(row.get("nextNodeOrder")),
+                        str(row.get("nextBizStatus")),
+                        listOfMaps(row.get("currentApprovers")),
+                        listOfMaps(row.get("nextApprovers")),
+                        str(row.get("resolveStatus")),
+                        str(row.get("resolveMessage")),
+                        str(row.get("startedTime")),
+                        str(row.get("finishedTime"))));
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("查询工作流进度异常 instanceIds={}: {}", ids, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private Integer intOrNull(Object value) {
+        return value instanceof Number n ? n.intValue() : null;
+    }
+
+    private Long longOrNull(Object value) {
+        return value instanceof Number n ? n.longValue() : null;
+    }
+
+    /**
+     * 读取底座任务详情，用于前端审批页的**服务端**身份校验：
+     * 只有 task.approverUserId = 当前用户、task 仍 PENDING、businessId 匹配时，
+     * 才允许查看申请人视角不可见的物资领用/核销详情。
+     *
+     * <p>透传当前员工 Bearer Token；组件不可达返回 null，调用方 fail-closed。</p>
+     */
+    @SuppressWarnings("unchecked")
+    public TaskIdentity taskIdentity(Long taskId) {
+        if (taskId == null) return null;
+        String token = currentUserTokenOrNull();
+        if (token == null) return null;
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Bearer " + token);
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    baseUrl + "/api/wf/task/" + taskId,
+                    HttpMethod.GET, new HttpEntity<>(headers), Map.class);
+            Map<String, Object> body = resp.getBody();
+            if (body == null || !(body.get("code") instanceof Number n) || n.intValue() != 200) {
+                return null;
+            }
+            if (!(body.get("data") instanceof Map<?, ?> data)) return null;
+            Object taskObj = data.get("task");
+            Object instanceObj = data.get("instance");
+            if (!(taskObj instanceof Map<?, ?> task) || !(instanceObj instanceof Map<?, ?> instance)) {
+                return null;
+            }
+            Object approver = task.get("approverUserId");
+            Long approverUserId = approver instanceof Number num ? num.longValue() : null;
+            return new TaskIdentity(approverUserId, str(task.get("status")),
+                    str(instance.get("businessType")), str(instance.get("businessId")));
+        } catch (Exception e) {
+            log.warn("查询工作流任务详情失败 taskId={}: {}", taskId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * 解析底座发起响应 / 实例详情中的审批人字段。
      *
      * <p>优先 currentApprovers（当前待办），其次 nextApprovers（下一节点），
@@ -242,6 +351,23 @@ public class WorkflowPlatformClient {
     public record StartRequest(String definitionCode, String businessType, String businessId,
                                String businessSummary, String businessAddress, String requestId,
                                Long corpId, Long initiatorUserId, String initiatorName) {
+    }
+
+    /** 审批任务的归属与状态（服务端权限校验用）。 */
+    public record TaskIdentity(Long approverUserId, String status, String businessType,
+                               String businessId) {
+    }
+
+    /** 批量流程进度（订单列表/详情展示用）。 */
+    public record InstanceProgress(Long instanceId, Long currentNodeId, String status,
+                                   String definitionName, String currentNodeName,
+                                   Integer currentNodeOrder, String currentBizStatus,
+                                   Long nextNodeId, String nextNodeName, Integer nextNodeOrder,
+                                   String nextBizStatus,
+                                   List<Map<String, Object>> currentApprovers,
+                                   List<Map<String, Object>> nextApprovers,
+                                   String resolveStatus, String resolveMessage,
+                                   String startedTime, String finishedTime) {
     }
 
     /**
