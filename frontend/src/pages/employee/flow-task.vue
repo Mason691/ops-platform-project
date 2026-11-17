@@ -61,6 +61,9 @@
         </view>
       </view>
 
+      <ApproverCard v-if="nextApprover" :info="nextApprover"
+        @toggle="approverExpanded = !approverExpanded" />
+
       <view class="card">
         <text class="card-title">{{ actionTitle }}</text>
 
@@ -186,6 +189,7 @@ import { computed, reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
+import ApproverCard from '@/components/ApproverCard.vue'
 
 const loading = ref(true)
 const submitting = ref(false)
@@ -203,6 +207,7 @@ const opinion = ref('')
 const rejecting = ref(false)
 const rejectNote = ref('')
 const categoryMap = ref({})
+const approverExpanded = ref(false)
 
 const form = reactive({
   receiptNo: '', financeReceiptDate: '', fundDynamicRows: null,
@@ -226,6 +231,25 @@ const detailNodeName = computed(() => (detail.value && detail.value.task && deta
 const isPurchase = computed(() => {
   const instance = detail.value && detail.value.instance
   return !!instance && instance.businessType === 'PUR_ORDER'
+})
+/** 当前节点处理完后的下一步审批人（底座 instance.nextNodePreview 已含姓名/规则） */
+const nextApprover = computed(() => {
+  const instance = detail.value && detail.value.instance
+  if (!instance) return null
+  const preview = instance.nextNodePreview
+  if (preview) {
+    const names = (preview.approvers || []).map(a => a.userName).filter(Boolean)
+    const roles = [...new Set((preview.approvers || []).map(a => a.roleName).filter(Boolean))]
+    return buildApprover(preview.nodeName, names, roles, preview.approveMode,
+      names.length ? '' : (preview.resolveMessage || '待分配审批人，请联系管理员'))
+  }
+  if (detail.value?.node?.lastNode) {
+    return buildApprover('', [], [], '', '当前为最后一个审批节点，提交后流程完成')
+  }
+  if (instance.status && instance.status !== 'RUNNING') {
+    return buildApprover('', [], [], '', statusText(instance.status))
+  }
+  return buildApprover('', [], [], '', '暂无法获取下一审批人，提交后可在详情页查看')
 })
 const actionTitle = computed(() => ({
   OPS_FINANCE_CHECK: '财务核对',
@@ -385,12 +409,35 @@ function validate() {
 async function submit() {
   const error = validate()
   if (error) return toast(error)
+  // 暂缓/驳回不向下一节点流转，不需要展示下一审批人
+  if (actionType.value === 'OPS_FINANCE_CHECK' && form.checkConclusion === 'HOLD') {
+    return doSubmit()
+  }
+  const willReject = (actionType.value === 'OPS_FINANCE_CHECK' && form.checkConclusion === 'REJECT')
+    || (actionType.value === 'OPS_ACCEPTANCE' && form.acceptanceConclusion === 'REJECT')
+  if (willReject) {
+    return doSubmit()
+  }
+  const info = nextApprover.value
+  const content = info && info.display
+    ? `确认提交给 ${info.display}${info.nodeName ? '（' + info.nodeName + '）' : ''} 审批？`
+    : (info && info.message ? info.message : '提交后将进入下一步，审批人信息请在提交后查看。')
+  uni.showModal({
+    title: '确认提交',
+    content,
+    confirmText: '确认提交',
+    success: (res) => { if (res.confirm) doSubmit() }
+  })
+}
+
+async function doSubmit() {
   submitting.value = true
   try {
     if (isPurchase.value) {
-      await api.scmPurOrderApprove({ taskId: Number(taskId.value), opinion: opinion.value })
-      toast('审批已通过')
-      goTodo()
+      const result = await api.scmPurOrderApprove({
+        taskId: Number(taskId.value), opinion: opinion.value
+      })
+      showSubmitResult(result, '审批已通过')
       return
     }
     const formData = buildFormData()
@@ -419,18 +466,98 @@ async function submit() {
       goTodo()
       return
     }
-    await api.workflowApprove({
+    const result = await api.workflowApprove({
       taskId: Number(taskId.value),
       opinion: opinion.value,
       formData
     })
-    toast('处理成功，流程已推进')
-    goTodo()
+    showSubmitResult(result, '处理成功，流程已推进')
   } catch (e) {
     toast((e && e.msg) || '处理失败，请重试')
   } finally {
     submitting.value = false
   }
+}
+
+/** 提交结果：显示实际下一审批人；取不到时展示兜底文案，不静默 */
+function showSubmitResult(result, fallback) {
+  const info = normalizeResult(result)
+  if (info.names.length) {
+    const names = info.names.join('、')
+    const who = info.roles.length ? `${info.roles.join('、')}：${names}` : names
+    uni.showModal({
+      title: '已提交',
+      content: `已提交给 ${who}${info.nodeName ? '（' + info.nodeName + '）' : ''} 审批`,
+      showCancel: false,
+      success: goTodo
+    })
+    return
+  }
+  if (info.message) {
+    uni.showModal({ title: '处理成功', content: info.message, showCancel: false, success: goTodo })
+    return
+  }
+  toast(fallback)
+  goTodo()
+}
+
+/** 兼容 SCM NextApproverInfo 与底座 FlowResult 两种返回结构 */
+function normalizeResult(result) {
+  if (!result) return { names: [], roles: [], nodeName: '', message: '' }
+  if (Array.isArray(result.nodes)) {
+    const names = []
+    const roles = []
+    result.nodes.forEach(node => (node.approvers || []).forEach(a => {
+      if (a.userName && !names.includes(a.userName)) names.push(a.userName)
+      if (a.roleName && !roles.includes(a.roleName)) roles.push(a.roleName)
+    }))
+    const node = result.nodes.find(n => (n.approvers || []).length)
+    return {
+      names, roles, nodeName: node ? node.nodeName : '',
+      message: result.fallbackMessage || ''
+    }
+  }
+  // 会签未完成时 pendingApprovers 是当前节点剩余待办人，优先于下一节点
+  const pending = result.pendingApprovers || []
+  const source = pending.length ? pending : (result.nextApprovers || [])
+  const names = source.map(a => a.userName).filter(Boolean)
+  const roles = [...new Set(source.map(a => a.roleName).filter(Boolean))]
+  const nodeName = pending.length
+    ? (result.currentNode?.nodeName || '')
+    : (result.nextNodeName || '')
+  return { names, roles, nodeName, message: result.resolveMessage || '' }
+}
+
+function buildApprover(nodeName, names, roles, rule, message) {
+  const collapsed = names.length > 2 && !approverExpanded.value
+  const shown = collapsed ? names.slice(0, 1) : names
+  const namesText = names.length
+    ? shown.map(shortName).join('、') + (collapsed ? ` 等 ${names.length} 人` : '')
+    : ''
+  const roleText = (roles || []).join('、')
+  // 角色配置时展示“总经办：张三、李四”；无法展开时至少保留角色名
+  const display = names.length
+    ? (roleText ? `${roleText}：${namesText}` : namesText)
+    : ''
+  return {
+    nodeName, display, message, roleText,
+    ruleText: ruleLabel(rule), expandable: names.length > 2
+  }
+}
+
+/** 移动端空间有限：超长姓名省略中间字，但姓名始终可见 */
+function shortName(name) {
+  const text = String(name || '')
+  return text.length > 4 ? text.charAt(0) + '*' + text.charAt(text.length - 1) : text
+}
+
+function ruleLabel(rule) {
+  return { ALL: '会签 · 全部通过', ANY: '或签 · 任一通过', SEQUENTIAL: '依次审批' }[rule] || ''
+}
+
+function statusText(status) {
+  return { COMPLETED: '审批已完成', REJECTED: '审批已驳回', TERMINATED: '审批已终止' }[status]
+    || '审批已结束'
 }
 
 async function confirmReject() {
