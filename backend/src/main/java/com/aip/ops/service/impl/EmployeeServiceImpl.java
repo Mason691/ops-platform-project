@@ -94,6 +94,11 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     @Override
+    public String getCurrentAgentPhone() {
+        return resolvePhone();
+    }
+
+    @Override
     public List<Map<String, Object>> getCategorySummary(String month) {
         String phone = resolvePhone();
         List<Map<String, Object>> rows = employeeMapper.selectCategorySummary(phone, month);
@@ -243,15 +248,22 @@ public class EmployeeServiceImpl implements EmployeeService {
         }
         BigDecimal allTimeSale = BigDecimal.ZERO;
         BigDecimal allTimeCommission = BigDecimal.ZERO;
+        int allTimeOrders = 0;
 
         // Group by month — monthKey → {monthLabel, totals, details[]}
         Map<String, MonthGroup> groups = new LinkedHashMap<>();
 
         for (Map<String, Object> row : all) {
-            BigDecimal sale = toBigDecimal(row.get("salePrice"));
+            BigDecimal salePrice = toBigDecimal(row.get("salePrice"));
+            // 汇总口径与提成计算/后台统计一致：收款金额（单价×数量）；存量行无该值时回退单价
+            BigDecimal sale = row.get("receiptAmount") != null
+                    ? toBigDecimal(row.get("receiptAmount")) : salePrice;
             BigDecimal commission = toBigDecimal(row.get("commissionAmount"));
             allTimeSale = allTimeSale.add(sale);
             allTimeCommission = allTimeCommission.add(commission);
+            // 退货负数分录计入金额冲减，但不计为一条销售单
+            boolean returnEntry = row.get("saleQuantity") instanceof Number n && n.intValue() < 0;
+            if (!returnEntry) allTimeOrders++;
 
             String saleDate = row.get("saleDate") instanceof String
                     ? (String) row.get("saleDate") : "";
@@ -265,19 +277,33 @@ public class EmployeeServiceImpl implements EmployeeService {
             });
             g.totalSale = g.totalSale.add(sale);
             g.totalCommission = g.totalCommission.add(commission);
-            g.orderCount++;
+            if (!returnEntry) g.orderCount++;
 
             Map<String, Object> detail = new LinkedHashMap<>();
+            if (row.get("id") != null) detail.put("id", row.get("id"));
             detail.put("brand", normalizeSentinel(row.get("brand")));
             detail.put("model", normalizeSentinel(row.get("model")));
-            detail.put("salePrice", sale);
+            detail.put("salePrice", salePrice);
+            detail.put("receiptAmount", sale);
+            if (row.get("saleQuantity") != null) detail.put("saleQuantity", row.get("saleQuantity"));
+            // 退货负数分录（员工端红色展示，退货申请统一在供应链管理销售退货中办理）
+            detail.put("isReturnEntry", returnEntry);
+            if (row.get("sourceReturnNo") != null) detail.put("sourceReturnNo", row.get("sourceReturnNo"));
             detail.put("commissionAmount", commission);
             detail.put("commissionRate", toBigDecimal(row.get("commissionRate")));
             detail.put("saleDate", saleDate);
             detail.put("customer", row.get("customer"));
+            if (row.get("communityName") != null) {
+                detail.put("communityName", row.get("communityName"));
+            }
+            if (row.get("detailedAddress") != null) {
+                detail.put("detailedAddress", row.get("detailedAddress"));
+            }
             detail.put("category", row.get("category"));
             if (row.get("calcStatus") != null) detail.put("calcStatus", row.get("calcStatus"));
             if (row.get("batchNo") != null) detail.put("batchNo", row.get("batchNo"));
+            if (row.get("isReceived") != null) detail.put("isReceived", row.get("isReceived"));
+            if (row.get("voucherUrl") != null) detail.put("voucherUrl", row.get("voucherUrl"));
             String catKey = (String) row.get("category");
             detail.put("categoryName", BusinessDataServiceImpl.KEY_TO_CN.getOrDefault(catKey, catKey));
             g.details.add(detail);
@@ -303,7 +329,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         result.put("allTime", Map.of(
                 "totalSale", allTimeSale.setScale(2, RoundingMode.HALF_UP),
                 "totalCommission", allTimeCommission.setScale(2, RoundingMode.HALF_UP),
-                "orderCount", all.size()));
+                "orderCount", allTimeOrders));
         result.put("months", months);
         return result;
     }

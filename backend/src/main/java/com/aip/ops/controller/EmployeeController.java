@@ -1,9 +1,15 @@
 package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
+import com.aip.ops.dto.BalanceReceiveRequest;
+import com.aip.ops.dto.EmployeeBusinessEntryRequest;
+import com.aip.ops.security.JwtTokenInspector;
 import com.aip.ops.service.BusinessDataService;
+import com.aip.ops.service.BusinessSpecialFileService;
 import com.aip.ops.service.EmployeeAuthService;
+import com.aip.ops.service.EmployeeBusinessEntryService;
 import com.aip.ops.service.EmployeeService;
+import com.aip.ops.service.ProductPriceService;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.LoginUser;
@@ -43,6 +49,10 @@ public class EmployeeController {
     private final EmployeeService employeeService;
     private final EmployeeAuthService employeeAuthService;
     private final BusinessDataService businessDataService;
+    private final EmployeeBusinessEntryService employeeBusinessEntryService;
+    private final ProductPriceService productPriceService;
+    private final BusinessSpecialFileService businessSpecialFileService;
+    private final JwtTokenInspector jwtTokenInspector;
     private final PlatformInternalClient platformInternalClient;
 
     @Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
@@ -86,6 +96,34 @@ public class EmployeeController {
     @GetMapping("/business-data/overview")
     public R<?> getOverview(@RequestParam(required = false) String batchNo) {
         return R.ok(employeeService.getOverview(batchNo));
+    }
+
+    /**
+     * 员工端订单列表：订单主行 + 本人参与的商品明细 + 工作流进度
+     * （当前/下一节点、当前/下一处理人）。仅当前组织 + 当前经办人。
+     */
+    @GetMapping("/business-data/orders")
+    public R<?> employeeOrders(@RequestParam(required = false) String batchNo,
+                               @RequestParam(required = false) String orderNo,
+                               @RequestParam(required = false) String bizStatus,
+                               @RequestParam(defaultValue = "1") int pageNum,
+                               @RequestParam(defaultValue = "10") int pageSize) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可查看业务订单");
+        }
+        return R.ok(businessDataService.employeeOrderPage(
+                SecurityUtils.getCurrentCorpId(), employeeService.getCurrentAgentPhone(),
+                batchNo, orderNo, bizStatus, pageNum, pageSize));
+    }
+
+    /** 员工端订单详情：本人参与的商品明细 + 流程进度 + 工作流处理留痕。 */
+    @GetMapping("/business-data/orders/{orderId}")
+    public R<?> employeeOrderDetail(@PathVariable Long orderId) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可查看业务订单");
+        }
+        return R.ok(businessDataService.employeeOrderDetail(
+                SecurityUtils.getCurrentCorpId(), employeeService.getCurrentAgentPhone(), orderId));
     }
 
     private static final int AVATAR_SIZE = 200;
@@ -189,13 +227,118 @@ public class EmployeeController {
         return R.ok(employeeService.getBatchNos());
     }
 
-    /** 经办人核对：将指定批次已计算数据标记为已核对 */
-    @OperationLog(module = "运营管理", action = "核对", targetTable = "ops_business_data")
+    // ═══ 员工手工新增业务数据 ═══
+
+    /** 表单选项：员工/公司信息、当前组织未上报批次、SCM 品牌/品类/型号。 */
+    @GetMapping("/business-data/manual/options")
+    public R<?> manualOptions() {
+        return R.ok(employeeBusinessEntryService.getManualEntryOptions());
+    }
+
+    /** 按客户手机号查询平台会员姓名（仅返回是否找到 + 姓名）。 */
+    @GetMapping("/business-data/manual/member")
+    public R<?> manualMember(@RequestParam String phone) {
+        return R.ok(employeeBusinessEntryService.lookupMember(phone));
+    }
+
+    /**
+     * 制单时按商品查询标准售价：优先 productId（SCM 商品ID），
+     * 旧前端仅传品牌/品类/型号时按字段兜底。
+     */
+    @GetMapping("/business-data/product-price")
+    public R<?> manualProductPrice(@RequestParam(required = false) Long productId,
+                                   @RequestParam(required = false) String brand,
+                                   @RequestParam(required = false) String category,
+                                   @RequestParam(required = false) String model) {
+        // 与员工手工制单一致：拒绝会员 SSO 令牌（token_type=sso）
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可查询产品售价");
+        }
+        return R.ok(productPriceService.lookupForEmployee(
+                SecurityUtils.getCurrentCorpIdOrNull(), productId, brand, category, model));
+    }
+
+    /**
+     * 制单时收据号查重（输入框失焦提示）：同组织内同一客户可复用，
+     * 被其他客户占用时返回 duplicate=true + message；最终提交仍由服务端二次校验。
+     */
+    @GetMapping("/business-data/receipt-no/check")
+    public R<?> checkReceiptNo(@RequestParam String receiptNo,
+                               @RequestParam(required = false) String customer) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可校验收据号");
+        }
+        return R.ok(employeeBusinessEntryService.checkReceiptNo(receiptNo, customer));
+    }
+
+    /**
+     * 低价特批文件上传：PDF/JPG/PNG ≤10MB；文件信息落库供提交引用与审计。
+     */
+    @PostMapping("/business-data/special-file")
+    public R<?> uploadSpecialFile(@RequestParam("file") MultipartFile file) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可上传特批文件");
+        }
+        return R.ok(businessSpecialFileService.upload(file));
+    }
+
+    /** 保存手工录入业务数据：组织/经办人由服务端从 JWT 派生。 */
+    @OperationLog(module = "运营管理", action = "员工手工新增业务数据", targetTable = "ops_business_order_item")
+    @PostMapping("/business-data/manual")
+    public R<?> createManual(@RequestBody EmployeeBusinessEntryRequest request) {
+        return R.ok(employeeBusinessEntryService.createManualEntry(request));
+    }
+
+    /** 以旧换新采购单创建失败/状态待同步时重试（SCM 幂等）。 */
+    @PostMapping("/business-data/orders/{orderId}/trade-in-purchase/retry")
+    public R<?> retryTradeInPurchase(@PathVariable Long orderId) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可重试旧品采购单");
+        }
+        return R.ok(employeeBusinessEntryService.retryTradeInPurchase(orderId));
+    }
+
+    /** 制单成功页轮询/详情兜底：查询订单当前审批人。 */
+    @GetMapping("/business-data/manual/{orderId}/approver")
+    public R<?> manualApprover(@PathVariable Long orderId) {
+        return R.ok(employeeBusinessEntryService.currentApprover(orderId));
+    }
+
+    // ═══ 货款补录（定金支付 → 收齐余款） ═══
+
+    /** 当前经办人名下定金支付且未全款的业务订单。 */
+    @GetMapping("/business-data/balance-pending")
+    public R<?> balancePending() {
+        return R.ok(employeeBusinessEntryService.listDepositPending());
+    }
+
+    /** 货款补录详情（只读；校验订单属于当前经办人）。 */
+    @GetMapping("/business-data/balance-pending/{orderId}")
+    public R<?> balancePendingDetail(@PathVariable Long orderId) {
+        return R.ok(employeeBusinessEntryService.depositPendingDetail(orderId));
+    }
+
+    /** 提交货款补录：实收余款=应补余款、凭证必填；成功后 is_full_payment=1。 */
+    @OperationLog(module = "运营管理", action = "货款补录", targetTable = "ops_business_order")
+    @PostMapping("/business-data/{orderId}/balance-receive")
+    // 请求体放在第一个参数：@OperationLog 只序列化第一个非 Servlet 参数，
+    // 这样审计日志能带上补录金额与凭证 URL（orderId 在路径中，日志 detail 外仍有接口上下文）
+    public R<?> receiveBalance(@RequestBody BalanceReceiveRequest request,
+                               @PathVariable Long orderId) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可进行货款补录");
+        }
+        return R.ok(employeeBusinessEntryService.receiveBalance(orderId, request));
+    }
+
+    /** 经办人核对：仅将本组织 + 本人批次下已计算数据标记为已核对 */
+    @OperationLog(module = "运营管理", action = "核对", targetTable = "ops_business_order_item")
     @PostMapping("/business-data/batch/check")
     public R<?> batchCheck(@RequestBody Map<String, String> params) {
         String batchNo = params.get("batchNo");
         if (batchNo == null || batchNo.isBlank()) return R.fail("批次号不能为空");
-        int count = businessDataService.batchCheck(batchNo);
+        int count = businessDataService.batchCheckOwned(batchNo,
+                SecurityUtils.getCurrentCorpId(), employeeService.getCurrentAgentPhone());
         return R.ok(Map.of("checkedCount", count, "message", "已核对 " + count + " 条数据"));
     }
 }

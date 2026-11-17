@@ -28,10 +28,24 @@
         <text class="card-label">组织角色</text>
         <text class="card-value">{{ activeCompany.roleName || activeCompany.roleType || '-' }}</text>
       </view>
+      <view class="card">
+        <text class="card-label">登录方式</text>
+        <text class="card-value">{{ loginModeText }}</text>
+      </view>
     </view>
+
+    <!-- WeChat binding -->
+    <EmployeeWechatBindCard />
 
     <!-- Menu -->
     <view class="section">
+      <view class="menu-item" @click="openSheet">
+        <text class="menu-label">🏢 切换组织</text>
+        <view class="org-entry">
+          <text class="org-entry-name">{{ activeCompany.corpName || '—' }}</text>
+          <text v-if="orgs.length > 1" class="menu-arrow">›</text>
+        </view>
+      </view>
       <view class="menu-item" @click="showPwdModal = true">
         <text class="menu-label">🔒 修改密码</text>
         <text class="menu-arrow">›</text>
@@ -71,17 +85,31 @@
       </view>
     </view>
 
+    <OrgSwitchSheet
+      v-model:visible="sheetVisible"
+      :orgs="orgs"
+      :current-corp-id="Number(activeCompany.corpId) || 0"
+      :loading="switching"
+      @select="confirmSwitch"
+    />
+
     <EmployeeTabBar active-key="profile" @switch="onTabSwitch" />
   </view>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index.js'
 import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
+import EmployeeWechatBindCard from '@/components/EmployeeWechatBindCard.vue'
+import OrgSwitchSheet from '@/components/OrgSwitchSheet.vue'
+import { useOrgSwitch } from '@/hooks/useOrgSwitch'
+import { clearEmployeeSession } from '@/utils/employeeSession'
 
 const info = ref({})
 const activeCompany = ref({})
+const loginMode = ref('')
 const showPwdModal = ref(false)
 const showNickModal = ref(false)
 const oldPwd = ref('')
@@ -94,7 +122,22 @@ const avatarKey = ref(0)
 
 const avatarUrl = ref('/static/gas-avatar.png')
 
-onMounted(() => {
+const loginModeText = computed(() => {
+  if (loginMode.value === 'wechat') return '微信授权登录'
+  if (loginMode.value === 'password') return '用户名+密码'
+  return '—'
+})
+
+const {
+  orgs, sheetVisible, switching, loadOrgs, openSheet, confirmSwitch
+} = useOrgSwitch({ onChanged: onOrgChanged })
+
+onShow(async () => {
+  loadProfile()
+  await loadOrgs()
+})
+
+function loadProfile() {
   const empToken = uni.getStorageSync('ops_employee_token')
   if (!empToken) {
     uni.redirectTo({ url: '/pages/employee/login' })
@@ -109,9 +152,15 @@ onMounted(() => {
     try { activeCompany.value = JSON.parse(active) } catch(e) {}
   }
   nickInput.value = info.value.name || ''
+  loginMode.value = uni.getStorageSync('ops_employee_login_mode') || ''
   // 读取 sys_user 头像（若未上传过则用默认头像）
   if (info.value.avatar) avatarUrl.value = info.value.avatar
-})
+}
+
+function onOrgChanged() {
+  // 切换成功后重新读取本地会话，组织名/角色/员工信息立即更新
+  loadProfile()
+}
 
 function changeAvatar() {
   uni.chooseImage({
@@ -170,7 +219,7 @@ async function changePassword() {
 }
 
 function onTabSwitch(key) {
-  const routes = { ai: '/pages/employee/ai-chat', home: '/pages/employee/dashboard', profile: '' }
+  const routes = { ai: '/pages/employee/ai-chat', home: '/pages/employee/dashboard', todo: '/pages/employee/flow-todo', profile: '' }
   if (routes[key]) uni.redirectTo({ url: routes[key] })
 }
 function doLogout() {
@@ -179,15 +228,7 @@ function doLogout() {
     content: '退出后需要重新登录，确定要退出吗？',
     success(res) {
       if (res.confirm) {
-        uni.removeStorageSync('ops_employee_token')
-        uni.removeStorageSync('ops_employee_info')
-        uni.removeStorageSync('ops_employee_companies')
-        uni.removeStorageSync('ops_employee_active_company')
-        uni.removeStorageSync('token_type')
-        // Also clear member tokens to prevent stale token from being used after re-login
-        uni.removeStorageSync('ops_token')
-        uni.removeStorageSync('ops_member')
-        uni.removeStorageSync('corp_id')
+        clearEmployeeSession()
         uni.redirectTo({ url: '/pages/employee/login' })
       }
     }
@@ -209,8 +250,11 @@ function doLogout() {
 .card-value { font-size: 28rpx; color: #333; font-weight: 500; }
 .section { margin: 24rpx; }
 .section-title { font-size: 26rpx; color: #999; padding: 0 0 16rpx 8rpx; }
-.menu-item { display: flex; justify-content: space-between; align-items: center; background: #fff; border-radius: 16rpx; padding: 32rpx; }
+.menu-item { display: flex; justify-content: space-between; align-items: center; background: #fff; border-radius: 16rpx; padding: 32rpx; margin-bottom: 16rpx; }
+.menu-item:last-child { margin-bottom: 0; }
 .menu-label { font-size: 30rpx; color: #333; }
+.org-entry { display: flex; align-items: center; gap: 8rpx; }
+.org-entry-name { font-size: 26rpx; color: #86909C; }
 .menu-arrow { font-size: 36rpx; color: #ccc; }
 .logout-btn { margin: 48rpx 24rpx; text-align: center; padding: 24rpx; background: #fff; border-radius: 16rpx; font-size: 28rpx; color: #e74c3c; }
 

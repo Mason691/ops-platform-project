@@ -7,7 +7,7 @@ import { initJssdk } from './utils/jssdk.js'
 // 路由路径 → 页面标题映射，与 pages.json 中的 navigationBarTitleText 保持同步
 const PAGE_TITLE_MAP = {
   'pages/ai/chat': 'AI 助手',
-  'pages/index/index': '金地燃气',
+  'pages/index/index': '金地美家',
   'pages/activity/index': '精彩活动',
   'pages/activity/detail': '活动详情',
   'pages/product/index': '积分商城',
@@ -41,12 +41,12 @@ function syncDocumentTitle() {
     const pages = getCurrentPages()
     if (pages && pages.length > 0) {
       const route = pages[pages.length - 1].route
-      document.title = PAGE_TITLE_MAP[route] || '金地燃气'
+      document.title = PAGE_TITLE_MAP[route] || '金地美家'
     } else {
-      document.title = '金地燃气'
+      document.title = '金地美家'
     }
   } catch (_) {
-    document.title = '金地燃气'
+    document.title = '金地美家'
   }
   // #endif
 }

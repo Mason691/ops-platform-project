@@ -80,18 +80,20 @@ public class MemberLedgerController {
                 LEFT JOIN ops_grid_manager gm ON gm.id = gmc.gm_id AND gm.delete_flag = 0
                 WHERE s.delete_flag = 0 AND gu.platform_member_id IS NOT NULL{scopeStove}
                 UNION ALL
-                -- 业务腿按收据号分组计数：同收据号 distinct 非空经办人>1 → 计 1（多经办人同订单），
-                -- 否则逐行计（同经办人多商品）；口径与 mergeBusinessDevices 一致（__row_ 前缀 key 同构），改动须两侧同步
+                -- 业务腿按「业务组号/收据号 + 产品」分组计数：同组同产品的多经办人行计 1（多经办人同订单），
+                -- 不同产品分别计；无组号/收据号时逐行计。口径与 mergeBusinessDevices 一致（__row_ 前缀 key 同构），改动须两侧同步
                 SELECT g.pid, 0, g.cnt, NULL, NULL, g.active_ts, g.corp_id, NULL, NULL
                 FROM (
                     SELECT bd.platform_member_id AS pid,
                            MAX(bd.corp_id) AS corp_id,
                            MAX(bd.create_time) AS active_ts,
                            CASE WHEN COUNT(DISTINCT NULLIF(bd.agent,'')) > 1 THEN 1 ELSE COUNT(*) END AS cnt
-                    FROM ops_business_data bd
-                    WHERE bd.delete_flag = 0 AND bd.platform_member_id IS NOT NULL{scopeBiz}
+                    FROM ops_business_order_item bd
+                    WHERE bd.delete_flag = 0 AND bd.platform_member_id IS NOT NULL
+                      AND (bd.sale_quantity IS NULL OR bd.sale_quantity >= 0){scopeBiz}
                     GROUP BY bd.platform_member_id,
-                             COALESCE(NULLIF(bd.receipt_no,''), CONCAT('__row_', bd.id))
+                             COALESCE(NULLIF(bd.order_no,''), NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__row_', bd.id)),
+                             bd.category, bd.brand, bd.model
                 ) g
             ) t
             JOIN ai_platform.sys_member m ON m.id = t.pid AND m.delete_flag = 0
@@ -324,7 +326,7 @@ public class MemberLedgerController {
         return " AND (s.corp_id IN (" + csv + ") OR gu.corp_id IN (" + csv + "))";
     }
 
-    /** 业务侧范围：ops_business_data 自身 corp 过滤。 */
+    /** 业务侧范围：ops_business_order_item 自身 corp 过滤。 */
     private String buildScopeBizClause(Set<Long> visible) {
         if (visible == null || visible.isEmpty()) return "";
         String csv = visible.stream().map(String::valueOf).collect(Collectors.joining(","));
@@ -387,35 +389,44 @@ public class MemberLedgerController {
         return jdbcTemplate.queryForList(sql, platformMemberId);
     }
 
-    /** 销售设备：ops_business_data 按 platform_member_id 归属（回填规则见迁移脚本）；
+    /** 销售设备：ops_business_order_item 按 platform_member_id 归属（回填规则见迁移脚本）；
      *  全量拉取（单会员行数有限）供 mergeBusinessDevices 按收据号合并，合并后再截断 500。
      *  使用日期=市场收款日期（receipt_date 全量 ISO yyyy-MM-dd，usage_date 列为死数据恒 NULL）。 */
     private List<Map<String, Object>> queryBusinessDevices(Long platformMemberId, String scopeBiz) {
         String sql = """
                 SELECT bd.id AS device_id, bd.category AS category_key, bd.brand, bd.model,
                        bd.sale_price, bd.sale_date, bd.receipt_date, bd.receipt_no,
-                       bd.agent, bd.remark, bd.customer,
+                       bd.order_no, bd.business_group_no, bd.agent, bd.remark, bd.customer,
                        bd.receipt_date AS usage_date
-                FROM ops_business_data bd
-                WHERE bd.delete_flag = 0 AND bd.platform_member_id = ?""" + scopeBiz + """
+                FROM ops_business_order_item bd
+                WHERE bd.delete_flag = 0 AND bd.platform_member_id = ?
+                  AND (bd.sale_quantity IS NULL OR bd.sale_quantity >= 0)""" + scopeBiz + """
                  ORDER BY (bd.receipt_date IS NULL), bd.receipt_date DESC, bd.id DESC
                 """;
         return jdbcTemplate.queryForList(sql, platformMemberId);
     }
 
     /**
-     * 销售设备按收据号合并（场景A/B 区分）：
-     * 收据号 NULL/空串 → 逐行独立组；组内 distinct 非空经办人 >1（多经办人同订单）→
+     * 销售设备按「业务组号/收据号 + 产品」合并：
+     * 组号优先（无则收据号，均无则逐行独立组）；组内 distinct 非空经办人 >1（多经办人同订单）→
      * 仅保留 id 最小行（"第一条"，与导出 sortByReceiptNo 首行口径一致），
      * 经办人替换为全员名单并打多人参与标记；经办人唯一 → 全部保留（同经办人多商品逐条展示）。
+     * 产品维度（品类/品牌/型号）入键：同一笔业务多产品分别展示多条。
      * 口径与 AGG_SQL 业务腿一致（__row_ 前缀分组 key 同构），改动须两侧同步。
      */
     private List<Map<String, Object>> mergeBusinessDevices(List<Map<String, Object>> rows) {
         Map<String, List<Map<String, Object>>> groups = new LinkedHashMap<>();
         for (Map<String, Object> row : rows) {
+            String orderNo = (String) row.get("order_no");
+            String groupNo = (String) row.get("business_group_no");
             String receiptNo = (String) row.get("receipt_no");
-            String key = (receiptNo == null || receiptNo.isEmpty())
-                    ? "__row_" + row.get("device_id") : receiptNo;
+            String base;
+            if (orderNo != null && !orderNo.isEmpty()) base = orderNo;
+            else if (groupNo != null && !groupNo.isEmpty()) base = groupNo;
+            else if (receiptNo != null && !receiptNo.isEmpty()) base = receiptNo;
+            else base = "__row_" + row.get("device_id");
+            String key = base + "|" + row.get("category_key") + "|"
+                    + row.get("brand") + "|" + row.get("model");
             groups.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
         }
         List<Map<String, Object>> merged = new ArrayList<>();

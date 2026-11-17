@@ -30,6 +30,21 @@ public class RestTemplateConfig {
     }
 
     /**
+     * 微信 OAuth 专用 RestTemplate：不挂日志拦截器。
+     * <p>
+     * 换取 openid 的 URL 含 appSecret 与一次性 code，若走通用 RestTemplate 的
+     * LoggingInterceptor，异常/非 2xx 时会打印完整 URI，造成密钥泄漏。
+     */
+    @Bean
+    @Qualifier("wechatRestTemplate")
+    public RestTemplate wechatRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(5_000);
+        factory.setReadTimeout(10_000);
+        return new RestTemplate(factory);
+    }
+
+    /**
      * AI 专用 RestTemplate：长超时，用于 AI 对话代理（ReAct 循环可能多轮 LLM 调用）。
      * 员工 AI 助手尤其耗时：至少 2-3 轮 DeepSeek 调用 + execute_python 工具执行。
      */

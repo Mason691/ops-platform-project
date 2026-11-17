@@ -3,6 +3,7 @@ package com.aip.ops.service.impl;
 import com.aip.ops.dto.EmployeeLoginRequest;
 import com.aip.ops.service.CaptchaService;
 import com.aip.ops.service.EmployeeAuthService;
+import com.aip.ops.service.EmployeeLoginResultMapper;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.security.LoginUser;
 import com.aip.sdk.security.SecurityUtils;
@@ -11,7 +12,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -79,6 +79,7 @@ public class EmployeeAuthServiceImpl implements EmployeeAuthService {
             Map<String, Object> empReq = new LinkedHashMap<>();
             empReq.put("phone", phone);
             empReq.put("password", password);
+            empReq.put("clientIp", clientIp);
 
             Map<String, Object> rawResp = platformInternalClient.post(
                     "/api/auth/employee/login", empReq, null);
@@ -107,7 +108,9 @@ public class EmployeeAuthServiceImpl implements EmployeeAuthService {
 
         // ── 5. Map platform response to frontend format ──
         log.info("员工登录成功: phone={}, userId={}", phone, platformData.get("userId"));
-        return mapLoginResult(platformData, phone);
+        Map<String, Object> result = EmployeeLoginResultMapper.map(platformData, phone, jwtExpiration);
+        result.put("loginMode", "password");
+        return result;
     }
 
     @Override
@@ -189,6 +192,8 @@ public class EmployeeAuthServiceImpl implements EmployeeAuthService {
         Map<String, Object> verifyReq = new LinkedHashMap<>();
         verifyReq.put("phone", phone);
         verifyReq.put("password", oldPassword);
+        // 仅做密码校验，不是一次登录，避免污染登录审计
+        verifyReq.put("audit", false);
         try {
             Map<String, Object> resp = platformInternalClient.post("/api/auth/employee/login", verifyReq, null);
             Object code = resp.get("code");
@@ -229,39 +234,6 @@ public class EmployeeAuthServiceImpl implements EmployeeAuthService {
             w.count++;
             return true;
         }
-    }
-
-    /**
-     * Map platform employee login response to the frontend format.
-     * <p>
-     * Platform returns: {token, userId, username, realName, phone, corpId,
-     *                     isAdmin, permissions, roles, corpName, companies, expiresIn}
-     * <p>
-     * Frontend expects: {token, employeeId, name, phone, role, corpId, companies, expiresIn}
-     */
-    private Map<String, Object> mapLoginResult(Map<String, Object> data, String phone) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("token", data.get("token"));
-        result.put("employeeId", data.get("userId"));             // userId → employeeId
-        result.put("name", data.getOrDefault("realName", ""));    // realName → name
-        result.put("phone", phone);                                // from request
-        result.put("role", extractRole(data));                     // first role name
-        result.put("corpId", data.get("corpId"));
-        result.put("corpName", data.getOrDefault("corpName", ""));       // 组织名称
-        result.put("expiresIn", data.getOrDefault("expiresIn", jwtExpiration));
-        result.put("companies", data.getOrDefault("companies", List.of())); // 多组织列表
-        result.put("avatar", data.getOrDefault("avatar", ""));             // sys_user头像
-        return result;
-    }
-
-    /** Extract primary role from platform roles list. */
-    @SuppressWarnings("unchecked")
-    private String extractRole(Map<String, Object> data) {
-        List<String> roles = (List<String>) data.get("roles");
-        if (roles != null && !roles.isEmpty()) {
-            return roles.get(0);
-        }
-        return "employee"; // default fallback
     }
 
     /**

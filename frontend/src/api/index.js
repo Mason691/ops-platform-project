@@ -228,18 +228,97 @@ export const api = {
 
   // 员工身份 & 业务数据
   employeeIdentity: () => request({url:'/api/ops/employee/identity'}),
+  // 复用底座组织接口：公众号 H5 与平台同域，/api/auth/** 由 platform-nginx 承载
+  employeeOrgs: () => request({url:'/api/auth/orgs'}),
+  employeeSwitchOrg: (corpId) => request({
+    url: '/api/auth/switch-org',
+    method: 'POST',
+    data: { corpId }
+  }),
   employeeMonths: () => request({url:'/api/ops/employee/business-data/months'}),
   employeeSummary: (month) => request({url:'/api/ops/employee/business-data/summary',data:{month}}),
   employeeDetail: (month, category) => request({url:'/api/ops/employee/business-data/detail',data:{month, category}}),
   employeeStats: (month) => request({url:'/api/ops/employee/business-data/stats',data:{month}}),
-  employeeOverview: (params) => request({url:'/api/ops/employee/business-data/overview',params}),
+  employeeOverview: (params) => request({url:'/api/ops/employee/business-data/overview',data:params}),
+  employeeOrders: (params) => request({url:'/api/ops/employee/business-data/orders',data:params}),
+  employeeOrderDetail: (orderId) => request({url:'/api/ops/employee/business-data/orders/' + orderId}),
+  employeeRetryTradeInPurchase: (orderId) => request({
+    url: '/api/ops/employee/business-data/orders/' + orderId + '/trade-in-purchase/retry',
+    method: 'POST'
+  }),
   employeeBatches: () => request({url:'/api/ops/employee/business-data/batches'}),
   employeeBatchCheck: (data) => request({url:'/api/ops/employee/business-data/batch/check',method:'POST',data}),
+  // 员工手工新增业务数据
+  employeeManualOptions: () => request({url:'/api/ops/employee/business-data/manual/options'}),
+  employeeLookupMember: (phone) => request({url:'/api/ops/employee/business-data/manual/member',data:{phone}}),
+  employeeProductPrice: (params) => request({url:'/api/ops/employee/business-data/product-price', data:params}),
+  employeeCheckReceiptNo: (params) => request({url:'/api/ops/employee/business-data/receipt-no/check', data:params}),
+  employeeCreateBusiness: (data) => request({url:'/api/ops/employee/business-data/manual',method:'POST',data}),
+  employeeOrderApprover: (orderId) => request({url:'/api/ops/employee/business-data/manual/' + orderId + '/approver'}),
+  // 货款补录（定金支付 → 收齐余款）
+  depositPending: () => request({url:'/api/ops/employee/business-data/balance-pending'}),
+  depositPendingDetail: (orderId) => request({url:'/api/ops/employee/business-data/balance-pending/' + orderId}),
+  receiveBalance: (orderId, data) => request({url:'/api/ops/employee/business-data/' + orderId + '/balance-receive', method:'POST', data}),
+  // 派工资格批量查询（H5 待办过滤/任务页提示）
+  businessDispatchEligibility: (orderIds) => request({url:'/api/ops/admin/business-data/dispatch-eligibility', data:{ orderIds: (orderIds || []).join(',') }}),
+
+  // 工作流待办 / 审批（平台 /api/wf，员工 JWT）
+  workflowTodo: (params) => request({url:'/api/wf/task/todo', data:params}),
+  workflowTaskDetail: (taskId) => request({url:'/api/wf/task/' + taskId}),
+  workflowApprove: (data) => request({url:'/api/wf/task/approve', method:'POST', data}),
+  workflowReject: (data) => request({url:'/api/wf/task/reject', method:'POST', data}),
+  workflowMyLogs: (params) => request({url:'/api/wf/log/my', data:params}),
+  workflowLogDetail: (key) => request({url:'/api/wf/log/detail', data:{key}}),
+  // SCM 采购（已核对业务 → 发起采购申请；总经办 H5 核审）
+  scmFinanceCheckedOrders: () => request({url:'/api/scm/pur-order/h5/finance-checked-orders'}),
+  scmCreatePurchaseRequest: (data) => request({url:'/api/scm/pur-order/h5/purchase-requests', method:'POST', data}),
+  scmPurOrderDetail: (id) => request({url:'/api/scm/pur-order/h5/' + id}),
+  scmPurOrderApprove: (data) => request({url:'/api/scm/pur-order/h5/workflow/approve', method:'POST', data}),
+  scmPurOrderReject: (data) => request({url:'/api/scm/pur-order/h5/workflow/reject', method:'POST', data}),
+
+  // 物料领取 / 核销（SCM 8084；H5 只制单与提交，不审批）
+  scmWarehouseList: (params) => request({url:'/api/scm/warehouse/list', data:params}),
+  scmInventoryQuery: (params) => request({url:'/api/scm/inventory/query', data:params}),
+  scmMaterialPickTaskOrders: () => request({url:'/api/scm/material-pick/task-orders'}),
+  scmMaterialPickCreate: (data) => request({url:'/api/scm/material-pick', method:'POST', data}),
+  scmMaterialWriteOffPickable: () => request({url:'/api/scm/material-write-off/pickable'}),
+  scmMaterialWriteOffFromPick: (pickId) => request({url:'/api/scm/material-write-off/from-pick/' + pickId}),
+  scmMaterialWriteOffCreate: (data) => request({url:'/api/scm/material-write-off', method:'POST', data}),
+  // 员工物资领用 / 物资核销（ops 员工端；物资=申请制，不经仓库）
+  materialOptions: () => request({url:'/api/ops/employee/material/options'}),
+  materialSearch: (params) => request({url:'/api/ops/employee/material/materials', data:params}),
+  materialRequisitionCreate: (data) => request({url:'/api/ops/employee/material/requisitions', method:'POST', data}),
+  materialRequisitionPage: (params) => request({url:'/api/ops/employee/material/requisitions', data:params}),
+  materialRequisitionDetail: (id) => request({url:'/api/ops/employee/material/requisitions/' + id}),
+  materialRequisitionApprovalDetail: (id, taskId) => request({
+    url: '/api/ops/employee/material/requisitions/' + id + '/approval', data: { taskId }
+  }),
+  materialPickableRequisitions: (params) => request({url:'/api/ops/employee/material/requisitions/pickable', data:params}),
+  materialWriteOffCreate: (data) => request({url:'/api/ops/employee/material/write-offs', method:'POST', data}),
+  materialWriteOffPage: (params) => request({url:'/api/ops/employee/material/write-offs', data:params}),
+  materialWriteOffDetail: (id) => request({url:'/api/ops/employee/material/write-offs/' + id}),
+  materialWriteOffApprovalDetail: (id, taskId) => request({
+    url: '/api/ops/employee/material/write-offs/' + id + '/approval', data: { taskId }
+  }),
+  // 业务订单详情 / 派工可选员工 / 财务暂缓（ops，员工 JWT + 数据范围）
+  businessOrderDetail: (orderId) => request({url:'/api/ops/admin/business-data/orders/' + orderId}),
+  businessFlowAssignees: () => request({url:'/api/ops/admin/business-data/flow/assignees'}),
+  businessHoldFinance: (orderId, data) => request({url:'/api/ops/admin/business-data/orders/' + orderId + '/flow/hold', method:'POST', data}),
+  // 平台公开字典
+  getDictData: (typeCode) => request({url:'/api/dict/data', data:{typeCode}}),
 
   // 员工登录（独立于会员登录）
   employeeCaptcha: () => request({url:'/api/ops/auth/employee/captcha'}),
   employeeLogin: (data) => request({url:'/api/ops/auth/employee/login',method:'POST',data}),
   employeeRefreshToken: () => request({url:'/api/ops/auth/employee/refresh-token',method:'POST'}),
+  // 微信授权登录 / 绑定
+  employeeWechatAuthorizeUrl: (mode = 'login', corpId) => request({
+    url: '/api/ops/auth/employee/wechat/authorize-url',
+    data: corpId ? { mode, corpId } : { mode }
+  }),
+  employeeWechatLogin: (data) => request({url:'/api/ops/auth/employee/wechat/login',method:'POST',data}),
+  employeeWechatBind: (data) => request({url:'/api/ops/auth/employee/wechat/bind',method:'POST',data}),
+  employeeWechatBindStatus: () => request({url:'/api/ops/auth/employee/wechat/bind-status'}),
   employeeChangePassword: (data) => request({url:'/api/ops/employee/change-password',method:'POST',data}),
   employeeUploadAvatar: (filePath) => new Promise((resolve, reject) => {
     const token = resolveToken()

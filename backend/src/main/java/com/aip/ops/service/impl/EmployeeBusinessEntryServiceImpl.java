@@ -1,0 +1,1480 @@
+package com.aip.ops.service.impl;
+
+import com.aip.ops.client.ScmBaseDataClient;
+import com.aip.ops.client.ScmPurchaseOrderClient;
+import com.aip.ops.client.WorkflowPlatformClient;
+import com.aip.ops.component.OrderNoGenerator;
+import com.aip.ops.dto.BalanceReceiveRequest;
+import com.aip.ops.dto.EmployeeBusinessEntryRequest;
+import com.aip.ops.dto.ProductPriceDtos;
+import com.aip.ops.entity.OpsBusinessData;
+import com.aip.ops.entity.OpsBusinessOrder;
+import com.aip.ops.entity.OpsBusinessOrderTradeIn;
+import com.aip.ops.entity.OpsBusinessSpecialFile;
+import com.aip.ops.mapper.OpsBusinessDataMapper;
+import com.aip.ops.mapper.OpsBusinessOrderTradeInMapper;
+import com.aip.ops.security.JwtTokenInspector;
+import com.aip.ops.service.BusinessOrderService;
+import com.aip.ops.service.BusinessOrderWorkflowService;
+import com.aip.ops.service.BusinessSpecialFileService;
+import com.aip.ops.service.EmployeeBusinessEntryService;
+import com.aip.ops.service.GasMemberMatcher;
+import com.aip.ops.service.ProductPriceService;
+import com.aip.ops.util.PaymentMethod;
+import com.aip.sdk.client.PlatformInternalClient;
+import com.aip.sdk.exception.BusinessException;
+import com.aip.sdk.security.SecurityUtils;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.text.Normalizer;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.regex.Pattern;
+
+/**
+ * 员工手工新增业务数据实现。
+ *
+ * <p>安全边界：corp_id / agent / agent_phone 全部由 JWT + 平台 sys_user 派生；
+ * 批次必须属于当前组织且未上报集团；品牌/品类/型号必须命中 SCM 基础资料。</p>
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntryService {
+
+    private static final String REPORTED_STATUS = "已上报集团";
+    private static final String INITIAL_CALC_STATUS = "未计算";
+    private static final int MAX_VOUCHERS = 3;
+    /** 单笔业务最多产品行/经办人数，防止超大批量录入拖垮事务 */
+    private static final int MAX_PRODUCTS = 50;
+    private static final int MAX_AGENTS = 20;
+    private static final int MAX_TEXT_LENGTH = 100;
+    private static final int MAX_DETAIL_ADDRESS_LENGTH = 200;
+    /** sys_member.real_name / nickname 为 VARCHAR(50)，自动建会员时不能超长 */
+    private static final int MAX_CUSTOMER_LENGTH = 50;
+    private static final int MAX_REMARK_LENGTH = 500;
+    private static final int MAX_TRADE_IN_ITEMS = 50;
+    /** 与 SCM 自动采购单单笔最多 100 条旧品分录保持一致，避免订单保存成功但采购单永远建不出来 */
+    private static final int MAX_TOTAL_TRADE_IN_ITEMS = 100;
+    private static final int MAX_TRADE_IN_NAME_LENGTH = 200;
+    private static final int MAX_TRADE_IN_BRAND_LENGTH = 100;
+    private static final int MAX_TRADE_IN_MODEL_LENGTH = 200;
+    private static final int MAX_TRADE_IN_UNIT_LENGTH = 50;
+    private static final int MAX_RECEIPT_NO_LENGTH = 50;
+    /** 收据号允许字符集：字母/数字/短横线/下划线/斜杠（不含空格，便于财务核对与导出）。 */
+    private static final Pattern RECEIPT_NO_PATTERN = Pattern.compile("^[A-Za-z0-9_/-]+$");
+
+    private final JdbcTemplate jdbcTemplate;
+    private final PlatformInternalClient platformInternalClient;
+    private final OpsBusinessDataMapper businessDataMapper;
+    private final OpsBusinessOrderTradeInMapper tradeInMapper;
+    private final ScmPurchaseOrderClient scmPurchaseOrderClient;
+    private final GasMemberMatcher memberMatcher;
+    private final ScmBaseDataClient scmClient;
+    private final JwtTokenInspector jwtTokenInspector;
+    private final PlatformTransactionManager transactionManager;
+    private final BusinessOrderService orderService;
+    private final OrderNoGenerator orderNoGenerator;
+    private final BusinessOrderWorkflowService workflowService;
+    private final ProductPriceService productPriceService;
+    private final BusinessSpecialFileService specialFileService;
+
+    private TransactionTemplate transactionTemplate;
+
+    @PostConstruct
+    void initTransactionTemplate() {
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+    }
+
+    @Override
+    public Map<String, Object> getManualEntryOptions() {
+        EmployeeContext ctx = resolveEmployeeContext();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("corpId", ctx.corpId());
+        result.put("corpName", ctx.corpName());
+        result.put("company", ctx.company());
+        result.put("employeeUserId", ctx.employeeUserId());
+        result.put("employeeName", ctx.employeeName());
+        result.put("employeePhone", ctx.employeePhone());
+        result.put("employees", loadCorpEmployees(ctx.corpId(), ctx.employeeUserId(),
+                ctx.employeeName(), ctx.employeePhone()));
+        result.put("batches", selectableBatches(ctx.corpId()));
+        result.put("newBatchPrefix", monthlyBatchNo(ctx.company()));
+        result.put("communities", loadCommunities(ctx.corpId()));
+        fillProductOptions(result, ctx.corpId());
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> lookupMember(String phone) {
+        assertEmployee();
+        String normalized = normalizePhone(phone);
+        if (!GasMemberMatcher.PHONE_PATTERN.matcher(normalized).matches()) {
+            throw BusinessException.of("请输入正确的11位大陆手机号");
+        }
+        try {
+            Map<String, Object> info = memberMatcher.findMemberInfoByPhone(normalized);
+            if (info == null) return Map.of("found", false);
+            Long memberId = info.get("id") instanceof Number n ? n.longValue() : null;
+            Long communityId = info.get("communityId") instanceof Number n ? n.longValue() : null;
+            if (communityId == null) {
+                communityId = findGasUserCommunity(memberId, normalized);
+            }
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("found", true);
+            result.put("memberId", memberId);
+            result.put("name", info.get("name"));
+            result.put("communityId", communityId);
+            result.put("communityName", communityName(communityId));
+            return result;
+        } catch (IllegalStateException e) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("found", false);
+            result.put("message", e.getMessage());
+            return result;
+        }
+    }
+
+    // ── 小区 / 详细地址 ──
+
+    /** 当前员工所属组织的小区下拉（sys_community.corp_id 精确过滤）。 */
+    private List<Map<String, Object>> loadCommunities(Long corpId) {
+        try {
+            return jdbcTemplate.queryForList(
+                    "SELECT id, community_name AS name FROM ai_platform.sys_community "
+                            + "WHERE delete_flag = 0 AND corp_id = ? ORDER BY community_name",
+                    corpId);
+        } catch (Exception e) {
+            log.warn("加载组织小区列表失败 corpId={}: {}", corpId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** 会员未直接关联小区时，按手机号/会员ID 从燃气用户回退取小区。 */
+    private Long findGasUserCommunity(Long memberId, String phone) {
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT community_id FROM ops_gas_user "
+                            + "WHERE delete_flag = 0 AND community_id IS NOT NULL "
+                            + "AND (phone = ? OR platform_member_id = ?) "
+                            + "ORDER BY (platform_member_id = ?) DESC, id LIMIT 1",
+                    phone, memberId, memberId);
+            if (rows.isEmpty()) return null;
+            Object value = rows.get(0).get("community_id");
+            if (!(value instanceof Number n)) return null;
+            return n.longValue() > 0 ? n.longValue() : null;
+        } catch (Exception e) {
+            log.debug("回退查询会员小区失败 memberId={}, phone={}: {}",
+                    memberId, phone, e.getMessage());
+            return null;
+        }
+    }
+
+    private String communityName(Long communityId) {
+        if (communityId == null || communityId <= 0) return null;
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT community_name FROM ai_platform.sys_community "
+                            + "WHERE id = ? AND delete_flag = 0 LIMIT 1", communityId);
+            return rows.isEmpty() ? null : str(rows.get(0).get("community_name"));
+        } catch (Exception e) {
+            log.debug("查询小区名称失败 communityId={}: {}", communityId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 当前组织可选经办人：sys_user_corp 关联 sys_user（账号 username 即手机号）。
+     * 当前操作员工固定在首位且 isSelf=true；若 sys_user_corp 缺关联仍兜底展示本人。
+     */
+    private List<Map<String, Object>> loadCorpEmployees(Long corpId, Long selfUserId,
+                                                        String selfName, String selfPhone) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT u.id AS userId, u.real_name AS realName, u.username, u.phone "
+                            + "FROM ai_platform.sys_user u "
+                            + "WHERE u.status = 1 AND u.delete_flag = 0 "
+                            + "AND (u.corp_id = ? OR EXISTS ("
+                            + "  SELECT 1 FROM ai_platform.sys_user_corp uc "
+                            + "  WHERE uc.user_id = u.id AND uc.corp_id = ? "
+                            + "  AND uc.status = 1 AND uc.delete_flag = 0)) "
+                            + "ORDER BY u.real_name, u.id",
+                    corpId, corpId);
+            for (Map<String, Object> row : rows) {
+                Long userId = row.get("userId") instanceof Number n ? n.longValue() : null;
+                if (userId == null) continue;
+                String username = str(row.get("username"));
+                String phone = username.isEmpty() ? str(row.get("phone")) : username;
+                if (phone.isEmpty()) continue;
+                String name = str(row.get("realName"));
+                result.add(employeeOption(userId, name.isEmpty() ? phone : name, phone,
+                        userId.equals(selfUserId)));
+            }
+        } catch (Exception e) {
+            log.warn("加载组织员工列表失败 corpId={}: {}", corpId, e.getMessage());
+        }
+        boolean selfPresent = result.stream()
+                .anyMatch(item -> Boolean.TRUE.equals(item.get("isSelf")));
+        if (!selfPresent && selfUserId != null) {
+            result.removeIf(item -> selfUserId.equals(item.get("userId")));
+            result.add(0, employeeOption(selfUserId, selfName, selfPhone, true));
+        }
+        return result;
+    }
+
+    private Map<String, Object> employeeOption(Long userId, String name, String phone,
+                                               boolean isSelf) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("userId", userId);
+        item.put("name", name);
+        item.put("phone", phone);
+        item.put("isSelf", isSelf);
+        return item;
+    }
+
+    @Override
+    public Map<String, Object> createManualEntry(EmployeeBusinessEntryRequest request) {
+        EmployeeContext ctx = resolveEmployeeContext();
+        Validated v = validateRequest(request, ctx);
+        // 平台/SCM 的 HTTP 查询在事务外完成；事务只包裹批次取号+行锁、会员创建、INSERT，
+        // 避免 Hikari 连接在外部 HTTP 期间被长期占用（连接池耗尽风险）。
+        Map<String, Object> result = transactionTemplate.execute(
+                status -> persistManualEntry(request, ctx, v));
+        // 事务提交后自动创建以旧换新采购单（SCM 幂等）；失败标记异常并随结果返回提示
+        if (result != null && Boolean.TRUE.equals(result.get("hasTradeIn"))
+                && result.get("orderId") instanceof Number orderId) {
+            autoCreateTradeInPurchase(orderId.longValue(), ctx.corpId(),
+                    str(result.get("orderNo")), result);
+        }
+        // 事务提交后同步发起审批流程：成功页必须拿到下一审批人；
+        // 发起失败不阻塞制单，返回 resolved=false + 兜底文案由前端展示。
+        if (result != null && result.get("orderId") instanceof Number orderId) {
+            try {
+                WorkflowPlatformClient.StartResult started = workflowService.start(
+                        orderId.longValue(), ctx.employeeUserId(), ctx.employeeName(), false);
+                result.put("wfInstanceId", started.instanceId());
+                result.put("currentApproverName", started.approverName());
+                result.put("currentApproverRole", started.approverRole());
+                result.put("approverResolved", started.resolved());
+                result.put("approverMessage", started.message());
+            } catch (Exception e) {
+                log.warn("订单 {} 发起工作流失败：{}", orderId, e.getMessage());
+                result.put("approverResolved", false);
+                result.put("approverMessage", "审批流程发起失败，请联系管理员");
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> retryTradeInPurchase(Long orderId) {
+        EmployeeContext ctx = resolveEmployeeContext();
+        OpsBusinessOrder order = requireAgentOrder(ctx, orderId);
+        if (!Integer.valueOf(1).equals(order.getHasTradeIn())) {
+            throw BusinessException.of("该订单不含以旧换新");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("orderId", orderId);
+        result.put("orderNo", order.getOrderNo());
+        if ("SUCCESS".equals(order.getTradeInPurchaseStatus())
+                && order.getTradeInPurchaseOrderId() != null) {
+            result.put("status", "SUCCESS");
+            result.put("purchaseOrderId", order.getTradeInPurchaseOrderId());
+            result.put("billNo", order.getTradeInPurchaseBillNo());
+            return result;
+        }
+        try {
+            ScmPurchaseOrderClient.TradeInPurchaseResult created =
+                    scmPurchaseOrderClient.createTradeInPurchaseOrder(
+                            buildTradeInPurchaseRequest(ctx.corpId(), orderId, order.getOrderNo()));
+            orderService.updateTradeInPurchaseStatus(orderId, "SUCCESS", created.orderId(),
+                    created.billNo(), null);
+            result.put("status", "SUCCESS");
+            result.put("purchaseOrderId", created.orderId());
+            result.put("billNo", created.billNo());
+        } catch (Exception e) {
+            String error = truncate(e.getMessage(), 500);
+            orderService.updateTradeInPurchaseStatus(orderId, "FAILED", null, null, error);
+            result.put("status", "FAILED");
+            result.put("error", error);
+        }
+        return result;
+    }
+
+    /** 事务提交后自动创建以旧换新采购单；失败标记 FAILED 并随成功响应提示，不静默。 */
+    private void autoCreateTradeInPurchase(Long orderId, Long corpId, String orderNo,
+                                           Map<String, Object> result) {
+        try {
+            ScmPurchaseOrderClient.TradeInPurchaseResult created =
+                    scmPurchaseOrderClient.createTradeInPurchaseOrder(
+                            buildTradeInPurchaseRequest(corpId, orderId, orderNo));
+            orderService.updateTradeInPurchaseStatus(orderId, "SUCCESS", created.orderId(),
+                    created.billNo(), null);
+            result.put("tradeInPurchaseStatus", "SUCCESS");
+            result.put("tradeInPurchaseOrderId", created.orderId());
+            result.put("tradeInPurchaseBillNo", created.billNo());
+        } catch (Exception e) {
+            String error = truncate(e.getMessage(), 500);
+            orderService.updateTradeInPurchaseStatus(orderId, "FAILED", null, null, error);
+            result.put("tradeInPurchaseStatus", "FAILED");
+            result.put("tradeInPurchaseError", error);
+            log.warn("以旧换新采购单创建失败 orderId={}: {}", orderId, error);
+        }
+    }
+
+    private ScmPurchaseOrderClient.TradeInPurchaseRequest buildTradeInPurchaseRequest(
+            Long corpId, Long orderId, String orderNo) {
+        List<OpsBusinessOrderTradeIn> rows = tradeInMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<OpsBusinessOrderTradeIn>()
+                        .eq(OpsBusinessOrderTradeIn::getOrderId, orderId)
+                        .eq(OpsBusinessOrderTradeIn::getDeleteFlag, 0)
+                        .orderByAsc(OpsBusinessOrderTradeIn::getId));
+        if (rows.isEmpty()) {
+            throw BusinessException.of("订单没有旧品明细，无法创建采购单");
+        }
+        List<ScmPurchaseOrderClient.TradeInItem> items = new ArrayList<>();
+        for (OpsBusinessOrderTradeIn row : rows) {
+            items.add(new ScmPurchaseOrderClient.TradeInItem(
+                    row.getId(), row.getOldProductId(), row.getOldMaterialNumber(),
+                    row.getOldProductName(), row.getBrand(), row.getModel(), row.getCategory(),
+                    row.getQuantity(), row.getUnit(), row.getRemark(),
+                    Integer.valueOf(1).equals(row.getIsManual())));
+        }
+        return new ScmPurchaseOrderClient.TradeInPurchaseRequest(corpId, orderId, orderNo, items);
+    }
+
+    private static String truncate(String value, int max) {
+        if (value == null) return null;
+        String text = value.trim();
+        return text.length() <= max ? text : text.substring(0, max);
+    }
+
+    @Override
+    public Map<String, Object> currentApprover(Long orderId) {
+        EmployeeIdentity identity = assertEmployee();
+        OpsBusinessOrder order = orderService.getById(orderId);
+        if (order == null || !Objects.equals(order.getCorpId(), identity.corpId())) {
+            throw BusinessException.notFound("业务订单不存在");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("orderId", orderId);
+        if (order.getWfInstanceId() == null) {
+            result.put("resolved", false);
+            result.put("message", "审批流程尚未发起，请联系管理员");
+            return result;
+        }
+        WorkflowPlatformClient.StartResult started =
+                workflowService.currentApprover(order.getWfInstanceId());
+        result.put("instanceId", started.instanceId());
+        result.put("approverName", started.approverName());
+        result.put("approverRole", started.approverRole());
+        result.put("resolved", started.resolved());
+        result.put("message", started.message());
+        return result;
+    }
+
+    // ── 货款补录（定金支付 → 收齐余款） ──
+
+    @Override
+    public List<Map<String, Object>> listDepositPending() {
+        EmployeeContext ctx = resolveEmployeeContext();
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, order_no, customer, total_amount, deposit_amount, balance_amount, "
+                        + "create_time, agent_names FROM ops_business_order "
+                        + "WHERE corp_id = ? AND delete_flag = 0 "
+                        + "AND payment_type = 'DEPOSIT' AND is_full_payment = 0 "
+                        + "AND (create_user = ? OR FIND_IN_SET(?, "
+                        + "  REPLACE(COALESCE(agent_phones, ''), '、', ',')) > 0) "
+                        + "ORDER BY create_time DESC, id DESC LIMIT 200",
+                ctx.corpId(), ctx.employeeUserId(), ctx.employeePhone());
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("orderId", longVal(row.get("id")));
+            item.put("orderNo", str(row.get("order_no")));
+            item.put("customer", str(row.get("customer")));
+            item.put("totalAmount", money(row.get("total_amount")));
+            item.put("depositAmount", money(row.get("deposit_amount")));
+            item.put("balanceAmount", money(row.get("balance_amount")));
+            item.put("createTime", row.get("create_time"));
+            item.put("agentNames", str(row.get("agent_names")));
+            result.add(item);
+        }
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> depositPendingDetail(Long orderId) {
+        EmployeeContext ctx = resolveEmployeeContext();
+        OpsBusinessOrder order = requireAgentOrder(ctx, orderId);
+        if (!"DEPOSIT".equals(order.getPaymentType())) {
+            throw BusinessException.of("该订单不是定金支付，无需补录");
+        }
+        return balanceOrderView(order);
+    }
+
+    @Override
+    public Map<String, Object> receiveBalance(Long orderId, BalanceReceiveRequest request) {
+        EmployeeContext ctx = resolveEmployeeContext();
+        if (request == null) throw BusinessException.of("补录信息不能为空");
+        BigDecimal received = request.getReceivedAmount();
+        if (received == null || received.compareTo(BigDecimal.ZERO) <= 0) {
+            throw BusinessException.of("实收余款必须大于0");
+        }
+        if (received.scale() > 2) {
+            throw BusinessException.of("实收余款最多保留两位小数");
+        }
+        BigDecimal amount = received.setScale(2, RoundingMode.HALF_UP);
+        String voucher = str(request.getVoucherUrl());
+        if (voucher.isEmpty()) throw BusinessException.of("请上传收款凭证");
+        // 复用员工特批文件上传目录，但只接受本组织命名空间下的凭证，防止引用其他组织的文件
+        String voucherPrefix = "/uploads/ops/special-approval/" + ctx.corpId() + "/";
+        if (voucher.length() > 500 || !voucher.startsWith(voucherPrefix)) {
+            throw BusinessException.of("收款凭证地址不合法，请重新上传");
+        }
+        String remark = str(request.getRemark());
+        // 是否全款=否的补录必须写清收款说明（后端为准，防绕过前端）
+        if (remark.isEmpty()) {
+            throw BusinessException.of("请填写收款备注");
+        }
+        if (remark.length() > MAX_REMARK_LENGTH) {
+            throw BusinessException.of("收款备注不能超过" + MAX_REMARK_LENGTH + "个字");
+        }
+        return transactionTemplate.execute(status -> doReceiveBalance(
+                ctx, orderId, amount, voucher, remark));
+    }
+
+    /** 事务内：行锁订单 → 重新校验经办人/付款方式/金额 → 原子置全款。 */
+    private Map<String, Object> doReceiveBalance(EmployeeContext ctx, Long orderId,
+                                                 BigDecimal received, String voucher, String remark) {
+        jdbcTemplate.queryForList(
+                "SELECT id FROM ops_business_order WHERE id=? AND delete_flag=0 FOR UPDATE",
+                Long.class, orderId);
+        OpsBusinessOrder order = requireAgentOrder(ctx, orderId);
+        if (!"DEPOSIT".equals(order.getPaymentType())) {
+            throw BusinessException.of("该订单不是定金支付，无需补录");
+        }
+        if (Integer.valueOf(1).equals(order.getIsFullPayment())) {
+            return alreadyReceivedView(order);
+        }
+        BigDecimal due = balanceOf(order);
+        if (due.compareTo(BigDecimal.ZERO) <= 0) {
+            throw BusinessException.of("订单应补余款为0，无需补录");
+        }
+        if (received.compareTo(due) != 0) {
+            throw BusinessException.of("实收余款必须等于应补余款 ¥"
+                    + due.toPlainString());
+        }
+        int updated = jdbcTemplate.update(
+                "UPDATE ops_business_order SET is_full_payment=1, balance_received_amount=?, "
+                        + "balance_paid_at=NOW(), balance_voucher_url=?, balance_remark=?, "
+                        + "modify_time=NOW(), modify_user=?, modify_user_name=? "
+                        + "WHERE id=? AND is_full_payment=0 AND delete_flag=0",
+                received, voucher, remark, ctx.employeeUserId(), ctx.employeeName(), orderId);
+        if (updated != 1) {
+            OpsBusinessOrder latest = orderService.getById(orderId);
+            if (latest != null && Integer.valueOf(1).equals(latest.getIsFullPayment())) {
+                return alreadyReceivedView(latest);
+            }
+            throw BusinessException.of("订单状态已变化，请刷新后重试");
+        }
+        OpsBusinessOrder latest = orderService.getById(orderId);
+        if (latest == null) throw BusinessException.of("订单状态已变化，请刷新后重试");
+        log.info("货款补录成功 orderId={} userId={} received={} voucher={}",
+                orderId, ctx.employeeUserId(), received, voucher);
+        Map<String, Object> result = balanceOrderView(latest);
+        result.put("alreadyReceived", false);
+        result.put("message", "货款补录成功，订单已标记为全款");
+        return result;
+    }
+
+    /** 幂等响应：已补录订单再次提交时返回同一结构，避免重复收款。 */
+    private Map<String, Object> alreadyReceivedView(OpsBusinessOrder order) {
+        Map<String, Object> result = balanceOrderView(order);
+        result.put("alreadyReceived", true);
+        result.put("message", "该订单已完成货款补录");
+        return result;
+    }
+
+    /** 经办人可见性：本组织 + 当前员工手机号在 agent_phones 中（或 create_user 为本人）。 */
+    private OpsBusinessOrder requireAgentOrder(EmployeeContext ctx, Long orderId) {
+        OpsBusinessOrder order = orderId == null ? null : orderService.getById(orderId);
+        if (order == null || Integer.valueOf(1).equals(order.getDeleteFlag())
+                || !Objects.equals(order.getCorpId(), ctx.corpId())
+                || !visibleToAgent(order, ctx)) {
+            throw BusinessException.notFound("订单不存在或不属于当前经办人");
+        }
+        return order;
+    }
+
+    private boolean visibleToAgent(OpsBusinessOrder order, EmployeeContext ctx) {
+        if (Objects.equals(order.getCreateUser(), ctx.employeeUserId())) return true;
+        String phones = str(order.getAgentPhones());
+        if (phones.isEmpty() || ctx.employeePhone() == null) return false;
+        for (String phone : phones.split("、")) {
+            if (ctx.employeePhone().equals(phone.trim())) return true;
+        }
+        return false;
+    }
+
+    private Map<String, Object> balanceOrderView(OpsBusinessOrder order) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("orderId", order.getId());
+        view.put("orderNo", order.getOrderNo());
+        view.put("customer", order.getCustomer());
+        view.put("customerPhone", order.getCustomerPhone());
+        view.put("agentNames", order.getAgentNames());
+        view.put("totalAmount", money(order.getTotalAmount()));
+        view.put("depositAmount", money(order.getDepositAmount()));
+        view.put("balanceAmount", balanceOf(order));
+        view.put("paymentType", order.getPaymentType());
+        view.put("isFullPayment", order.getIsFullPayment());
+        view.put("balanceReceivedAmount", order.getBalanceReceivedAmount());
+        view.put("balancePaidAt", order.getBalancePaidAt());
+        view.put("balanceVoucherUrl", order.getBalanceVoucherUrl());
+        view.put("balanceRemark", order.getBalanceRemark());
+        view.put("createTime", order.getCreateTime());
+        view.put("alreadyReceived", Integer.valueOf(1).equals(order.getIsFullPayment()));
+        return view;
+    }
+
+    private BigDecimal balanceOf(OpsBusinessOrder order) {
+        BigDecimal balance = order.getBalanceAmount() != null ? order.getBalanceAmount()
+                : money(order.getTotalAmount()).subtract(money(order.getDepositAmount()));
+        return balance.max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static BigDecimal money(Object value) {
+        if (value instanceof BigDecimal b) return b.setScale(2, RoundingMode.HALF_UP);
+        if (value instanceof Number n) {
+            return new BigDecimal(n.toString()).setScale(2, RoundingMode.HALF_UP);
+        }
+        return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static Long longVal(Object value) {
+        return value instanceof Number n ? n.longValue() : null;
+    }
+
+    @Override
+    public Map<String, Object> checkReceiptNo(String receiptNo, String customer) {
+        EmployeeIdentity identity = assertEmployee();
+        String normalized = normalizeReceiptNo(receiptNo);
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (normalized == null) {
+            result.put("duplicate", false);
+            return result;
+        }
+        String conflict = findReceiptConflict(identity.corpId(), normalized, str(customer));
+        result.put("duplicate", conflict != null);
+        if (conflict != null) result.put("message", conflict);
+        return result;
+    }
+
+    private Map<String, Object> persistManualEntry(EmployeeBusinessEntryRequest request,
+                                                   EmployeeContext ctx, Validated v) {
+        String batchNo = resolveBatch(request, ctx);
+        MemberResolution member = resolveOrCreateMember(v.phone(), v.customer(), ctx.corpId());
+        CommunityInfo community = resolveCommunity(v.communityId(), ctx.corpId());
+        // 订单编号由独立事务生成（REQUIRES_NEW），避免长事务持有流水行锁；回滚可能产生号段空洞
+        String orderNo = orderNoGenerator.next();
+        // 订单编号即业务组号：提成/统计/财务核对均以订单为维度；
+        // 同时写入 business_group_no 兼容历史分组逻辑
+        String businessGroupNo = orderNo;
+        List<Long> ids = new ArrayList<>();
+        Map<String, Long> firstItemIds = new LinkedHashMap<>();
+        BigDecimal totalAmount = v.products().stream()
+                .map(ValidatedProduct::amount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // 主子表拆分：一次提交 = 1 条订单头 + N（产品×经办人）条子表
+        OpsBusinessOrder order = orderService.createOrderWithPayment(
+                ctx.corpId(), "O|" + orderNo, orderNo, batchNo, businessGroupNo,
+                v.receiptNo(), ctx.company(), v.customer(), v.phone(), member.id(),
+                community.id(), community.name(), v.detailAddress(), v.receiptDate(),
+                null, null, null, v.voucherUrl(),
+                totalAmount, INITIAL_CALC_STATUS, v.remark(), v.paymentMethod(),
+                v.paymentType(), v.depositAmount());
+        // 多经办人按「产品 × 经办人」拆行：每行独立 agent_phone 归属，
+        // 提成计算沿用「同收据号+客户+品类+型号」组内均分规则。
+        for (ValidatedProduct product : v.products()) {
+            for (AgentInfo agent : v.agents()) {
+                OpsBusinessData entity = buildEntity(ctx, v, product, agent,
+                        batchNo, orderNo, businessGroupNo, member.id(), community);
+                entity.setOrderId(order.getId());
+                businessDataMapper.insert(entity);
+                ids.add(entity.getId());
+                firstItemIds.putIfAbsent(tradeInProductKey(product), entity.getId());
+            }
+        }
+        int tradeInCount = insertTradeInItems(ctx, v, order.getId(), firstItemIds);
+        if (tradeInCount > 0) {
+            // 与业务订单同事务落 PENDING：进程在提交后崩溃也能看出采购单未完成，前端据此提供重试
+            orderService.updateTradeInPurchaseStatus(order.getId(), "PENDING", null, null, null);
+        }
+        orderService.refreshAgentSummary(order.getId());
+        orderService.refreshTotals(order.getId());
+        // 新月度批次首次写入时无行可锁；入库后再次锁定校验，
+        // 防止「检查为空 → 并发上报 → 继续插入」产生已上报批次下的新行
+        lockAndCheckBatch(ctx.corpId(), batchNo);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("orderId", order.getId());
+        result.put("ids", ids);
+        result.put("detailCount", ids.size());
+        result.put("productCount", v.products().size());
+        result.put("agentCount", v.agents().size());
+        result.put("batchNo", batchNo);
+        result.put("orderNo", orderNo);
+        result.put("businessGroupNo", businessGroupNo);
+        result.put("receiptAmount", totalAmount);
+        BigDecimal deductionTotal = v.products().stream()
+                .map(ValidatedProduct::deduction)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        boolean hasTradeIn = v.products().stream().anyMatch(ValidatedProduct::tradeIn);
+        result.put("hasTradeIn", hasTradeIn);
+        result.put("tradeInDeduction", deductionTotal);
+        result.put("payableAmount", totalAmount.subtract(deductionTotal).max(BigDecimal.ZERO));
+        result.put("tradeInCount", tradeInCount);
+        result.put("paymentType", v.paymentType());
+        result.put("depositAmount", v.depositAmount());
+        result.put("balanceAmount", v.balanceAmount());
+        result.put("isFullPayment", v.isFullPayment());
+        result.put("platformMemberId", member.id());
+        result.put("memberCreated", member.created());
+        return result;
+    }
+
+    /** 旧品按销售商品行分组落库；同一产品多经办人共用一份旧品。 */
+    private int insertTradeInItems(EmployeeContext ctx, Validated v, Long orderId,
+                                   Map<String, Long> firstItemIds) {
+        int count = 0;
+        for (ValidatedProduct product : v.products()) {
+            if (!product.tradeIn()) continue;
+            String productKey = tradeInProductKey(product);
+            Long sourceItemId = firstItemIds.get(productKey);
+            for (ValidatedTradeIn old : product.tradeInItems()) {
+                OpsBusinessOrderTradeIn row = new OpsBusinessOrderTradeIn();
+                row.setCorpId(ctx.corpId());
+                row.setOrderId(orderId);
+                row.setProductKey(productKey);
+                row.setSourceItemId(sourceItemId);
+                row.setOldProductId(old.productId());
+                row.setOldMaterialNumber(old.materialNumber());
+                row.setOldProductName(old.productName());
+                row.setBrand(old.brand());
+                row.setModel(old.model());
+                row.setCategory(old.category());
+                row.setQuantity(old.quantity());
+                row.setUnit(old.unit());
+                row.setRemark(old.remark());
+                row.setIsManual(old.manual() ? 1 : 0);
+                row.setDeleteFlag(0);
+                tradeInMapper.insert(row);
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static String tradeInProductKey(ValidatedProduct product) {
+        return product.categoryKey() + "|" + product.brand() + "|" + product.model()
+                + "|" + product.price().stripTrailingZeros().toPlainString();
+    }
+
+    // ── 员工上下文 ──
+
+    private EmployeeContext resolveEmployeeContext() {
+        EmployeeIdentity identity = assertEmployee();
+        CorpInfo corp = fetchCorpInfo(identity.corpId());
+        return new EmployeeContext(identity.corpId(), corp.corpName(), corp.company(),
+                identity.name(), identity.phone(), SecurityUtils.getCurrentUserId());
+    }
+
+    /** 校验当前 JWT 确为在职员工；返回组织 + 经办人姓名/手机号。 */
+    private EmployeeIdentity assertEmployee() {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            throw BusinessException.of("仅员工账号可录入业务数据");
+        }
+        Long corpId = SecurityUtils.getCurrentCorpId();
+        if (corpId == null || corpId <= 0) {
+            throw BusinessException.of("请选择所属公司后再录入业务数据");
+        }
+        Map<String, Object> user = loadPlatformUser(SecurityUtils.getCurrentUserId());
+        String username = str(user.get("username"));
+        String userPhone = str(user.get("phone"));
+        // 员工 JWT 的 username 来自 sys_user.username。会员 SSO JWT 的 sub 是
+        // sys_member.id，恰与某个 sys_user.id 相同时不能仅凭 id 放行为员工。
+        String jwtUsername = SecurityUtils.getCurrentUser().getUsername();
+        if (!username.equals(jwtUsername) && !userPhone.equals(jwtUsername)) {
+            throw BusinessException.of("仅员工账号可录入业务数据");
+        }
+        String phone = GasMemberMatcher.PHONE_PATTERN.matcher(username).matches()
+                ? username : userPhone;
+        if (!GasMemberMatcher.PHONE_PATTERN.matcher(phone).matches()) {
+            throw BusinessException.of("员工账号未绑定有效手机号，请联系管理员");
+        }
+        String name = str(user.get("real_name"));
+        if (name.isEmpty()) name = fallbackMemberName();
+        if (name.isEmpty()) name = username;
+        return new EmployeeIdentity(corpId, name, phone);
+    }
+
+    private Map<String, Object> loadPlatformUser(Long userId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT username, real_name, phone, status, delete_flag "
+                        + "FROM ai_platform.sys_user WHERE id = ? LIMIT 1", userId);
+        if (rows.isEmpty()) {
+            throw BusinessException.of("仅员工账号可录入业务数据");
+        }
+        Map<String, Object> row = rows.get(0);
+        if (num(row.get("status")) != 1 || num(row.get("delete_flag")) != 0) {
+            throw BusinessException.of("员工账号已被禁用，请联系管理员");
+        }
+        return row;
+    }
+
+    /** 员工姓名缺失时，用 JWT member_id 关联的平台会员姓名兜底。 */
+    private String fallbackMemberName() {
+        try {
+            Long memberId = SecurityUtils.getCurrentUser().getMemberId();
+            if (memberId == null) return "";
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT real_name, nickname FROM ai_platform.sys_member "
+                            + "WHERE id = ? AND delete_flag = 0 LIMIT 1", memberId);
+            if (rows.isEmpty()) return "";
+            String realName = str(rows.get(0).get("real_name"));
+            return realName.isEmpty() ? str(rows.get(0).get("nickname")) : realName;
+        } catch (Exception e) {
+            log.debug("员工姓名兜底查询失败: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    private CorpInfo fetchCorpInfo(Long corpId) {
+        try {
+            Map<String, Object> resp = platformInternalClient.get(
+                    "/api/internal/corp/" + corpId, null);
+            Object dataObj = resp.get("data");
+            if (!(dataObj instanceof Map<?, ?> data)) {
+                throw BusinessException.of("无法获取所属公司信息");
+            }
+            String name = str(data.get("name"));
+            String shortName = str(data.get("shortName"));
+            // 批次前缀优先用组织简称；简称缺失时沿用该组织历史业务数据的“公司”口径，
+            // 最后才回退到全称，避免批次前缀与既有数据（临洮/康乐/…）不一致。
+            String company = shortName.isEmpty() ? establishedCompany(corpId) : shortName;
+            if (company.isEmpty()) company = name;
+            if (company.isEmpty()) {
+                throw BusinessException.of("所属公司名称为空，请联系管理员");
+            }
+            if (company.length() > 32) company = company.substring(0, 32);
+            return new CorpInfo(name.isEmpty() ? company : name, company);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("获取组织信息失败 corpId={}: {}", corpId, e.getMessage());
+            throw BusinessException.of("无法获取所属公司信息，请稍后重试");
+        }
+    }
+
+    /** 组织历史业务数据中最常用的公司名（仅用于组织无简称时的批次前缀兜底）。 */
+    private String establishedCompany(Long corpId) {
+        try {
+            List<String> rows = jdbcTemplate.queryForList(
+                    "SELECT company FROM ops_business_order_item "
+                            + "WHERE corp_id = ? AND delete_flag = 0 "
+                            + "AND company IS NOT NULL AND company <> '' "
+                            + "GROUP BY company ORDER BY COUNT(*) DESC LIMIT 1",
+                    String.class, corpId);
+            return rows.isEmpty() ? "" : str(rows.get(0));
+        } catch (Exception e) {
+            log.debug("查询组织历史公司名失败 corpId={}: {}", corpId, e.getMessage());
+            return "";
+        }
+    }
+
+    // ── 批次 ──
+
+    private List<String> selectableBatches(Long corpId) {
+        String sql = "SELECT batch_no FROM ops_business_order_item "
+                + "WHERE corp_id = ? AND delete_flag = 0 "
+                + "AND batch_no IS NOT NULL AND batch_no <> '' "
+                + "GROUP BY batch_no "
+                + "HAVING SUM(CASE WHEN calc_status = ? THEN 1 ELSE 0 END) = 0 "
+                + "ORDER BY MAX(id) DESC LIMIT 200";
+        return jdbcTemplate.queryForList(sql, String.class, corpId, REPORTED_STATUS);
+    }
+
+    private String resolveBatch(EmployeeBusinessEntryRequest req, EmployeeContext ctx) {
+        if (Boolean.TRUE.equals(req.getNewBatch())) {
+            // 一公司一月一批次：存在则复用（已上报则拒绝），不存在则使用该月批次
+            String monthly = monthlyBatchNo(ctx.company());
+            lockAndCheckBatch(ctx.corpId(), monthly);
+            return monthly;
+        }
+        String batchNo = str(req.getBatchNo());
+        if (batchNo.isEmpty()) {
+            throw BusinessException.of("请选择批次或新建批次");
+        }
+        if (batchNo.length() > 64) {
+            throw BusinessException.of("批次号过长");
+        }
+        boolean exists = lockAndCheckBatch(ctx.corpId(), batchNo);
+        if (!exists) {
+            throw BusinessException.of("批次不存在或不属于当前公司");
+        }
+        return batchNo;
+    }
+
+    /** 公司月度批次：{公司简称}-{yyyyMM}。 */
+    private static String monthlyBatchNo(String company) {
+        return company + "-" + YearMonth.now().format(DateTimeFormatter.ofPattern("yyyyMM"));
+    }
+
+    /**
+     * 锁定批次现有行并检查是否已上报集团（SELECT ... FOR UPDATE，锁定读）。
+     * 与「提成上报集团」更新串行化，避免“检查未上报 → 上报提交 → 新行插入”
+     * 竞态产生部分上报批次；锁定读也保证能看到最新已提交的上报状态，
+     * 不受 REPEATABLE READ 快照影响。
+     *
+     * @return 批次是否已有行（false = 可创建新批次）
+     */
+    private boolean lockAndCheckBatch(Long corpId, String batchNo) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT calc_status FROM ops_business_order_item "
+                        + "WHERE corp_id = ? AND batch_no = ? AND delete_flag = 0 FOR UPDATE",
+                corpId, batchNo);
+        for (Map<String, Object> row : rows) {
+            if (REPORTED_STATUS.equals(str(row.get("calc_status")))) {
+                throw BusinessException.of("该批次已上报集团，无法新增业务");
+            }
+        }
+        return !rows.isEmpty();
+    }
+
+    // 订单编号由 OrderNoGenerator 统一生成（导入/手工共用同一全局流水）。
+    // ── 校验 ──
+
+    private Validated validateRequest(EmployeeBusinessEntryRequest req, EmployeeContext ctx) {
+        if (req == null) throw BusinessException.of("请求参数不能为空");
+        String phone = normalizePhone(req.getCustomerPhone());
+        if (!GasMemberMatcher.PHONE_PATTERN.matcher(phone).matches()) {
+            throw BusinessException.of("客户手机号须为11位大陆手机号");
+        }
+        String customer = requireText(req.getCustomer(), "客户名称", MAX_CUSTOMER_LENGTH);
+        List<ValidatedProduct> products = validateProducts(req.getProducts(), ctx.corpId());
+        int totalTradeInRows = products.stream()
+                .filter(ValidatedProduct::tradeIn)
+                .mapToInt(product -> product.tradeInItems().size())
+                .sum();
+        if (totalTradeInRows > MAX_TOTAL_TRADE_IN_ITEMS) {
+            throw BusinessException.of("单笔业务旧品最多" + MAX_TOTAL_TRADE_IN_ITEMS + "行");
+        }
+        List<AgentInfo> agents = validateAgents(req.getAgentUserIds(), ctx);
+        String receiptDate = normalizeDate(req.getReceiptDate());
+        String receiptNo = normalizeReceiptNo(req.getReceiptNo());
+        if (receiptNo != null) {
+            // 制单阶段仅做提示性校验，真正写入仍在此处二次确认，防止绕过前端直接提交
+            assertReceiptNoAvailable(ctx.corpId(), receiptNo, customer);
+        }
+        PaymentMethod paymentMethod = PaymentMethod.normalize(req.getPaymentMethod());
+        String voucherUrl = normalizeVouchers(req.getVoucherUrls());
+        Long communityId = req.getCommunityId();
+        if (communityId != null && communityId <= 0) communityId = null;
+        // 小区必填：订单需归属到具体小区，便于后续网格/台账统计
+        if (communityId == null) {
+            throw BusinessException.of("请选择小区");
+        }
+        String detailAddress = requireText(
+                req.getDetailAddress(), "详细地址", MAX_DETAIL_ADDRESS_LENGTH);
+        String remark = normalizeRemark(req.getRemark());
+        BigDecimal salesAmount = products.stream().map(ValidatedProduct::amount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        // 定金/余款以抵扣后的应付合计为基数，避免以旧换新订单按销售额多收余款
+        BigDecimal deductionAmount = products.stream().map(ValidatedProduct::deduction)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal payableAmount = salesAmount.subtract(deductionAmount)
+                .max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+        PaymentTerms terms = validatePaymentTerms(req.getPaymentType(), req.getDepositAmount(),
+                payableAmount);
+        return new Validated(phone, customer, products, agents,
+                receiptDate, receiptNo, paymentMethod.name(), voucherUrl,
+                communityId, detailAddress, remark,
+                terms.paymentType(), terms.isFullPayment(), terms.depositAmount(),
+                terms.balanceAmount());
+    }
+
+    /**
+     * 付款方式校验（服务端最终口径）：
+     * FULL：定金必须为 0，余款 0，is_full_payment=1；
+     * DEPOSIT：定金 >0 且严格小于应付合计（销售金额 − 以旧换新抵扣），
+     * 余款 = 应付合计 - 定金（服务端计算）。
+     */
+    private PaymentTerms validatePaymentTerms(String rawType, BigDecimal rawDeposit,
+                                              BigDecimal payableAmount) {
+        String type = rawType == null || rawType.isBlank() ? "FULL" : rawType.trim().toUpperCase();
+        if (!"FULL".equals(type) && !"DEPOSIT".equals(type)) {
+            throw BusinessException.of("付款方式必须是 FULL（全款支付）或 DEPOSIT（定金支付）");
+        }
+        if ("FULL".equals(type)) {
+            if (rawDeposit != null && rawDeposit.compareTo(BigDecimal.ZERO) != 0) {
+                throw BusinessException.of("全款支付时定金金额必须为0");
+            }
+            return new PaymentTerms("FULL", 1, BigDecimal.ZERO, BigDecimal.ZERO);
+        }
+        if (rawDeposit == null) {
+            throw BusinessException.of("定金支付请填写定金金额");
+        }
+        if (rawDeposit.scale() > 2) {
+            throw BusinessException.of("定金金额最多保留两位小数");
+        }
+        BigDecimal deposit = rawDeposit.setScale(2, RoundingMode.HALF_UP);
+        if (deposit.compareTo(BigDecimal.ZERO) <= 0) {
+            throw BusinessException.of("定金金额必须大于0");
+        }
+        if (deposit.compareTo(payableAmount) >= 0) {
+            throw BusinessException.of("定金金额必须小于应付合计，全额支付请选择全款支付");
+        }
+        BigDecimal balance = payableAmount.subtract(deposit).setScale(2, RoundingMode.HALF_UP);
+        return new PaymentTerms("DEPOSIT", 0, deposit, balance);
+    }
+
+    /** 收据号选填：去首尾空白；空串落库为 null；非空校验长度与字符集。 */
+    private static String normalizeReceiptNo(String raw) {
+        String value = str(raw);
+        if (value.isEmpty()) return null;
+        if (value.length() > MAX_RECEIPT_NO_LENGTH) {
+            throw BusinessException.of("收据号不能超过" + MAX_RECEIPT_NO_LENGTH + "个字符");
+        }
+        if (!RECEIPT_NO_PATTERN.matcher(value).matches()) {
+            throw BusinessException.of("收据号只能包含字母、数字、短横线、下划线和斜杠");
+        }
+        return value;
+    }
+
+    private void assertReceiptNoAvailable(Long corpId, String receiptNo, String customer) {
+        String conflict = findReceiptConflict(corpId, receiptNo, customer);
+        if (conflict != null) throw BusinessException.of(conflict);
+    }
+
+    /**
+     * 收据号查重：与财务核对同口径——同组织内同一客户可复用（同订单拆分/补录），
+     * 被其他客户占用时返回可读冲突说明，未冲突返回 null。
+     */
+    private String findReceiptConflict(Long corpId, String receiptNo, String customer) {
+        List<Map<String, Object>> dups = jdbcTemplate.queryForList(
+                "SELECT batch_no, customer FROM ops_business_order_item "
+                        + "WHERE corp_id = ? AND receipt_no = ? AND delete_flag = 0 "
+                        + "ORDER BY id LIMIT 20",
+                corpId, receiptNo);
+        for (Map<String, Object> dup : dups) {
+            if (!customer.equals(str(dup.get("customer")))) {
+                return "收据号 " + receiptNo + " 已被其他客户占用（批次 "
+                        + str(dup.get("batch_no")) + "，客户 " + str(dup.get("customer"))
+                        + "），请更换";
+            }
+        }
+        return null;
+    }
+
+    /** 备注选填：去首尾空白，超长拒绝，空串落库为 null。 */
+    private static String normalizeRemark(String value) {
+        String remark = value == null ? "" : value.trim();
+        if (remark.length() > MAX_REMARK_LENGTH) {
+            throw BusinessException.of("备注不能超过" + MAX_REMARK_LENGTH + "个字");
+        }
+        return remark.isEmpty() ? null : remark;
+    }
+
+    /** 产品明细：至少一行；每行独立校验品牌/品类/型号、标准售价、单价、数量与低价特批。 */
+    private List<ValidatedProduct> validateProducts(
+            List<EmployeeBusinessEntryRequest.ProductItem> items, Long corpId) {
+        if (items == null || items.isEmpty()) {
+            throw BusinessException.of("请至少添加一行产品");
+        }
+        if (items.size() > MAX_PRODUCTS) {
+            throw BusinessException.of("单笔业务最多" + MAX_PRODUCTS + "行产品");
+        }
+        List<ValidatedProduct> result = new ArrayList<>();
+        Map<String, Integer> seenModels = new LinkedHashMap<>();
+        for (int i = 0; i < items.size(); i++) {
+            ValidatedProduct product = validateProduct(items.get(i), i + 1, corpId);
+            // 同一型号重复成行会被提成均分逻辑误判为多经办人/重复订单，要求合并数量
+            String key = product.brand() + "|" + product.categoryKey() + "|" + product.model();
+            Integer firstRow = seenModels.putIfAbsent(key, i + 1);
+            if (firstRow != null) {
+                throw BusinessException.of("第" + (i + 1) + "个产品与第" + firstRow
+                        + "个产品品牌/品类/型号重复，请合并数量后录入");
+            }
+            result.add(product);
+        }
+        return result;
+    }
+
+    private ValidatedProduct validateProduct(EmployeeBusinessEntryRequest.ProductItem item,
+                                             int rowNo, Long corpId) {
+        String prefix = "第" + rowNo + "个产品：";
+        if (item == null) throw BusinessException.of(prefix + "信息不能为空");
+        String brand = requireText(item.getBrand(), prefix + "品牌");
+        String categoryName = requireText(item.getCategory(), prefix + "品类");
+        String model = requireText(item.getModel(), prefix + "型号");
+        BigDecimal price = normalizePrice(item.getSalePrice(), prefix);
+        int qty = item.getSaleQuantity() != null ? item.getSaleQuantity() : 0;
+        if (qty < 1) throw BusinessException.of(prefix + "销售数量必须为正整数");
+        BigDecimal amount = price.multiply(BigDecimal.valueOf(qty))
+                .setScale(2, RoundingMode.HALF_UP);
+
+        // 标准售价：以产品售价表为准；未配置/停用直接拒绝制单（后端二次校验防绕过）
+        ProductPriceDtos.ProductPriceInfo priceInfo = productPriceService.lookupForEmployee(
+                corpId, item.getProductId(), brand, categoryName, model);
+        if (!priceInfo.configured()) {
+            throw BusinessException.of(prefix + priceInfo.message());
+        }
+        boolean special = price.compareTo(priceInfo.salePrice()) < 0;
+        BigDecimal rate = BigDecimal.ZERO;
+        Long specialFileId = null;
+        String specialFileUrl = null;
+        String specialFileName = null;
+        if (special) {
+            OpsBusinessSpecialFile file = specialFileService.requireOwned(
+                    item.getSpecialFileId(), corpId);
+            specialFileId = file.getId();
+            specialFileUrl = file.getFileUrl();
+            specialFileName = file.getFileName();
+            rate = validateCommissionRate(true, item.getCommissionRate(), prefix);
+        }
+        String categoryKey;
+        try {
+            categoryKey = scmClient.requireCategoryKey(corpId, categoryName);
+            if (item.getProductId() != null && item.getProductId() > 0) {
+                // productId 是售价主键：必须与提交的品牌/品类/型号同源，
+                // 否则可用低价商品ID套高价商品绕过特批校验。
+                scmClient.requireMaterialById(corpId, item.getProductId(), brand,
+                        categoryName, model);
+            } else {
+                scmClient.requireMaterial(corpId, brand, categoryName, model);
+            }
+        } catch (BusinessException e) {
+            throw BusinessException.of(prefix + e.getMessage());
+        }
+        boolean tradeIn = Boolean.TRUE.equals(item.getIsTradeIn());
+        BigDecimal deduction = BigDecimal.ZERO;
+        List<ValidatedTradeIn> tradeInItems = List.of();
+        if (tradeIn) {
+            deduction = validateTradeInDeduction(item.getDeductionAmount(), amount, prefix);
+            tradeInItems = validateTradeInItems(item.getTradeInItems(), corpId, prefix);
+        }
+        return new ValidatedProduct(item.getProductId(), brand, categoryKey, model, price, qty,
+                amount, rate, priceInfo.salePrice(), special, specialFileId, specialFileUrl,
+                specialFileName, priceInfo.retailFloorPrice(), priceInfo.groupLowestPrice(),
+                tradeIn, deduction, tradeInItems);
+    }
+
+    /** 抵扣金额：>0、最多两位小数、不得超过该商品行销售金额。 */
+    private BigDecimal validateTradeInDeduction(BigDecimal raw, BigDecimal sales, String prefix) {
+        if (raw == null || raw.signum() <= 0) {
+            throw BusinessException.of(prefix + "以旧换新抵扣金额必须大于0");
+        }
+        if (raw.scale() > 2) {
+            throw BusinessException.of(prefix + "抵扣金额最多保留两位小数");
+        }
+        BigDecimal deduction = raw.setScale(2, RoundingMode.HALF_UP);
+        if (deduction.compareTo(sales) > 0) {
+            throw BusinessException.of(prefix + "抵扣金额不能超过商品金额");
+        }
+        return deduction;
+    }
+
+    /**
+     * 旧品校验：至少1件；选中 SCM 商品时以商品资料为准（防篡改品牌/型号），
+     * 其他旧品允许手工录入名称/品牌/型号。
+     */
+    private List<ValidatedTradeIn> validateTradeInItems(
+            List<EmployeeBusinessEntryRequest.TradeInItem> items, Long corpId, String prefix) {
+        if (items == null || items.isEmpty()) {
+            throw BusinessException.of(prefix + "以旧换新至少录入1件旧品");
+        }
+        if (items.size() > MAX_TRADE_IN_ITEMS) {
+            throw BusinessException.of(prefix + "旧品最多录入" + MAX_TRADE_IN_ITEMS + "件");
+        }
+        List<ValidatedTradeIn> result = new ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            String rowPrefix = prefix + "第" + (i + 1) + "件旧品：";
+            result.add(validateTradeInItem(items.get(i), corpId, rowPrefix));
+        }
+        return result;
+    }
+
+    /** 单件旧品：选中 SCM 商品以商品资料为准；否则按手工旧品校验名称/品牌/型号。 */
+    private ValidatedTradeIn validateTradeInItem(EmployeeBusinessEntryRequest.TradeInItem item,
+                                                 Long corpId, String rowPrefix) {
+        if (item == null) throw BusinessException.of(rowPrefix + "信息不能为空");
+        int quantity = item.getQuantity() == null ? 0 : item.getQuantity();
+        if (quantity < 1) throw BusinessException.of(rowPrefix + "数量必须为正整数");
+        String remark = optionalText(item.getRemark(), MAX_REMARK_LENGTH, rowPrefix + "备注");
+        if (item.getProductId() != null && item.getProductId() > 0) {
+            ScmBaseDataClient.MaterialOption material;
+            try {
+                material = scmClient.requireMaterial(corpId, item.getProductId());
+            } catch (BusinessException e) {
+                throw BusinessException.of(rowPrefix + e.getMessage());
+            }
+            String name = str(material.name());
+            if (name.isEmpty()) {
+                name = (str(material.brand()) + " " + str(material.model())).trim();
+            }
+            if (name.isEmpty()) {
+                throw BusinessException.of(rowPrefix + "旧品名称不能为空");
+            }
+            return new ValidatedTradeIn(material.id(), str(material.number()),
+                    truncate(name, MAX_TRADE_IN_NAME_LENGTH),
+                    truncate(str(material.brand()), MAX_TRADE_IN_BRAND_LENGTH),
+                    truncate(str(material.model()), MAX_TRADE_IN_MODEL_LENGTH),
+                    truncate(str(material.category()), MAX_TRADE_IN_BRAND_LENGTH),
+                    quantity, truncate(str(material.unit()), MAX_TRADE_IN_UNIT_LENGTH),
+                    remark, false);
+        }
+        String name = requireText(item.getProductName(), rowPrefix + "旧品名称",
+                MAX_TRADE_IN_NAME_LENGTH);
+        String brand = optionalText(item.getBrand(), MAX_TRADE_IN_BRAND_LENGTH,
+                rowPrefix + "品牌");
+        String model = optionalText(item.getModel(), MAX_TRADE_IN_MODEL_LENGTH,
+                rowPrefix + "型号");
+        String category = optionalText(item.getCategory(), MAX_TRADE_IN_BRAND_LENGTH,
+                rowPrefix + "品类");
+        String unit = optionalText(item.getUnit(), MAX_TRADE_IN_UNIT_LENGTH,
+                rowPrefix + "单位");
+        return new ValidatedTradeIn(null, null, name, brand, model, category,
+                quantity, unit, remark, true);
+    }
+
+    /** 选填文本：去首尾空白、超长拒绝、空串归 null。 */
+    private static String optionalText(String raw, int maxLength, String label) {
+        String value = str(raw);
+        if (value.isEmpty()) return null;
+        if (value.length() > maxLength) {
+            throw BusinessException.of(label + "不能超过" + maxLength + "个字符");
+        }
+        return value;
+    }
+
+    /**
+     * 经办人：本人始终在列且不可移除；其他人员必须属于当前组织且在职。
+     * 手机号取 sys_user.username（员工登录账号即手机号）。
+     */
+    private List<AgentInfo> validateAgents(List<Long> requestedIds, EmployeeContext ctx) {
+        List<AgentInfo> agents = new ArrayList<>();
+        agents.add(new AgentInfo(ctx.employeeUserId(), ctx.employeeName(), ctx.employeePhone()));
+        LinkedHashSet<Long> requested = new LinkedHashSet<>();
+        if (requestedIds != null) {
+            for (Long id : requestedIds) {
+                if (id != null && id > 0) requested.add(id);
+            }
+        }
+        requested.remove(ctx.employeeUserId());
+        if (requested.isEmpty()) return agents;
+        if (requested.size() + 1 > MAX_AGENTS) {
+            throw BusinessException.of("单笔业务最多选择" + MAX_AGENTS + "名经办人");
+        }
+        agents.addAll(findCorpAgents(requested, ctx.corpId()));
+        return agents;
+    }
+
+    /** 按 ID 回查当前组织在职员工，返回顺序与请求一致；有缺失即拒绝。 */
+    private List<AgentInfo> findCorpAgents(Set<Long> requested, Long corpId) {
+        String placeholders = String.join(",",
+                Collections.nCopies(requested.size(), "?"));
+        List<Map<String, Object>> rows;
+        try {
+            rows = jdbcTemplate.queryForList(
+                    "SELECT u.id AS userId, u.real_name AS realName, u.username, u.phone "
+                            + "FROM ai_platform.sys_user u "
+                            + "WHERE u.status = 1 AND u.delete_flag = 0 "
+                            + "AND (u.corp_id = ? OR EXISTS ("
+                            + "  SELECT 1 FROM ai_platform.sys_user_corp uc "
+                            + "  WHERE uc.user_id = u.id AND uc.corp_id = ? "
+                            + "  AND uc.status = 1 AND uc.delete_flag = 0)) "
+                            + "AND u.id IN (" + placeholders + ")",
+                    buildAgentQueryArgs(corpId, requested));
+        } catch (Exception e) {
+            log.warn("校验经办人失败 corpId={}: {}", corpId, e.getMessage());
+            throw BusinessException.of("经办人信息查询失败，请稍后重试");
+        }
+        Map<Long, AgentInfo> found = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            Long userId = row.get("userId") instanceof Number n ? n.longValue() : null;
+            String username = str(row.get("username"));
+            String phone = username.isEmpty() ? str(row.get("phone")) : username;
+            if (userId == null || phone.isEmpty()) continue;
+            String name = str(row.get("realName"));
+            found.put(userId, new AgentInfo(userId, name.isEmpty() ? phone : name, phone));
+        }
+        if (found.size() != requested.size()) {
+            throw BusinessException.of("部分经办人不属于当前组织或已停用，请重新选择");
+        }
+        List<AgentInfo> result = new ArrayList<>();
+        for (Long id : requested) result.add(found.get(id));
+        return result;
+    }
+
+    /** 查询参数：组织ID 出现两次（sys_user.corp_id 与 sys_user_corp.corp_id），后接员工ID。 */
+    private static Object[] buildAgentQueryArgs(Long corpId, Set<Long> requested) {
+        List<Object> args = new ArrayList<>();
+        args.add(corpId);
+        args.add(corpId);
+        args.addAll(requested);
+        return args.toArray();
+    }
+
+    private BigDecimal validateCommissionRate(boolean special, BigDecimal raw, String prefix) {
+        if (!special) return BigDecimal.ZERO;
+        if (raw == null) throw BusinessException.of(prefix + "特批时提成比例不能为空");
+        if (raw.signum() < 0 || raw.compareTo(BigDecimal.valueOf(100)) > 0) {
+            throw BusinessException.of(prefix + "提成比例必须在0-100之间");
+        }
+        return raw.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal normalizePrice(BigDecimal raw, String prefix) {
+        if (raw == null) throw BusinessException.of(prefix + "销售单价不能为空");
+        BigDecimal price = raw.setScale(2, RoundingMode.HALF_UP);
+        if (price.signum() <= 0) throw BusinessException.of(prefix + "销售单价必须大于0");
+        return price;
+    }
+
+    private String normalizeDate(String raw) {
+        String value = str(raw);
+        if (value.isEmpty()) return LocalDate.now().toString();
+        try {
+            return LocalDate.parse(value).toString();
+        } catch (DateTimeParseException e) {
+            throw BusinessException.of("市场收款日期格式不正确，应为 yyyy-MM-dd");
+        }
+    }
+
+    private String normalizeVouchers(List<String> urls) {
+        if (urls == null || urls.isEmpty()) return null;
+        List<String> cleaned = new ArrayList<>();
+        for (String url : urls) {
+            String value = str(url);
+            if (value.isEmpty()) continue;
+            if (value.contains(",") || value.length() > 500
+                    || !value.startsWith("/uploads/")) {
+                throw BusinessException.of("收款凭证地址不合法");
+            }
+            cleaned.add(value);
+        }
+        if (cleaned.isEmpty()) return null;
+        if (cleaned.size() > MAX_VOUCHERS) {
+            throw BusinessException.of("收款凭证最多上传" + MAX_VOUCHERS + "张");
+        }
+        String joined = String.join(",", cleaned);
+        if (joined.length() > 1000) {
+            throw BusinessException.of("收款凭证地址过长");
+        }
+        return joined;
+    }
+
+    private static String requireText(String raw, String label) {
+        return requireText(raw, label, MAX_TEXT_LENGTH);
+    }
+
+    private static String requireText(String raw, String label, int maxLength) {
+        String value = str(raw);
+        if (value.isEmpty()) throw BusinessException.of(label + "不能为空");
+        if (value.length() > maxLength) {
+            throw BusinessException.of(label + "不能超过" + maxLength + "个字符");
+        }
+        return value;
+    }
+
+    // ── 会员 / 落库 ──
+
+    private MemberResolution resolveOrCreateMember(String phone, String customer, Long corpId) {
+        try {
+            // 与导入链路一致：先在本组织燃气公司范围的燃气用户中按手机号匹配
+            // （可拿到燃气用户已关联的 platform_member_id，即使 sys_member 手机号不同），
+            // 再走全局 uk_phone 复用，最后自动建会员。
+            String gasCompanyId = memberMatcher.resolveGasCompanyId(corpId);
+            Map<String, Long> gasMembers = memberMatcher.memberIdByPhone(
+                    List.of(phone), gasCompanyId);
+            Long gasMember = gasMembers.get(phone);
+            if (gasMember != null) return new MemberResolution(gasMember, false);
+
+            Long existing = memberMatcher.findMemberIdByPhone(phone);
+            if (existing != null) return new MemberResolution(existing, false);
+            Long created = memberMatcher.createMember(phone, customer, corpId,
+                    "员工手工录入自动创建");
+            return new MemberResolution(created, true);
+        } catch (IllegalStateException e) {
+            throw BusinessException.of(e.getMessage());
+        }
+    }
+
+    private OpsBusinessData buildEntity(EmployeeContext ctx, Validated v, ValidatedProduct p,
+                                        AgentInfo agent, String batchNo, String orderNo,
+                                        String businessGroupNo,
+                                        Long memberId, CommunityInfo community) {
+        OpsBusinessData entity = new OpsBusinessData();
+        entity.setCorpId(ctx.corpId());
+        entity.setOperatorId(ctx.corpId());
+        entity.setBatchNo(batchNo);
+        entity.setOrderNo(orderNo);
+        entity.setBusinessGroupNo(businessGroupNo);
+        entity.setCompany(ctx.company());
+        entity.setCustomer(v.customer());
+        entity.setCustomerPhone(v.phone());
+        entity.setPlatformMemberId(memberId);
+        entity.setCommunityId(community.id());
+        entity.setCommunityName(community.name());
+        entity.setDetailedAddress(v.detailAddress());
+        entity.setBrand(p.brand());
+        entity.setCategory(p.categoryKey());
+        entity.setModel(p.model());
+        entity.setSalePrice(p.price());
+        entity.setSaleQuantity(p.qty());
+        entity.setReceiptAmount(p.amount());
+        // 以旧换新：收款金额仍为销售额（提成基数不变），抵扣后金额用于应付/展示
+        entity.setIsTradeIn(p.tradeIn() ? "是" : "否");
+        entity.setDeductionAmount(p.deduction());
+        entity.setTradeInPayableAmount(p.amount().subtract(p.deduction()).max(BigDecimal.ZERO));
+        // 底价统一取产品售价表（制单已强制要求配置），保证提成分档与售价配置同源
+        entity.setRetailFloorPrice(p.retailFloorPrice());
+        entity.setGroupLowestPrice(p.groupLowestPrice());
+        // 销售日期取市场收款日期：员工业务数据列表按 sale_date 分月，避免新数据落入「未知」
+        entity.setSaleDate(v.receiptDate());
+        entity.setReceiptDate(v.receiptDate());
+        entity.setReceiptNo(v.receiptNo());
+        entity.setFinanceReceiptDate(null);
+        entity.setAgent(agent.name());
+        entity.setAgentPhone(agent.phone());
+        entity.setIsSpecial(p.special() ? "是" : "否");
+        entity.setCommissionRate(p.rate());
+        entity.setStandardSalePrice(p.standardPrice());
+        entity.setSpecialFileId(p.specialFileId());
+        entity.setSpecialFileUrl(p.specialFileUrl());
+        entity.setSpecialFileName(p.specialFileName());
+        entity.setPaymentMethod(v.paymentMethod());
+        entity.setVoucherUrl(v.voucherUrl());
+        // 备注同时写子表：导出「备注」列读取的是子表 remark，保证手工单与导入单口径一致
+        entity.setRemark(v.remark());
+        entity.setCalcStatus(INITIAL_CALC_STATUS);
+        entity.setDeleteFlag(0);
+        return entity;
+    }
+
+    /**
+     * 小区必填；按 id + corp 校验归属并取名称（不接受前端传来的名称，防止跨租户引用）。
+     * 小区名称落库为冗余字段，供列表/导出/出库打印直接展示。
+     */
+    private CommunityInfo resolveCommunity(Long communityId, Long corpId) {
+        if (communityId == null) return new CommunityInfo(null, null);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT community_name FROM ai_platform.sys_community "
+                        + "WHERE id = ? AND corp_id = ? AND delete_flag = 0 LIMIT 1",
+                communityId, corpId);
+        if (rows.isEmpty()) {
+            throw BusinessException.of("所选小区不属于当前组织，请重新选择");
+        }
+        String name = str(rows.get(0).get("community_name"));
+        if (name.isEmpty()) {
+            throw BusinessException.of("小区名称为空，请重新选择");
+        }
+        return new CommunityInfo(communityId, name);
+    }
+
+    private void fillProductOptions(Map<String, Object> result, Long corpId) {
+        try {
+            ScmBaseDataClient.ScmOptions opts = scmClient.options(corpId);
+            result.put("brands", opts.brands());
+            result.put("categories", opts.categories());
+            result.put("materials", opts.materials());
+            boolean empty = opts.brands().isEmpty() || opts.categories().isEmpty()
+                    || opts.materials().isEmpty();
+            result.put("productError", empty
+                    ? "供应链基础资料为空，请联系管理员在供应链管理模块同步品牌/商品类别/商品信息"
+                    : null);
+        } catch (Exception e) {
+            log.warn("员工手工录入加载供应链基础资料失败 corpId={}: {}", corpId, e.getMessage());
+            result.put("brands", List.of());
+            result.put("categories", List.of());
+            result.put("materials", List.of());
+            result.put("productError", e.getMessage() != null
+                    ? e.getMessage() : "供应链基础资料加载失败，请稍后重试");
+        }
+    }
+
+    // ── helpers ──
+
+    private static String normalizePhone(String raw) {
+        if (raw == null) return "";
+        return Normalizer.normalize(raw, Normalizer.Form.NFKC)
+                .replaceAll("\\s+", "").replace("-", "").trim();
+    }
+
+    private static String str(Object value) {
+        return value == null ? "" : value.toString().trim();
+    }
+
+    private static int num(Object value) {
+        return value instanceof Number n ? n.intValue() : 0;
+    }
+
+    // ── records ──
+
+    private record EmployeeIdentity(Long corpId, String name, String phone) {}
+
+    private record EmployeeContext(Long corpId, String corpName, String company,
+                                   String employeeName, String employeePhone,
+                                   Long employeeUserId) {}
+
+    private record CorpInfo(String corpName, String company) {}
+
+    private record Validated(String phone, String customer,
+                             List<ValidatedProduct> products, List<AgentInfo> agents,
+                             String receiptDate, String receiptNo, String paymentMethod,
+                             String voucherUrl, Long communityId, String detailAddress,
+                             String remark, String paymentType, Integer isFullPayment,
+                             BigDecimal depositAmount, BigDecimal balanceAmount) {}
+
+    private record PaymentTerms(String paymentType, Integer isFullPayment,
+                                BigDecimal depositAmount, BigDecimal balanceAmount) {}
+
+    private record ValidatedProduct(Long productId, String brand, String categoryKey, String model,
+                                    BigDecimal price, int qty, BigDecimal amount,
+                                    BigDecimal rate, BigDecimal standardPrice, boolean special,
+                                    Long specialFileId, String specialFileUrl,
+                                    String specialFileName, BigDecimal retailFloorPrice,
+                                    BigDecimal groupLowestPrice,
+                                    boolean tradeIn, BigDecimal deduction,
+                                    List<ValidatedTradeIn> tradeInItems) {}
+
+    private record ValidatedTradeIn(Long productId, String materialNumber, String productName,
+                                    String brand, String model, String category, int quantity,
+                                    String unit, String remark, boolean manual) {}
+
+    private record AgentInfo(Long userId, String name, String phone) {}
+
+    private record MemberResolution(Long id, boolean created) {}
+
+    private record CommunityInfo(Long id, String name) {}
+}

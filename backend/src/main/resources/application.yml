@@ -9,6 +9,9 @@ server:
 spring:
   application:
     name: ops-platform
+  # 平台开启 Redis 时，子系统同步检查 blacklist:{jti}；默认关闭不改变现网行为
+  redis:
+    enabled: ${SPRING_REDIS_ENABLED:false}
   servlet:
     multipart:
       max-file-size: 50MB
@@ -75,15 +78,37 @@ platform:
     - /api/ops/product/**
     - /api/ops/activity/**
 
+# 物资领用/核销工作流（定义在底座工作流管理端维护；callback 指向本服务 8082）
+material:
+  requisition:
+    definition-code: ${MATERIAL_REQUISITION_DEFINITION:OPS_MATERIAL_REQUISITION_APPROVAL}
+    business-type: OPS_MATERIAL_REQUISITION
+  write-off:
+    definition-code: ${MATERIAL_WRITE_OFF_DEFINITION:OPS_MATERIAL_WRITE_OFF_APPROVAL}
+    business-type: OPS_MATERIAL_WRITE_OFF
+
 # mall-service 地址（用于跨子系统调用 InternalProductController）
 mall-service:
   base-url: http://localhost:8083
+
+# 供应链基础资料服务（员工手工录入的品牌/品类/型号下拉 + 保存校验）
+# 生产与 scm-backend 同 host 网络，默认 8084；本地联调可覆盖 SCM_SERVICE_BASE_URL
+scm-service:
+  base-url: http://localhost:8084
+
+# 微信公众号网页授权（员工微信登录）
+# redirect-uri 必须与公众号后台「网页授权域名」下的实际回调地址完全一致；
+# 生产 H5 base 为 /ops/，微信会在该地址后追加 ?code=...&state=...
+wechat:
+  oauth:
+    redirect-uri: ${WECHAT_OAUTH_REDIRECT_URI:https://boss.jdzn99.com/ops/}
+    state-ttl-seconds: 300
+    scope: snsapi_base
 
 # 活动预约提醒配置
 ops:
   remind:
     hours-before: 24,1
-
 # 作战地图 ETL（单实例部署）：启动全量初始化 + 定时增量刷新
 battle-map:
   etl:
@@ -109,11 +134,23 @@ gas:
 amap:
   key: YOUR_AMAP_KEY_HERE
 
+security:
+  qr:
+    # 收款码打包在 jar 的 secure/qr/ 下，启动时 ECDSA 验签；
+    # 生产默认 true：校验失败拒绝启动，避免带病返回可疑收款码。
+    fail-fast: ${QR_FAIL_FAST:true}
+    # 每日巡检（绕过缓存重新验签），失败记 PAYMENT_QR_INTEGRITY_PATROL_FAILED
+    patrol-cron: "${QR_PATROL_CRON:0 0 3 * * *}"
+
 management:
   endpoints:
     web:
       exposure:
         include: health,info
+  health:
+    # SDK 引入 Redis starter 后，Redis 未配置凭据时不能拖垮 /actuator/health
+    redis:
+      enabled: false
 
 logging:
   level:

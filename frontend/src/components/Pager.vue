@@ -16,12 +16,13 @@
 
 <script setup>
 import { computed } from 'vue'
+import { PAGE_SIZES } from '@/constants/pagination'
 
 const props = defineProps({
   pageNum: { type: Number, required: true },
   pageSize: { type: Number, required: true },
   total: { type: Number, required: true },
-  pageSizeOptions: { type: Array, default: () => [10, 20, 50] },
+  pageSizeOptions: { type: Array, default: () => [...PAGE_SIZES] },
 })
 
 const emit = defineEmits(['update:pageNum', 'update:pageSize', 'change'])

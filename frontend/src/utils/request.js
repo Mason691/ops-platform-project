@@ -20,6 +20,7 @@ function resolveToken() {
 
 export function request(options) {
   const token = resolveToken()
+  const tokenType = uni.getStorageSync('token_type') || ''
   const corpId = uni.getStorageSync('corp_id') || DEFAULT_CORP_ID
   return new Promise((resolve, reject) => {
     uni.request({
@@ -37,11 +38,20 @@ export function request(options) {
         if (d && d.code === 200) resolve(d.data)
         else {
           if (d && d.code === 401) {
+            const wasEmployee = tokenType === 'employee'
             uni.removeStorageSync('ops_token')
             uni.removeStorageSync('ops_employee_token')
             uni.removeStorageSync('ops_member')
             uni.removeStorageSync('ops_user')
             uni.removeStorageSync('token_type')
+            // 员工会话失效：回登录页，避免停留在空白工作台
+            if (wasEmployee) {
+              const pages = getCurrentPages()
+              const route = pages.length ? pages[pages.length - 1].route : ''
+              if (!String(route).includes('pages/employee/login')) {
+                uni.reLaunch({ url: '/pages/employee/login' })
+              }
+            }
           }
           reject({ code: (d && d.code) || 0, msg: (d && d.msg) || '请求失败' })
         }

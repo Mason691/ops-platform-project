@@ -13,6 +13,7 @@ public class ImportResult {
     private String status;     // "success" or "fail"
     private String phase;      // current phase identifier
     private int count;
+    private int orderCount;    // 生成/关联的主表（订单头）条数
     private int totalRows;
     private int successRows;
     private int failRows;
@@ -22,6 +23,7 @@ public class ImportResult {
     private int createdCount;  // 本次导入自动新建会员数
     private List<String> createdList = new ArrayList<>(); // 新建会员清单（姓名 手机号）
     private int defaultQtyCount; // 销售数量为空默认按 1 处理的行数
+    private int detailedAddressEmptyCount; // 详细地址为空的行数（便于运营核对）
     private List<String> errors = new ArrayList<>();
     private String message;     // human-readable summary, e.g. "已有用户 XXX，增量导入 XXXX"
 
@@ -67,6 +69,7 @@ public class ImportResult {
         m.put("status", status);
         m.put("phase", phase);
         m.put("count", count);
+        m.put("orderCount", orderCount);
         m.put("totalRows", totalRows);
         m.put("successRows", successRows);
         m.put("failRows", failRows);
@@ -76,6 +79,7 @@ public class ImportResult {
         m.put("createdCount", createdCount);
         m.put("createdList", createdList);
         m.put("defaultQtyCount", defaultQtyCount);
+        m.put("detailedAddressEmptyCount", detailedAddressEmptyCount);
         m.put("errors", errors);
         m.put("message", message);
         return m;
@@ -93,6 +97,8 @@ public class ImportResult {
     public void setCreatedList(List<String> v) { createdList = v; }
     public int getDefaultQtyCount() { return defaultQtyCount; }
     public void setDefaultQtyCount(int v) { defaultQtyCount = v; }
+    public int getDetailedAddressEmptyCount() { return detailedAddressEmptyCount; }
+    public void setDetailedAddressEmptyCount(int v) { detailedAddressEmptyCount = v; }
     public String getMessage() { return message; }
     public void setMessage(String v) { message = v; }
     public String getStatus() { return status; }
@@ -101,6 +107,8 @@ public class ImportResult {
     public void setPhase(String v) { phase = v; }
     public int getCount() { return count; }
     public void setCount(int v) { count = v; }
+    public int getOrderCount() { return orderCount; }
+    public void setOrderCount(int v) { orderCount = v; }
     public int getTotalRows() { return totalRows; }
     public void setTotalRows(int v) { totalRows = v; }
     public int getSuccessRows() { return successRows; }

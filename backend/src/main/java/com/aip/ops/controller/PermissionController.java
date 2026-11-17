@@ -12,6 +12,9 @@ import java.util.Map;
 
 /**
  * 权限查询端点 — 供前端获取当前用户在 ops 模块的操作权限。
+ *
+ * <p>财务核对、派工已改为工作流驱动：处理人由工作流节点角色/审批人决定，
+ * 不再由 ops 页面按钮权限控制。</p>
  */
 @RestController
 @RequestMapping("/api/ops/admin/permission")

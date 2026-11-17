@@ -2,14 +2,15 @@ package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
 import com.aip.ops.entity.PublicAccountConfig;
+import com.aip.ops.service.WechatOfficialAccountClient;
 import com.aip.ops.service.impl.PublicAccountConfigServiceImpl;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import jakarta.servlet.http.HttpServletRequest;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 
@@ -22,46 +23,33 @@ import java.util.concurrent.ConcurrentHashMap;
  * 多公众号运营配置管理 + H5公开查询接口
  */
 @Slf4j
-@RestController @RequiredArgsConstructor
+@RestController
 public class PublicAccountController {
 
     private final PublicAccountConfigServiceImpl configService;
-    private final RestTemplate restTemplate;
+    private final WechatOfficialAccountClient officialAccountClient;
+    private final RestTemplate wechatRestTemplate;
 
-    // ── access_token / jsapi_ticket 缓存 ──
-    private final Map<String, String>  tokenCache  = new ConcurrentHashMap<>();
-    private final Map<String, Long>    tokenExpire = new ConcurrentHashMap<>();
+    public PublicAccountController(PublicAccountConfigServiceImpl configService,
+                                   WechatOfficialAccountClient officialAccountClient,
+                                   @Qualifier("wechatRestTemplate") RestTemplate wechatRestTemplate) {
+        this.configService = configService;
+        this.officialAccountClient = officialAccountClient;
+        this.wechatRestTemplate = wechatRestTemplate;
+    }
+
+    // ── jsapi_ticket 缓存 ──
     private final Map<String, String>  ticketCache = new ConcurrentHashMap<>();
     private final Map<String, Long>    ticketExpire= new ConcurrentHashMap<>();
-
-    private String getAccessToken(PublicAccountConfig cfg) {
-        String key = cfg.getAppId();
-        Long expire = tokenExpire.getOrDefault(key, 0L);
-        if (System.currentTimeMillis() < expire) return tokenCache.get(key);
-        String url = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential"
-                + "&appid=" + cfg.getAppId() + "&secret=" + cfg.getAppSecret();
-        try {
-            var resp = restTemplate.getForObject(url, Map.class);
-            if (resp != null && resp.containsKey("access_token")) {
-                String token = (String) resp.get("access_token");
-                int expiresIn = ((Number) resp.get("expires_in")).intValue();
-                tokenCache.put(key, token);
-                tokenExpire.put(key, System.currentTimeMillis() + (expiresIn - 300) * 1000L);
-                return token;
-            }
-            log.warn("getAccessToken failed: {}", resp);
-        } catch (Exception e) { log.error("getAccessToken error", e); }
-        return null;
-    }
 
     private String getJsapiTicket(PublicAccountConfig cfg) {
         String key = cfg.getAppId();
         Long expire = ticketExpire.getOrDefault(key, 0L);
         if (System.currentTimeMillis() < expire) return ticketCache.get(key);
-        String token = getAccessToken(cfg);
+        String token = officialAccountClient.accessToken(cfg);
         if (token == null) return null;
         try {
-            var resp = restTemplate.getForObject(
+            var resp = wechatRestTemplate.getForObject(
                     "https://api.weixin.qq.com/cgi-bin/ticket/getticket?access_token="
                     + token + "&type=jsapi", Map.class);
             if (resp != null && "ok".equals(resp.get("errmsg")) && resp.containsKey("ticket")) {
@@ -161,22 +149,7 @@ public class PublicAccountController {
         if (corpId != null && corpId != 0) qw.eq(PublicAccountConfig::getCorpId, corpId);
         PublicAccountConfig cfg = configService.getOne(qw);
         if (cfg == null) return R.fail("配置不存在");
-        String url = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential"
-                + "&appid=" + cfg.getAppId() + "&secret=" + cfg.getAppSecret();
-        try {
-            var resp = restTemplate.getForObject(url, Map.class);
-            Map<String,Object> r = new LinkedHashMap<>();
-            if (resp != null && resp.containsKey("access_token")) {
-                r.put("success", true);
-                r.put("access_token", ((String) resp.get("access_token")).substring(0, 10) + "…");
-            } else {
-                r.put("success", false);
-                r.put("errmsg", resp != null ? resp.get("errmsg") : "无响应");
-            }
-            return R.ok(r);
-        } catch (Exception e) {
-            return R.ok(Map.of("success", false, "errmsg", e.getMessage()));
-        }
+        return R.ok(officialAccountClient.probe(cfg));
     }
 
     // ═══ H5 公开查询 (无需 JWT) ═══
@@ -258,17 +231,12 @@ public class PublicAccountController {
         }
         if (cfg == null) return R.fail("无可用小程序配置");
 
-        // 获取 access_token
-        String tokenUrl = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential"
-                + "&appid=" + cfg.getAppId() + "&secret=" + cfg.getAppSecret();
+        // 获取 access_token（统一由 WechatOfficialAccountClient 缓存）
+        String accessToken = officialAccountClient.accessToken(cfg);
+        if (accessToken == null) {
+            return R.fail("获取 access_token 失败，请检查 appId/appSecret");
+        }
         try {
-            var tokenResp = restTemplate.getForObject(tokenUrl, Map.class);
-            if (tokenResp == null || !tokenResp.containsKey("access_token")) {
-                return R.fail("获取 access_token 失败: " + tokenResp);
-            }
-            String accessToken = (String) tokenResp.get("access_token");
-
-            // 调用 generate_urllink
             String url = "https://api.weixin.qq.com/wxa/generate_urllink?access_token=" + accessToken;
             Map<String,Object> body = new LinkedHashMap<>();
             body.put("path", "pages/channels/live?finderUserName=" + finderUserName);
@@ -276,7 +244,7 @@ public class PublicAccountController {
             body.put("is_expire", false);
 
             log.info("mp-url-link: calling generate_urllink, body={}", body);
-            var resp = restTemplate.postForObject(url, body, Map.class);
+            var resp = wechatRestTemplate.postForObject(url, body, Map.class);
             log.info("mp-url-link: response={}", resp);
             if (resp != null && resp.containsKey("url_link")) {
                 String urlLink = (String) resp.get("url_link");

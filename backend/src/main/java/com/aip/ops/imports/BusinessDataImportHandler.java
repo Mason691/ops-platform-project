@@ -1,8 +1,10 @@
 package com.aip.ops.imports;
 
+import com.aip.ops.component.OrderNoGenerator;
 import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsBusinessModelAlias;
+import com.aip.ops.entity.OpsBusinessOrder;
 import com.aip.ops.entity.OpsPersonalCommissionRule;
 import com.aip.ops.entity.OpsValueAddedProduct;
 import com.aip.ops.entity.SysImportTask;
@@ -10,6 +12,8 @@ import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsBusinessModelAliasMapper;
 import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
+import com.aip.ops.service.BusinessOrderService;
+import com.aip.ops.service.BusinessOrderWorkflowService;
 import com.aip.ops.service.GasMemberMatcher;
 import com.aip.sdk.client.PlatformInternalClient;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +22,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.sql.DataSource;
 import java.math.BigDecimal;
@@ -55,6 +61,9 @@ public class BusinessDataImportHandler implements ImportHandler {
     private final DataSource dataSource;
     private final JdbcTemplate jdbcTemplate;
     private final GasMemberMatcher memberMatcher;
+    private final BusinessOrderService orderService;
+    private final OrderNoGenerator orderNoGenerator;
+    private final BusinessOrderWorkflowService workflowService;
 
     private static final String CATEGORY_TYPE_CODE = "PRODUCT_CATEGORY";
     private static final Set<String> VALID_COMPANIES =
@@ -82,7 +91,10 @@ public class BusinessDataImportHandler implements ImportHandler {
                                      PlatformInternalClient platformInternalClient,
                                      DataSource dataSource,
                                      JdbcTemplate jdbcTemplate,
-                                     GasMemberMatcher memberMatcher) {
+                                     GasMemberMatcher memberMatcher,
+                                     BusinessOrderService orderService,
+                                     OrderNoGenerator orderNoGenerator,
+                                     BusinessOrderWorkflowService workflowService) {
         this.mapper = mapper;
         this.productMapper = productMapper;
         this.aliasMapper = aliasMapper;
@@ -91,6 +103,9 @@ public class BusinessDataImportHandler implements ImportHandler {
         this.dataSource = dataSource;
         this.jdbcTemplate = jdbcTemplate;
         this.memberMatcher = memberMatcher;
+        this.orderService = orderService;
+        this.orderNoGenerator = orderNoGenerator;
+        this.workflowService = workflowService;
     }
 
     @Override
@@ -106,6 +121,9 @@ public class BusinessDataImportHandler implements ImportHandler {
         boolean quantityDefaulted;     // 数量列空 → 默认 1（结果统计用）
         String quantityRaw = "";       // 原始数量文本（validateFields 校验用）
         String agent, agentPhone, dept, remark;
+        String communityName;       // 小区名称（可选列；旧模板缺失/空 = 空，不阻断）
+        Long communityId;           // 按名称匹配 sys_community 回填；未匹配留空
+        String detailedAddress;     // 详细地址（可选列；旧模板列名「收货地址」兼容）
         String saleDate, receiptDate, receiptNo;
         String receiptDateRaw; // raw value for validation (市场收款日期：空=错误)
         String financeReceiptDateRaw, financeReceiptDate;
@@ -114,6 +132,9 @@ public class BusinessDataImportHandler implements ImportHandler {
         int rowNum;                 // 文件行号（表头=1，数据行从 2 起）
         boolean special;            // 是否特批 = "是"
         BigDecimal commissionRate;  // 提成比例（%），特批行导入时落库 commission_rate
+        Long orderId;               // 订单头ID（insertRows 归组后回填）
+        String orderNo;             // 订单编号（归组后生成）
+        String businessGroupNo;     // 业务组号（= 订单编号）
     }
 
     /** 解析准备产物：一次解析/校验的完整上下文（check 与 confirm 各自独立解析） */
@@ -187,6 +208,7 @@ public class BusinessDataImportHandler implements ImportHandler {
         resp.put("fileMd5", p.fileMd5);
         resp.put("totalRows", p.totalRows);
         resp.put("stats", statsMap(m));
+        resp.put("detailedAddressEmptyCount", emptyAddressCount(p));
         return resp;
     }
 
@@ -547,7 +569,13 @@ public class BusinessDataImportHandler implements ImportHandler {
         resp.put("totalRows", p.totalRows);
         resp.put("pendingItems", items);
         resp.put("stats", statsMap(m));
+        resp.put("detailedAddressEmptyCount", emptyAddressCount(p));
         return resp;
+    }
+
+    private int emptyAddressCount(Prepared p) {
+        return (int) p.rows.stream()
+                .filter(r -> r.detailedAddress == null || r.detailedAddress.isEmpty()).count();
     }
 
     private Map<String, Object> statsMap(MatchResult m) {
@@ -595,19 +623,24 @@ public class BusinessDataImportHandler implements ImportHandler {
         String ts = LocalDateTime.now().format(
                 DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         Map<String, String> batchNoMap = new HashMap<>();
-        String insertSql = "INSERT INTO ops_business_data "
+        String insertSql = "INSERT INTO ops_business_order_item "
                 + "(batch_no, company, customer, customer_phone, platform_member_id, "
                 + "brand, category, model, "
                 + "sale_price, sale_quantity, receipt_amount, agent, agent_phone, is_special, commission_rate, "
                 + "sale_date, receipt_date, finance_receipt_date, fund_dynamic_rows, "
                 + "receipt_no, department, retail_floor_price, group_lowest_price, "
-                + "calc_status, remark, corp_id, operator_id) "
-                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "calc_status, remark, corp_id, operator_id, "
+                + "community_id, community_name, detailed_address, order_id, order_no, business_group_no) "
+                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
         int batchCount = 0;
+        // 小区名称 → sys_community.id 匹配（匹配失败不阻断，name 照常落库）
+        resolveCommunityIds(p, corpId);
         // 会员兜底确保（confirm 事务内）：未匹配行 → 全局已有会员复用（uk_phone）→ 创建新会员；
         // 同文件同手机号只创建一次（映射复用）。创建失败整体回滚，不留孤儿会员。
         MemberEnsure ensure = ensureMembers(p.rows, corpId);
+        // 先生成订单头：同一收据号+公司+客户手机归为一单；无收据号按单行成单。
+        createOrders(p, corpId, ts, batchNoMap);
         PreparedStatement ps = DataSourceUtils.getConnection(dataSource)
                 .prepareStatement(insertSql);
         try {
@@ -624,6 +657,12 @@ public class BusinessDataImportHandler implements ImportHandler {
                 throw new RuntimeException("入库行数(" + batchCount
                         + ")与有效行数(" + p.rows.size() + ")不一致");
             }
+            // 主表合计/经办人汇总以已落库子表为准
+            p.rows.stream().map(r -> r.orderId).filter(Objects::nonNull).distinct()
+                    .forEach(orderId -> {
+                        orderService.refreshTotals(orderId);
+                        orderService.refreshAgentSummary(orderId);
+                    });
             log.info("Import done: {} rows, corpId={}, createdMembers={}", batchCount, corpId, ensure.createdMembers.size());
             ImportResult ir = ImportResult.success(batchCount, p.totalRows,
                     batchCount - ensure.createdRows - ensure.unmatchedRows,
@@ -631,10 +670,98 @@ public class BusinessDataImportHandler implements ImportHandler {
                     ensure.createdMembers.size(), ensure.createdMembers);
             ir.setDefaultQtyCount((int) p.rows.stream()
                     .filter(r -> r.quantityDefaulted).count());
+            ir.setOrderCount((int) p.rows.stream()
+                    .map(r -> r.orderId).filter(Objects::nonNull).distinct().count());
+            ir.setDetailedAddressEmptyCount(emptyAddressCount(p));
+            // 事务提交后异步发起工作流，避免在导入事务内调用平台 HTTP；
+            // 发起失败只记日志，管理端可对单笔订单手动重试。
+            List<Long> orderIds = p.rows.stream().map(r -> r.orderId)
+                    .filter(Objects::nonNull).distinct().toList();
+            if (!orderIds.isEmpty()) {
+                if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                    TransactionSynchronizationManager.registerSynchronization(
+                            new TransactionSynchronization() {
+                                @Override
+                                public void afterCommit() {
+                                    workflowService.startBatchAsync(orderIds);
+                                }
+                            });
+                } else {
+                    workflowService.startBatchAsync(orderIds);
+                }
+            }
             return ir;
         } finally {
             ps.close();
         }
+    }
+
+    /**
+     * 导入归组建单：收据号 + 公司 + 客户手机 视为同一订单；无收据号按单行成单。
+     * 每单生成全局订单编号，并回填 ParsedRow.orderId/orderNo/businessGroupNo。
+     */
+    private void createOrders(Prepared p, Long corpId, String ts, Map<String, String> batchNoMap) {
+        Map<String, List<ParsedRow>> groups = new LinkedHashMap<>();
+        for (ParsedRow pr : p.rows) {
+            groups.computeIfAbsent(importOrderKey(pr), k -> new ArrayList<>()).add(pr);
+        }
+        for (List<ParsedRow> group : groups.values()) {
+            ParsedRow first = group.get(0);
+            String batchNo = batchNoMap.computeIfAbsent(first.company, c -> c + ts);
+            String orderNo = orderNoGenerator.next();
+            String businessGroupNo = orderNo;
+            BigDecimal totalAmount = groupProductTotal(group);
+            OpsBusinessOrder order = orderService.createOrder(
+                    corpId, "O|" + orderNo, orderNo, batchNo, businessGroupNo,
+                    emptyToNull(first.receiptNo), first.company, first.customer,
+                    first.customerPhone, first.platformMemberId, first.communityId,
+                    emptyToNull(first.communityName), emptyToNull(first.detailedAddress),
+                    first.receiptDate, parseLocalDate(first.financeReceiptDate),
+                    first.fundDynamicRows, null, null, totalAmount, "未计算",
+                    emptyToNull(first.remark), null);
+            for (ParsedRow pr : group) {
+                pr.orderId = order.getId();
+                pr.orderNo = orderNo;
+                pr.businessGroupNo = businessGroupNo;
+            }
+        }
+    }
+
+    /** 导入订单归组键：收据号优先；无收据号按文件行单行成单。 */
+    private static String importOrderKey(ParsedRow pr) {
+        if (pr.receiptNo != null && !pr.receiptNo.isBlank()) {
+            return "R|" + pr.receiptNo.trim() + "|" + nullSafe(pr.company)
+                    + "|" + nullSafe(pr.customerPhone);
+        }
+        return "I|" + pr.rowNum;
+    }
+
+    /** 订单合计：订单内 品类+品牌+型号+单价 去重后求和（多经办人不重复计额）。 */
+    private static BigDecimal groupProductTotal(List<ParsedRow> group) {
+        Map<String, BigDecimal> amounts = new LinkedHashMap<>();
+        for (ParsedRow pr : group) {
+            if (pr.salePrice == null) continue;
+            String k = nullSafe(pr.catKey) + "|" + nullSafe(pr.brand) + "|"
+                    + nullSafe(pr.model) + "|" + pr.salePrice.stripTrailingZeros().toPlainString();
+            BigDecimal qty = BigDecimal.valueOf(pr.saleQuantity != null ? pr.saleQuantity : 1);
+            // 与 refreshTotals/对账口径一致：同产品取 MAX(收款金额)，而非首行
+            amounts.merge(k, pr.salePrice.multiply(qty), BigDecimal::max);
+        }
+        return amounts.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+
+    private static String nullSafe(String v) {
+        return v == null ? "" : v.trim();
+    }
+
+    private static String emptyToNull(String v) {
+        return v == null || v.isBlank() ? null : v.trim();
+    }
+
+    private static java.time.LocalDate parseLocalDate(String v) {
+        if (v == null || v.isBlank()) return null;
+        try { return java.time.LocalDate.parse(v.trim()); } catch (Exception e) { return null; }
     }
 
     /**
@@ -686,7 +813,48 @@ public class BusinessDataImportHandler implements ImportHandler {
         final List<String> createdMembers = new ArrayList<>(); // 新建会员清单（姓名 手机号，每会员一条）
     }
 
-    /** 绑定 27 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
+    /**
+     * 导入小区名称 → sys_community.id 匹配（同 corp、名称精确、去重批量查询）。
+     * 匹配失败不阻断导入：community_name 照常落库，community_id 留空，
+     * 后续可由人工或匹配逻辑回填（需求：历史/未匹配小区允许为空）。
+     */
+    private void resolveCommunityIds(Prepared p, Long corpId) {
+        if (corpId == null) return;
+        List<String> names = p.rows.stream()
+                .map(r -> r.communityName)
+                .filter(n -> n != null && !n.isEmpty())
+                .distinct()
+                .collect(Collectors.toList());
+        if (names.isEmpty()) return;
+        try {
+            String placeholders = names.stream().map(n -> "?").collect(Collectors.joining(","));
+            List<Object> params = new ArrayList<>();
+            params.add(corpId);
+            params.addAll(names);
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT id, community_name FROM ai_platform.sys_community "
+                            + "WHERE delete_flag = 0 AND corp_id = ? "
+                            + "AND community_name IN (" + placeholders + ")",
+                    params.toArray());
+            Map<String, Long> byName = new HashMap<>();
+            for (Map<String, Object> row : rows) {
+                Object name = row.get("community_name");
+                Object id = row.get("id");
+                if (name != null && id instanceof Number n) {
+                    byName.putIfAbsent(name.toString(), n.longValue());
+                }
+            }
+            for (ParsedRow pr : p.rows) {
+                if (pr.communityId == null && pr.communityName != null) {
+                    pr.communityId = byName.get(pr.communityName);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("导入小区名称匹配失败 corpId={}: {}", corpId, e.getMessage());
+        }
+    }
+
+    /** 绑定 30 列参数：特批行提成比例落库 commission_rate；零售底价/集团最低价取自匹配产品 */
     private void bindRow(PreparedStatement ps, ParsedRow pr, String batchNo, Long corpId)
             throws SQLException {
         int idx = 1;
@@ -724,6 +892,15 @@ public class BusinessDataImportHandler implements ImportHandler {
         ps.setString(idx++, pr.remark.isEmpty() ? null : pr.remark);
         ps.setLong(idx++, corpId);
         ps.setLong(idx++, corpId);
+        ps.setObject(idx++, pr.communityId);
+        ps.setString(idx++, pr.communityName == null || pr.communityName.isEmpty()
+                ? null : pr.communityName);
+        ps.setString(idx++, pr.detailedAddress == null || pr.detailedAddress.isEmpty()
+                ? null : pr.detailedAddress);
+        // 主子表拆分：订单头ID + 订单编号/业务组号（同一订单全部明细共享）
+        ps.setObject(idx++, pr.orderId);
+        ps.setString(idx++, pr.orderNo);
+        ps.setString(idx++, pr.businessGroupNo);
     }
 
     /**
@@ -840,6 +1017,11 @@ public class BusinessDataImportHandler implements ImportHandler {
     private static final int I_RATIO = 15;
     private static final int I_REMARK = 16;
     private static final int I_QUANTITY = 17;   // 销售数量（可选列：缺失/空默认 1）
+    // 独立槽位 19/20（可选列）：详细地址 / 小区。模板 S 备注后为 T=小区、U=详细地址；
+    // 旧模板 T=收货地址，按表头名回落映射到详细地址。idx=-1 时 val() 返回空，不阻断导入。
+    // 槽位必须逐一唯一（历史事故：I_CUSTOMER_PHONE 与 I_QUANTITY 同为 17 致整文件拒收）。
+    private static final int I_DETAILED_ADDRESS = 19;
+    private static final int I_COMMUNITY = 20;
 
     /** 表头校验 + 定位各列下标；任一必填列缺失 → 错误并返回 null。 */
     private int[] headerIndices(String[] headers, List<String> errors) {
@@ -855,7 +1037,7 @@ public class BusinessDataImportHandler implements ImportHandler {
             if (indexOf(headers, h) < 0) errors.add("缺少列: " + h);
         }
         if (!errors.isEmpty()) return null;
-        int[] idx = new int[19];
+        int[] idx = new int[21];
         idx[I_CUSTOMER] = indexOf(headers, "客户");
         idx[I_CUSTOMER_PHONE] = indexOf(headers, "客户手机");
         idx[I_CATEGORY] = indexOf(headers, "品类");
@@ -882,6 +1064,14 @@ public class BusinessDataImportHandler implements ImportHandler {
         idx[I_RATIO] = indexOfExact(headers, "提成比例");
         // 备注为可选列：模板含该列时映射 remark，缺失时置空
         idx[I_REMARK] = indexOf(headers, "备注");
+        // 详细地址为可选列：新模板 U 列「详细地址」；旧模板 T 列「收货地址」向下兼容
+        idx[I_DETAILED_ADDRESS] = indexOfExact(headers, "详细地址");
+        if (idx[I_DETAILED_ADDRESS] < 0) {
+            idx[I_DETAILED_ADDRESS] = indexOfExact(headers, "收货地址");
+        }
+        // 小区为可选列：新模板 T 列；旧模板/存量文件无该列时 idx=-1，按空处理
+        idx[I_COMMUNITY] = indexOfExact(headers, "小区");
+        if (idx[I_COMMUNITY] < 0) idx[I_COMMUNITY] = indexOf(headers, "小区");
         return idx;
     }
 
@@ -954,6 +1144,11 @@ public class BusinessDataImportHandler implements ImportHandler {
         // 客户名称：自动创建会员的必要字段（real_name/nickname），必填
         if (pr.customer == null || pr.customer.isBlank())
             errors.add("第" + rowNum + "行：客户名称为空（自动创建会员需要客户名称）");
+        // 小区/详细地址均可选（手工录入详细地址必填）；超列宽拒绝该行，避免入库截断
+        if (pr.communityName != null && pr.communityName.length() > 200)
+            errors.add("第" + rowNum + "行：小区名称不能超过200个字符");
+        if (pr.detailedAddress != null && pr.detailedAddress.length() > 500)
+            errors.add("第" + rowNum + "行：详细地址不能超过500个字符");
         // 销售数量：必须为正整数；空已在 parseRow 默认 1
         if (!pr.quantityRaw.isEmpty()
                 && (pr.saleQuantity == null || pr.saleQuantity <= 0))
@@ -1082,6 +1277,8 @@ public class BusinessDataImportHandler implements ImportHandler {
         pr.special = "是".equals(rawSpecial);
         pr.commissionRate = parseRatio(val(cols, idx[I_RATIO]));
         pr.remark = val(cols, idx[I_REMARK]);
+        pr.communityName = val(cols, idx[I_COMMUNITY]);
+        pr.detailedAddress = val(cols, idx[I_DETAILED_ADDRESS]);
         return pr;
     }
 
