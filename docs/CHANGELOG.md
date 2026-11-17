@@ -8,7 +8,10 @@
 - **删除**：`components/WorkLogCard.vue`、`hooks/useWorkLogSummary.js`（不再使用，避免双路径）；工作台不再请求日志接口。
 - **保留**：日志列表页与详情页、`/api/wf/log/my` 均不变。
 - **验证**：`npm run build:h5`、`npm run build:mp-weixin` 通过；小程序产物工作台含工作业务日志菜单、无 `work-log-card` 节点。
-- **未执行**：生产部署（待确认）、微信真机验证。
+- **提交**：`6a7aee4 fix(workbench): 工作业务日志改为常用功能入口`（分支 `fix/workbench-log-entry`，未合并/推送）。
+- **部署（2026-11-18 07:37）**：仅 ops H5。入口 `index-D2S0TVOg.js`；工作台 chunk `pages-employee-dashboard.DXoihe2M.js`；128 assets；备份 `backups/html-ops-pre-wlogmenu-20261118_0737.tgz`（326K）；`boss-ops-nginx` 配置检查通过并 reload；ops 后端/nginx healthy。
+- **冒烟**：`/ops/` 标题「金地美家」200；新入口 200、上一版入口 `index-Dak5_ZI7.js` 404；工作台 chunk 含「工作业务日志」菜单，旧日志卡文案/节点为 0；驳回聚焦修复仍在（`reject-panel textarea` + `height:10rem`）；未认证 `/api/wf/task/todo` 401。
+- **未执行**：微信真机视觉/点击验证（需真实员工账号）。
 
 ## 2026-11-18（驳回意见框加高 + 自动聚焦：合并与生产发布）
 
