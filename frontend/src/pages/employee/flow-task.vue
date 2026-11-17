@@ -1,10 +1,9 @@
 <template>
   <view class="page">
-    <EmployeeHomeLink />
     <view class="head">
       <view class="back" @click="goBack"><text>‹ 返回</text></view>
       <text class="title">任务处理</text>
-      <view class="back placeholder" />
+      <EmployeeHomeLink />
     </view>
 
     <view v-if="missing" class="state">
@@ -767,8 +766,7 @@ function goBack() {
 .page { min-height: 100vh; background: #f5f6f8; padding-bottom: 40rpx; }
 .head { display: flex; align-items: center; justify-content: space-between; padding: 26rpx 28rpx; background: linear-gradient(135deg, #FF6B35, #E85D2C); }
 .back { min-width: 120rpx; font-size: 26rpx; color: #fff; }
-.back.placeholder { visibility: hidden; }
-.title { font-size: 34rpx; font-weight: 700; color: #fff; }
+.title { flex: 1; text-align: center; font-size: 34rpx; font-weight: 700; color: #fff; }
 .state { padding: 120rpx 48rpx; display: flex; flex-direction: column; align-items: center; }
 .empty-icon { font-size: 72rpx; margin-bottom: 20rpx; }
 .state-title { font-size: 32rpx; font-weight: 600; color: #1D2129; margin-bottom: 12rpx; }

@@ -1,8 +1,10 @@
 <template>
   <view class="page">
-    <EmployeeHomeLink />
     <view class="head">
-      <text class="title">物料领取</text>
+      <view class="head-title-row">
+        <text class="title">物料领取</text>
+        <EmployeeHomeLink />
+      </view>
       <text class="sub">提交后由财务审批，审批通过才扣减库存并生成可打印单据</text>
     </view>
 
@@ -256,6 +258,7 @@ async function submit() {
 <style scoped>
 .page { min-height: 100vh; background: #F5F6FA; padding: 24rpx 24rpx 180rpx; }
 .head { padding: 8rpx 8rpx 20rpx; display: flex; flex-direction: column; gap: 8rpx; }
+.head-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; }
 .title { font-size: 36rpx; font-weight: 700; color: #1D2129; }
 .sub { font-size: 24rpx; color: #86909C; }
 .card { background: #fff; border-radius: 16rpx; padding: 8rpx 24rpx; }

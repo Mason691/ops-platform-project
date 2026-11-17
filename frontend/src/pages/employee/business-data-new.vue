@@ -1,6 +1,6 @@
 <template>
   <view class="page">
-    <EmployeeHomeLink />
+    <EmployeePageHead title="新增业务订单" />
     <view v-if="loading" class="state">
       <text class="state-text">加载中...</text>
     </view>
@@ -14,7 +14,6 @@
 
     <template v-else>
       <view class="context">
-        <text class="context-title">新增业务订单</text>
         <text class="context-sub">{{ meta.company }} · {{ meta.employeeName }} · {{ meta.employeePhone }}</text>
       </view>
 
@@ -77,7 +76,7 @@
 </template>
 
 <script setup>
-import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
+import EmployeePageHead from '@/components/EmployeePageHead.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useBusinessWizard } from '@/hooks/useBusinessWizard'
 import { computeProductsDeductionTotal, computeProductsPayableTotal, computeProductsTotal } from '@/utils/businessForm'
@@ -134,8 +133,7 @@ onMounted(() => {
   background: linear-gradient(135deg, #FF6B35, #FF8C5A);
   border-radius: 16rpx; padding: 26rpx 24rpx; margin-bottom: 18rpx;
 }
-.context-title { display: block; font-size: 34rpx; font-weight: 700; color: #fff; }
-.context-sub { display: block; font-size: 22rpx; color: rgba(255, 255, 255, .88); margin-top: 8rpx; }
+.context-sub { display: block; font-size: 22rpx; color: rgba(255, 255, 255, .88); }
 .error-banner {
   position: fixed; left: 24rpx; right: 24rpx;
   top: calc(var(--window-top, 0px) + 16rpx); z-index: 80;

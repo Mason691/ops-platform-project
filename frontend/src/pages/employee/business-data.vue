@@ -1,6 +1,6 @@
 <template>
   <view class="page">
-    <EmployeeHomeLink />
+    <view class="page-head-wrap"><EmployeePageHead title="业务数据" /></view>
     <!-- Loading -->
     <view class="loading-wrap" v-if="loading">
       <text class="loading-text">加载中...</text>
@@ -91,7 +91,7 @@
 </template>
 
 <script setup>
-import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
+import EmployeePageHead from '@/components/EmployeePageHead.vue'
 import { ref, reactive, computed, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
@@ -248,6 +248,7 @@ function goAddBusiness() { uni.navigateTo({ url: '/pages/employee/business-data-
 
 <style scoped>
 .page { min-height: 100vh; background: #f5f5f5; padding-bottom: 130rpx; }
+.page-head-wrap { margin: 16rpx 24rpx 0; }
 
 /* Loading / Error / Empty */
 .loading-wrap, .error-wrap, .empty { text-align: center; padding: 200rpx 32rpx; }

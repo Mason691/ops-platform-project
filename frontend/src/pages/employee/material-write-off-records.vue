@@ -1,12 +1,14 @@
 <template>
   <view class="page">
-    <EmployeeHomeLink />
     <view class="head">
       <view class="head-main">
         <text class="title">物资核销记录</text>
         <text class="sub">查看核销单审批状态与核销/退回数量</text>
       </view>
-      <view class="create-btn" @click="createNew"><text>＋ 新建核销</text></view>
+      <view class="head-actions">
+        <view class="create-btn" @click="createNew"><text>＋ 新建核销</text></view>
+        <EmployeeHomeLink />
+      </view>
     </view>
 
     <view class="filter-card">
@@ -152,9 +154,10 @@ function openDetail(id) {
 <style scoped>
 .page { min-height: 100vh; background: #F5F6FA; padding: 24rpx 24rpx 40rpx; box-sizing: border-box; }
 .head { display: flex; align-items: center; justify-content: space-between; padding: 8rpx 4rpx 20rpx; }
-.head-main { display: flex; flex-direction: column; gap: 6rpx; }
+.head-main { display: flex; flex-direction: column; gap: 6rpx; min-width: 0; }
 .title { font-size: 36rpx; font-weight: 700; color: #1D2129; }
 .sub { font-size: 23rpx; color: #86909C; }
+.head-actions { display: flex; align-items: center; gap: 12rpx; flex-shrink: 0; }
 .create-btn { padding: 14rpx 24rpx; border-radius: 999rpx; background: #FF6B35; color: #fff; font-size: 24rpx; font-weight: 600; }
 .filter-card { background: #fff; border-radius: 16rpx; padding: 20rpx; display: flex; flex-direction: column; gap: 14rpx; }
 .search-row { display: flex; align-items: center; background: #f5f5f5; border-radius: 10rpx; padding: 0 18rpx; }

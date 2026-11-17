@@ -1,8 +1,10 @@
 <template>
   <view class="page">
-    <EmployeeHomeLink />
     <view class="head">
-      <text class="title">货款补录</text>
+      <view class="head-title-row">
+        <text class="title">货款补录</text>
+        <EmployeeHomeLink />
+      </view>
       <text class="sub">定金支付订单收齐余款后标记为全款，方可派工出库</text>
     </view>
 
@@ -89,6 +91,7 @@ function openReceive(item) {
 <style scoped>
 .page { min-height: 100vh; background: #F5F6FA; padding: 24rpx 24rpx 40rpx; box-sizing: border-box; }
 .head { padding: 8rpx 4rpx 20rpx; display: flex; flex-direction: column; gap: 6rpx; }
+.head-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; }
 .title { font-size: 36rpx; font-weight: 700; color: #1D2129; }
 .sub { font-size: 23rpx; color: #86909C; line-height: 1.5; }
 .list { display: flex; flex-direction: column; gap: 14rpx; }

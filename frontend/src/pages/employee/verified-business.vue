@@ -1,8 +1,10 @@
 <template>
   <view class="page">
-    <EmployeeHomeLink />
     <view class="head">
-      <text class="title">已核对业务</text>
+      <view class="head-title-row">
+        <text class="title">已核对业务</text>
+        <EmployeeHomeLink />
+      </view>
       <text class="sub">财务核对完成的业务数据，可发起采购申请</text>
     </view>
 
@@ -211,6 +213,7 @@ function money(v) {
 <style scoped>
 .page { min-height: 100vh; background: #f5f6f8; padding-bottom: 40rpx; }
 .head { padding: 36rpx 32rpx 20rpx; background: linear-gradient(135deg, #FF6B35, #E85D2C); }
+.head-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; }
 .title { display: block; font-size: 40rpx; font-weight: 700; color: #fff; }
 .sub { display: block; margin-top: 8rpx; font-size: 24rpx; color: rgba(255,255,255,.85); }
 .pending-summary {

@@ -1,8 +1,10 @@
 <template>
   <view class="page">
-    <EmployeeHomeLink />
     <view class="head">
-      <text class="title">物料核销</text>
+      <view class="head-title-row">
+        <text class="title">物料核销</text>
+        <EmployeeHomeLink />
+      </view>
       <text class="sub">核销数量 = 领取数量（剩余可核销）− 退回数量，系统自动计算；提交后部长 → 总经办审批</text>
     </view>
 
@@ -179,6 +181,7 @@ async function submit() {
 <style scoped>
 .page { min-height: 100vh; background: #F5F6FA; padding: 24rpx 24rpx 180rpx; }
 .head { padding: 8rpx 8rpx 20rpx; display: flex; flex-direction: column; gap: 8rpx; }
+.head-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; }
 .title { font-size: 36rpx; font-weight: 700; color: #1D2129; }
 .sub { font-size: 23rpx; color: #86909C; line-height: 1.5; }
 .card { background: #fff; border-radius: 16rpx; padding: 8rpx 24rpx; }
