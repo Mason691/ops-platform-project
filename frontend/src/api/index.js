@@ -246,6 +246,7 @@ export const api = {
   employeeManualOptions: () => request({url:'/api/ops/employee/business-data/manual/options'}),
   employeeLookupMember: (phone) => request({url:'/api/ops/employee/business-data/manual/member',data:{phone}}),
   employeeProductPrice: (params) => request({url:'/api/ops/employee/business-data/product-price', data:params}),
+  employeeCheckReceiptNo: (params) => request({url:'/api/ops/employee/business-data/receipt-no/check', data:params}),
   employeeCreateBusiness: (data) => request({url:'/api/ops/employee/business-data/manual',method:'POST',data}),
 
   // 工作流待办 / 审批（平台 /api/wf，员工 JWT）

@@ -41,6 +41,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 员工手工新增业务数据实现。
@@ -64,6 +65,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     /** sys_member.real_name / nickname 为 VARCHAR(50)，自动建会员时不能超长 */
     private static final int MAX_CUSTOMER_LENGTH = 50;
     private static final int MAX_REMARK_LENGTH = 500;
+    private static final int MAX_RECEIPT_NO_LENGTH = 50;
+    /** 收据号允许字符集：字母/数字/短横线/下划线/斜杠（不含空格，便于财务核对与导出）。 */
+    private static final Pattern RECEIPT_NO_PATTERN = Pattern.compile("^[A-Za-z0-9_/-]+$");
 
     private final JdbcTemplate jdbcTemplate;
     private final PlatformInternalClient platformInternalClient;
@@ -248,6 +252,21 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         return result;
     }
 
+    @Override
+    public Map<String, Object> checkReceiptNo(String receiptNo, String customer) {
+        EmployeeIdentity identity = assertEmployee();
+        String normalized = normalizeReceiptNo(receiptNo);
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (normalized == null) {
+            result.put("duplicate", false);
+            return result;
+        }
+        String conflict = findReceiptConflict(identity.corpId(), normalized, str(customer));
+        result.put("duplicate", conflict != null);
+        if (conflict != null) result.put("message", conflict);
+        return result;
+    }
+
     private Map<String, Object> persistManualEntry(EmployeeBusinessEntryRequest request,
                                                    EmployeeContext ctx, Validated v) {
         String batchNo = resolveBatch(request, ctx);
@@ -265,7 +284,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         // 主子表拆分：一次提交 = 1 条订单头 + N（产品×经办人）条子表
         OpsBusinessOrder order = orderService.createOrder(
                 ctx.corpId(), "O|" + orderNo, orderNo, batchNo, businessGroupNo,
-                null, ctx.company(), v.customer(), v.phone(), member.id(),
+                v.receiptNo(), ctx.company(), v.customer(), v.phone(), member.id(),
                 community.id(), community.name(), v.detailAddress(), v.receiptDate(),
                 null, null, null, v.voucherUrl(),
                 totalAmount, INITIAL_CALC_STATUS, v.remark(), v.paymentMethod());
@@ -484,6 +503,11 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         List<ValidatedProduct> products = validateProducts(req.getProducts(), ctx.corpId());
         List<AgentInfo> agents = validateAgents(req.getAgentUserIds(), ctx);
         String receiptDate = normalizeDate(req.getReceiptDate());
+        String receiptNo = normalizeReceiptNo(req.getReceiptNo());
+        if (receiptNo != null) {
+            // 制单阶段仅做提示性校验，真正写入仍在此处二次确认，防止绕过前端直接提交
+            assertReceiptNoAvailable(ctx.corpId(), receiptNo, customer);
+        }
         PaymentMethod paymentMethod = PaymentMethod.normalize(req.getPaymentMethod());
         String voucherUrl = normalizeVouchers(req.getVoucherUrls());
         Long communityId = req.getCommunityId();
@@ -496,7 +520,46 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 req.getDetailAddress(), "详细地址", MAX_DETAIL_ADDRESS_LENGTH);
         String remark = normalizeRemark(req.getRemark());
         return new Validated(phone, customer, products, agents,
-                receiptDate, paymentMethod.name(), voucherUrl, communityId, detailAddress, remark);
+                receiptDate, receiptNo, paymentMethod.name(), voucherUrl,
+                communityId, detailAddress, remark);
+    }
+
+    /** 收据号选填：去首尾空白；空串落库为 null；非空校验长度与字符集。 */
+    private static String normalizeReceiptNo(String raw) {
+        String value = str(raw);
+        if (value.isEmpty()) return null;
+        if (value.length() > MAX_RECEIPT_NO_LENGTH) {
+            throw BusinessException.of("收据号不能超过" + MAX_RECEIPT_NO_LENGTH + "个字符");
+        }
+        if (!RECEIPT_NO_PATTERN.matcher(value).matches()) {
+            throw BusinessException.of("收据号只能包含字母、数字、短横线、下划线和斜杠");
+        }
+        return value;
+    }
+
+    private void assertReceiptNoAvailable(Long corpId, String receiptNo, String customer) {
+        String conflict = findReceiptConflict(corpId, receiptNo, customer);
+        if (conflict != null) throw BusinessException.of(conflict);
+    }
+
+    /**
+     * 收据号查重：与财务核对同口径——同组织内同一客户可复用（同订单拆分/补录），
+     * 被其他客户占用时返回可读冲突说明，未冲突返回 null。
+     */
+    private String findReceiptConflict(Long corpId, String receiptNo, String customer) {
+        List<Map<String, Object>> dups = jdbcTemplate.queryForList(
+                "SELECT batch_no, customer FROM ops_business_order_item "
+                        + "WHERE corp_id = ? AND receipt_no = ? AND delete_flag = 0 "
+                        + "ORDER BY id LIMIT 20",
+                corpId, receiptNo);
+        for (Map<String, Object> dup : dups) {
+            if (!customer.equals(str(dup.get("customer")))) {
+                return "收据号 " + receiptNo + " 已被其他客户占用（批次 "
+                        + str(dup.get("batch_no")) + "，客户 " + str(dup.get("customer"))
+                        + "），请更换";
+            }
+        }
+        return null;
     }
 
     /** 备注选填：去首尾空白，超长拒绝，空串落库为 null。 */
@@ -766,6 +829,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         // 销售日期取市场收款日期：员工业务数据列表按 sale_date 分月，避免新数据落入「未知」
         entity.setSaleDate(v.receiptDate());
         entity.setReceiptDate(v.receiptDate());
+        entity.setReceiptNo(v.receiptNo());
         entity.setFinanceReceiptDate(null);
         entity.setAgent(agent.name());
         entity.setAgentPhone(agent.phone());
@@ -853,8 +917,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     private record Validated(String phone, String customer,
                              List<ValidatedProduct> products, List<AgentInfo> agents,
-                             String receiptDate, String paymentMethod, String voucherUrl,
-                             Long communityId, String detailAddress, String remark) {}
+                             String receiptDate, String receiptNo, String paymentMethod,
+                             String voucherUrl, Long communityId, String detailAddress,
+                             String remark) {}
 
     private record ValidatedProduct(Long productId, String brand, String categoryKey, String model,
                                     BigDecimal price, int qty, BigDecimal amount,

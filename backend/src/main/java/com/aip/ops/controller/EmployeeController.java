@@ -230,6 +230,19 @@ public class EmployeeController {
     }
 
     /**
+     * 制单时收据号查重（输入框失焦提示）：同组织内同一客户可复用，
+     * 被其他客户占用时返回 duplicate=true + message；最终提交仍由服务端二次校验。
+     */
+    @GetMapping("/business-data/receipt-no/check")
+    public R<?> checkReceiptNo(@RequestParam String receiptNo,
+                               @RequestParam(required = false) String customer) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可校验收据号");
+        }
+        return R.ok(employeeBusinessEntryService.checkReceiptNo(receiptNo, customer));
+    }
+
+    /**
      * 低价特批文件上传：PDF/JPG/PNG ≤10MB；文件信息落库供提交引用与审计。
      */
     @PostMapping("/business-data/special-file")

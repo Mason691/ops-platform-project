@@ -330,6 +330,7 @@ export function useBusinessWizard() {
         commissionRate: product.isSpecial ? Number(product.commissionRate) : 0
       })),
       receiptDate: form.receiptDate,
+      receiptNo: String(form.receiptNo || '').trim() || null,
       voucherUrls: form.voucherUrls || [],
       remark: String(form.remark || '').trim()
     }
@@ -512,6 +513,9 @@ export function useBusinessWizard() {
     form.agentUserIds = uniqueIds
     if (!Array.isArray(form.voucherUrls)) form.voucherUrls = []
     if (!form.paymentMethod) form.paymentMethod = 'QR'
+    if (!form.receiptNo) form.receiptNo = ''
+    // 草稿里的查重结果是旧值快照，恢复时必须丢弃，避免误报
+    delete form.receiptNoCheck
     step.value = Math.min(Math.max(Number(draft.step) || 0, 0), steps.length - 1)
     maxVisited.value = step.value
     if (step.value === 3) refreshConfirmErrors()

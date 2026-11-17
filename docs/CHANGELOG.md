@@ -2,6 +2,17 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-17（员工制单价格交互 / 收款凭证说明 / 收据号填报与财务核对留痕）
+
+- **价格卡片**：商品卡片销售单价由文字链（修改/用标准价）改为价格卡片——大号当前单价 + 「修改单价」「恢复标准价」两个按钮（填充/描边、图标、按压反馈）；「恢复标准价」与标准价一致时置灰并提示“当前已是标准价”；编辑态使用数字键盘并展示标准价参考；未配置标准价显示“未配置标准价/请联系管理员”；低价仍自动展开特批文件与提成比例。删除 `priceLocked` 旧状态与 `unlockPrice`。
+- **收款码**：`PaymentQr.vue` 增加图片渲染失败兜底（不再静默空白），失败文案统一为“收款码加载失败，请重试”；后端哈希校验失败文案改为“收款码校验失败，请联系管理员”。生产未显示的根因是**未配置收款码**（`ops_payment_qr_config` 0 行、私有目录为空），代码链路本身已具备加载/重试/校验分支。
+- **收款凭证**：收款信息步骤新增说明文案“请上传收款到账凭证（如银行到账截图、微信/支付宝收款记录），用于财务核对；请勿上传收据或白条。”
+- **收据号（制单）**：`ops_business_order` 主表 + `ops_business_order_item` 明细同步写入 `receipt_no`；字段选填，长度 ≤50，字符集 `[A-Za-z0-9_/-]`；失焦调用 `GET /api/ops/employee/business-data/receipt-no/check` 查重（同组织同客户可复用，被其他客户占用时拦截），提交时服务端二次校验；确认页展示。
+- **财务核对留痕**：`financeCheck` 结果记录 `receiptNoBefore` / `receiptNoAfter`；平台主站订单详情「工作流处理留痕」展开行展示「收据号变更」；修改人/时间沿用节点记录；已上报集团仍禁止修改。
+- **文件**：后端 `EmployeeBusinessEntryRequest/Service/Impl`、`EmployeeController`、`BusinessDataFinanceServiceImpl`、`PaymentQrServiceImpl`；H5 `BusinessProductCard/BusinessStepReceipt/BusinessStepConfirm/PaymentQr`、`businessForm.js`、`useBusinessWizard.js`、`useProductPrice.js`、`api/index.js`；平台主站 `BusinessOrderFlowRecords.vue`。
+- **验证**：后端 `mvn -f backend/pom.xml compile -o` 通过；H5 `npm run build:h5` 通过；平台主站 `npm run build` 通过。**未执行**：项目无自动化测试；真实数据库/API 落库、微信真机验证。规格见 `Specs/员工制单价格交互与收据号-规格说明.md`。
+- **生产发布（2026-11-17 08:50-08:52）**：①**备份** `ops-backend/app.jar.bak-receipt-20261117_085031`（注：该文件为 11-16 遗留 JAR，发布前运行版本以回滚镜像为准）、镜像 `boss-platform/ops:rollback-receipt-20261117_085031`（`43141a26cd30`，发布前 dblclick 运行镜像）、`backups/html-ops-receipt-20261117_085031.tgz`、`backups/html-platform-receipt-20261117_085031.tgz`；无数据库迁移。②**后端**：上传 JAR sha `a182e4f6…`，overlay 构建 `boss-platform/ops:receipt-20261117_085031`（`d92201f912a9`）并 tag `latest`，`docker compose up -d ops-backend` 重建容器；容器内 JAR sha `a182e4f6…`，healthy，`/actuator/health` 200，新路由 `receipt-no/check` 与 `payment-qr` 未认证均 401。③**Ops H5**：`rsync --delete` 同步 `dist/build/h5`（84 个 assets），新 chunk `pages-employee-business-data-new.D3aD7wR4.js` 含「修改单价/恢复标准价/请勿上传收据」，旧 chunks 已清除，`boss-ops-nginx` reload。④**平台主站**：从 `0f72773` 干净 worktree + 仅 `BusinessOrderFlowRecords.vue` 变更构建（隔离工作区未提交的组织/手机号改动），新入口 `index-CwDGAZjb.js`、218 个 assets，`BusinessData-DBJxUdPI.js` 含「收据号变更」，`boss-platform-nginx` reload。⑤**冒烟**：`/` 与 `/ops/business-data` 标题「协同平台」200，`/ops/` 标题「金地美家」200，平台入口与新 H5 chunk 公网 200，新接口 401。⑥**回滚**：后端 `docker tag boss-platform/ops:rollback-receipt-20261117_085031 boss-platform/ops:latest && cd /data2/boss-platform && docker compose up -d ops-backend`；前端解压对应 tgz 后 reload 对应 nginx。⑦**未执行**：登录态浏览器真实制单/财务核对 E2E、微信真机验证；生产收款码仍为 0 行，需平台后台上传后员工端才显示。⑧临时构建 worktree 与 overlay 目录已清理，回滚镜像/备份保留。
+
 ## 2026-11-16（生产发布：业务数据双击查看订单详情）
 
 - **发布顺序**：先 ops 后端起效 `/orders/by-no`，再平台主站前端；ops 提交 `9ecb034`、平台提交 `0f72773`。

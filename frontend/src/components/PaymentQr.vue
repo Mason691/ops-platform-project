@@ -5,7 +5,8 @@
       <text class="qr-error-text">{{ error }}</text>
       <view class="qr-retry" @click="load"><text>重试</text></view>
     </view>
-    <image v-else-if="src" class="qr-image" :src="src" mode="widthFix" @click="preview" />
+    <image v-else-if="src" class="qr-image" :src="src" mode="widthFix"
+           @click="preview" @error="onImageError" />
     <view v-else class="qr-state"><text>收款码未配置，请联系管理员</text></view>
     <text v-if="src && !loading && !error" class="qr-hint">请使用微信扫描上方收款码完成支付</text>
   </view>
@@ -50,7 +51,7 @@ async function load() {
     const contentType = res.headers.get('content-type') || ''
     if (!res.ok || contentType.includes('application/json')) {
       const body = await res.json().catch(() => ({}))
-      if (!disposed) error.value = body.msg || '收款码加载失败，请联系管理员'
+      if (!disposed) error.value = body.msg || '收款码加载失败，请重试'
       return
     }
     const blob = await res.blob()
@@ -58,7 +59,7 @@ async function load() {
     objectUrl = URL.createObjectURL(blob)
     src.value = objectUrl
   } catch (e) {
-    if (!disposed) error.value = '收款码加载失败，请检查网络后重试'
+    if (!disposed) error.value = '收款码加载失败，请重试'
   } finally {
     if (!disposed) loading.value = false
   }
@@ -72,10 +73,10 @@ async function load() {
       if (res.statusCode === 200 && res.tempFilePath) {
         src.value = res.tempFilePath
       } else {
-        error.value = '收款码加载失败，请联系管理员'
+        error.value = '收款码加载失败，请重试'
       }
     },
-    fail: () => { if (!disposed) error.value = '收款码加载失败，请检查网络后重试' },
+    fail: () => { if (!disposed) error.value = '收款码加载失败，请重试' },
     complete: () => { if (!disposed) loading.value = false }
   })
   // #endif
@@ -84,6 +85,13 @@ async function load() {
 function preview() {
   if (!src.value) return
   uni.previewImage({ urls: [src.value], current: src.value })
+}
+
+/** 图片解码/渲染失败（哈希校验通过但浏览器无法展示）时也给出重试入口，不静默空白。 */
+function onImageError() {
+  revoke()
+  src.value = ''
+  error.value = '收款码加载失败，请重试'
 }
 
 function revoke() {

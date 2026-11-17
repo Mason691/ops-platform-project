@@ -36,7 +36,6 @@ export function useProductPrice(product) {
     product.priceError = ''
     product.priceLoading = false
     product.salePrice = ''
-    product.priceLocked = true
     product.isSpecial = false
     product.specialNotified = false
     clearSpecial()
@@ -87,7 +86,6 @@ export function useProductPrice(product) {
       product.priceError = (info && info.message) || '该商品未配置售价，请联系管理员'
       product.standardSalePrice = null
       product.salePrice = ''
-      product.priceLocked = true
       product.isSpecial = false
       product.specialNotified = false
       clearSpecial()
@@ -102,7 +100,6 @@ export function useProductPrice(product) {
       // 草稿/步骤切换回显：保留用户已填价格与特批附件，只按最新标准价重判
       const below = standard > 0 && currentPrice < standard
       product.isSpecial = below
-      product.priceLocked = currentPrice === standard
       if (!below) {
         clearSpecial()
         product.specialNotified = false
@@ -110,7 +107,6 @@ export function useProductPrice(product) {
       return
     }
     product.salePrice = standard.toFixed(2)
-    product.priceLocked = true
     product.isSpecial = false
     product.specialNotified = false
     clearSpecial()
@@ -138,14 +134,9 @@ export function useProductPrice(product) {
     }
   }
 
-  function unlockPrice() {
-    product.priceLocked = false
-  }
-
   function useStandardPrice() {
     if (product.standardSalePrice == null) return
     product.salePrice = Number(product.standardSalePrice).toFixed(2)
-    product.priceLocked = true
     evaluateSpecial()
   }
 
@@ -156,5 +147,5 @@ export function useProductPrice(product) {
     product.commissionRate = ''
   }
 
-  return { checking, lookup, resetPrice, evaluateSpecial, unlockPrice, useStandardPrice }
+  return { checking, lookup, resetPrice, evaluateSpecial, useStandardPrice }
 }

@@ -72,6 +72,7 @@
       </view>
       <view class="kv"><text class="k">支付方式</text><text class="v">{{ paymentLabel }}</text></view>
       <view class="kv"><text class="k">市场收款日期</text><text class="v">{{ form.receiptDate || '—' }}</text></view>
+      <view v-if="form.receiptNo" class="kv"><text class="k">收据号</text><text class="v">{{ form.receiptNo }}</text></view>
       <view v-if="form.voucherUrls && form.voucherUrls.length" class="kv">
         <text class="k">收款凭证</text>
         <view class="vouchers">

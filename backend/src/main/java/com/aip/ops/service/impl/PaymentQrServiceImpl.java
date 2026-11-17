@@ -164,7 +164,7 @@ public class PaymentQrServiceImpl implements PaymentQrService {
         if (!actual.equalsIgnoreCase(config.getFileHash())) {
             log.error("收款码文件哈希校验失败 corpId={} expected={} actual={} path={}",
                     corpId, config.getFileHash(), actual, config.getFilePath());
-            throw BusinessException.of("收款码文件校验失败，请联系管理员");
+            throw BusinessException.of("收款码校验失败，请联系管理员");
         }
         validateImage(bytes);
         return new VerifiedQr(bytes, config.getContentType() == null

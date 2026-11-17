@@ -16,6 +16,12 @@ export const MAX_AGENTS = 20
 /** 备注最大长度（与后端 MAX_REMARK_LENGTH 保持一致） */
 export const MAX_REMARK = 500
 
+/** 收据号最大长度（与后端 MAX_RECEIPT_NO_LENGTH 保持一致） */
+export const MAX_RECEIPT_NO = 50
+
+/** 收据号允许字符集：字母/数字/短横线/下划线/斜杠，不含空格 */
+export const RECEIPT_NO_RE = /^[A-Za-z0-9_/-]+$/
+
 /** 支付方式（与后端 PaymentMethod 保持一致） */
 export const PAYMENT_METHODS = [
   { value: 'QR', label: '二维码' },
@@ -33,7 +39,7 @@ export const STEPS = [
 
 const BASIC_FIELDS = ['batchNo', 'customerPhone', 'customer', 'communityId',
   'detailAddress', 'agentUserIds']
-const RECEIPT_FIELDS = ['paymentMethod', 'receiptDate', 'voucherUrls']
+const RECEIPT_FIELDS = ['paymentMethod', 'receiptDate', 'receiptNo', 'voucherUrls']
 const PRODUCT_FIELD_LABELS = {
   category: '品类',
   brand: '品牌',
@@ -54,6 +60,7 @@ const FIELD_LABELS = {
   products: '产品明细',
   paymentMethod: '支付方式',
   receiptDate: '市场收款日期',
+  receiptNo: '收据号',
   voucherUrls: '收款凭证',
   remark: '备注'
 }
@@ -91,7 +98,7 @@ export function emptyProduct() {
     productId: null, category: '', brand: '', model: '',
     salePrice: '', saleQuantity: '1',
     standardSalePrice: null, priceConfigured: null, priceLoading: false,
-    priceError: '', priceLocked: true,
+    priceError: '',
     isSpecial: false, specialFileId: null, specialFileUrl: '', specialFileName: '',
     commissionRate: ''
   }
@@ -122,7 +129,8 @@ export function emptyBusinessForm() {
     batchNo: '', newBatch: true, customerPhone: '', customer: '',
     communityId: null, communityName: '', detailAddress: '',
     products: [emptyProduct()],
-    paymentMethod: 'QR', receiptDate: today(), voucherUrls: [], remark: '',
+    paymentMethod: 'QR', receiptDate: today(), receiptNo: '', receiptNoCheck: null,
+    voucherUrls: [], remark: '',
     agentUserIds: []
   }
 }
@@ -222,6 +230,16 @@ export function validateBusinessForm(form, meta = {}) {
     errors.paymentMethod = '请选择支付方式'
   }
   if (!form.receiptDate) errors.receiptDate = '请选择市场收款日期'
+  // 收据号选填：未取得收据可由财务核对补录；填写时校验长度/字符集/重复占用
+  const receiptNo = String(form.receiptNo || '').trim()
+  if (receiptNo.length > MAX_RECEIPT_NO) {
+    errors.receiptNo = `收据号不能超过${MAX_RECEIPT_NO}个字符`
+  } else if (receiptNo && !RECEIPT_NO_RE.test(receiptNo)) {
+    errors.receiptNo = '收据号只能包含字母、数字、短横线、下划线和斜杠'
+  } else if (receiptNo && form.receiptNoCheck
+    && form.receiptNoCheck.value === receiptNo && form.receiptNoCheck.message) {
+    errors.receiptNo = form.receiptNoCheck.message
+  }
   if (String(form.remark || '').trim().length > MAX_REMARK) {
     errors.remark = `备注不能超过${MAX_REMARK}个字`
   }
@@ -233,7 +251,7 @@ export function validateBusinessForm(form, meta = {}) {
       'specialFileId', 'commissionRate']
       .forEach(field => order.push(`products.${index}.${field}`))
   })
-  order.push('paymentMethod', 'receiptDate', 'voucherUrls', 'remark')
+  order.push('paymentMethod', 'receiptDate', 'receiptNo', 'voucherUrls', 'remark')
   const firstError = order.map(key => errors[key]).find(Boolean) || ''
   return { valid: Object.keys(errors).length === 0, errors, firstError }
 }

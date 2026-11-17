@@ -20,4 +20,10 @@ public interface EmployeeBusinessEntryService {
 
     /** 保存手工录入的业务数据。 */
     Map<String, Object> createManualEntry(EmployeeBusinessEntryRequest request);
+
+    /**
+     * 收据号查重（制单阶段失焦提示）：同组织内仅允许同一客户复用，
+     * 被其他客户占用时返回 duplicate=true + message。
+     */
+    Map<String, Object> checkReceiptNo(String receiptNo, String customer);
 }

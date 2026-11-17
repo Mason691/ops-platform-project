@@ -93,6 +93,10 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
             throw BusinessException.of("核对不通过时必须填写原因");
         }
         LocalDateTime now = LocalDateTime.now();
+        // 留痕：财务核对是收据号的主要补录/修改入口，记录修改前后值供审计追溯。
+        // 主表缺失时回退子表历史值（旧数据可能只写子表）。
+        String receiptNoBefore = order != null ? str(order.getReceiptNo()) : "";
+        if (receiptNoBefore.isEmpty()) receiptNoBefore = str(row.getReceiptNo());
         int updated = updateFinance(groupIds, v, userId, userName, now);
         if (updated != groupIds.size()) {
             throw BusinessException.of("订单内部分数据已上报集团或状态已变更，请刷新后重试");
@@ -103,6 +107,8 @@ public class BusinessDataFinanceServiceImpl implements BusinessDataFinanceServic
         Map<String, Object> result = result(row.getId(), order.getId(), v, userId, userName, now);
         result.put("checkConclusion", conclusion);
         result.put("checkRemark", remark);
+        result.put("receiptNoBefore", receiptNoBefore);
+        result.put("receiptNoAfter", v.receiptNo());
         return result;
     }
 

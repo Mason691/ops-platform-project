@@ -50,41 +50,62 @@
       </text>
     </view>
 
-    <view class="row">
-      <view :id="fieldId('salePrice')" class="col">
-        <view class="price-head">
-          <text class="label" @click="focusField(fieldId('salePrice'))">
-            销售单价 <text class="req">*</text>
+    <view :id="fieldId('salePrice')" class="field">
+      <text class="label" @click="focusField(fieldId('salePrice'))">
+        销售单价 <text class="req">*</text>
+      </text>
+      <view class="price-card" :class="{ 'price-card-special': product.isSpecial }">
+        <view class="price-main">
+          <text v-if="!editingPrice" class="price-value" :class="{ placeholder: !hasPrice }">
+            <text class="price-currency">¥</text>{{ priceText }}
           </text>
-          <text v-if="product.standardSalePrice != null" class="standard-price">
-            标准价 ¥{{ standardText }}
+          <text v-if="product.standardSalePrice != null" class="price-standard">
+            标准价：¥{{ standardText }}
           </text>
+          <text v-else-if="product.priceConfigured === false" class="price-standard missing">
+            未配置标准价
+          </text>
+          <text v-else-if="product.priceLoading" class="price-standard">正在查询标准售价...</text>
+          <text v-else-if="!product.model" class="price-standard">选择型号后自动带出标准价</text>
         </view>
-        <view class="price-input-row">
+
+        <view v-if="editingPrice && product.priceConfigured === true" class="price-edit">
           <input class="input" :class="{ 'control-error': errors.salePrice }"
-                 type="digit" :value="product.salePrice" placeholder="0.00"
-                 :disabled="!!product.priceLocked"
+                 type="digit" :value="product.salePrice" placeholder="请输入销售单价"
+                 :focus="editingPrice"
                  @input="onPriceInput" @blur="formatPrice"
                  @focus="keepFieldVisible(fieldId('salePrice'))" />
-          <text v-if="product.priceLocked && product.priceConfigured === true"
-                class="edit-price" @click="unlockPrice">修改</text>
-          <text v-else-if="!product.priceLocked && product.standardSalePrice != null"
-                class="edit-price" @click="useStandardPrice">用标准价</text>
         </view>
-        <text v-if="product.priceLoading" class="hint">正在查询标准售价...</text>
-        <text :id="fieldId('standardPrice')" v-else-if="errors.standardPrice"
-              class="ferr">{{ errors.standardPrice }}</text>
-        <text v-else-if="product.priceConfigured === false" class="ferr">{{ product.priceError }}</text>
-        <text v-if="errors.salePrice" class="ferr">{{ errors.salePrice }}</text>
-        <text v-if="product.isSpecial" class="special-tag">低于标准价 · 特批</text>
-      </view>
-      <view :id="fieldId('saleQuantity')" class="col">
-        <text class="label">销售数量 <text class="req">*</text></text>
-        <view :class="{ 'control-error-box': errors.saleQuantity }">
-          <QuantityStepper v-model="product.saleQuantity" />
+
+        <view v-if="product.priceConfigured === true" class="price-actions">
+          <view class="price-btn primary" hover-class="price-btn-pressed" @click="startEditPrice">
+            <text class="price-btn-icon">✎</text><text>修改单价</text>
+          </view>
+          <view class="price-btn ghost" :class="{ disabled: isStandardPrice }"
+                :hover-class="isStandardPrice ? 'none' : 'price-btn-pressed'"
+                @click="restoreStandardPrice">
+            <text class="price-btn-icon">↺</text><text>恢复标准价</text>
+          </view>
         </view>
-        <text v-if="errors.saleQuantity" class="ferr">{{ errors.saleQuantity }}</text>
+        <text v-else-if="product.priceConfigured === false" class="price-contact">
+          请联系管理员配置该商品的标准售价
+        </text>
       </view>
+
+      <text :id="fieldId('standardPrice')" v-if="!product.priceLoading && errors.standardPrice"
+            class="ferr">{{ errors.standardPrice }}</text>
+      <text v-else-if="!product.priceLoading && product.priceConfigured === false"
+            class="ferr">{{ product.priceError }}</text>
+      <text v-if="errors.salePrice" class="ferr">{{ errors.salePrice }}</text>
+      <text v-if="product.isSpecial" class="special-tag">低于标准价 · 需上传特批文件</text>
+    </view>
+
+    <view :id="fieldId('saleQuantity')" class="field">
+      <text class="label">销售数量 <text class="req">*</text></text>
+      <view :class="{ 'control-error-box': errors.saleQuantity }">
+        <QuantityStepper v-model="product.saleQuantity" />
+      </view>
+      <text v-if="errors.saleQuantity" class="ferr">{{ errors.saleQuantity }}</text>
     </view>
 
     <view class="amount-row">
@@ -130,7 +151,10 @@ defineEmits(['remove'])
 
 const brandSheet = ref(false)
 const modelSheet = ref(false)
-const { lookup: lookupPrice, resetPrice, evaluateSpecial, unlockPrice, useStandardPrice }
+// 价格卡片：默认展示当前单价，点“修改单价”后才进入输入态；
+// 每个产品卡片独立维护，互不影响。
+const editingPrice = ref(false)
+const { lookup: lookupPrice, resetPrice, evaluateSpecial, useStandardPrice }
   = useProductPrice(props.product)
 
 onMounted(() => {
@@ -193,6 +217,22 @@ const standardText = computed(() => {
   const value = Number(props.product.standardSalePrice)
   return Number.isFinite(value) ? value.toFixed(2) : ''
 })
+const priceText = computed(() => {
+  const value = Number(props.product.salePrice)
+  return Number.isFinite(value) && value > 0 ? value.toFixed(2) : '—'
+})
+const hasPrice = computed(() => {
+  const value = Number(props.product.salePrice)
+  return Number.isFinite(value) && value > 0
+})
+// 当前单价与标准价一致时“恢复标准价”置灰（按分比较，避免浮点误差）
+const isStandardPrice = computed(() => {
+  if (props.product.standardSalePrice == null) return false
+  const standard = Number(props.product.standardSalePrice)
+  const current = Number(props.product.salePrice)
+  return Number.isFinite(standard) && Number.isFinite(current) && current > 0
+    && Math.abs(current - standard) < 0.005
+})
 
 function fieldId(field) {
   return `field-products-${props.index}-${field}`
@@ -203,6 +243,7 @@ function setCategory(value) {
   props.product.brand = ''
   props.product.model = ''
   props.product.productId = null
+  editingPrice.value = false
   resetPrice()
 }
 
@@ -210,6 +251,7 @@ function setBrand(value) {
   props.product.brand = value
   props.product.model = ''
   props.product.productId = null
+  editingPrice.value = false
   resetPrice()
 }
 
@@ -219,6 +261,7 @@ function setModel(value) {
     item && item.brand === props.product.brand
     && item.category === props.product.category && item.model === value)
   props.product.productId = material && material.id != null ? material.id : null
+  editingPrice.value = false
   resetPrice()
   lookupPrice()
 }
@@ -243,6 +286,22 @@ function formatPrice() {
     props.product.salePrice = value.toFixed(2)
   }
   evaluateSpecial(true)
+}
+
+/** 进入可编辑态：数字键盘 + 卡片内标准价参考值；低价特批由 evaluateSpecial 自动联动。 */
+function startEditPrice() {
+  if (props.product.priceConfigured !== true) return
+  editingPrice.value = true
+}
+
+/** 恢复标准价：与标准价一致时置灰，点击给出明确提示而不是静默无响应。 */
+function restoreStandardPrice() {
+  if (isStandardPrice.value) {
+    uni.showToast({ title: '当前已是标准价', icon: 'none' })
+    return
+  }
+  useStandardPrice()
+  editingPrice.value = false
 }
 </script>
 
@@ -280,13 +339,42 @@ function formatPrice() {
 }
 .placeholder { font-size: 27rpx; color: #bbb; }
 .arrow { font-size: 30rpx; color: #999; }
-.row { display: flex; gap: 16rpx; margin-bottom: 18rpx; }
-.col { flex: 1; min-width: 0; }
-.price-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8rpx; }
-.standard-price { font-size: 21rpx; color: #FF6B35; white-space: nowrap; }
-.price-input-row { display: flex; align-items: center; gap: 12rpx; }
-.price-input-row .input { flex: 1; min-width: 0; }
-.edit-price { font-size: 22rpx; color: #FF6B35; white-space: nowrap; }
+.price-card {
+  display: flex; flex-direction: column; gap: 14rpx;
+  border: 2rpx solid #FFE0D2; border-radius: 14rpx;
+  background: linear-gradient(180deg, #FFF9F6, #fff);
+  padding: 18rpx 20rpx;
+}
+.price-card-special {
+  border-color: #FFB899;
+  background: linear-gradient(180deg, #FFF3ED, #fff);
+}
+.price-main {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: 4rpx 12rpx;
+}
+.price-value {
+  font-size: 40rpx; font-weight: 700; color: #FF6B35; line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.price-value.placeholder { color: #bbb; }
+.price-currency { font-size: 24rpx; font-weight: 600; margin-right: 2rpx; }
+.price-standard { font-size: 22rpx; color: #8a6a5c; white-space: nowrap; }
+.price-standard.missing { color: #e53935; }
+.price-edit .input { width: 100%; }
+.price-actions { display: flex; gap: 14rpx; }
+.price-btn {
+  flex: 1; min-width: 0; height: 64rpx; border-radius: 32rpx;
+  display: flex; align-items: center; justify-content: center; gap: 6rpx;
+  font-size: 24rpx; font-weight: 600; box-sizing: border-box;
+  transition: opacity .12s, transform .12s;
+}
+.price-btn.primary { background: #FF6B35; color: #fff; }
+.price-btn.ghost { background: #fff; color: #FF6B35; border: 2rpx solid #FF6B35; }
+.price-btn.disabled { background: #f5f5f5; border-color: #e2e2e2; color: #bbb; }
+.price-btn-pressed { opacity: .82; transform: scale(.98); }
+.price-btn-icon { font-size: 24rpx; line-height: 1; }
+.price-contact { font-size: 22rpx; color: #e53935; line-height: 1.5; }
 .special-tag {
   display: inline-block; margin-top: 6rpx; font-size: 21rpx;
   color: #C2410C; background: #FFF0E8; border-radius: 6rpx; padding: 2rpx 10rpx;

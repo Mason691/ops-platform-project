@@ -42,6 +42,12 @@ public class EmployeeBusinessEntryRequest {
     /** 市场收款日期 yyyy-MM-dd；空默认当天 */
     private String receiptDate;
 
+    /**
+     * 收据号（选填）：制单时可能尚未取得收据，留空由财务核对阶段补录。
+     * 填写时需在当前组织内唯一（同客户可复用），长度 ≤50。
+     */
+    private String receiptNo;
+
     /** 是否收款（是/否）——历史字段保留兼容，新前端不再传值 */
     private Boolean isReceived;
 
