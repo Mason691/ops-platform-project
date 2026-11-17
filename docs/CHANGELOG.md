@@ -2,6 +2,17 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-17（员工工作台二级页返回主页链接 + 生产验证）
+
+- **功能**：新增 `EmployeeHomeLink`（纯链接，`reLaunch` 回 `/pages/employee/dashboard`）与 `EmployeePageHead`（标题 + 最右链接）；17 个非 Tab 二级页面统一将「⌂ 返回主页」放在页面标题同一行最右侧；待办/AI/个人中心仍使用底部「主页」Tab。
+- **提交/合并**：ops `52295d5 fix(ops-h5): 返回主页链接与页面标题同行靠右`；已快进合并到 `main` 并推送。
+- **部署（2026-11-17 21:16）**：仅 ops H5。入口 `index-D702sTAY.js`；组件 `EmployeeHomeLink.BFRT4y2e.js`、`EmployeePageHead.CZbGA2In.js`；125 assets；`boss-ops-nginx` reload；备份 `backups/html-ops-pre-inlinehome-20261117_2116.tgz`。
+- **验证**：
+  - 17 个二级页面 chunk 均引用返回主页组件；旧入口 `index-KrrnFLYm.js`、旧组件 chunk 均 404。
+  - `flow-task` 构建代码头部顺序为 返回 → 任务处理 → 返回主页；`EmployeePageHead` 使用 `justify-content:space-between`，链接 `flex-shrink:0`。
+  - `/ops/` 标题「金地美家」200；新入口/组件/页面 chunk 公网 200；ops 8082 health 200、容器 healthy。
+- **未执行**：部署后尚无真实微信请求（日志最后加载时间 21:08–21:13，早于 21:16 部署），真实手机视觉点击需用户重新进入确认。
+
 ## 2026-11-17（平台驳回弹窗统一 + 生产部署验证）
 
 - **合并**：平台 `fix/workflow-reject` 快进合并到 `main`（`743fef4..d444131`），并推送 `origin/main`。内容：`RejectDialog/useReject` 统一驳回弹窗、驳回任务级锁与并发加固、`WorkflowRejectService` 及测试。
