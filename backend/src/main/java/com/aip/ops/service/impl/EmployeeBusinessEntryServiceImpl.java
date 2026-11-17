@@ -351,11 +351,15 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
             throw BusinessException.of("收款凭证地址不合法，请重新上传");
         }
         String remark = str(request.getRemark());
+        // 是否全款=否的补录必须写清收款说明（后端为准，防绕过前端）
+        if (remark.isEmpty()) {
+            throw BusinessException.of("请填写收款备注");
+        }
         if (remark.length() > MAX_REMARK_LENGTH) {
             throw BusinessException.of("收款备注不能超过" + MAX_REMARK_LENGTH + "个字");
         }
         return transactionTemplate.execute(status -> doReceiveBalance(
-                ctx, orderId, amount, voucher, remark.isEmpty() ? null : remark));
+                ctx, orderId, amount, voucher, remark));
     }
 
     /** 事务内：行锁订单 → 重新校验经办人/付款方式/金额 → 原子置全款。 */

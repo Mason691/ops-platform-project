@@ -20,6 +20,12 @@ public interface MaterialRequisitionService {
 
     MaterialRequisitionView detail(Long id);
 
+    /**
+     * 审批人视角详情：调用方必须先通过底座 taskId 校验“当前用户是待办审批人且
+     * businessId 匹配”，本方法不再按 applicant_user_ids 过滤。
+     */
+    MaterialRequisitionView approvalDetail(Long id);
+
     /** 可核销领用单：当前员工可见、已通过/已发放、未核销完成、无审批中核销单。 */
     List<MaterialRequisitionSummary> pickable(String keyword, LocalDate dateFrom, LocalDate dateTo);
 

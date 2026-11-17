@@ -51,9 +51,11 @@
                                          :error="voucherError" />
           </view>
           <view class="field">
-            <text class="label">收款备注</text>
-            <textarea v-model="form.remark" class="textarea" maxlength="500"
-                      placeholder="选填，最多500字" />
+            <text class="label">收款备注 <text class="req">*</text></text>
+            <textarea v-model="form.remark" class="textarea"
+                      :class="{ 'control-error': remarkError }" maxlength="500"
+                      placeholder="请填写收款说明，最多500字" />
+            <text v-if="remarkError" class="ferr">{{ remarkError }}</text>
           </view>
         </view>
 
@@ -75,7 +77,7 @@ import BusinessSpecialFileUploader from '@/components/BusinessSpecialFileUploade
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 
-/** 货款补录：应补余款只读；实收余款默认等于应补余款且必须相等；凭证必填。 */
+/** 货款补录：应补余款只读；实收余款默认等于应补余款且必须相等；凭证、收款备注必填。 */
 const orderId = ref(null)
 const detail = ref(null)
 const loading = ref(true)
@@ -83,6 +85,7 @@ const errorMsg = ref('')
 const submitting = ref(false)
 const amountError = ref('')
 const voucherError = ref('')
+const remarkError = ref('')
 
 const form = reactive({ receivedAmount: '', voucher: null, remark: '' })
 
@@ -121,6 +124,7 @@ function money(value) {
 function validate() {
   amountError.value = ''
   voucherError.value = ''
+  remarkError.value = ''
   const raw = String(form.receivedAmount || '').trim()
   const received = Number(raw)
   const due = Number(detail.value.balanceAmount) || 0
@@ -136,6 +140,10 @@ function validate() {
     voucherError.value = '请上传收款凭证'
     return false
   }
+  if (!String(form.remark || '').trim()) {
+    remarkError.value = '请填写收款备注'
+    return false
+  }
   return true
 }
 
@@ -147,7 +155,7 @@ async function submit() {
     const result = await api.receiveBalance(orderId.value, {
       receivedAmount: Number(form.receivedAmount),
       voucherUrl: form.voucher.url,
-      remark: String(form.remark || '').trim() || null
+      remark: String(form.remark || '').trim()
     })
     if (result && result.alreadyReceived) {
       uni.showModal({
@@ -168,6 +176,7 @@ async function submit() {
     if (e && e.msg) {
       if (String(e.msg).includes('实收余款')) amountError.value = e.msg
       else if (String(e.msg).includes('凭证')) voucherError.value = e.msg
+      else if (String(e.msg).includes('备注')) remarkError.value = e.msg
     }
     uni.showToast({ title: (e && e.msg) || '补录失败，请稍后重试', icon: 'none', duration: 2500 })
   } finally {
@@ -210,6 +219,7 @@ function back() {
   background: #f7f7f7; border-radius: 12rpx; padding: 16rpx 20rpx;
   font-size: 27rpx; color: #333; box-sizing: border-box;
 }
+.control-error { border: 1rpx solid #e53935; background: #FFF8F8; }
 .hint { display: block; font-size: 21rpx; color: #999; margin-top: 8rpx; }
 .ferr { display: block; font-size: 22rpx; color: #e53935; margin-top: 6rpx; }
 .done-card {

@@ -8,10 +8,13 @@ import com.aip.ops.dto.MaterialSearchResult;
 import com.aip.ops.dto.MaterialWriteOffRequest;
 import com.aip.ops.dto.MaterialWriteOffSummary;
 import com.aip.ops.dto.MaterialWriteOffView;
+import com.aip.ops.client.WorkflowPlatformClient;
 import com.aip.ops.service.EmployeeMaterialSupport;
 import com.aip.ops.service.MaterialRequisitionService;
 import com.aip.ops.service.MaterialWriteOffService;
+import com.aip.sdk.exception.BusinessException;
 import com.aip.sdk.result.R;
+import com.aip.sdk.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -53,6 +57,7 @@ public class EmployeeMaterialController {
     private final EmployeeMaterialSupport support;
     private final MaterialRequisitionService requisitionService;
     private final MaterialWriteOffService writeOffService;
+    private final WorkflowPlatformClient workflowClient;
 
     @Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
     private String uploadBaseDir;
@@ -99,6 +104,17 @@ public class EmployeeMaterialController {
         return R.ok(requisitionService.detail(id));
     }
 
+    /**
+     * 审批人视角领用详情：必须携带底座 taskId，服务端校验当前用户是该任务审批人
+     * 且 task.businessId = 单据 ID，才能读取申请人视角之外的详情。
+     */
+    @GetMapping("/requisitions/{id}/approval")
+    public R<MaterialRequisitionView> requisitionApprovalDetail(
+            @PathVariable Long id, @RequestParam Long taskId) {
+        assertApproverTask(taskId, id, "OPS_MATERIAL_REQUISITION");
+        return R.ok(requisitionService.approvalDetail(id));
+    }
+
     /** 可核销领用单（已通过/已发放、未核销完成、无审批中核销单）。 */
     @GetMapping("/requisitions/pickable")
     public R<List<MaterialRequisitionSummary>> pickable(
@@ -135,6 +151,14 @@ public class EmployeeMaterialController {
         return R.ok(writeOffService.detail(id));
     }
 
+    /** 审批人视角核销详情：校验 taskId 归属、审批人、业务类型与单据 ID。 */
+    @GetMapping("/write-offs/{id}/approval")
+    public R<MaterialWriteOffView> writeOffApprovalDetail(
+            @PathVariable Long id, @RequestParam Long taskId) {
+        assertApproverTask(taskId, id, "OPS_MATERIAL_WRITE_OFF");
+        return R.ok(writeOffService.approvalDetail(id));
+    }
+
     /** 使用凭证上传：JPG/PNG/WEBP/PDF，单个 ≤10MB。 */
     @PostMapping("/voucher")
     public R<Map<String, Object>> uploadVoucher(@RequestParam("file") MultipartFile file) {
@@ -165,6 +189,24 @@ public class EmployeeMaterialController {
         } catch (Exception e) {
             log.error("物资使用凭证上传失败", e);
             return R.fail("上传失败，请重试");
+        }
+    }
+
+    /**
+     * 审批人权限校验（fail-closed）：taskId 必须是底座中当前用户 PENDING 的任务，
+     * 且业务类型/业务 ID 与请求一致；否则不允许读取非申请人视角的详情。
+     */
+    private void assertApproverTask(Long taskId, Long businessId, String businessType) {
+        // 同时校验员工身份（拒绝 SSO 会员令牌）
+        support.context();
+        WorkflowPlatformClient.TaskIdentity task = workflowClient.taskIdentity(taskId);
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (task == null
+                || !Objects.equals(task.approverUserId(), userId)
+                || !"PENDING".equals(task.status())
+                || !businessType.equals(task.businessType())
+                || !String.valueOf(businessId).equals(task.businessId())) {
+            throw BusinessException.forbidden("无权处理该审批任务");
         }
     }
 }

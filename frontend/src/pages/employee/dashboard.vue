@@ -78,7 +78,6 @@
         <view class="menu-card" @click="goBalancePending">
           <view class="mc-icon mc-icon-pay">
             <text>💰</text>
-            <text v-if="balancePendingCount" class="mc-badge">{{ balancePendingCount > 99 ? '99+' : balancePendingCount }}</text>
           </view>
           <view class="mc-body">
             <text class="mc-title">货款补录</text>
@@ -119,7 +118,10 @@
           <text class="mc-arrow">›</text>
         </view>
         <view class="menu-card" @click="goTodo">
-          <view class="mc-icon mc-icon-pending"><text>📋</text></view>
+          <view class="mc-icon mc-icon-pending">
+            <text>📋</text>
+            <text v-if="todoCount" class="mc-badge">{{ todoCount > 99 ? '99+' : todoCount }}</text>
+          </view>
           <view class="mc-body">
             <text class="mc-title">待办任务</text>
             <text class="mc-desc">审核、核对、派工与施工任务</text>
@@ -180,10 +182,10 @@ const yearlyStats = ref({
   totalCommission: '¥0',
   totalSale: '¥0'
 })
-const balancePendingCount = ref(0)
+/** 待办角标 = 底座当前登录人 PENDING 审批任务总数；业务数据卡片不显示徽标 */
+const todoCount = ref(0)
 const logCardRef = ref(null)
 let dashboardShown = false
-
 const {
   orgs, sheetVisible, switching, loadOrgs, openSheet, confirmSwitch
 } = useOrgSwitch({ onChanged: onOrgChanged })
@@ -192,12 +194,26 @@ const avatarChar = computed(() => (employeeName.value || '员').charAt(0))
 
 onShow(async () => {
   await loadDashboard()
-  loadBalancePending()
+  loadTodoCount()
   await loadOrgs()
   // 卡片自身在 mounted 已加载一次；后续回到工作台（含查看全部返回）再刷新
   if (dashboardShown) logCardRef.value?.reload()
   dashboardShown = true
 })
+
+/** 待办角标：底座 /api/wf/task/todo 已按当前登录人 PENDING 审批任务过滤 */
+async function loadTodoCount() {
+  if (!uni.getStorageSync('ops_employee_token')) {
+    todoCount.value = 0
+    return
+  }
+  try {
+    const data = await api.workflowTodo({ pageNum: 1, pageSize: 1 })
+    todoCount.value = Math.max(0, Number(data && data.total) || 0)
+  } catch (e) {
+    todoCount.value = 0
+  }
+}
 
 function refreshCompany() {
   noPermissionTip.value = uni.getStorageSync('ops_employee_no_permission') === '1'
@@ -263,19 +279,6 @@ async function onOrgChanged(data) {
 
 function goBusinessData() { uni.navigateTo({ url: '/pages/employee/business-data' }) }
 function goBalancePending() { uni.navigateTo({ url: '/pages/employee/balance-pending' }) }
-
-async function loadBalancePending() {
-  if (!uni.getStorageSync('ops_employee_token')) {
-    balancePendingCount.value = 0
-    return
-  }
-  try {
-    const list = await api.depositPending()
-    balancePendingCount.value = Array.isArray(list) ? list.length : 0
-  } catch (e) {
-    balancePendingCount.value = 0
-  }
-}
 function goVerifiedBusiness() { uni.navigateTo({ url: '/pages/employee/verified-business' }) }
 function goMaterialRequisition() { uni.navigateTo({ url: '/pages/employee/material-requisition-records' }) }
 function goMaterialWriteOff2()   { uni.navigateTo({ url: '/pages/employee/material-write-off-records' }) }

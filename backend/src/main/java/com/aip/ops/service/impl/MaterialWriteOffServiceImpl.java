@@ -126,6 +126,16 @@ public class MaterialWriteOffServiceImpl implements MaterialWriteOffService {
     }
 
     @Override
+    public MaterialWriteOffView approvalDetail(Long id) {
+        // 安全边界在控制器：已用底座 taskId 校验当前用户是该单待办审批人且 businessId 匹配
+        OpsMaterialWriteOff header = id == null ? null : writeOffMapper.selectById(id);
+        if (header == null || Integer.valueOf(1).equals(header.getDeleteFlag())) {
+            throw BusinessException.notFound("核销单不存在");
+        }
+        return toView(header, entriesOf(id), currentApprover(header));
+    }
+
+    @Override
     @Transactional
     public void handleWorkflowEvent(WorkflowBusinessEvent event) {
         Long id = parseLong(event.getBusinessId());

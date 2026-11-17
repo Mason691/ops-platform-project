@@ -5,6 +5,14 @@
       <text class="sub">财务核对完成的业务数据，可发起采购申请</text>
     </view>
 
+    <view class="pending-summary">
+      <view class="pending-main">
+        <text class="pending-label">待发起采购申请</text>
+        <text class="pending-hint">已核对 · 未发起 · 未派工出库</text>
+      </view>
+      <text class="pending-value">{{ pendingCount }} 单</text>
+    </view>
+
     <view v-if="loading" class="state"><text>加载中...</text></view>
     <view v-else-if="errorMsg" class="state">
       <text class="state-err">{{ errorMsg }}</text>
@@ -21,7 +29,12 @@
 
       <view v-for="item in list" :key="itemKey(item)" class="card">
         <view class="card-top">
-          <text class="order-no">{{ item.orderNo || item.receiptNo || '未填单号' }}</text>
+          <view class="order-title">
+            <text class="order-no">{{ item.orderNo || item.receiptNo || '未填单号' }}</text>
+            <text v-if="item.dispatched" class="status-tag danger">已派工出库</text>
+            <text v-else-if="item.requested" class="status-tag muted">已发起</text>
+            <text v-else class="status-tag pending">待发起</text>
+          </view>
           <text class="amount">¥{{ money(item.totalAmount) }}</text>
         </view>
         <text class="customer">{{ item.customerName || '—' }} {{ item.customerPhone || '' }}</text>
@@ -54,12 +67,15 @@
         </view>
 
         <view class="card-bottom">
-          <text v-if="item.requested" class="requested">已申请 {{ item.requestBillNo || '' }}</text>
+          <text v-if="item.dispatched" class="requested">
+            已派工出库，不可再发起采购申请
+          </text>
+          <text v-else-if="item.requested" class="requested">已申请 {{ item.requestBillNo || '' }}</text>
           <text v-else class="hint">申请后生成采购订单草稿，请在 PC 端核对商品并完善供应商/仓库/单价</text>
-          <view class="btn primary" :class="{ disabled: item.requested }"
+          <view v-if="!item.dispatched && !item.requested" class="btn primary"
+            :class="{ disabled: submittingKey === itemKey(item) }"
             @click="initiate(item)">
-            <text>{{ item.requested ? '已申请'
-              : (submittingKey === itemKey(item) ? '提交中...' : '发起采购申请') }}</text>
+            <text>{{ submittingKey === itemKey(item) ? '提交中...' : '发起采购申请' }}</text>
           </view>
         </view>
       </view>
@@ -77,6 +93,7 @@ const loading = ref(true)
 const errorMsg = ref('')
 const list = ref([])
 const truncated = ref(false)
+const pendingCount = ref(0)
 const submittingKey = ref('')
 const expanded = ref({})
 
@@ -102,6 +119,8 @@ async function loadData() {
     const data = await api.scmFinanceCheckedOrders()
     list.value = (data && data.candidates) || []
     truncated.value = !!(data && data.truncated)
+    // 与列表同一响应返回，口径 = 已核对 + 未发起 + 未派工出库
+    pendingCount.value = Math.max(0, Number(data && data.pendingCount) || 0)
   } catch (e) {
     errorMsg.value = (e && e.msg) || '加载失败，请稍后重试'
   } finally {
@@ -146,7 +165,8 @@ function qtyText(value) {
 
 /** 发起采购申请：生成采购订单草稿，PC 端完善供应商/仓库/单价后提交审批 */
 function initiate(item) {
-  if (item.requested || submittingKey.value) {
+  // 已发起/已派工出库均不允许再发起；后端 createPurchaseRequest 有同样的最终拦截
+  if (item.requested || item.dispatched || submittingKey.value) {
     return
   }
   const name = item.orderNo || item.receiptNo || '该业务订单'
@@ -191,6 +211,15 @@ function money(v) {
 .head { padding: 36rpx 32rpx 20rpx; background: linear-gradient(135deg, #FF6B35, #E85D2C); }
 .title { display: block; font-size: 40rpx; font-weight: 700; color: #fff; }
 .sub { display: block; margin-top: 8rpx; font-size: 24rpx; color: rgba(255,255,255,.85); }
+.pending-summary {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 20rpx 24rpx 0; padding: 22rpx 24rpx; border-radius: 16rpx;
+  background: #fff; box-shadow: 0 4rpx 16rpx rgba(0,0,0,.04);
+}
+.pending-main { display: flex; flex-direction: column; gap: 4rpx; }
+.pending-label { font-size: 25rpx; color: #4E5969; font-weight: 600; }
+.pending-hint { font-size: 20rpx; color: #86909C; }
+.pending-value { font-size: 38rpx; line-height: 1; font-weight: 700; color: #F53F3F; }
 .state { padding: 120rpx 40rpx; display: flex; flex-direction: column; align-items: center; color: #86909C; font-size: 28rpx; }
 .state-err { color: #F53F3F; margin-bottom: 24rpx; text-align: center; }
 .empty-icon { font-size: 72rpx; margin-bottom: 16rpx; }
@@ -198,7 +227,12 @@ function money(v) {
 .warn { background: #fff7e8; color: #FF7D00; font-size: 24rpx; padding: 16rpx 20rpx; border-radius: 12rpx; margin-bottom: 16rpx; }
 .card { background: #fff; border-radius: 20rpx; padding: 26rpx; margin-bottom: 20rpx; box-shadow: 0 4rpx 16rpx rgba(0,0,0,.04); }
 .card-top { display: flex; justify-content: space-between; align-items: center; gap: 12rpx; }
-.order-no { font-size: 30rpx; font-weight: 700; color: #1D2129; flex: 1; }
+.order-title { display: flex; align-items: center; gap: 10rpx; flex: 1; min-width: 0; }
+.order-no { font-size: 30rpx; font-weight: 700; color: #1D2129; flex: 1; min-width: 0; word-break: break-all; }
+.status-tag { font-size: 20rpx; line-height: 1; padding: 8rpx 12rpx; border-radius: 8rpx; flex-shrink: 0; }
+.status-tag.pending { color: #FF7D00; background: #FFF7E6; }
+.status-tag.danger { color: #F53F3F; background: #FFF1F0; }
+.status-tag.muted { color: #86909C; background: #F2F3F5; }
 .amount { font-size: 30rpx; font-weight: 700; color: #F53F3F; }
 .customer { display: block; margin-top: 12rpx; font-size: 27rpx; color: #4E5969; }
 .address { display: block; margin-top: 6rpx; font-size: 24rpx; color: #86909C; }

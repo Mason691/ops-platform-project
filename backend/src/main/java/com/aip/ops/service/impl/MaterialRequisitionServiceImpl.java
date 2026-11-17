@@ -120,6 +120,16 @@ public class MaterialRequisitionServiceImpl implements MaterialRequisitionServic
     }
 
     @Override
+    public MaterialRequisitionView approvalDetail(Long id) {
+        // 安全边界在控制器：已用底座 taskId 校验当前用户是该单待办审批人且 businessId 匹配
+        OpsMaterialRequisition header = id == null ? null : requisitionMapper.selectById(id);
+        if (header == null || Integer.valueOf(1).equals(header.getDeleteFlag())) {
+            throw BusinessException.notFound("领用单不存在");
+        }
+        return toView(header, entriesOf(id), currentApprover(header));
+    }
+
+    @Override
     public List<MaterialRequisitionSummary> pickable(String keyword,
                                                      LocalDate dateFrom, LocalDate dateTo) {
         EmployeeMaterialSupport.EmployeeContext ctx = support.context();

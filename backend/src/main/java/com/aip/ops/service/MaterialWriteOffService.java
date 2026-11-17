@@ -19,5 +19,11 @@ public interface MaterialWriteOffService {
 
     MaterialWriteOffView detail(Long id);
 
+    /**
+     * 审批人视角详情：调用方必须先通过底座 taskId 校验“当前用户是待办审批人且
+     * businessId 匹配”，本方法不再按 write_off_user_ids 过滤。
+     */
+    MaterialWriteOffView approvalDetail(Long id);
+
     void handleWorkflowEvent(WorkflowBusinessEvent event);
 }

@@ -286,10 +286,16 @@ export const api = {
   materialRequisitionCreate: (data) => request({url:'/api/ops/employee/material/requisitions', method:'POST', data}),
   materialRequisitionPage: (params) => request({url:'/api/ops/employee/material/requisitions', data:params}),
   materialRequisitionDetail: (id) => request({url:'/api/ops/employee/material/requisitions/' + id}),
+  materialRequisitionApprovalDetail: (id, taskId) => request({
+    url: '/api/ops/employee/material/requisitions/' + id + '/approval', data: { taskId }
+  }),
   materialPickableRequisitions: (params) => request({url:'/api/ops/employee/material/requisitions/pickable', data:params}),
   materialWriteOffCreate: (data) => request({url:'/api/ops/employee/material/write-offs', method:'POST', data}),
   materialWriteOffPage: (params) => request({url:'/api/ops/employee/material/write-offs', data:params}),
   materialWriteOffDetail: (id) => request({url:'/api/ops/employee/material/write-offs/' + id}),
+  materialWriteOffApprovalDetail: (id, taskId) => request({
+    url: '/api/ops/employee/material/write-offs/' + id + '/approval', data: { taskId }
+  }),
   // 业务订单详情 / 派工可选员工 / 财务暂缓（ops，员工 JWT + 数据范围）
   businessOrderDetail: (orderId) => request({url:'/api/ops/admin/business-data/orders/' + orderId}),
   businessFlowAssignees: () => request({url:'/api/ops/admin/business-data/flow/assignees'}),
