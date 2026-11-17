@@ -10,7 +10,7 @@
         v-model="note"
         class="reject-input"
         maxlength="500"
-        :focus="visible"
+        :focus="focused"
         :adjust-position="true"
         :cursor-spacing="24"
         :show-confirm-bar="false"
@@ -28,7 +28,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -38,10 +38,31 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'confirm'])
 const note = ref('')
+const focused = ref(false)
 
 watch(() => props.visible, (value) => {
-  if (value) note.value = ''
-})
+  if (!value) {
+    focused.value = false
+    return
+  }
+  note.value = ''
+  // 先复位再置 true，强制 textarea 的 focus 属性发生一次 false→true 变化
+  focused.value = false
+  nextTick(() => {
+    focused.value = true
+    focusDom()
+  })
+}, { immediate: true })
+
+/** H5 兜底：uni-app textarea 的 focus 属性在部分微信 WebView 不生效，直接聚焦内层 textarea。 */
+function focusDom() {
+  if (typeof document === 'undefined') return
+  const el = document.querySelector('.reject-panel textarea')
+  if (!el || typeof el.focus !== 'function') return
+  setTimeout(() => {
+    if (props.visible) el.focus()
+  }, 50)
+}
 
 function toast(title) {
   uni.showToast({ title, icon: 'none', duration: 2500 })
@@ -116,9 +137,10 @@ function confirm() {
 .reject-input {
   width: 100%;
   box-sizing: border-box;
-  min-height: 200rpx;
+  height: 320rpx;
+  min-height: 320rpx;
   margin-top: 20rpx;
-  padding: 20rpx 22rpx;
+  padding: 22rpx;
   background: #F7F8FA;
   border-radius: 12rpx;
   font-size: 28rpx;
