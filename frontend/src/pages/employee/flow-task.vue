@@ -261,25 +261,22 @@
 
         <view v-else class="no-action"><text>当前节点为审批节点，确认信息后提交即可。</text></view>
 
-        <view class="field"><text class="label">处理意见</text>
-          <textarea v-model="opinion" class="textarea" maxlength="500" placeholder="可选" />
-        </view>
-
-        <view v-if="rejecting" class="field reject-box">
-          <text class="label">驳回意见 <text class="req">*</text></text>
-          <textarea v-model="rejectNote" class="textarea" maxlength="500" placeholder="请填写驳回原因（不少于5个字）" />
-          <view class="actions">
-            <button class="btn ghost-line" @click="rejecting = false">取消</button>
-            <button class="btn danger" :disabled="submitting" @click="confirmReject">确认驳回</button>
-          </view>
+        <view class="field"><text class="label">处理意见（可选，仅通过时记录）</text>
+          <textarea v-model="opinion" class="textarea" maxlength="500" placeholder="通过时的处理意见（可选）" />
         </view>
       </view>
 
       <view class="actions">
-        <button v-if="showGenericReject" class="btn danger" :disabled="submitting" @click="rejecting = !rejecting">驳回</button>
+        <button v-if="showGenericReject" class="btn danger" :disabled="submitting" @click="rejectVisible = true">驳回</button>
         <button class="btn primary" :disabled="submitting || !!dispatchBlockedReason" @click="submit">{{ submitting ? '提交中...' : '提交处理' }}</button>
       </view>
     </template>
+
+    <RejectPopup
+      v-model:visible="rejectVisible"
+      :submitting="submitting"
+      @confirm="confirmReject"
+    />
   </view>
 </template>
 
@@ -291,6 +288,7 @@ import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 import { REQUISITION_STATUS, WRITE_OFF_STATUS } from '@/utils/materialForm'
 import ApproverCard from '@/components/ApproverCard.vue'
+import RejectPopup from '@/components/RejectPopup.vue'
 
 const loading = ref(true)
 const submitting = ref(false)
@@ -305,8 +303,7 @@ const selectedKeys = ref([])
 const expectDate = ref('')
 const expectClock = ref('')
 const opinion = ref('')
-const rejecting = ref(false)
-const rejectNote = ref('')
+const rejectVisible = ref(false)
 const categoryMap = ref({})
 const approverExpanded = ref(false)
 
@@ -734,10 +731,10 @@ function materialWriteOffStatus(value) {
   return WRITE_OFF_STATUS[value] || value || '-'
 }
 
-async function confirmReject() {
+async function confirmReject(opinionText) {
   if (submitting.value) return
-  const text = String(rejectNote.value || '').trim()
-  if (text.length < 5) return toast('驳回意见至少5个字')
+  const text = String(opinionText || '').trim()
+  if (text.length < 5) return toast('请填写驳回意见（不少于 5 个字）')
   submitting.value = true
   try {
     const payload = { taskId: Number(taskId.value), opinion: text }
@@ -746,6 +743,7 @@ async function confirmReject() {
     } else {
       await api.workflowReject(payload)
     }
+    rejectVisible.value = false
     toast('已驳回')
     goTodo()
   } catch (e) {
@@ -832,7 +830,5 @@ function goBack() {
 .btn.primary { background: #FF6B35; color: #fff; }
 .btn.danger { background: #fff; color: #F53F3F; border: 1rpx solid #F53F3F; }
 .btn.ghost { background: #fff; color: #FF6B35; border: 1rpx solid #FF6B35; margin-top: 16rpx; width: 100%; }
-.btn.ghost-line { background: #fff; color: #4E5969; border: 1rpx solid #C9CDD4; }
 .btn[disabled] { opacity: .6; }
-.reject-box { background: #FFF7F5; border-radius: 12rpx; padding: 18rpx; }
 </style>
