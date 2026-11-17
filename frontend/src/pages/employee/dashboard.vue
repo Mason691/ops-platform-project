@@ -72,6 +72,22 @@
           </view>
           <text class="mc-arrow">›</text>
         </view>
+        <view class="menu-card" @click="goMaterialPick">
+          <view class="mc-icon mc-icon-dispatch"><text>📦</text></view>
+          <view class="mc-body">
+            <text class="mc-title">物料领取</text>
+            <text class="mc-desc">派工施工领取物料，财务审批</text>
+          </view>
+          <text class="mc-arrow">›</text>
+        </view>
+        <view class="menu-card" @click="goMaterialWriteOff">
+          <view class="mc-icon mc-icon-dispatch"><text>♻️</text></view>
+          <view class="mc-body">
+            <text class="mc-title">物料核销</text>
+            <text class="mc-desc">剩余物料退回与消耗核销</text>
+          </view>
+          <text class="mc-arrow">›</text>
+        </view>
         <view class="menu-card" @click="goTodo">
           <view class="mc-icon mc-icon-pending"><text>📋</text></view>
           <view class="mc-body">
@@ -208,6 +224,8 @@ async function onOrgChanged(data) {
 
 function goBusinessData() { uni.navigateTo({ url: '/pages/employee/business-data' }) }
 function goVerifiedBusiness() { uni.navigateTo({ url: '/pages/employee/verified-business' }) }
+function goMaterialPick()     { uni.navigateTo({ url: '/pages/employee/material-pick' }) }
+function goMaterialWriteOff() { uni.navigateTo({ url: '/pages/employee/material-write-off' }) }
 function goTodo()         { uni.redirectTo({ url: '/pages/employee/flow-todo' }) }
 function goAiChat()       { uni.redirectTo({ url: '/pages/employee/ai-chat' }) }
 function goProfile()      { uni.redirectTo({ url: '/pages/employee/profile' }) }

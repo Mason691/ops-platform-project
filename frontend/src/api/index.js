@@ -261,6 +261,15 @@ export const api = {
   scmPurOrderDetail: (id) => request({url:'/api/scm/pur-order/h5/' + id}),
   scmPurOrderApprove: (data) => request({url:'/api/scm/pur-order/h5/workflow/approve', method:'POST', data}),
   scmPurOrderReject: (data) => request({url:'/api/scm/pur-order/h5/workflow/reject', method:'POST', data}),
+
+  // 物料领取 / 核销（SCM 8084；H5 只制单与提交，不审批）
+  scmWarehouseList: (params) => request({url:'/api/scm/warehouse/list', data:params}),
+  scmInventoryQuery: (params) => request({url:'/api/scm/inventory/query', data:params}),
+  scmMaterialPickTaskOrders: () => request({url:'/api/scm/material-pick/task-orders'}),
+  scmMaterialPickCreate: (data) => request({url:'/api/scm/material-pick', method:'POST', data}),
+  scmMaterialWriteOffPickable: () => request({url:'/api/scm/material-write-off/pickable'}),
+  scmMaterialWriteOffFromPick: (pickId) => request({url:'/api/scm/material-write-off/from-pick/' + pickId}),
+  scmMaterialWriteOffCreate: (data) => request({url:'/api/scm/material-write-off', method:'POST', data}),
   // 业务订单详情 / 派工可选员工 / 财务暂缓（ops，员工 JWT + 数据范围）
   businessOrderDetail: (orderId) => request({url:'/api/ops/admin/business-data/orders/' + orderId}),
   businessFlowAssignees: () => request({url:'/api/ops/admin/business-data/flow/assignees'}),
