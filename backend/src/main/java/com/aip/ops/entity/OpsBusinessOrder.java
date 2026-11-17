@@ -100,6 +100,34 @@ public class OpsBusinessOrder extends BaseEntity {
     @TableField("total_commission")
     private BigDecimal totalCommission;
 
+    /** 是否含以旧换新（0否 1是），用于施工完成提醒与列表标记。 */
+    @TableField("has_trade_in")
+    private Integer hasTradeIn;
+
+    /** 以旧换新抵扣合计（按产品组 MAX 去重）。 */
+    @TableField("trade_in_deduction_amount")
+    private BigDecimal tradeInDeductionAmount;
+
+    /** 应付合计 = total_amount - trade_in_deduction_amount。 */
+    @TableField("payable_amount")
+    private BigDecimal payableAmount;
+
+    /** 以旧换新自动采购单状态：PENDING/SUCCESS/FAILED。 */
+    @TableField("trade_in_purchase_status")
+    private String tradeInPurchaseStatus;
+
+    /** 关联 SCM 采购订单ID（scm_pur_order.id）。 */
+    @TableField("trade_in_purchase_order_id")
+    private Long tradeInPurchaseOrderId;
+
+    /** 关联 SCM 采购订单号。 */
+    @TableField("trade_in_purchase_bill_no")
+    private String tradeInPurchaseBillNo;
+
+    /** 采购单创建失败原因（FAILED 时展示）。 */
+    @TableField("trade_in_purchase_error")
+    private String tradeInPurchaseError;
+
     @TableField("calc_status")
     private String calcStatus;
     /**

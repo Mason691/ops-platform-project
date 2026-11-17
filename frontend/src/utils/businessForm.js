@@ -10,6 +10,12 @@ export const PHONE_RE = /^1[3-9]\d{9}$/
 /** 单笔业务最多产品行（与后端 MAX_PRODUCTS 保持一致） */
 export const MAX_PRODUCTS = 50
 
+/** 每个商品行最多旧品数（与后端 MAX_TRADE_IN_ITEMS 保持一致） */
+export const MAX_TRADE_IN_ITEMS = 50
+
+/** 单笔业务旧品行数上限（与 SCM 自动采购单 100 条分录上限保持一致） */
+export const MAX_TOTAL_TRADE_IN_ITEMS = 100
+
 /** 单笔业务最多经办人（与后端 MAX_AGENTS 保持一致，含本人） */
 export const MAX_AGENTS = 20
 
@@ -49,7 +55,9 @@ const PRODUCT_FIELD_LABELS = {
   saleQuantity: '销售数量',
   standardPrice: '标准售价',
   specialFileId: '特批文件',
-  commissionRate: '提成比例'
+  commissionRate: '提成比例',
+  deductionAmount: '抵扣金额',
+  tradeInItems: '旧品明细'
 }
 const FIELD_LABELS = {
   batchNo: '批次',
@@ -102,6 +110,23 @@ export function newProductUid() {
   return `p${Date.now().toString(36)}-${productUidSeed}`
 }
 
+let tradeInUidSeed = 0
+
+export function newTradeInUid() {
+  tradeInUidSeed += 1
+  return `t${Date.now().toString(36)}-${tradeInUidSeed}`
+}
+
+/** 新增一件空白旧品（default 1 件）。 */
+export function emptyTradeInItem() {
+  return {
+    uid: newTradeInUid(),
+    productId: null, materialNumber: '', productName: '',
+    brand: '', model: '', category: '', unit: '',
+    quantity: '1', remark: '', isManual: false
+  }
+}
+
 /** 新增一行空白产品。 */
 export function emptyProduct() {
   return {
@@ -111,19 +136,43 @@ export function emptyProduct() {
     standardSalePrice: null, priceConfigured: null, priceLoading: false,
     priceError: '',
     isSpecial: false, specialFileId: null, specialFileUrl: '', specialFileName: '',
-    commissionRate: ''
+    commissionRate: '',
+    isTradeIn: false, deductionAmount: '', tradeInItems: []
   }
 }
 
-/** 单行产品的收款金额 = 销售单价 × 销售数量。 */
+/** 单行产品的收款金额（销售单价 × 销售数量）；提成基数仍按此口径。 */
 export function computeProductAmount(product) {
   return computeReceiptAmount(product && product.salePrice, product && product.saleQuantity)
+}
+
+/** 单行以旧换新抵扣金额；未选择以旧换新按 0。 */
+export function computeProductDeduction(product) {
+  if (!product || !product.isTradeIn) return 0
+  return normalizeMoney(product.deductionAmount)
+}
+
+/** 单行抵扣后金额 = 销售金额 - 抵扣金额（不小于 0）。 */
+export function computeProductPayable(product) {
+  return normalizeMoney(Math.max(0, computeProductAmount(product) - computeProductDeduction(product)))
 }
 
 /** 整笔业务收款金额合计（按产品求和，不随经办人数翻倍）。 */
 export function computeProductsTotal(products) {
   const sum = (products || []).reduce(
     (total, product) => total + computeProductAmount(product), 0)
+  return normalizeMoney(sum)
+}
+
+export function computeProductsDeductionTotal(products) {
+  const sum = (products || []).reduce(
+    (total, product) => total + computeProductDeduction(product), 0)
+  return normalizeMoney(sum)
+}
+
+export function computeProductsPayableTotal(products) {
+  const sum = (products || []).reduce(
+    (total, product) => total + computeProductPayable(product), 0)
   return normalizeMoney(sum)
 }
 
@@ -181,6 +230,13 @@ export function validateBusinessForm(form, meta = {}) {
 
   const products = Array.isArray(form.products) ? form.products : []
   const seenModels = {}
+  const tradeInRows = products.reduce((sum, product) => {
+    if (!product || !product.isTradeIn) return sum
+    return sum + (Array.isArray(product.tradeInItems) ? product.tradeInItems.length : 0)
+  }, 0)
+  if (tradeInRows > MAX_TOTAL_TRADE_IN_ITEMS) {
+    errors.products = `单笔业务旧品最多${MAX_TOTAL_TRADE_IN_ITEMS}行`
+  }
   if (!products.length) errors.products = '请至少添加一行产品'
   if (products.length > MAX_PRODUCTS) errors.products = `单笔业务最多${MAX_PRODUCTS}行产品`
 
@@ -236,13 +292,42 @@ export function validateBusinessForm(form, meta = {}) {
         errors[key('commissionRate')] = prefix + '请输入0-100的提成比例'
       }
     }
+
+    // 以旧换新：抵扣 >0 且不超过销售金额，旧品至少1件且数量为正整数
+    const salesAmount = computeProductAmount(product)
+    if (product && product.isTradeIn) {
+      const deduction = normalizeMoney(product.deductionAmount)
+      if (!(deduction > 0)) {
+        errors[key('deductionAmount')] = prefix + '以旧换新抵扣金额必须大于0'
+      } else if (deduction > salesAmount) {
+        errors[key('deductionAmount')] = prefix + '抵扣金额不能超过商品金额'
+      }
+      const items = Array.isArray(product.tradeInItems) ? product.tradeInItems : []
+      if (!items.length) {
+        errors[key('tradeInItems')] = prefix + '以旧换新至少录入1件旧品'
+      } else {
+        items.forEach((item, itemIndex) => {
+          const itemKey = field => `products.${index}.tradeInItems.${itemIndex}.${field}`
+          if (!item || !String(item.productName || '').trim()) {
+            errors[itemKey('productName')] =
+              `第${index + 1}个产品第${itemIndex + 1}件旧品：请选择或填写旧品名称`
+          }
+          const itemQty = Number(item && item.quantity)
+          if (!Number.isInteger(itemQty) || itemQty < 1) {
+            errors[itemKey('quantity')] =
+              `第${index + 1}个产品第${itemIndex + 1}件旧品：数量必须为正整数`
+          }
+        })
+      }
+    }
   })
 
   const paymentType = form.paymentType || 'FULL'
   if (!['FULL', 'DEPOSIT'].includes(paymentType)) {
     errors.paymentType = '请选择付款方式'
   } else if (paymentType === 'DEPOSIT') {
-    const salesTotal = computeProductsTotal(products)
+    // 定金以抵扣后的应付合计为基数，避免以旧换新订单多收余款
+    const payableTotal = computeProductsPayableTotal(products)
     const rawDeposit = String(form.depositAmount == null ? '' : form.depositAmount).trim()
     const deposit = normalizeMoney(form.depositAmount)
     if (rawDeposit === '') {
@@ -251,8 +336,8 @@ export function validateBusinessForm(form, meta = {}) {
       errors.depositAmount = '定金金额最多保留两位小数'
     } else if (!(deposit > 0)) {
       errors.depositAmount = '定金金额必须大于0'
-    } else if (deposit >= salesTotal) {
-      errors.depositAmount = '定金金额必须小于销售价合计，全额支付请选择全款支付'
+    } else if (deposit >= payableTotal) {
+      errors.depositAmount = '定金金额必须小于应付合计，全额支付请选择全款支付'
     }
   }
   if (!PAYMENT_METHODS.some(item => item.value === form.paymentMethod)) {
@@ -277,7 +362,7 @@ export function validateBusinessForm(form, meta = {}) {
     'agentUserIds', 'products']
   products.forEach((_, index) => {
     ['category', 'brand', 'model', 'standardPrice', 'salePrice', 'saleQuantity',
-      'specialFileId', 'commissionRate']
+      'specialFileId', 'commissionRate', 'deductionAmount', 'tradeInItems']
       .forEach(field => order.push(`products.${index}.${field}`))
   })
   order.push('paymentType', 'depositAmount', 'paymentMethod', 'receiptDate',
@@ -315,8 +400,15 @@ export function validateStep(form, meta, step) {
 export function errorLabel(key) {
   if (!key) return ''
   if (key.startsWith('products.')) {
-    const [, index, field] = key.split('.')
+    const [, index, field, itemIndex, itemField] = key.split('.')
     const row = Number(index) + 1
+    if (field === 'tradeInItems') {
+      if (itemField) {
+        const itemName = itemField === 'quantity' ? '数量' : '名称'
+        return `第${row}个产品 · 第${Number(itemIndex) + 1}件旧品 · ${itemName}`
+      }
+      return `第${row}个产品 · 旧品明细`
+    }
     return `第${row}个产品 · ${PRODUCT_FIELD_LABELS[field] || '信息'}`
   }
   return FIELD_LABELS[key] || key

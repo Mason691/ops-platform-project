@@ -242,6 +242,10 @@ export const api = {
   employeeOverview: (params) => request({url:'/api/ops/employee/business-data/overview',data:params}),
   employeeOrders: (params) => request({url:'/api/ops/employee/business-data/orders',data:params}),
   employeeOrderDetail: (orderId) => request({url:'/api/ops/employee/business-data/orders/' + orderId}),
+  employeeRetryTradeInPurchase: (orderId) => request({
+    url: '/api/ops/employee/business-data/orders/' + orderId + '/trade-in-purchase/retry',
+    method: 'POST'
+  }),
   employeeBatches: () => request({url:'/api/ops/employee/business-data/batches'}),
   employeeBatchCheck: (data) => request({url:'/api/ops/employee/business-data/batch/check',method:'POST',data}),
   // 员工手工新增业务数据

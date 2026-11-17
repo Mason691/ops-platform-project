@@ -43,8 +43,18 @@
       <view class="footer-space" :class="{ tall: step === 1 }"></view>
       <view class="action-bar">
         <view v-if="step === 1" class="footer-total">
-          <text class="footer-total-label">合计金额</text>
-          <AnimatedAmount class="footer-total-value" :value="productsTotal" />
+          <view class="footer-total-line">
+            <text class="footer-total-label">商品合计</text>
+            <AnimatedAmount class="footer-total-sub" :value="productsTotal" />
+          </view>
+          <view v-if="deductionTotal > 0" class="footer-total-line">
+            <text class="footer-total-label">抵扣合计</text>
+            <AnimatedAmount class="footer-total-sub deduction" :value="deductionTotal" prefix="-¥" />
+          </view>
+          <view class="footer-total-line payable">
+            <text class="footer-total-label">应付合计</text>
+            <AnimatedAmount class="footer-total-value" :value="payableTotal" />
+          </view>
         </view>
         <view class="btn-row">
           <view v-if="step > 0" class="btn ghost" @click="back"><text>上一步</text></view>
@@ -68,7 +78,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useBusinessWizard } from '@/hooks/useBusinessWizard'
-import { computeProductsTotal } from '@/utils/businessForm'
+import { computeProductsDeductionTotal, computeProductsPayableTotal, computeProductsTotal } from '@/utils/businessForm'
 import BusinessWizardSteps from '@/components/BusinessWizardSteps.vue'
 import BusinessStepBasic from '@/components/BusinessStepBasic.vue'
 import BusinessStepProducts from '@/components/BusinessStepProducts.vue'
@@ -85,6 +95,9 @@ const {
 
 const animClass = ref('')
 const productsTotal = computed(() => computeProductsTotal(form.products))
+const deductionTotal = computed(() => computeProductsDeductionTotal(form.products))
+const payableTotal = computed(() => computeProductsPayableTotal(form.products))
+
 let animTimer = null
 
 // 进入右滑、返回左滑；仅做轻量位移+淡入，避免叠加动画。
@@ -149,17 +162,21 @@ onMounted(() => {
 .step-body.enter-forward { animation: slideFromRight .22s ease-out; }
 .step-body.enter-back { animation: slideFromLeft .22s ease-out; }
 .footer-space { height: 160rpx; }
-.footer-space.tall { height: 230rpx; }
+.footer-space.tall { height: 260rpx; }
 .action-bar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
   background: #fff; border-top: 1rpx solid #f0f0f0;
   padding: 14rpx 24rpx calc(14rpx + env(safe-area-inset-bottom));
 }
 .footer-total {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; flex-direction: column; gap: 4rpx;
   padding: 4rpx 4rpx 12rpx;
 }
+.footer-total-line { display: flex; align-items: center; justify-content: space-between; }
+.footer-total-line.payable { border-top: 1rpx solid #F2F3F5; padding-top: 6rpx; }
 .footer-total-label { font-size: 25rpx; color: #666; }
+.footer-total-sub { font-size: 25rpx; color: #1D2129; font-weight: 600; }
+.footer-total-sub.deduction { color: #C62828; }
 .footer-total-value { font-size: 38rpx; font-weight: 700; color: #FF6B35; }
 .btn-row { display: flex; gap: 20rpx; }
 .btn {

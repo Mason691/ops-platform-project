@@ -18,14 +18,24 @@
     </view>
 
     <view v-if="!onlyErrors" class="total-card">
-      <text class="total-label">合计金额</text>
-      <AnimatedAmount class="total-val" :value="totalAmount" />
+      <view class="total-line">
+        <text class="total-label">商品合计</text>
+        <AnimatedAmount class="total-sub" :value="salesTotal" />
+      </view>
+      <view v-if="deductionTotal > 0" class="total-line">
+        <text class="total-label">抵扣合计</text>
+        <AnimatedAmount class="total-sub deduction" :value="deductionTotal" prefix="-¥" />
+      </view>
+      <view class="total-line payable">
+        <text class="total-label">应付合计</text>
+        <AnimatedAmount class="total-val" :value="payableTotal" />
+      </view>
     </view>
     <text v-if="!onlyErrors" class="hint">
-      收款金额 = 销售单价 × 销售数量，由系统自动计算并以服务端结果为准
+      销售金额 = 销售单价 × 销售数量；提成仍按销售额计算，抵扣不冲减提成基数，最终以服务端结果为准
     </text>
 
-    <!-- 付款方式与销售价强相关：放在商品合计之后，制单人录入商品时同步确认全款/定金 -->
+    <!-- 付款方式与应付金额强相关：放在商品合计之后，制单人录入商品时同步确认全款/定金 -->
     <BusinessPaymentSection :form="form" :errors="errors" :only-errors="onlyErrors" />
   </view>
 </template>
@@ -35,7 +45,10 @@ import { computed } from 'vue'
 import BusinessProductCard from '@/components/BusinessProductCard.vue'
 import BusinessPaymentSection from '@/components/BusinessPaymentSection.vue'
 import AnimatedAmount from '@/components/AnimatedAmount.vue'
-import { emptyProduct, computeProductsTotal, MAX_PRODUCTS } from '@/utils/businessForm'
+import {
+  emptyProduct, computeProductsTotal, computeProductsDeductionTotal,
+  computeProductsPayableTotal, MAX_PRODUCTS
+} from '@/utils/businessForm'
 
 /**
  * 第 2 步：商品明细 + 付款方式。可增删产品卡片，底部实时展示合计金额，
@@ -49,25 +62,28 @@ const props = defineProps({
   onlyErrors: { type: Boolean, default: false }
 })
 
-// 产品卡片渲染的全部字段：标准价查询错误、特批文件与提成比例都在卡片内处理
-const ROW_FIELDS = ['category', 'brand', 'model', 'standardPrice', 'salePrice',
-  'saleQuantity', 'specialFileId', 'commissionRate']
-
-const totalAmount = computed(() => computeProductsTotal(props.form.products))
+// 产品卡片渲染的全部字段：标准价查询错误、特批文件与提成比例、抵扣与旧品都在卡片内处理
+const salesTotal = computed(() => computeProductsTotal(props.form.products))
+const deductionTotal = computed(() => computeProductsDeductionTotal(props.form.products))
+const payableTotal = computed(() => computeProductsPayableTotal(props.form.products))
 
 const visibleRows = computed(() => (props.form.products || [])
   .map((product, index) => ({ product, index }))
   .filter(row => !props.onlyErrors || rowHasError(row.index)))
 
 function rowHasError(index) {
-  return ROW_FIELDS.some(field => !!props.errors[`products.${index}.${field}`])
+  const prefix = `products.${index}.`
+  return Object.keys(props.errors || {}).some(key => key.startsWith(prefix))
 }
 
 function rowErrors(index) {
   const result = {}
-  for (const field of ROW_FIELDS) {
-    const message = props.errors[`products.${index}.${field}`]
-    if (message) result[field] = message
+  const prefix = `products.${index}.`
+  for (const [key, message] of Object.entries(props.errors || {})) {
+    if (!key.startsWith(prefix)) continue
+    const rest = key.slice(prefix.length)
+    // 旧品明细用完整键传递，供 BusinessTradeInSection 按 products.i.tradeInItems.j.* 读取
+    result[rest.startsWith('tradeInItems.') ? key : rest] = message
   }
   return result
 }
@@ -117,11 +133,15 @@ function clearRowErrors() {
 .add-row:active { background: #FFF3ED; }
 .add-row.disabled { opacity: .5; }
 .total-card {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; flex-direction: column; gap: 12rpx;
   background: #fff; border-radius: 16rpx; padding: 26rpx 24rpx;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, .04);
 }
+.total-line { display: flex; align-items: center; justify-content: space-between; }
+.total-line.payable { border-top: 1rpx solid #F2F3F5; padding-top: 12rpx; }
 .total-label { font-size: 27rpx; color: #666; font-weight: 600; }
+.total-sub { font-size: 28rpx; color: #1D2129; font-weight: 600; }
+.total-sub.deduction { color: #C62828; }
 .total-val { font-size: 42rpx; font-weight: 700; color: #FF6B35; }
 .hint { display: block; font-size: 22rpx; color: #999; margin-top: 12rpx; line-height: 1.5; }
 </style>

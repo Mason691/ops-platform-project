@@ -115,6 +115,18 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("receipt_amount")
     private BigDecimal receiptAmount;
 
+    /** 是否以旧换新（是/否）；提成仍按 receipt_amount 计算，抵扣不冲减提成基数。 */
+    @TableField("is_trade_in")
+    private String isTradeIn;
+
+    /** 以旧换新抵扣金额（同一产品多经办人行写相同值，订单汇总按产品组 MAX 去重）。 */
+    @TableField("deduction_amount")
+    private BigDecimal deductionAmount;
+
+    /** 抵扣后金额 = receipt_amount - deduction_amount（展示/应付口径）。 */
+    @TableField("trade_in_payable_amount")
+    private BigDecimal tradeInPayableAmount;
+
     @TableField("sale_date")
     private String saleDate;
 

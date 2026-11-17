@@ -108,8 +108,26 @@
       <text v-if="errors.saleQuantity" class="ferr">{{ errors.saleQuantity }}</text>
     </view>
 
+    <view v-if="product.model" class="trade-in-switch">
+      <view class="trade-in-switch-head">
+        <text class="label">是否以旧换新</text>
+        <view class="trade-in-switch-control">
+          <SegmentedControl :model-value="product.isTradeIn ? 'YES' : 'NO'"
+                            :options="tradeInOptions" @update:model-value="setTradeIn" />
+        </view>
+      </view>
+    </view>
+
+    <BusinessTradeInSection v-if="product.isTradeIn" :product="product" :index="index"
+                            :meta="meta" :errors="errors" />
+
     <view class="amount-row">
-      <text class="amount-label">本商品小计</text>
+      <view class="amount-left">
+        <text class="amount-label">{{ product.isTradeIn ? '抵扣后小计' : '本商品小计' }}</text>
+        <text v-if="product.isTradeIn" class="amount-breakdown">
+          销售 ¥{{ salesText }} · 抵扣 -¥{{ deductionText }}
+        </text>
+      </view>
       <AnimatedAmount class="amount-val" :value="amount" />
     </view>
 
@@ -131,9 +149,14 @@ import FieldChips from '@/components/FieldChips.vue'
 import BottomSheetSelect from '@/components/BottomSheetSelect.vue'
 import QuantityStepper from '@/components/QuantityStepper.vue'
 import AnimatedAmount from '@/components/AnimatedAmount.vue'
+import SegmentedControl from '@/components/SegmentedControl.vue'
 import BusinessSpecialApproval from '@/components/BusinessSpecialApproval.vue'
+import BusinessTradeInSection from '@/components/BusinessTradeInSection.vue'
 import { useProductPrice } from '@/hooks/useProductPrice'
-import { computeProductAmount } from '@/utils/businessForm'
+import {
+  computeProductAmount, computeProductDeduction, computeProductPayable,
+  emptyTradeInItem
+} from '@/utils/businessForm'
 import { focusField, keepFieldVisible } from '@/utils/fieldFocus'
 
 /**
@@ -212,7 +235,13 @@ const modelPlaceholder = computed(() => {
   return '请选择型号'
 })
 
-const amount = computed(() => computeProductAmount(props.product))
+const amount = computed(() => computeProductPayable(props.product))
+const salesText = computed(() => computeProductAmount(props.product).toFixed(2))
+const deductionText = computed(() => computeProductDeduction(props.product).toFixed(2))
+const tradeInOptions = [
+  { value: 'YES', label: '是' },
+  { value: 'NO', label: '否' }
+]
 const standardText = computed(() => {
   const value = Number(props.product.standardSalePrice)
   return Number.isFinite(value) ? value.toFixed(2) : ''
@@ -245,6 +274,7 @@ function setCategory(value) {
   props.product.productId = null
   editingPrice.value = false
   resetPrice()
+  clearTradeInState()
 }
 
 function setBrand(value) {
@@ -253,6 +283,7 @@ function setBrand(value) {
   props.product.productId = null
   editingPrice.value = false
   resetPrice()
+  clearTradeInState()
 }
 
 function setModel(value) {
@@ -263,7 +294,8 @@ function setModel(value) {
   props.product.productId = material && material.id != null ? material.id : null
   editingPrice.value = false
   resetPrice()
-  lookupPrice()
+  if (value) lookupPrice()
+  else clearTradeInState()
 }
 
 function openBrandSheet() {
@@ -286,6 +318,29 @@ function formatPrice() {
     props.product.salePrice = value.toFixed(2)
   }
   evaluateSpecial(true)
+}
+
+/** 以旧换新开关：开启时至少生成一件旧品；关闭时清空抵扣与旧品（按0/空处理）。 */
+function setTradeIn(value) {
+  const tradeIn = value === 'YES'
+  if (tradeIn === !!props.product.isTradeIn) return
+  props.product.isTradeIn = tradeIn
+  if (tradeIn) {
+    if (!Array.isArray(props.product.tradeInItems) || !props.product.tradeInItems.length) {
+      props.product.tradeInItems = [emptyTradeInItem()]
+    }
+  } else {
+    props.product.deductionAmount = ''
+    props.product.tradeInItems = []
+  }
+}
+
+/** 品类/品牌变更会清空型号；此时旧品行失去归属，同步关闭以旧换新。 */
+function clearTradeInState() {
+  if (!props.product.isTradeIn) return
+  props.product.isTradeIn = false
+  props.product.deductionAmount = ''
+  props.product.tradeInItems = []
 }
 
 /** 进入可编辑态：数字键盘 + 卡片内标准价参考值；低价特批由 evaluateSpecial 自动联动。 */
@@ -391,6 +446,12 @@ function restoreStandardPrice() {
   display: flex; align-items: center; justify-content: space-between;
   background: #FFF3ED; border-radius: 10rpx; padding: 14rpx 18rpx;
 }
+.amount-left { display: flex; flex-direction: column; gap: 4rpx; }
+.amount-breakdown { font-size: 20rpx; color: #86909C; }
 .amount-label { font-size: 24rpx; color: #666; }
 .amount-val { font-size: 32rpx; font-weight: 700; color: #FF6B35; }
+.trade-in-switch { margin-bottom: 18rpx; }
+.trade-in-switch-head { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; }
+.trade-in-switch-head .label { margin-bottom: 0; }
+.trade-in-switch-control { width: 220rpx; flex-shrink: 0; }
 </style>

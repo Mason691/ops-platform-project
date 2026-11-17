@@ -289,6 +289,15 @@ public class EmployeeController {
         return R.ok(employeeBusinessEntryService.createManualEntry(request));
     }
 
+    /** 以旧换新采购单创建失败/状态待同步时重试（SCM 幂等）。 */
+    @PostMapping("/business-data/orders/{orderId}/trade-in-purchase/retry")
+    public R<?> retryTradeInPurchase(@PathVariable Long orderId) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可重试旧品采购单");
+        }
+        return R.ok(employeeBusinessEntryService.retryTradeInPurchase(orderId));
+    }
+
     /** 制单成功页轮询/详情兜底：查询订单当前审批人。 */
     @GetMapping("/business-data/manual/{orderId}/approver")
     public R<?> manualApprover(@PathVariable Long orderId) {

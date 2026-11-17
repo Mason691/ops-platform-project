@@ -55,6 +55,15 @@
         <text v-if="product.standardSalePrice != null" class="product-sub">
           标准价 ¥{{ money(product.standardSalePrice) }}
         </text>
+        <view v-if="product.isTradeIn" class="product-trade-in">
+          <text class="special-tag">以旧换新</text>
+          <text class="product-sub">销售 ¥{{ money(computeProductAmount(product)) }}</text>
+          <text class="product-sub">抵扣 -¥{{ money(product.deductionAmount) }}</text>
+          <text class="product-sub">应付 ¥{{ amountOf(product) }}</text>
+        </view>
+        <text v-if="product.isTradeIn && (product.tradeInItems || []).length" class="product-sub">
+          旧品：{{ tradeInSummary(product) }}
+        </text>
         <view v-if="product.isSpecial" class="product-special">
           <text class="special-tag">特批</text>
           <text class="product-sub">提成 {{ product.commissionRate || '—' }}%</text>
@@ -88,8 +97,16 @@
 
     <view class="totals-card">
       <view class="total-line">
-        <text class="total-label">合计金额</text>
-        <AnimatedAmount class="total-amount" :value="totalAmount" />
+        <text class="total-label">商品合计</text>
+        <text class="total-sub">¥{{ money(totalAmount) }}</text>
+      </view>
+      <view v-if="deductionTotal > 0" class="total-line">
+        <text class="total-label">抵扣合计</text>
+        <text class="total-sub deduction">-¥{{ money(deductionTotal) }}</text>
+      </view>
+      <view class="total-line">
+        <text class="total-label">应付合计</text>
+        <AnimatedAmount class="total-amount" :value="payableTotal" />
       </view>
       <view class="total-meta">
         <text>共 {{ form.products.length }} 种商品</text>
@@ -106,7 +123,9 @@ import BusinessStepProducts from '@/components/BusinessStepProducts.vue'
 import BusinessStepReceipt from '@/components/BusinessStepReceipt.vue'
 import AnimatedAmount from '@/components/AnimatedAmount.vue'
 import {
-  PAYMENT_METHODS, computeProductAmount, computeProductsTotal, hasStepErrors, normalizeMoney
+  PAYMENT_METHODS, computeProductAmount, computeProductPayable,
+  computeProductsDeductionTotal, computeProductsPayableTotal, computeProductsTotal,
+  hasStepErrors, normalizeMoney
 } from '@/utils/businessForm'
 import { assetUrl } from '@/utils/image'
 
@@ -147,10 +166,12 @@ const agentNames = computed(() => {
 })
 
 const totalAmount = computed(() => computeProductsTotal(props.form.products))
+const deductionTotal = computed(() => computeProductsDeductionTotal(props.form.products))
+const payableTotal = computed(() => computeProductsPayableTotal(props.form.products))
 const isDeposit = computed(() => props.form.paymentType === 'DEPOSIT')
 const paymentTypeLabel = computed(() => isDeposit.value ? '定金支付' : '全款支付')
 const balanceAmount = computed(() =>
-  Math.max(0, totalAmount.value - normalizeMoney(props.form.depositAmount)))
+  Math.max(0, payableTotal.value - normalizeMoney(props.form.depositAmount)))
 const money = value => (Number(value) || 0).toFixed(2)
 const paymentLabel = computed(() => {
   const found = PAYMENT_METHODS.find(item => item.value === props.form.paymentMethod)
@@ -163,7 +184,15 @@ const detailCount = computed(() => {
 })
 
 function amountOf(product) {
-  return computeProductAmount(product).toFixed(2)
+  return computeProductPayable(product).toFixed(2)
+}
+
+function tradeInSummary(product) {
+  const items = Array.isArray(product.tradeInItems) ? product.tradeInItems : []
+  const parts = items.slice(0, 5).map(item =>
+    `${item.productName || item.brand || '旧品'} ×${item.quantity}`)
+  if (items.length > 5) parts.push(`等${items.length}行`)
+  return parts.join('、')
 }
 
 function previewVoucher(index) {

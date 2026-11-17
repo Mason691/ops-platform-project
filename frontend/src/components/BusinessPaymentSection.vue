@@ -3,7 +3,10 @@
         id="field-paymentType" class="payment-card">
     <view class="label-row">
       <text class="label">付款方式 <text class="req">*</text></text>
-      <text class="sales-total">销售价合计 ¥{{ money(salesTotal) }}</text>
+      <text class="sales-total">
+        {{ deductionTotal > 0 ? '应付合计' : '销售价合计' }} ¥{{ money(payableTotal) }}
+        <text v-if="deductionTotal > 0" class="sales-sub">（销售 ¥{{ money(salesTotal) }}）</text>
+      </text>
     </view>
     <SegmentedControl :model-value="form.paymentType || 'FULL'" :options="paymentTypeOptions"
                       @update:model-value="changePaymentType" />
@@ -16,7 +19,7 @@
           id="field-depositAmount" class="deposit-block">
       <text class="label">定金金额 <text class="req">*</text></text>
       <input class="input" type="digit" :class="{ 'control-error': errors.depositAmount }"
-             :value="form.depositAmount" placeholder="请输入定金金额（>0 且小于销售价合计）"
+             :value="form.depositAmount" placeholder="请输入定金金额（>0 且小于应付合计）"
              @input="onDepositInput" @blur="formatDeposit"
              @focus="keepFieldVisible('field-depositAmount')" />
       <text v-if="errors.depositAmount" class="ferr">{{ errors.depositAmount }}</text>
@@ -24,7 +27,7 @@
         <text class="balance-label">应补余款</text>
         <text class="balance-value">¥{{ money(balanceAmount) }}</text>
       </view>
-      <text class="section-hint">应补余款 = 销售价合计 − 定金金额，由系统自动计算，不支持手工填写。</text>
+      <text class="section-hint">应补余款 = 应付合计 − 定金金额，由系统自动计算，不支持手工填写。</text>
     </view>
   </view>
 </template>
@@ -32,7 +35,7 @@
 <script setup>
 import { computed } from 'vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
-import { computeProductsTotal, normalizeMoney } from '@/utils/businessForm'
+import { computeProductsDeductionTotal, computeProductsPayableTotal, computeProductsTotal, normalizeMoney } from '@/utils/businessForm'
 import { keepFieldVisible } from '@/utils/fieldFocus'
 
 /**
@@ -55,8 +58,10 @@ const paymentTypeOptions = [
   { value: 'DEPOSIT', label: '定金支付' }
 ]
 const salesTotal = computed(() => computeProductsTotal(props.form.products))
+const deductionTotal = computed(() => computeProductsDeductionTotal(props.form.products))
+const payableTotal = computed(() => computeProductsPayableTotal(props.form.products))
 const balanceAmount = computed(() =>
-  Math.max(0, salesTotal.value - normalizeMoney(props.form.depositAmount)))
+  Math.max(0, payableTotal.value - normalizeMoney(props.form.depositAmount)))
 const money = value => (Number(value) || 0).toFixed(2)
 const show = key => !props.onlyErrors || !!props.errors[key]
 
@@ -100,6 +105,7 @@ function formatDeposit() {
 .label { display: block; font-size: 26rpx; color: #666; margin-bottom: 14rpx; }
 .label-row .label { margin-bottom: 0; }
 .sales-total { font-size: 26rpx; color: #FF6B35; font-weight: 700; }
+.sales-sub { font-size: 21rpx; color: #86909C; font-weight: 400; }
 .section-hint { display: block; font-size: 22rpx; color: #999; line-height: 1.6; margin: 12rpx 0 0; }
 .deposit-block { margin-top: 22rpx; padding-top: 20rpx; border-top: 1rpx solid #F2F3F5; }
 .input {

@@ -6,6 +6,7 @@
           <view class="order-no-row">
             <text class="order-no">{{ order.orderNo || '未编号订单' }}</text>
             <text class="status-tag" :class="statusClass(order)">{{ order.bizStatusName || '状态未知' }}</text>
+            <text v-if="order.hasTradeIn" class="trade-tag">以旧换新</text>
           </view>
           <text class="order-sub">{{ order.customer || '—' }}</text>
           <text class="order-meta">
@@ -14,7 +15,8 @@
           </text>
         </view>
         <view class="order-right">
-          <text class="order-amount">¥{{ money(order.totalAmount) }}</text>
+          <text class="order-amount">¥{{ money(order.hasTradeIn ? order.payableAmount : order.totalAmount) }}</text>
+          <text v-if="order.hasTradeIn" class="order-count">销售 ¥{{ money(order.totalAmount) }}</text>
           <text class="order-count">{{ order.productCount || 0 }} 项</text>
           <text class="order-arrow">{{ isExpanded(order) ? '▲' : '▼' }}</text>
         </view>
@@ -30,6 +32,9 @@
                 {{ p.categoryName || p.category || '—' }} · ¥{{ money(p.salePrice) }} × {{ p.saleQuantity }}
               </text>
               <text v-if="p.isSpecial === '是'" class="product-special">特批</text>
+              <text v-if="p.isTradeIn === '是'" class="product-trade">
+                以旧换新 · 抵扣 -¥{{ money(p.deductionAmount) }} · 应付 ¥{{ money(p.payableAmount) }}
+              </text>
             </view>
             <view class="product-money">
               <text class="product-amount">¥{{ money(p.receiptAmount) }}</text>
@@ -135,6 +140,10 @@ function formatDate(value) {
 .status-tag.done { background: #E8F8E8; color: #0B7A42; }
 .status-tag.stopped { background: #FFF1F0; color: #C62828; }
 .status-tag.pending { background: #F2F3F5; color: #86909C; }
+.trade-tag {
+  flex-shrink: 0; font-size: 19rpx; padding: 2rpx 10rpx; border-radius: 6rpx;
+  background: #FFF0E8; color: #C2410C;
+}
 .order-sub { font-size: 25rpx; color: #4E5969; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .order-meta { font-size: 21rpx; color: #A9AEB8; }
 .order-right { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 4rpx; }
@@ -159,6 +168,7 @@ function formatDate(value) {
   align-self: flex-start; font-size: 19rpx; padding: 1rpx 8rpx; border-radius: 4rpx;
   background: #FFF0E8; color: #C2410C;
 }
+.product-trade { font-size: 20rpx; color: #B26A00; line-height: 1.5; }
 .product-money { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 4rpx; }
 .product-amount { font-size: 26rpx; font-weight: 600; color: #1D2129; }
 .product-commission { font-size: 20rpx; color: #0B7A42; }

@@ -2,6 +2,14 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-17（业务订单以旧换新 + 自动生成 SCM 未审采购单，待发布）
+
+- **ops 后端**：`ops_business_order_item` 增 `is_trade_in/deduction_amount/trade_in_payable_amount`；`ops_business_order` 增 `has_trade_in/trade_in_deduction_amount/payable_amount` 与自动采购单状态/单号/错误字段；新增 `ops_business_order_trade_in` 旧品明细表（`sql/migrate_business_order_trade_in.sql`）。后端全量校验抵扣/旧品（SCM 商品权威资料、手工旧品、每行 ≤50、全单 ≤100 行），`receipt_amount` 仍为销售额、提成基数不变；新增 `payable_amount`，定金/余款按抵扣后应付计算。订单保存事务内落 `trade_in_purchase_status=PENDING`，提交后调用 SCM 幂等接口创建未审采购单并回写 SUCCESS/FAILED/单号/错误；新增员工重试接口 `POST /api/ops/employee/business-data/orders/{id}/trade-in-purchase/retry`。列表/详情补抵扣、应付、旧品明细、采购单及实时入库状态。
+- **ops H5**：商品卡片新增分段选择器“是否以旧换新”，展开抵扣金额 + 多件旧品（SCM 商品选择/其他旧品手工录入、数量步进、备注、增删）；实时展示销售/抵扣/抵扣后金额，商品步骤与底部固定栏展示商品合计/抵扣合计/应付合计（数字滚动动效）；确认页、成功页（采购单失败提示）、订单列表、订单详情同步；草稿保存恢复；订单详情与流程节点页（施工完成/施工记录/验收）展示旧品入库提醒、旧品汇总、采购单与入库状态，入库完成改“旧品已入库”。
+- **SCM 后端**：`scm_pur_order.source_order_id` + 唯一键 `(corp_id, data_source, source_order_id)`；分录增名称/品牌/型号/单位/手工标记/来源旧品明细ID/备注（`sql/migrate_pur_order_trade_in.sql`）。新增内部接口（X-Internal-Token）创建以旧换新草稿单/查询状态；草稿编辑锁定旧品身份与数量、禁止切换来源/增删分录；其他旧品必须映射真实入库商品后才能提交/审核；禁止手工新建/删除自动单。
+- **平台 PC**：业务数据列表展开显示以旧换新、抵扣/应付、旧品汇总、采购单号/失败标记，支持跳转 SCM 采购单；业务订单流程节点页显示施工完成旧品入库提醒、旧品汇总、采购单/入库状态及跳转；SCM 采购列表/详情展示旧品字段、来源标签，编辑页支持其他旧品选择入库商品。
+- **验证（待提交/待发布）**：ops 后端 `mvn -o -DskipTests compile`、SCM 后端 `mvn -o test`（既有 2 项）、H5 `npm run build:h5`、平台前端 `npm run build` 均通过；Node 纯函数校验金额/抵扣/定金/上限通过。**未执行**：两条 SQL 迁移与端到端（本机无 3306/SCM 服务；生产 3306 封禁）、微信真机验证。
+
 ## 2026-11-17（并行 WIP 批次发布：物资审批/待办角标/货款备注 + SCM 派工拦截 + 平台组织手机号）
 
 - **发布内容**：ops `e73c4ed`（物资领用/核销审批人详情、H5 任务页物料详情、工作台待办角标、货款补录备注必填、已核对业务待发起统计）、SCM `0dbc5ad`（已核对业务返回 `dispatched/pendingCount`、发起采购申请拦截已派工出库、已驳回申请允许重新发起）、平台 `16b1d5e`（组织创建复用自然人手机号、随机初始密码 + 强制改密、手机号全局查重、前端查重提示；平台后端该改动已于 18:04 运行，本次补部署平台前端）。

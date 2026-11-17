@@ -153,10 +153,39 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
                 "SELECT COALESCE(SUM(i.commission_amount), 0) FROM ops_business_order_item i "
                         + "WHERE i.order_id = ? AND i.delete_flag = 0",
                 BigDecimal.class, orderId);
+        // 抵扣按销售产品组 MAX 去重（多经办人行同值，不能 SUM 翻倍）
+        BigDecimal deduction = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(x.deduction), 0) FROM ("
+                        + "  SELECT MAX(i.deduction_amount) AS deduction FROM ops_business_order_item i "
+                        + "  WHERE i.order_id = ? AND i.delete_flag = 0 "
+                        + "    AND COALESCE(i.sale_quantity, 1) >= 0 "
+                        + "  GROUP BY i.category, i.brand, i.model, i.sale_price"
+                        + ") x", BigDecimal.class, orderId);
+        Integer tradeInRows = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ops_business_order_item i "
+                        + "WHERE i.order_id = ? AND i.delete_flag = 0 AND i.is_trade_in = '是'",
+                Integer.class, orderId);
+        BigDecimal total = amount != null ? amount : BigDecimal.ZERO;
+        BigDecimal deduct = deduction != null ? deduction : BigDecimal.ZERO;
+        BigDecimal payable = total.subtract(deduct).max(BigDecimal.ZERO);
         jdbcTemplate.update("UPDATE ops_business_order SET total_amount = ?, "
-                        + "total_commission = ?, modify_time = NOW() WHERE id = ?",
-                amount != null ? amount : BigDecimal.ZERO,
-                commission != null ? commission : BigDecimal.ZERO, orderId);
+                        + "total_commission = ?, trade_in_deduction_amount = ?, payable_amount = ?, "
+                        + "has_trade_in = ?, modify_time = NOW() WHERE id = ?",
+                total,
+                commission != null ? commission : BigDecimal.ZERO,
+                deduct, payable,
+                tradeInRows != null && tradeInRows > 0 ? 1 : 0, orderId);
+    }
+
+    @Override
+    public void updateTradeInPurchaseStatus(Long orderId, String status, Long purchaseOrderId,
+                                            String billNo, String error) {
+        if (orderId == null) return;
+        jdbcTemplate.update("UPDATE ops_business_order SET trade_in_purchase_status = ?, "
+                        + "trade_in_purchase_order_id = ?, trade_in_purchase_bill_no = ?, "
+                        + "trade_in_purchase_error = ?, modify_time = NOW() WHERE id = ?",
+                status, purchaseOrderId, billNo,
+                error == null || error.isBlank() ? null : error, orderId);
     }
 
     @Override

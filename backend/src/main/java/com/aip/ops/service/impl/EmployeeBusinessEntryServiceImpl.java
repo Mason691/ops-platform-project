@@ -1,6 +1,7 @@
 package com.aip.ops.service.impl;
 
 import com.aip.ops.client.ScmBaseDataClient;
+import com.aip.ops.client.ScmPurchaseOrderClient;
 import com.aip.ops.client.WorkflowPlatformClient;
 import com.aip.ops.component.OrderNoGenerator;
 import com.aip.ops.dto.BalanceReceiveRequest;
@@ -8,8 +9,10 @@ import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.dto.ProductPriceDtos;
 import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsBusinessOrder;
+import com.aip.ops.entity.OpsBusinessOrderTradeIn;
 import com.aip.ops.entity.OpsBusinessSpecialFile;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
+import com.aip.ops.mapper.OpsBusinessOrderTradeInMapper;
 import com.aip.ops.security.JwtTokenInspector;
 import com.aip.ops.service.BusinessOrderService;
 import com.aip.ops.service.BusinessOrderWorkflowService;
@@ -68,6 +71,13 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     /** sys_member.real_name / nickname 为 VARCHAR(50)，自动建会员时不能超长 */
     private static final int MAX_CUSTOMER_LENGTH = 50;
     private static final int MAX_REMARK_LENGTH = 500;
+    private static final int MAX_TRADE_IN_ITEMS = 50;
+    /** 与 SCM 自动采购单单笔最多 100 条旧品分录保持一致，避免订单保存成功但采购单永远建不出来 */
+    private static final int MAX_TOTAL_TRADE_IN_ITEMS = 100;
+    private static final int MAX_TRADE_IN_NAME_LENGTH = 200;
+    private static final int MAX_TRADE_IN_BRAND_LENGTH = 100;
+    private static final int MAX_TRADE_IN_MODEL_LENGTH = 200;
+    private static final int MAX_TRADE_IN_UNIT_LENGTH = 50;
     private static final int MAX_RECEIPT_NO_LENGTH = 50;
     /** 收据号允许字符集：字母/数字/短横线/下划线/斜杠（不含空格，便于财务核对与导出）。 */
     private static final Pattern RECEIPT_NO_PATTERN = Pattern.compile("^[A-Za-z0-9_/-]+$");
@@ -75,6 +85,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private final JdbcTemplate jdbcTemplate;
     private final PlatformInternalClient platformInternalClient;
     private final OpsBusinessDataMapper businessDataMapper;
+    private final OpsBusinessOrderTradeInMapper tradeInMapper;
+    private final ScmPurchaseOrderClient scmPurchaseOrderClient;
     private final GasMemberMatcher memberMatcher;
     private final ScmBaseDataClient scmClient;
     private final JwtTokenInspector jwtTokenInspector;
@@ -247,6 +259,12 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         // 避免 Hikari 连接在外部 HTTP 期间被长期占用（连接池耗尽风险）。
         Map<String, Object> result = transactionTemplate.execute(
                 status -> persistManualEntry(request, ctx, v));
+        // 事务提交后自动创建以旧换新采购单（SCM 幂等）；失败标记异常并随结果返回提示
+        if (result != null && Boolean.TRUE.equals(result.get("hasTradeIn"))
+                && result.get("orderId") instanceof Number orderId) {
+            autoCreateTradeInPurchase(orderId.longValue(), ctx.corpId(),
+                    str(result.get("orderNo")), result);
+        }
         // 事务提交后同步发起审批流程：成功页必须拿到下一审批人；
         // 发起失败不阻塞制单，返回 resolved=false + 兜底文案由前端展示。
         if (result != null && result.get("orderId") instanceof Number orderId) {
@@ -265,6 +283,89 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
             }
         }
         return result;
+    }
+
+    @Override
+    public Map<String, Object> retryTradeInPurchase(Long orderId) {
+        EmployeeContext ctx = resolveEmployeeContext();
+        OpsBusinessOrder order = requireAgentOrder(ctx, orderId);
+        if (!Integer.valueOf(1).equals(order.getHasTradeIn())) {
+            throw BusinessException.of("该订单不含以旧换新");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("orderId", orderId);
+        result.put("orderNo", order.getOrderNo());
+        if ("SUCCESS".equals(order.getTradeInPurchaseStatus())
+                && order.getTradeInPurchaseOrderId() != null) {
+            result.put("status", "SUCCESS");
+            result.put("purchaseOrderId", order.getTradeInPurchaseOrderId());
+            result.put("billNo", order.getTradeInPurchaseBillNo());
+            return result;
+        }
+        try {
+            ScmPurchaseOrderClient.TradeInPurchaseResult created =
+                    scmPurchaseOrderClient.createTradeInPurchaseOrder(
+                            buildTradeInPurchaseRequest(ctx.corpId(), orderId, order.getOrderNo()));
+            orderService.updateTradeInPurchaseStatus(orderId, "SUCCESS", created.orderId(),
+                    created.billNo(), null);
+            result.put("status", "SUCCESS");
+            result.put("purchaseOrderId", created.orderId());
+            result.put("billNo", created.billNo());
+        } catch (Exception e) {
+            String error = truncate(e.getMessage(), 500);
+            orderService.updateTradeInPurchaseStatus(orderId, "FAILED", null, null, error);
+            result.put("status", "FAILED");
+            result.put("error", error);
+        }
+        return result;
+    }
+
+    /** 事务提交后自动创建以旧换新采购单；失败标记 FAILED 并随成功响应提示，不静默。 */
+    private void autoCreateTradeInPurchase(Long orderId, Long corpId, String orderNo,
+                                           Map<String, Object> result) {
+        try {
+            ScmPurchaseOrderClient.TradeInPurchaseResult created =
+                    scmPurchaseOrderClient.createTradeInPurchaseOrder(
+                            buildTradeInPurchaseRequest(corpId, orderId, orderNo));
+            orderService.updateTradeInPurchaseStatus(orderId, "SUCCESS", created.orderId(),
+                    created.billNo(), null);
+            result.put("tradeInPurchaseStatus", "SUCCESS");
+            result.put("tradeInPurchaseOrderId", created.orderId());
+            result.put("tradeInPurchaseBillNo", created.billNo());
+        } catch (Exception e) {
+            String error = truncate(e.getMessage(), 500);
+            orderService.updateTradeInPurchaseStatus(orderId, "FAILED", null, null, error);
+            result.put("tradeInPurchaseStatus", "FAILED");
+            result.put("tradeInPurchaseError", error);
+            log.warn("以旧换新采购单创建失败 orderId={}: {}", orderId, error);
+        }
+    }
+
+    private ScmPurchaseOrderClient.TradeInPurchaseRequest buildTradeInPurchaseRequest(
+            Long corpId, Long orderId, String orderNo) {
+        List<OpsBusinessOrderTradeIn> rows = tradeInMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<OpsBusinessOrderTradeIn>()
+                        .eq(OpsBusinessOrderTradeIn::getOrderId, orderId)
+                        .eq(OpsBusinessOrderTradeIn::getDeleteFlag, 0)
+                        .orderByAsc(OpsBusinessOrderTradeIn::getId));
+        if (rows.isEmpty()) {
+            throw BusinessException.of("订单没有旧品明细，无法创建采购单");
+        }
+        List<ScmPurchaseOrderClient.TradeInItem> items = new ArrayList<>();
+        for (OpsBusinessOrderTradeIn row : rows) {
+            items.add(new ScmPurchaseOrderClient.TradeInItem(
+                    row.getId(), row.getOldProductId(), row.getOldMaterialNumber(),
+                    row.getOldProductName(), row.getBrand(), row.getModel(), row.getCategory(),
+                    row.getQuantity(), row.getUnit(), row.getRemark(),
+                    Integer.valueOf(1).equals(row.getIsManual())));
+        }
+        return new ScmPurchaseOrderClient.TradeInPurchaseRequest(corpId, orderId, orderNo, items);
+    }
+
+    private static String truncate(String value, int max) {
+        if (value == null) return null;
+        String text = value.trim();
+        return text.length() <= max ? text : text.substring(0, max);
     }
 
     @Override
@@ -500,6 +601,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         // 同时写入 business_group_no 兼容历史分组逻辑
         String businessGroupNo = orderNo;
         List<Long> ids = new ArrayList<>();
+        Map<String, Long> firstItemIds = new LinkedHashMap<>();
         BigDecimal totalAmount = v.products().stream()
                 .map(ValidatedProduct::amount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -520,7 +622,13 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 entity.setOrderId(order.getId());
                 businessDataMapper.insert(entity);
                 ids.add(entity.getId());
+                firstItemIds.putIfAbsent(tradeInProductKey(product), entity.getId());
             }
+        }
+        int tradeInCount = insertTradeInItems(ctx, v, order.getId(), firstItemIds);
+        if (tradeInCount > 0) {
+            // 与业务订单同事务落 PENDING：进程在提交后崩溃也能看出采购单未完成，前端据此提供重试
+            orderService.updateTradeInPurchaseStatus(order.getId(), "PENDING", null, null, null);
         }
         orderService.refreshAgentSummary(order.getId());
         orderService.refreshTotals(order.getId());
@@ -537,6 +645,14 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         result.put("orderNo", orderNo);
         result.put("businessGroupNo", businessGroupNo);
         result.put("receiptAmount", totalAmount);
+        BigDecimal deductionTotal = v.products().stream()
+                .map(ValidatedProduct::deduction)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        boolean hasTradeIn = v.products().stream().anyMatch(ValidatedProduct::tradeIn);
+        result.put("hasTradeIn", hasTradeIn);
+        result.put("tradeInDeduction", deductionTotal);
+        result.put("payableAmount", totalAmount.subtract(deductionTotal).max(BigDecimal.ZERO));
+        result.put("tradeInCount", tradeInCount);
         result.put("paymentType", v.paymentType());
         result.put("depositAmount", v.depositAmount());
         result.put("balanceAmount", v.balanceAmount());
@@ -544,6 +660,43 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         result.put("platformMemberId", member.id());
         result.put("memberCreated", member.created());
         return result;
+    }
+
+    /** 旧品按销售商品行分组落库；同一产品多经办人共用一份旧品。 */
+    private int insertTradeInItems(EmployeeContext ctx, Validated v, Long orderId,
+                                   Map<String, Long> firstItemIds) {
+        int count = 0;
+        for (ValidatedProduct product : v.products()) {
+            if (!product.tradeIn()) continue;
+            String productKey = tradeInProductKey(product);
+            Long sourceItemId = firstItemIds.get(productKey);
+            for (ValidatedTradeIn old : product.tradeInItems()) {
+                OpsBusinessOrderTradeIn row = new OpsBusinessOrderTradeIn();
+                row.setCorpId(ctx.corpId());
+                row.setOrderId(orderId);
+                row.setProductKey(productKey);
+                row.setSourceItemId(sourceItemId);
+                row.setOldProductId(old.productId());
+                row.setOldMaterialNumber(old.materialNumber());
+                row.setOldProductName(old.productName());
+                row.setBrand(old.brand());
+                row.setModel(old.model());
+                row.setCategory(old.category());
+                row.setQuantity(old.quantity());
+                row.setUnit(old.unit());
+                row.setRemark(old.remark());
+                row.setIsManual(old.manual() ? 1 : 0);
+                row.setDeleteFlag(0);
+                tradeInMapper.insert(row);
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static String tradeInProductKey(ValidatedProduct product) {
+        return product.categoryKey() + "|" + product.brand() + "|" + product.model()
+                + "|" + product.price().stripTrailingZeros().toPlainString();
     }
 
     // ── 员工上下文 ──
@@ -728,6 +881,13 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         }
         String customer = requireText(req.getCustomer(), "客户名称", MAX_CUSTOMER_LENGTH);
         List<ValidatedProduct> products = validateProducts(req.getProducts(), ctx.corpId());
+        int totalTradeInRows = products.stream()
+                .filter(ValidatedProduct::tradeIn)
+                .mapToInt(product -> product.tradeInItems().size())
+                .sum();
+        if (totalTradeInRows > MAX_TOTAL_TRADE_IN_ITEMS) {
+            throw BusinessException.of("单笔业务旧品最多" + MAX_TOTAL_TRADE_IN_ITEMS + "行");
+        }
         List<AgentInfo> agents = validateAgents(req.getAgentUserIds(), ctx);
         String receiptDate = normalizeDate(req.getReceiptDate());
         String receiptNo = normalizeReceiptNo(req.getReceiptNo());
@@ -749,8 +909,13 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         BigDecimal salesAmount = products.stream().map(ValidatedProduct::amount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
+        // 定金/余款以抵扣后的应付合计为基数，避免以旧换新订单按销售额多收余款
+        BigDecimal deductionAmount = products.stream().map(ValidatedProduct::deduction)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal payableAmount = salesAmount.subtract(deductionAmount)
+                .max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
         PaymentTerms terms = validatePaymentTerms(req.getPaymentType(), req.getDepositAmount(),
-                salesAmount);
+                payableAmount);
         return new Validated(phone, customer, products, agents,
                 receiptDate, receiptNo, paymentMethod.name(), voucherUrl,
                 communityId, detailAddress, remark,
@@ -761,10 +926,11 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     /**
      * 付款方式校验（服务端最终口径）：
      * FULL：定金必须为 0，余款 0，is_full_payment=1；
-     * DEPOSIT：定金 >0 且严格小于销售价合计，余款 = 销售价 - 定金（服务端计算）。
+     * DEPOSIT：定金 >0 且严格小于应付合计（销售金额 − 以旧换新抵扣），
+     * 余款 = 应付合计 - 定金（服务端计算）。
      */
     private PaymentTerms validatePaymentTerms(String rawType, BigDecimal rawDeposit,
-                                              BigDecimal salesAmount) {
+                                              BigDecimal payableAmount) {
         String type = rawType == null || rawType.isBlank() ? "FULL" : rawType.trim().toUpperCase();
         if (!"FULL".equals(type) && !"DEPOSIT".equals(type)) {
             throw BusinessException.of("付款方式必须是 FULL（全款支付）或 DEPOSIT（定金支付）");
@@ -785,10 +951,10 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         if (deposit.compareTo(BigDecimal.ZERO) <= 0) {
             throw BusinessException.of("定金金额必须大于0");
         }
-        if (deposit.compareTo(salesAmount) >= 0) {
-            throw BusinessException.of("定金金额必须小于销售价合计，全额支付请选择全款支付");
+        if (deposit.compareTo(payableAmount) >= 0) {
+            throw BusinessException.of("定金金额必须小于应付合计，全额支付请选择全款支付");
         }
-        BigDecimal balance = salesAmount.subtract(deposit).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal balance = payableAmount.subtract(deposit).setScale(2, RoundingMode.HALF_UP);
         return new PaymentTerms("DEPOSIT", 0, deposit, balance);
     }
 
@@ -910,9 +1076,105 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         } catch (BusinessException e) {
             throw BusinessException.of(prefix + e.getMessage());
         }
+        boolean tradeIn = Boolean.TRUE.equals(item.getIsTradeIn());
+        BigDecimal deduction = BigDecimal.ZERO;
+        List<ValidatedTradeIn> tradeInItems = List.of();
+        if (tradeIn) {
+            deduction = validateTradeInDeduction(item.getDeductionAmount(), amount, prefix);
+            tradeInItems = validateTradeInItems(item.getTradeInItems(), corpId, prefix);
+        }
         return new ValidatedProduct(item.getProductId(), brand, categoryKey, model, price, qty,
                 amount, rate, priceInfo.salePrice(), special, specialFileId, specialFileUrl,
-                specialFileName, priceInfo.retailFloorPrice(), priceInfo.groupLowestPrice());
+                specialFileName, priceInfo.retailFloorPrice(), priceInfo.groupLowestPrice(),
+                tradeIn, deduction, tradeInItems);
+    }
+
+    /** 抵扣金额：>0、最多两位小数、不得超过该商品行销售金额。 */
+    private BigDecimal validateTradeInDeduction(BigDecimal raw, BigDecimal sales, String prefix) {
+        if (raw == null || raw.signum() <= 0) {
+            throw BusinessException.of(prefix + "以旧换新抵扣金额必须大于0");
+        }
+        if (raw.scale() > 2) {
+            throw BusinessException.of(prefix + "抵扣金额最多保留两位小数");
+        }
+        BigDecimal deduction = raw.setScale(2, RoundingMode.HALF_UP);
+        if (deduction.compareTo(sales) > 0) {
+            throw BusinessException.of(prefix + "抵扣金额不能超过商品金额");
+        }
+        return deduction;
+    }
+
+    /**
+     * 旧品校验：至少1件；选中 SCM 商品时以商品资料为准（防篡改品牌/型号），
+     * 其他旧品允许手工录入名称/品牌/型号。
+     */
+    private List<ValidatedTradeIn> validateTradeInItems(
+            List<EmployeeBusinessEntryRequest.TradeInItem> items, Long corpId, String prefix) {
+        if (items == null || items.isEmpty()) {
+            throw BusinessException.of(prefix + "以旧换新至少录入1件旧品");
+        }
+        if (items.size() > MAX_TRADE_IN_ITEMS) {
+            throw BusinessException.of(prefix + "旧品最多录入" + MAX_TRADE_IN_ITEMS + "件");
+        }
+        List<ValidatedTradeIn> result = new ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            String rowPrefix = prefix + "第" + (i + 1) + "件旧品：";
+            result.add(validateTradeInItem(items.get(i), corpId, rowPrefix));
+        }
+        return result;
+    }
+
+    /** 单件旧品：选中 SCM 商品以商品资料为准；否则按手工旧品校验名称/品牌/型号。 */
+    private ValidatedTradeIn validateTradeInItem(EmployeeBusinessEntryRequest.TradeInItem item,
+                                                 Long corpId, String rowPrefix) {
+        if (item == null) throw BusinessException.of(rowPrefix + "信息不能为空");
+        int quantity = item.getQuantity() == null ? 0 : item.getQuantity();
+        if (quantity < 1) throw BusinessException.of(rowPrefix + "数量必须为正整数");
+        String remark = optionalText(item.getRemark(), MAX_REMARK_LENGTH, rowPrefix + "备注");
+        if (item.getProductId() != null && item.getProductId() > 0) {
+            ScmBaseDataClient.MaterialOption material;
+            try {
+                material = scmClient.requireMaterial(corpId, item.getProductId());
+            } catch (BusinessException e) {
+                throw BusinessException.of(rowPrefix + e.getMessage());
+            }
+            String name = str(material.name());
+            if (name.isEmpty()) {
+                name = (str(material.brand()) + " " + str(material.model())).trim();
+            }
+            if (name.isEmpty()) {
+                throw BusinessException.of(rowPrefix + "旧品名称不能为空");
+            }
+            return new ValidatedTradeIn(material.id(), str(material.number()),
+                    truncate(name, MAX_TRADE_IN_NAME_LENGTH),
+                    truncate(str(material.brand()), MAX_TRADE_IN_BRAND_LENGTH),
+                    truncate(str(material.model()), MAX_TRADE_IN_MODEL_LENGTH),
+                    truncate(str(material.category()), MAX_TRADE_IN_BRAND_LENGTH),
+                    quantity, truncate(str(material.unit()), MAX_TRADE_IN_UNIT_LENGTH),
+                    remark, false);
+        }
+        String name = requireText(item.getProductName(), rowPrefix + "旧品名称",
+                MAX_TRADE_IN_NAME_LENGTH);
+        String brand = optionalText(item.getBrand(), MAX_TRADE_IN_BRAND_LENGTH,
+                rowPrefix + "品牌");
+        String model = optionalText(item.getModel(), MAX_TRADE_IN_MODEL_LENGTH,
+                rowPrefix + "型号");
+        String category = optionalText(item.getCategory(), MAX_TRADE_IN_BRAND_LENGTH,
+                rowPrefix + "品类");
+        String unit = optionalText(item.getUnit(), MAX_TRADE_IN_UNIT_LENGTH,
+                rowPrefix + "单位");
+        return new ValidatedTradeIn(null, null, name, brand, model, category,
+                quantity, unit, remark, true);
+    }
+
+    /** 选填文本：去首尾空白、超长拒绝、空串归 null。 */
+    private static String optionalText(String raw, int maxLength, String label) {
+        String value = str(raw);
+        if (value.isEmpty()) return null;
+        if (value.length() > maxLength) {
+            throw BusinessException.of(label + "不能超过" + maxLength + "个字符");
+        }
+        return value;
     }
 
     /**
@@ -1091,6 +1353,10 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         entity.setSalePrice(p.price());
         entity.setSaleQuantity(p.qty());
         entity.setReceiptAmount(p.amount());
+        // 以旧换新：收款金额仍为销售额（提成基数不变），抵扣后金额用于应付/展示
+        entity.setIsTradeIn(p.tradeIn() ? "是" : "否");
+        entity.setDeductionAmount(p.deduction());
+        entity.setTradeInPayableAmount(p.amount().subtract(p.deduction()).max(BigDecimal.ZERO));
         // 底价统一取产品售价表（制单已强制要求配置），保证提成分档与售价配置同源
         entity.setRetailFloorPrice(p.retailFloorPrice());
         entity.setGroupLowestPrice(p.groupLowestPrice());
@@ -1198,7 +1464,13 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                                     BigDecimal rate, BigDecimal standardPrice, boolean special,
                                     Long specialFileId, String specialFileUrl,
                                     String specialFileName, BigDecimal retailFloorPrice,
-                                    BigDecimal groupLowestPrice) {}
+                                    BigDecimal groupLowestPrice,
+                                    boolean tradeIn, BigDecimal deduction,
+                                    List<ValidatedTradeIn> tradeInItems) {}
+
+    private record ValidatedTradeIn(Long productId, String materialNumber, String productName,
+                                    String brand, String model, String category, int quantity,
+                                    String unit, String remark, boolean manual) {}
 
     private record AgentInfo(Long userId, String name, String phone) {}
 

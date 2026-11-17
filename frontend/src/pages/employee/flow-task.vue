@@ -103,7 +103,40 @@
         <view class="info-row"><text class="k">客户</text><text class="v">{{ order.customer || '-' }} {{ order.customerPhone || '' }}</text></view>
         <view class="info-row"><text class="k">小区/地址</text><text class="v">{{ order.communityName || '-' }} {{ order.detailedAddress || '' }}</text></view>
         <view class="info-row"><text class="k">合计金额</text><text class="v money">{{ money(order.totalAmount) }}</text></view>
+        <view v-if="order.hasTradeIn" class="info-row">
+          <text class="k">抵扣金额</text>
+          <text class="v deduction">-{{ money(order.tradeInDeductionAmount) }}</text>
+        </view>
+        <view v-if="order.hasTradeIn" class="info-row">
+          <text class="k">应付合计</text>
+          <text class="v money">{{ money(order.payableAmount) }}</text>
+        </view>
+        <view v-if="order.hasTradeIn" class="info-row">
+          <text class="k">旧品采购单</text>
+          <text class="v">{{ order.tradeInPurchaseBillNo || '—' }}</text>
+        </view>
         <view class="info-row"><text class="k">计算状态</text><text class="v">{{ order.calcStatus || '未计算' }}</text></view>
+      </view>
+
+      <view v-if="isBusinessOrder && tradeInInboundDone && isConstructionStage" class="inbound-done">
+        <text class="inbound-done-title">✓ 旧品已入库</text>
+        <text v-if="order.tradeInPurchaseBillNo" class="inbound-done-sub">
+          关联采购单 {{ order.tradeInPurchaseBillNo }}
+        </text>
+      </view>
+      <view v-if="isBusinessOrder && showInboundReminder" class="inbound-alert">
+        <text class="inbound-title">⚠️ 本订单含以旧换新旧品，请及时办理旧品入库。</text>
+        <text v-if="order.tradeInSummary" class="inbound-line">旧品：{{ order.tradeInSummary }}</text>
+        <text v-if="order.tradeInPurchaseBillNo" class="inbound-line">
+          关联采购单：{{ order.tradeInPurchaseBillNo }}（未审核）
+        </text>
+        <text class="inbound-line">入库状态：{{ order.tradeInInboundStatusName || '旧品未入库' }}</text>
+        <text v-if="order.tradeInPurchaseStatus === 'FAILED'" class="inbound-line error">
+          关联采购单生成失败，请联系经办人在订单详情重试
+        </text>
+        <text v-if="order.tradeInPurchaseBillNo" class="inbound-hint">
+          请在供应链管理 PC 端打开该采购订单办理旧品入库
+        </text>
       </view>
 
       <view v-if="isBusinessOrder && (order.products || []).length" class="card">
@@ -112,6 +145,12 @@
           <view class="product-main">
             <text class="product-name">{{ p.brand || '' }} {{ p.model || '' }}</text>
             <text class="product-meta">品类 {{ categoryLabel(p.category) }} · 单价 {{ money(p.salePrice) }} · 数量 {{ p.saleQuantity }}</text>
+            <text v-if="p.isTradeIn === '是'" class="product-trade">
+              以旧换新 · 抵扣 -{{ money(p.deductionAmount) }} · 应付 {{ money(p.payableAmount) }}
+            </text>
+            <text v-if="p.isTradeIn === '是' && (p.tradeInItems || []).length" class="product-old">
+              旧品：{{ tradeInItemsText(p.tradeInItems) }}
+            </text>
           </view>
           <text class="product-amount" :class="{ negative: Number(p.receiptAmount) < 0 }">{{ money(p.receiptAmount) }}</text>
         </view>
@@ -313,6 +352,33 @@ const isMaterialRequisition = computed(() => businessType.value === 'OPS_MATERIA
 const isMaterialWriteOff = computed(() => businessType.value === 'OPS_MATERIAL_WRITE_OFF')
 const isBusinessOrder = computed(() => !isPurchase.value
   && !isMaterialRequisition.value && !isMaterialWriteOff.value)
+/** 旧品入库完成（SCM inboundStatus=ALL）后提醒消失，改为已入库标识。 */
+const tradeInInboundDone = computed(() => {
+  const o = order.value || {}
+  return !!o.hasTradeIn && (o.tradeInInboundStatus === 'ALL'
+    || o.tradeInInboundStatusName === '旧品已入库')
+})
+/**
+ * 施工完成节点（施工记录/施工验收）处理页必须提示旧品入库；
+ * 其余节点在业务状态到达 5 施工完成后同样提示，直到入库完成。
+ */
+const isConstructionStage = computed(() => {
+  if (['OPS_CONSTRUCTION_RECORD', 'OPS_ACCEPTANCE'].includes(actionType.value)) return true
+  const o = order.value || {}
+  const match = String(o.bizStatus == null ? '' : o.bizStatus).match(/\d+/)
+  if (match) return Number(match[0]) >= 5
+  return /施工完成|验收|完成/.test(String(o.bizStatusName || ''))
+})
+const showInboundReminder = computed(() => {
+  const o = order.value || {}
+  return !!o.hasTradeIn && isConstructionStage.value && !tradeInInboundDone.value
+})
+
+function tradeInItemsText(items) {
+  return (items || [])
+    .map(item => `${item.productName || item.brand || '旧品'} ×${item.quantity || 0}`)
+    .join('、')
+}
 /** 当前节点处理完后的下一步审批人（底座 instance.nextNodePreview 已含姓名/规则） */
 const nextApprover = computed(() => {
   const instance = detail.value && detail.value.instance
@@ -439,7 +505,10 @@ function normalizeDate(raw) {
 function categoryLabel(key) { return categoryMap.value[String(key)] || key }
 /** 采购订单审批页展示用（不依赖字典，避免 H5 额外请求） */
 function sourceLabel(v) {
-  return { DIRECT: '直接采购', BUSINESS_DATA: '业务数据', MALL_ORDER: '商城订单' }[v] || v || '-'
+  return {
+    DIRECT: '直接采购', BUSINESS_DATA: '业务数据', MALL_ORDER: '商城订单',
+    BUSINESS_ORDER_TRADE_IN: '业务订单以旧换新'
+  }[v] || v || '-'
 }
 function approvalLabel(v) {
   return { NONE: '无需审批', IN_APPROVAL: '审批中', APPROVED: '已通过', REJECTED: '已驳回' }[v] || v || '-'
@@ -711,6 +780,7 @@ function goBack() {
 .k { color: #86909C; flex: 0 0 150rpx; }
 .v { color: #1D2129; text-align: right; flex: 1; word-break: break-all; }
 .money { color: #FF6B35; font-weight: 600; }
+.deduction { color: #C62828; font-weight: 600; }
 .product { display: flex; justify-content: space-between; padding: 14rpx 0; border-top: 1rpx solid #F2F3F5; }
 .product:first-of-type { border-top: none; }
 .product-main { flex: 1; padding-right: 12rpx; }
@@ -718,6 +788,24 @@ function goBack() {
 .product-meta { display: block; margin-top: 6rpx; font-size: 22rpx; color: #86909C; }
 .product-amount { font-size: 26rpx; color: #1D2129; font-weight: 600; }
 .negative { color: #F53F3F; }
+.inbound-alert {
+  margin: 20rpx 24rpx 0; padding: 22rpx 24rpx; border-radius: 16rpx;
+  background: #FFF7E6; border: 2rpx solid #FFB74D;
+  display: flex; flex-direction: column; gap: 8rpx;
+}
+.inbound-title { font-size: 26rpx; font-weight: 700; color: #B26A00; line-height: 1.5; }
+.inbound-line { font-size: 23rpx; color: #8C5A00; line-height: 1.5; word-break: break-all; }
+.inbound-line.error { color: #C62828; font-weight: 600; }
+.inbound-hint { font-size: 21rpx; color: #A9812F; }
+.inbound-done {
+  margin: 20rpx 24rpx 0; padding: 18rpx 24rpx; border-radius: 16rpx;
+  background: #F0FBF4; border: 2rpx solid #BFE9CF;
+  display: flex; align-items: center; justify-content: space-between; gap: 12rpx;
+}
+.inbound-done-title { font-size: 25rpx; font-weight: 700; color: #0B7A42; }
+.inbound-done-sub { font-size: 21rpx; color: #3D8B62; }
+.product-trade { display: block; margin-top: 6rpx; font-size: 21rpx; color: #B26A00; }
+.product-old { display: block; margin-top: 4rpx; font-size: 20rpx; color: #A9812F; line-height: 1.5; }
 .block-alert {
   margin: 0 0 16rpx; padding: 18rpx 20rpx; border-radius: 12rpx;
   background: #FFF7E6; border: 2rpx solid #FFD591; color: #B26A00;

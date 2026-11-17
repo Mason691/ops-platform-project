@@ -96,5 +96,45 @@ public class EmployeeBusinessEntryRequest {
 
         /** 提成比例（0-100，仅低价特批时生效；非特批按 0 处理） */
         private BigDecimal commissionRate;
+
+        /** 是否以旧换新；true 时 deductionAmount/tradeInItems 必填 */
+        private Boolean isTradeIn;
+
+        /** 以旧换新抵扣金额（>0 且 ≤ 销售单价×数量） */
+        private BigDecimal deductionAmount;
+
+        /** 旧品明细（至少 1 条；旧品不在商品库时 isManual=true） */
+        private List<TradeInItem> tradeInItems;
+    }
+
+    /** 以旧换新旧品明细。 */
+    @Data
+    public static class TradeInItem {
+
+        /** SCM 商品ID；手工旧品可不传 */
+        private Long productId;
+
+        /** SCM 商品编码（后端按 productId 回查覆盖） */
+        private String materialNumber;
+
+        /** 旧品名称（手工旧品必填） */
+        private String productName;
+
+        private String brand;
+
+        private String model;
+
+        private String category;
+
+        /** 旧品数量（正整数） */
+        private Integer quantity;
+
+        private String unit;
+
+        /** 成色/故障等备注 */
+        private String remark;
+
+        /** true=其他旧品手工录入 */
+        private Boolean isManual;
     }
 }

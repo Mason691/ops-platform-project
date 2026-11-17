@@ -23,6 +23,9 @@ public interface EmployeeBusinessEntryService {
     /** 保存手工录入的业务数据（同步发起工作流并带回下一审批人）。 */
     Map<String, Object> createManualEntry(EmployeeBusinessEntryRequest request);
 
+    /** 以旧换新采购单创建失败/状态待同步时重试（SCM 侧幂等）。 */
+    Map<String, Object> retryTradeInPurchase(Long orderId);
+
     /**
      * 货款补录：当前经办人名下定金支付且未全款的业务订单。
      * 经办人判定：当前员工手机号出现在 agent_phones，或 create_user = 当前用户。

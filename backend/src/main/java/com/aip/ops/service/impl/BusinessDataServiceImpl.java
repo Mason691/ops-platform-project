@@ -1,10 +1,12 @@
 package com.aip.ops.service.impl;
 
 import com.aip.sdk.exception.BusinessException;
+import com.aip.ops.client.ScmPurchaseOrderClient;
 import com.aip.ops.client.WorkflowPlatformClient;
 import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsBusinessOrder;
+import com.aip.ops.entity.OpsBusinessOrderTradeIn;
 import com.aip.ops.entity.OpsPersonalCommissionRule;
 import com.aip.ops.entity.OpsValueAddedProduct;
 import com.aip.ops.entity.SysImportTask;
@@ -76,6 +78,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final com.aip.ops.mapper.OpsBusinessFlowRecordMapper flowRecordMapper;
     private final DispatchEligibilityService dispatchEligibilityService;
     private final WorkflowPlatformClient workflowClient;
+    private final ScmPurchaseOrderClient scmPurchaseOrderClient;
+    private final com.aip.ops.mapper.OpsBusinessOrderTradeInMapper tradeInMapper;
 
     /** 锁定状态：已上报集团的数据禁止删除/修改/重新计算（所有组织一致） */
     public static final String REPORTED_STATUS = "已上报集团";
@@ -138,7 +142,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             BizStatusService bizStatusService,
             com.aip.ops.mapper.OpsBusinessFlowRecordMapper flowRecordMapper,
             DispatchEligibilityService dispatchEligibilityService,
-            WorkflowPlatformClient workflowClient) {
+            WorkflowPlatformClient workflowClient,
+            ScmPurchaseOrderClient scmPurchaseOrderClient,
+            com.aip.ops.mapper.OpsBusinessOrderTradeInMapper tradeInMapper) {
         this.mapper = mapper;
         this.orderMapper = orderMapper;
         this.productMapper = productMapper;
@@ -155,6 +161,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         this.flowRecordMapper = flowRecordMapper;
         this.dispatchEligibilityService = dispatchEligibilityService;
         this.workflowClient = workflowClient;
+        this.scmPurchaseOrderClient = scmPurchaseOrderClient;
+        this.tradeInMapper = tradeInMapper;
     }
     public static String getCategoryDisplayName(String key) {
         if (key == null || key.isEmpty()) return "";
@@ -363,6 +371,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             order.remove("_maxId");
             records.add(order);
         }
+        attachTradeInItems(records);
         List<Map<String, Object>> categoryStats = new ArrayList<>();
         categoryTotals.entrySet().stream()
                 .sorted((a, b) -> b.getValue()[0].compareTo(a.getValue()[0]))
@@ -444,6 +453,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             order.put("flow", buildEmployeeFlow(order, progress));
             order.remove("_maxId");
         }
+        attachTradeInItems(pageOrders);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("records", pageOrders);
         result.put("total", total);
@@ -492,6 +502,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                         .eq(com.aip.ops.entity.OpsBusinessFlowRecord::getDeleteFlag, 0)
                         .orderByDesc(com.aip.ops.entity.OpsBusinessFlowRecord::getId));
         view.put("flowRecords", records);
+        attachTradeInItems(List.of(view));
+        enrichTradeInStatus(view);
         return view;
     }
 
@@ -610,6 +622,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                         .eq(com.aip.ops.entity.OpsBusinessFlowRecord::getDeleteFlag, 0)
                         .orderByDesc(com.aip.ops.entity.OpsBusinessFlowRecord::getId));
         view.put("flowRecords", records);
+        attachTradeInItems(List.of(view));
+        enrichTradeInStatus(view);
         return view;
     }
 
@@ -638,6 +652,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         view.put("bizStatus", "0");
         view.put("bizStatusName", bizStatusService.label("0"));
         view.put("flowRecords", List.of());
+        attachTradeInItems(List.of(view));
+        enrichTradeInStatus(view);
         return view;
     }
 
@@ -843,6 +859,20 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 rows.stream().anyMatch(r -> r.getPlatformMemberId() == null));
         order.put("totalAmount", totalAmount.setScale(2, RoundingMode.HALF_UP));
         order.put("totalCommission", totalCommission.setScale(2, RoundingMode.HALF_UP));
+        BigDecimal tradeInDeduction = products.stream()
+                .map(product -> (BigDecimal) product.get("deductionAmount"))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        boolean hasTradeIn = products.stream().anyMatch(product -> "是".equals(product.get("isTradeIn")));
+        order.put("hasTradeIn", hasTradeIn);
+        order.put("tradeInDeductionAmount", tradeInDeduction.setScale(2, RoundingMode.HALF_UP));
+        order.put("payableAmount", totalAmount.subtract(tradeInDeduction)
+                .max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP));
+        order.put("tradeInItems", new ArrayList<>());
+        order.put("tradeInSummary", "");
+        order.put("tradeInPurchaseStatus", master != null ? master.getTradeInPurchaseStatus() : null);
+        order.put("tradeInPurchaseOrderId", master != null ? master.getTradeInPurchaseOrderId() : null);
+        order.put("tradeInPurchaseBillNo", master != null ? master.getTradeInPurchaseBillNo() : null);
+        order.put("tradeInPurchaseError", master != null ? master.getTradeInPurchaseError() : null);
         order.put("productCount", products.size());
         order.put("products", products);
         order.put("hasReturn", hasReturn);
@@ -868,6 +898,101 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         order.put("rowIds", rows.stream().map(OpsBusinessData::getId).toList());
         order.put("_maxId", rows.stream().mapToLong(OpsBusinessData::getId).max().orElse(0L));
         return order;
+    }
+
+    /** 批量挂载旧品明细：订单级 tradeInItems + 按 productKey 挂到商品行。 */
+    private void attachTradeInItems(List<Map<String, Object>> orders) {
+        if (orders == null || orders.isEmpty()) return;
+        Set<Long> orderIds = orders.stream()
+                .map(order -> order.get("orderId"))
+                .filter(value -> value instanceof Number)
+                .map(value -> ((Number) value).longValue())
+                .collect(Collectors.toSet());
+        if (orderIds.isEmpty()) return;
+        List<OpsBusinessOrderTradeIn> rows = tradeInMapper.selectList(
+                new LambdaQueryWrapper<OpsBusinessOrderTradeIn>()
+                        .in(OpsBusinessOrderTradeIn::getOrderId, orderIds)
+                        .eq(OpsBusinessOrderTradeIn::getDeleteFlag, 0)
+                        .orderByAsc(OpsBusinessOrderTradeIn::getId));
+        Map<Long, List<OpsBusinessOrderTradeIn>> byOrder = rows.stream()
+                .collect(Collectors.groupingBy(OpsBusinessOrderTradeIn::getOrderId,
+                        LinkedHashMap::new, Collectors.toList()));
+        for (Map<String, Object> order : orders) {
+            Long orderId = order.get("orderId") instanceof Number n ? n.longValue() : null;
+            List<OpsBusinessOrderTradeIn> tradeIns = orderId == null
+                    ? List.of() : byOrder.getOrDefault(orderId, List.of());
+            List<Map<String, Object>> items = tradeIns.stream()
+                    .map(this::tradeInItemView).toList();
+            order.put("tradeInItems", items);
+            order.put("tradeInSummary", tradeInSummary(items));
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> products = (List<Map<String, Object>>) order.get("products");
+            if (products == null) continue;
+            Map<String, List<Map<String, Object>>> byProduct = items.stream()
+                    .filter(item -> item.get("productKey") != null)
+                    .collect(Collectors.groupingBy(item -> String.valueOf(item.get("productKey")),
+                            LinkedHashMap::new, Collectors.toList()));
+            for (Map<String, Object> product : products) {
+                product.put("tradeInItems", byProduct.getOrDefault(
+                        String.valueOf(product.get("productKey")), List.of()));
+            }
+        }
+    }
+
+    private Map<String, Object> tradeInItemView(OpsBusinessOrderTradeIn row) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id", row.getId());
+        item.put("productKey", row.getProductKey());
+        item.put("oldProductId", row.getOldProductId());
+        item.put("materialNumber", row.getOldMaterialNumber());
+        item.put("productName", row.getOldProductName());
+        item.put("brand", row.getBrand());
+        item.put("model", row.getModel());
+        item.put("category", row.getCategory());
+        item.put("quantity", row.getQuantity());
+        item.put("unit", row.getUnit());
+        item.put("remark", row.getRemark());
+        item.put("isManual", Integer.valueOf(1).equals(row.getIsManual()));
+        return item;
+    }
+
+    private static String tradeInSummary(List<Map<String, Object>> items) {
+        if (items == null || items.isEmpty()) return "";
+        List<String> parts = new ArrayList<>();
+        for (int i = 0; i < items.size() && i < 5; i++) {
+            Map<String, Object> item = items.get(i);
+            parts.add(strValue(item.get("productName")) + " ×" + item.get("quantity"));
+        }
+        if (items.size() > 5) parts.add("等" + items.size() + "行");
+        return String.join("、", parts);
+    }
+
+    private static String strValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    /**
+     * 订单详情实时补充 SCM 采购单状态：旧品入库完成（inboundStatus=ALL）时
+     * 施工完成提醒显示“已入库”；SCM 不可达显示“状态待同步”，不阻断详情。
+     */
+    private void enrichTradeInStatus(Map<String, Object> view) {
+        if (!Boolean.TRUE.equals(view.get("hasTradeIn"))) return;
+        if (!(view.get("tradeInPurchaseOrderId") instanceof Number pid)) return;
+        Long corpId = view.get("corpId") instanceof Number c ? c.longValue() : null;
+        ScmPurchaseOrderClient.TradeInPurchaseStatus status =
+                scmPurchaseOrderClient.status(corpId, pid.longValue());
+        if (status == null) {
+            view.put("tradeInInboundStatusName", "状态待同步");
+            return;
+        }
+        view.put("tradeInInboundStatus", status.inboundStatus());
+        view.put("tradeInInboundStatusName", switch (String.valueOf(status.inboundStatus())) {
+            case "ALL" -> "旧品已入库";
+            case "PARTIAL" -> "旧品部分入库";
+            default -> "旧品未入库";
+        });
+        view.put("tradeInAuditStatus", status.auditStatus());
+        view.put("tradeInApprovalStatus", status.approvalStatus());
     }
 
     private static String pick(String masterValue, List<OpsBusinessData> rows,
@@ -897,6 +1022,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 .orElse(BigDecimal.ZERO);
         BigDecimal commission = rows.stream().map(OpsBusinessData::getCommissionAmount)
                 .filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal deduction = rows.stream().map(OpsBusinessData::getDeductionAmount)
+                .filter(Objects::nonNull).max(Comparator.naturalOrder())
+                .orElse(BigDecimal.ZERO);
+        BigDecimal payable = amount.subtract(deduction).max(BigDecimal.ZERO);
+        boolean tradeIn = rows.stream().anyMatch(row -> "是".equals(row.getIsTradeIn()));
         BigDecimal rate = rows.stream().map(OpsBusinessData::getCommissionRate)
                 .filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
         Integer quantity = rows.stream().map(OpsBusinessData::getSaleQuantity)
@@ -917,6 +1047,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         product.put("salePrice", first.getSalePrice());
         product.put("saleQuantity", quantity);
         product.put("receiptAmount", amount.setScale(2, RoundingMode.HALF_UP));
+        product.put("deductionAmount", deduction.setScale(2, RoundingMode.HALF_UP));
+        product.put("payableAmount", payable.setScale(2, RoundingMode.HALF_UP));
+        product.put("isTradeIn", tradeIn ? "是" : "否");
+        product.put("tradeInItems", new ArrayList<>());
         product.put("commissionAmount", commission.setScale(2, RoundingMode.HALF_UP));
         product.put("commissionRate", rate.setScale(2, RoundingMode.HALF_UP));
         product.put("isSpecial", first.getIsSpecial());

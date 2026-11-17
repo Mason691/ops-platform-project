@@ -20,8 +20,16 @@
         <text class="v">{{ result.batchNo || '—' }}</text>
       </view>
       <view class="result-row">
-        <text class="k">合计金额</text>
+        <text class="k">{{ result.hasTradeIn ? '销售金额' : '合计金额' }}</text>
         <text class="v amount">¥{{ amount }}</text>
+      </view>
+      <view v-if="result.hasTradeIn" class="result-row">
+        <text class="k">抵扣金额</text>
+        <text class="v deduction">-¥{{ money(result.tradeInDeduction) }}</text>
+      </view>
+      <view v-if="result.hasTradeIn" class="result-row">
+        <text class="k">应付合计</text>
+        <text class="v amount">¥{{ money(result.payableAmount) }}</text>
       </view>
       <view class="result-row">
         <text class="k">付款方式</text>
@@ -43,6 +51,20 @@
         <text class="k">会员</text>
         <text class="v">已自动创建平台会员</text>
       </view>
+      <view v-if="result.hasTradeIn" class="result-row">
+        <text class="k">旧品采购单</text>
+        <text class="v" :class="{ failed: result.tradeInPurchaseStatus === 'FAILED' }">
+          {{ purchaseStatusText }}
+        </text>
+      </view>
+    </view>
+
+    <view v-if="result.hasTradeIn && result.tradeInPurchaseStatus === 'FAILED'" class="trade-warn">
+      <text class="trade-warn-title">旧品采购单未生成</text>
+      <text class="trade-warn-text">
+        {{ result.tradeInPurchaseError || '采购订单创建失败' }}
+      </text>
+      <text class="trade-warn-text">请进入订单详情重试生成，或联系管理员处理。</text>
     </view>
 
     <view class="actions">
@@ -70,6 +92,16 @@ const money = value => (Number(value) || 0).toFixed(2)
 const detailCount = computed(() => Number(props.result && props.result.detailCount) || 0)
 const productCount = computed(() => Number(props.result && props.result.productCount) || 0)
 const agentCount = computed(() => Number(props.result && props.result.agentCount) || 1)
+const purchaseStatusText = computed(() => {
+  const result = props.result || {}
+  if (result.tradeInPurchaseStatus === 'SUCCESS') {
+    return result.tradeInPurchaseBillNo
+      ? `${result.tradeInPurchaseBillNo}（未审核）`
+      : '已生成（单号待同步）'
+  }
+  if (result.tradeInPurchaseStatus === 'FAILED') return '生成失败，请到订单详情重试'
+  return '生成中，请稍后在订单详情查看'
+})
 /** 审批人展示：有姓名显示“已提交给 角色：姓名 审批”；否则显示明确兜底文案。 */
 const approverText = computed(() => {
   const result = props.result || {}
@@ -111,6 +143,15 @@ const approverText = computed(() => {
 .v { flex: 1; font-size: 27rpx; color: #333; line-height: 1.5; }
 .order-no { font-weight: 700; color: #FF6B35; letter-spacing: 1rpx; }
 .amount { font-size: 32rpx; font-weight: 700; color: #FF6B35; }
+.deduction { color: #C62828; font-weight: 700; }
+.v.failed { color: #C62828; }
+.trade-warn {
+  width: 100%; box-sizing: border-box; margin-top: 20rpx;
+  background: #FFF7E6; border: 2rpx solid #FFB74D; border-radius: 16rpx;
+  padding: 22rpx 24rpx; display: flex; flex-direction: column; gap: 8rpx;
+}
+.trade-warn-title { font-size: 25rpx; font-weight: 700; color: #B26A00; }
+.trade-warn-text { font-size: 22rpx; color: #8C5A00; line-height: 1.5; word-break: break-all; }
 .approver { color: #07C160; font-weight: 600; }
 .approver.fallback { color: #FF7D00; font-weight: 400; line-height: 1.5; }
 .actions { display: flex; gap: 20rpx; width: 100%; margin-top: 48rpx; }

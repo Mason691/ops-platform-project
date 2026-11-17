@@ -2,7 +2,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { api } from '@/api/index'
 import {
   PHONE_RE, STEPS, emptyBusinessForm, emptyProduct, missingItems, newProductUid,
-  normalizeMoney, normalizePhone, validateBusinessForm, validateStep
+  newTradeInUid, normalizeMoney, normalizePhone, validateBusinessForm, validateStep
 } from '@/utils/businessForm'
 import { focusField, scrollToField, vibrateLight } from '@/utils/fieldFocus'
 
@@ -371,7 +371,21 @@ export function useBusinessWizard() {
         saleQuantity: Number(product.saleQuantity),
         isSpecial: !!product.isSpecial,
         specialFileId: product.isSpecial ? (product.specialFileId || null) : null,
-        commissionRate: product.isSpecial ? Number(product.commissionRate) : 0
+        commissionRate: product.isSpecial ? Number(product.commissionRate) : 0,
+        isTradeIn: !!product.isTradeIn,
+        deductionAmount: product.isTradeIn ? normalizeMoney(product.deductionAmount) : 0,
+        tradeInItems: product.isTradeIn ? (product.tradeInItems || []).map(item => ({
+          productId: item.productId || null,
+          materialNumber: item.materialNumber || '',
+          productName: String(item.productName || '').trim(),
+          brand: item.brand || '',
+          model: item.model || '',
+          category: item.category || '',
+          quantity: Number(item.quantity),
+          unit: item.unit || '',
+          remark: String(item.remark || '').trim(),
+          isManual: !!item.isManual
+        })) : []
       })),
       receiptDate: form.receiptDate,
       receiptNo: String(form.receiptNo || '').trim() || null,
@@ -544,6 +558,17 @@ export function useBusinessWizard() {
     // 旧版草稿没有稳定 uid：补一个，避免删除行后价格状态串到相邻行
     form.products.forEach(product => {
       if (product && !product.uid) product.uid = newProductUid()
+      if (!product) return
+      if (product.isTradeIn == null) product.isTradeIn = false
+      if (product.deductionAmount == null) product.deductionAmount = ''
+      if (!Array.isArray(product.tradeInItems)) product.tradeInItems = []
+      product.tradeInItems.forEach(item => {
+        if (!item.uid) item.uid = newTradeInUid()
+        if (item.quantity == null || item.quantity === '') item.quantity = '1'
+        if (item.isManual == null) item.isManual = false
+        if (item.productId == null) item.productId = null
+        if (item.productName == null) item.productName = ''
+      })
     })
     // 草稿可能跨天/跨组织：剔除已离岗或不在当前组织员工列表中的经办人，
     // 否则界面上无法取消、提交时会被后端整体拒绝。

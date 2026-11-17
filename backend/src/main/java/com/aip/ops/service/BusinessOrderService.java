@@ -47,8 +47,12 @@ public interface BusinessOrderService {
 
     List<OpsBusinessOrder> findByIds(Collection<Long> ids);
 
-    /** 重算主表 total_amount / total_commission。 */
+    /** 重算主表 total_amount / total_commission / 以旧换新抵扣 / 应付合计 / has_trade_in。 */
     void refreshTotals(Long orderId);
+
+    /** 以旧换新自动采购单状态回写（PENDING/SUCCESS/FAILED + 采购单ID/号/错误）。 */
+    void updateTradeInPurchaseStatus(Long orderId, String status, Long purchaseOrderId,
+                                     String billNo, String error);
 
     /** 子表状态变更后同步主表 calc_status。 */
     void syncStatus(Long orderId);
