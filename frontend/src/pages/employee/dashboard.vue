@@ -52,8 +52,9 @@
       </view>
     </view>
 
-    <!-- Work log -->
-    <WorkLogCard ref="logCardRef" />
+    <!-- Primary action + todo -->
+    <AddBusinessButton ref="addBusinessRef" :enabled="!noPermissionTip" />
+    <WorkTodoCard ref="todoCardRef" :addable="!noPermissionTip" @add-business="openAddBusiness" />
 
     <!-- Menu -->
     <view v-if="!noPermissionTip" class="menu-section">
@@ -117,17 +118,6 @@
           </view>
           <text class="mc-arrow">›</text>
         </view>
-        <view class="menu-card" @click="goTodo">
-          <view class="mc-icon mc-icon-pending">
-            <text>📋</text>
-            <text v-if="todoCount" class="mc-badge">{{ todoCount > 99 ? '99+' : todoCount }}</text>
-          </view>
-          <view class="mc-body">
-            <text class="mc-title">待办任务</text>
-            <text class="mc-desc">审核、核对、派工与施工任务</text>
-          </view>
-          <text class="mc-arrow">›</text>
-        </view>
         <view class="menu-card" @click="goAiChat">
           <view class="mc-icon mc-icon-ai"><text>🤖</text></view>
           <view class="mc-body">
@@ -146,6 +136,9 @@
         </view>
       </view>
     </view>
+
+    <!-- Work log -->
+    <WorkLogCard ref="logCardRef" />
 
     <OrgSwitchSheet
       v-model:visible="sheetVisible"
@@ -168,6 +161,8 @@ import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
 import OrgSwitcher from '@/components/OrgSwitcher.vue'
 import OrgSwitchSheet from '@/components/OrgSwitchSheet.vue'
 import WorkLogCard from '@/components/WorkLogCard.vue'
+import WorkTodoCard from '@/components/WorkTodoCard.vue'
+import AddBusinessButton from '@/components/AddBusinessButton.vue'
 import { useOrgSwitch } from '@/hooks/useOrgSwitch'
 import { getActiveCompany, getEmployeeInfo } from '@/utils/employeeSession'
 
@@ -182,9 +177,10 @@ const yearlyStats = ref({
   totalCommission: '¥0',
   totalSale: '¥0'
 })
-/** 待办角标 = 底座当前登录人 PENDING 审批任务总数；业务数据卡片不显示徽标 */
-const todoCount = ref(0)
+/** 待办数量徽标由 WorkTodoCard 自行加载并展示 */
 const logCardRef = ref(null)
+const todoCardRef = ref(null)
+const addBusinessRef = ref(null)
 let dashboardShown = false
 const {
   orgs, sheetVisible, switching, loadOrgs, openSheet, confirmSwitch
@@ -194,26 +190,14 @@ const avatarChar = computed(() => (employeeName.value || '员').charAt(0))
 
 onShow(async () => {
   await loadDashboard()
-  loadTodoCount()
   await loadOrgs()
   // 卡片自身在 mounted 已加载一次；后续回到工作台（含查看全部返回）再刷新
-  if (dashboardShown) logCardRef.value?.reload()
+  if (dashboardShown) {
+    logCardRef.value?.reload({ silent: true })
+    todoCardRef.value?.reload({ silent: true })
+  }
   dashboardShown = true
 })
-
-/** 待办角标：底座 /api/wf/task/todo 已按当前登录人 PENDING 审批任务过滤 */
-async function loadTodoCount() {
-  if (!uni.getStorageSync('ops_employee_token')) {
-    todoCount.value = 0
-    return
-  }
-  try {
-    const data = await api.workflowTodo({ pageNum: 1, pageSize: 1 })
-    todoCount.value = Math.max(0, Number(data && data.total) || 0)
-  } catch (e) {
-    todoCount.value = 0
-  }
-}
 
 function refreshCompany() {
   noPermissionTip.value = uni.getStorageSync('ops_employee_no_permission') === '1'
@@ -275,6 +259,7 @@ async function onOrgChanged(data) {
   refreshCompany()
   await loadStats()
   logCardRef.value?.reload()
+  todoCardRef.value?.reload()
 }
 
 function goBusinessData() { uni.navigateTo({ url: '/pages/employee/business-data' }) }
@@ -284,9 +269,9 @@ function goMaterialRequisition() { uni.navigateTo({ url: '/pages/employee/materi
 function goMaterialWriteOff2()   { uni.navigateTo({ url: '/pages/employee/material-write-off-records' }) }
 function goMaterialPick()     { uni.navigateTo({ url: '/pages/employee/material-pick' }) }
 function goMaterialWriteOff() { uni.navigateTo({ url: '/pages/employee/material-write-off' }) }
-function goTodo()         { uni.redirectTo({ url: '/pages/employee/flow-todo' }) }
 function goAiChat()       { uni.redirectTo({ url: '/pages/employee/ai-chat' }) }
 function goProfile()      { uni.redirectTo({ url: '/pages/employee/profile' }) }
+function openAddBusiness() { addBusinessRef.value?.open() }
 
 function onTabSwitch(key) {
   const routes = { ai: '/pages/employee/ai-chat', home: '', todo: '/pages/employee/flow-todo', profile: '/pages/employee/profile' }
@@ -349,11 +334,6 @@ function onTabSwitch(key) {
 }
 .menu-card:active { transform: scale(.985); box-shadow: 0 1rpx 6rpx rgba(0,0,0,.06); }
 .mc-icon { position: relative; width: 80rpx; height: 80rpx; border-radius: 18rpx; display: flex; align-items: center; justify-content: center; font-size: 40rpx; flex-shrink: 0; }
-.mc-badge {
-  position: absolute; top: -10rpx; right: -12rpx; min-width: 30rpx; height: 30rpx; line-height: 30rpx;
-  padding: 0 8rpx; border-radius: 15rpx; background: #F53F3F; color: #fff;
-  font-size: 19rpx; text-align: center; font-weight: 600; box-sizing: border-box;
-}
 .mc-icon-data { background: #FFF3E8; }
 .mc-icon-pay  { background: #FFF1E8; }
 .mc-icon-pending { background: #E8F8E8; }

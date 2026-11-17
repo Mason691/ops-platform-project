@@ -2,6 +2,22 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-18（员工工作台首页布局调整：新增业务主按钮 + 待办前置 + 日志单卡片）
+
+- **功能**：工作台首页信息层级调整。
+  - 新增「新增业务」主按钮（主色渐变、高 96rpx、单业务类型直跳 `/pages/employee/business-data-new`，多类型走 `BottomSheetSelect`；组织无权限时隐藏）。
+  - 待办任务从「常用功能」提升为首页主卡片：最多 5 条 + 「查看更多（共 N 条）」；空态含「新增业务」引导；单条展示业务类型、标题、节点、发起人、到达时间、剩余时限及超时/临期色条。
+  - 工作业务日志改为单张摘要卡（最近一条 + 本周/累计统计），下移至常用功能之后。
+  - 移除「常用功能」中重复的「待办任务」入口及角标逻辑。
+- **新增文件**：`utils/formatRemainTime.js`、`utils/workflowTodo.js`、`utils/track.js`、`hooks/useWorkTodo.js`、`hooks/useWorkLogSummary.js`、`hooks/useBusinessTypes.js`、`components/AddBusinessButton.vue`、`components/WorkTodoCard.vue`、`components/WorkTodoItem.vue`、`Specs/工作台首页布局调整-规格说明.md`。
+- **修改文件**：`components/WorkLogCard.vue`（重写为摘要卡）、`pages/employee/dashboard.vue`、`pages/employee/flow-todo.vue`（过滤/排序抽到共享工具，保证与首页一致）。
+- **接口**：全部复用 `/api/wf/task/todo` 与 `/api/wf/log/my`，未新增后端接口。
+- **验证**：
+  - `npm run build:h5` 与 `npm run build:mp-weixin` 均通过（入口 `index-BN1Q0oRN.js`，工作台 chunk `pages-employee-dashboard.B65_qiyT.js`）；小程序产物顺序确认：新增业务 → 待办 → 常用功能 → 日志卡片。
+  - 纯函数自测通过：时限文案（30 分钟不再误显示为 1 小时）、`remainingHours=null` 不误判超时、紧急度排序（超时 > 临期到达倒序 > 普通）、派工过滤与 fail-open。
+  - 独立代码审查 5 项发现已修复：查看更多改 `redirectTo` 防页面栈增长、null SLA 不判超时、静默刷新失败保留旧数据、首屏 loading 初值、切组织清空旧计数。
+- **未执行**：生产部署、微信真机视觉/点击验证（需真实员工账号）；项目无 lint/单测框架，未运行相关检查。
+
 ## 2026-11-17（员工工作台二级页返回主页链接 + 生产验证）
 
 - **功能**：新增 `EmployeeHomeLink`（纯链接，`reLaunch` 回 `/pages/employee/dashboard`）与 `EmployeePageHead`（标题 + 最右链接）；17 个非 Tab 二级页面统一将「⌂ 返回主页」放在页面标题同一行最右侧；待办/AI/个人中心仍使用底部「主页」Tab。
