@@ -2,6 +2,21 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-17（平台驳回弹窗统一 + 生产部署验证）
+
+- **合并**：平台 `fix/workflow-reject` 快进合并到 `main`（`743fef4..d444131`），并推送 `origin/main`。内容：`RejectDialog/useReject` 统一驳回弹窗、驳回任务级锁与并发加固、`WorkflowRejectService` 及测试。
+- **验证**：平台 `mvn -o test -pl web -am` 34 项通过；平台前端 `npm run build` 通过；平台后端 clean package 通过（JAR sha256 前 16 位 `d40a5bd8f10add2b`）。
+- **部署（2026-11-17 21:24）**：仅平台后端 + 平台主站。
+  - 后端镜像 `boss-platform/backend:reject-20261117_2124` → latest，容器 JAR sha `d40a5bd8…`，8080 health 200，healthy。
+  - 前端入口 `index-6jpFWraw.js`，227 assets；`boss-platform-nginx` reload；`RejectDialog-Cykcuue3.js` 已被 `BusinessDataFlowTask`/`TaskDetail` 引用。
+  - ops H5 `pages-employee-flow-task.DN1pbg4i.js` 已含 `RejectPopup`/驳回意见。
+- **冒烟**：`/` 标题「协同平台」200；`/api/wf/task/reject` 未认证 401；测试员工访问真实任务 `81`：
+  - `GET /api/wf/task/81` → 403「你不是该审批的参与人，无权查看」
+  - `POST /api/wf/task/reject` → 403「您不是当前任务审批人，无权操作」
+  - 任务 `81` 保持 `PENDING`，未被误驳回。
+- **备份/回滚**：`backups/ai_platform-platform-reject-20261117_2124.sql.gz`、`backups/html-platform-pre-reject-20261117_2124.tgz`、`platform-backend/app.jar.bak-reject-20261117_2124`；回滚镜像 `boss-platform/backend:rollback-reject-20261117_2124`。
+- **未执行**：真实审批人登录后的弹窗视觉/点击/提交 E2E（未提供 corp 9 测试审批人账号或测试待办）。
+
 ## 2026-11-17（以旧换新旧品品牌过滤，生产已发布）
 
 - **规则**：旧品选择器只列出品牌为「旧品」的商品；保留「其他旧品」手工录入。正常销售商品的品牌/型号列表排除「旧品」品牌；后端校验选中旧品必须为「旧品」品牌，并禁止「旧品」品牌作为销售商品。
