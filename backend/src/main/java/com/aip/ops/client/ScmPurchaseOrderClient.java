@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -125,7 +126,8 @@ public class ScmPurchaseOrderClient {
 
     public record TradeInItem(Long tradeInId, Long productId, String materialNumber,
                               String materialName, String brand, String model, String category,
-                              Integer quantity, String unit, String remark, Boolean isManual) {
+                              Integer quantity, BigDecimal taxPrice, String unit, String remark,
+                              Boolean isManual) {
     }
 
     public record TradeInPurchaseResult(Long orderId, String billNo, String auditStatus,

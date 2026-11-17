@@ -353,15 +353,59 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         if (rows.isEmpty()) {
             throw BusinessException.of("订单没有旧品明细，无法创建采购单");
         }
+        Map<String, BigDecimal> unitPriceByKey = tradeInUnitPrices(orderId, rows);
         List<ScmPurchaseOrderClient.TradeInItem> items = new ArrayList<>();
         for (OpsBusinessOrderTradeIn row : rows) {
+            BigDecimal taxPrice = unitPriceByKey.get(row.getProductKey());
+            if (taxPrice == null) {
+                throw BusinessException.of("旧品抵扣金额或数量缺失，无法计算采购单价");
+            }
             items.add(new ScmPurchaseOrderClient.TradeInItem(
                     row.getId(), row.getOldProductId(), row.getOldMaterialNumber(),
                     row.getOldProductName(), row.getBrand(), row.getModel(), row.getCategory(),
-                    row.getQuantity(), row.getUnit(), row.getRemark(),
+                    row.getQuantity(), taxPrice, row.getUnit(), row.getRemark(),
                     Integer.valueOf(1).equals(row.getIsManual())));
         }
         return new ScmPurchaseOrderClient.TradeInPurchaseRequest(corpId, orderId, orderNo, items);
+    }
+
+    /**
+     * 采购单价 = 商品行抵扣金额 / 该商品行旧品总数量（两位小数）。
+     * 多经办人行抵扣同值，按产品组 MAX 去重；同一商品行多件旧品共用该单价。
+     */
+    private Map<String, BigDecimal> tradeInUnitPrices(Long orderId,
+                                                      List<OpsBusinessOrderTradeIn> rows) {
+        Map<String, BigDecimal> deductionByKey = new LinkedHashMap<>();
+        List<OpsBusinessData> orderItems = businessDataMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<OpsBusinessData>()
+                        .eq(OpsBusinessData::getOrderId, orderId)
+                        .eq(OpsBusinessData::getDeleteFlag, 0));
+        for (OpsBusinessData item : orderItems) {
+            if (item.getDeductionAmount() == null || item.getDeductionAmount().signum() <= 0) {
+                continue;
+            }
+            String key = tradeInProductKey(item.getCategory(), item.getBrand(),
+                    item.getModel(), item.getSalePrice());
+            deductionByKey.merge(key, item.getDeductionAmount(), BigDecimal::max);
+        }
+        Map<String, Integer> quantityByKey = new LinkedHashMap<>();
+        for (OpsBusinessOrderTradeIn row : rows) {
+            int quantity = row.getQuantity() == null ? 0 : row.getQuantity();
+            if (quantity <= 0) {
+                throw BusinessException.of("旧品数量必须为正整数");
+            }
+            quantityByKey.merge(row.getProductKey(), quantity, Integer::sum);
+        }
+        Map<String, BigDecimal> result = new LinkedHashMap<>();
+        for (Map.Entry<String, BigDecimal> entry : deductionByKey.entrySet()) {
+            Integer totalQuantity = quantityByKey.get(entry.getKey());
+            if (totalQuantity == null || totalQuantity <= 0) {
+                continue;
+            }
+            result.put(entry.getKey(), entry.getValue()
+                    .divide(BigDecimal.valueOf(totalQuantity), 2, RoundingMode.HALF_UP));
+        }
+        return result;
     }
 
     private static String truncate(String value, int max) {
@@ -697,8 +741,14 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     }
 
     private static String tradeInProductKey(ValidatedProduct product) {
-        return product.categoryKey() + "|" + product.brand() + "|" + product.model()
-                + "|" + product.price().stripTrailingZeros().toPlainString();
+        return tradeInProductKey(product.categoryKey(), product.brand(), product.model(),
+                product.price());
+    }
+
+    private static String tradeInProductKey(String category, String brand, String model,
+                                            BigDecimal price) {
+        return category + "|" + brand + "|" + model
+                + "|" + (price == null ? "" : price.stripTrailingZeros().toPlainString());
     }
 
     // ── 员工上下文 ──
