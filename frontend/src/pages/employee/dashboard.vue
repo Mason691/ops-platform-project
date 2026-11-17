@@ -118,6 +118,14 @@
           </view>
           <text class="mc-arrow">›</text>
         </view>
+        <view class="menu-card" @click="goWorkLog">
+          <view class="mc-icon mc-icon-data"><text>📝</text></view>
+          <view class="mc-body">
+            <text class="mc-title">工作业务日志</text>
+            <text class="mc-desc">查看我发起与处理的流程操作</text>
+          </view>
+          <text class="mc-arrow">›</text>
+        </view>
         <view class="menu-card" @click="goAiChat">
           <view class="mc-icon mc-icon-ai"><text>🤖</text></view>
           <view class="mc-body">
@@ -136,9 +144,6 @@
         </view>
       </view>
     </view>
-
-    <!-- Work log -->
-    <WorkLogCard ref="logCardRef" />
 
     <OrgSwitchSheet
       v-model:visible="sheetVisible"
@@ -160,7 +165,6 @@ import { api } from '@/api/index.js'
 import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
 import OrgSwitcher from '@/components/OrgSwitcher.vue'
 import OrgSwitchSheet from '@/components/OrgSwitchSheet.vue'
-import WorkLogCard from '@/components/WorkLogCard.vue'
 import WorkTodoCard from '@/components/WorkTodoCard.vue'
 import AddBusinessButton from '@/components/AddBusinessButton.vue'
 import { useOrgSwitch } from '@/hooks/useOrgSwitch'
@@ -178,7 +182,6 @@ const yearlyStats = ref({
   totalSale: '¥0'
 })
 /** 待办数量徽标由 WorkTodoCard 自行加载并展示 */
-const logCardRef = ref(null)
 const todoCardRef = ref(null)
 const addBusinessRef = ref(null)
 let dashboardShown = false
@@ -193,7 +196,6 @@ onShow(async () => {
   await loadOrgs()
   // 卡片自身在 mounted 已加载一次；后续回到工作台（含查看全部返回）再刷新
   if (dashboardShown) {
-    logCardRef.value?.reload({ silent: true })
     todoCardRef.value?.reload({ silent: true })
   }
   dashboardShown = true
@@ -258,7 +260,6 @@ async function onOrgChanged(data) {
   noPermissionTip.value = !(data.permissions || []).length
   refreshCompany()
   await loadStats()
-  logCardRef.value?.reload()
   todoCardRef.value?.reload()
 }
 
@@ -269,6 +270,7 @@ function goMaterialRequisition() { uni.navigateTo({ url: '/pages/employee/materi
 function goMaterialWriteOff2()   { uni.navigateTo({ url: '/pages/employee/material-write-off-records' }) }
 function goMaterialPick()     { uni.navigateTo({ url: '/pages/employee/material-pick' }) }
 function goMaterialWriteOff() { uni.navigateTo({ url: '/pages/employee/material-write-off' }) }
+function goWorkLog()      { uni.navigateTo({ url: '/pages/employee/work-log' }) }
 function goAiChat()       { uni.redirectTo({ url: '/pages/employee/ai-chat' }) }
 function goProfile()      { uni.redirectTo({ url: '/pages/employee/profile' }) }
 function openAddBusiness() { addBusinessRef.value?.open() }
