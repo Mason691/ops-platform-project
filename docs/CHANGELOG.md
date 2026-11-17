@@ -2,6 +2,14 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-18（驳回意见框加高 + 自动聚焦：合并与生产发布）
+
+- **合并**：`fix/workflow-h5-reject-focus`（`4eafde2`）以 `--no-ff` 合并到 `main`（合并提交 `149c8ea`），解决与工作台改造分支的分叉。
+- **功能**：驳回意见框 `200rpx → 320rpx` 并加大内边距；新增 `focused` 状态强制 textarea focus 由 false→true；H5 兜底 `nextTick + 50ms` 直接聚焦内层 textarea（适配微信 WebView）；watch 增加 `immediate` 兼容首次挂载即打开。
+- **部署（2026-11-18 07:35）**：仅 ops H5。入口 `index-Dak5_ZI7.js`；128 assets；备份 `backups/html-ops-pre-rejectfocus-20261118_0735.tgz`（326K）；`boss-ops-nginx` 配置检查通过并 reload；ops 后端/nginx healthy。
+- **冒烟**：`/ops/` 标题「金地美家」200；新入口 200、上一版入口 `index-BN1Q0oRN.js` 404；`pages-employee-flow-task` chunk 含 `reject-panel textarea` 聚焦兜底；`reject-input` 样式高度 10rem（320rpx）；工作台 chunk 200 且含「暂无待办任务」；未认证 `/api/wf/task/todo` 401。
+- **未执行**：真实微信员工账号的驳回弹窗聚焦 E2E（需真机）。
+
 ## 2026-11-18（员工工作台首页布局调整：新增业务主按钮 + 待办前置 + 日志单卡片）
 
 - **功能**：工作台首页信息层级调整。
