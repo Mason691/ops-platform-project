@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <EmployeeHomeLink />
     <view class="head">
       <text class="title">货款补录</text>
       <text class="sub">定金支付订单收齐余款后标记为全款，方可派工出库</text>
@@ -35,6 +36,7 @@
 </template>
 
 <script setup>
+import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { ref } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import { api } from '@/api/index'

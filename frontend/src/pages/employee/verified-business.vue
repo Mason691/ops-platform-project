@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <EmployeeHomeLink />
     <view class="head">
       <text class="title">已核对业务</text>
       <text class="sub">财务核对完成的业务数据，可发起采购申请</text>
@@ -84,6 +85,7 @@
 </template>
 
 <script setup>
+import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { ref } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import { api } from '@/api/index'

@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <EmployeeHomeLink />
     <view v-if="loading" class="state"><text>加载中...</text></view>
     <view v-else-if="errorMsg" class="state">
       <text class="state-err">{{ errorMsg }}</text>
@@ -71,6 +72,7 @@
 </template>
 
 <script setup>
+import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import BusinessSpecialFileUploader from '@/components/BusinessSpecialFileUploader.vue'

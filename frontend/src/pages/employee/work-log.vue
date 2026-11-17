@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <EmployeeHomeLink />
     <view class="filter-card">
       <view class="filter-row">
         <picker mode="selector" :range="businessTypeLabels" :value="businessTypeIndex"
@@ -54,6 +55,7 @@
 </template>
 
 <script setup>
+import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
 import { api } from '@/api'

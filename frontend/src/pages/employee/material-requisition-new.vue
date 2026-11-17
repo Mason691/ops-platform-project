@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <EmployeeHomeLink />
     <view v-if="loading" class="state"><text class="state-text">加载中...</text></view>
     <view v-else-if="errorMsg" class="state">
       <text class="state-error">{{ errorMsg }}</text>
@@ -60,6 +61,7 @@
 </template>
 
 <script setup>
+import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useMaterialRequisitionWizard } from '@/hooks/useMaterialRequisitionWizard'
 import { requisitionTotals } from '@/utils/materialForm'

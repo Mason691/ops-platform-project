@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <EmployeeHomeLink />
     <view class="head">
       <text class="title">物料领取</text>
       <text class="sub">提交后由财务审批，审批通过才扣减库存并生成可打印单据</text>
@@ -87,6 +88,7 @@
 </template>
 
 <script setup>
+import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { computed, reactive, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index'

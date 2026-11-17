@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <EmployeeHomeLink />
     <view class="head">
       <view class="back" @click="goBack"><text>‹ 返回</text></view>
       <text class="title">任务处理</text>
@@ -283,6 +284,7 @@
 </template>
 
 <script setup>
+import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { computed, reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/api/index'

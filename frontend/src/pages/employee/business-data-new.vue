@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <EmployeeHomeLink />
     <view v-if="loading" class="state">
       <text class="state-text">加载中...</text>
     </view>
@@ -76,6 +77,7 @@
 </template>
 
 <script setup>
+import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useBusinessWizard } from '@/hooks/useBusinessWizard'
 import { computeProductsDeductionTotal, computeProductsPayableTotal, computeProductsTotal } from '@/utils/businessForm'

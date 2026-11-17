@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <EmployeeHomeLink />
     <view class="head">
       <text class="title">物料核销</text>
       <text class="sub">核销数量 = 领取数量（剩余可核销）− 退回数量，系统自动计算；提交后部长 → 总经办审批</text>
@@ -55,6 +56,7 @@
 </template>
 
 <script setup>
+import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index'

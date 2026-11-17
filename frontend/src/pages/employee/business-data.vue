@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <EmployeeHomeLink />
     <!-- Loading -->
     <view class="loading-wrap" v-if="loading">
       <text class="loading-text">加载中...</text>
@@ -90,6 +91,7 @@
 </template>
 
 <script setup>
+import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { ref, reactive, computed, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
