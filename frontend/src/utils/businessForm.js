@@ -39,7 +39,8 @@ export const STEPS = [
 
 const BASIC_FIELDS = ['batchNo', 'customerPhone', 'customer', 'communityId',
   'detailAddress', 'agentUserIds']
-const RECEIPT_FIELDS = ['paymentMethod', 'receiptDate', 'receiptNo', 'voucherUrls']
+const RECEIPT_FIELDS = ['paymentType', 'depositAmount', 'paymentMethod',
+  'receiptDate', 'receiptNo', 'voucherUrls']
 const PRODUCT_FIELD_LABELS = {
   category: '品类',
   brand: '品牌',
@@ -58,6 +59,8 @@ const FIELD_LABELS = {
   detailAddress: '详细地址',
   agentUserIds: '经办人',
   products: '产品明细',
+  paymentType: '付款方式',
+  depositAmount: '定金金额',
   paymentMethod: '支付方式',
   receiptDate: '市场收款日期',
   receiptNo: '收据号',
@@ -70,6 +73,14 @@ export function normalizePhone(value) {
 }
 
 /** 金额统一保留两位小数；发送给后端前也用它，保证前后端按同一单价计算。 */
+/** 定金金额最多两位小数（字符串层面判断，避免 1.999 被四舍五入后放行）。 */
+function hasMoreThanTwoDecimals(raw) {
+  const text = String(raw || '').trim()
+  if (!text) return false
+  const dot = text.indexOf('.')
+  return dot >= 0 && text.length - dot - 1 > 2
+}
+
 export function normalizeMoney(value) {
   const n = Number(value)
   if (!Number.isFinite(n)) return 0
@@ -129,6 +140,7 @@ export function emptyBusinessForm() {
     batchNo: '', newBatch: true, customerPhone: '', customer: '',
     communityId: null, communityName: '', detailAddress: '',
     products: [emptyProduct()],
+    paymentType: 'FULL', depositAmount: '',
     paymentMethod: 'QR', receiptDate: today(), receiptNo: '', receiptNoCheck: null,
     voucherUrls: [], remark: '',
     agentUserIds: []
@@ -226,6 +238,23 @@ export function validateBusinessForm(form, meta = {}) {
     }
   })
 
+  const paymentType = form.paymentType || 'FULL'
+  if (!['FULL', 'DEPOSIT'].includes(paymentType)) {
+    errors.paymentType = '请选择付款方式'
+  } else if (paymentType === 'DEPOSIT') {
+    const salesTotal = computeProductsTotal(products)
+    const rawDeposit = String(form.depositAmount == null ? '' : form.depositAmount).trim()
+    const deposit = normalizeMoney(form.depositAmount)
+    if (rawDeposit === '') {
+      errors.depositAmount = '请输入定金金额'
+    } else if (hasMoreThanTwoDecimals(rawDeposit)) {
+      errors.depositAmount = '定金金额最多保留两位小数'
+    } else if (!(deposit > 0)) {
+      errors.depositAmount = '定金金额必须大于0'
+    } else if (deposit >= salesTotal) {
+      errors.depositAmount = '定金金额必须小于销售价合计，全额支付请选择全款支付'
+    }
+  }
   if (!PAYMENT_METHODS.some(item => item.value === form.paymentMethod)) {
     errors.paymentMethod = '请选择支付方式'
   }
@@ -251,7 +280,8 @@ export function validateBusinessForm(form, meta = {}) {
       'specialFileId', 'commissionRate']
       .forEach(field => order.push(`products.${index}.${field}`))
   })
-  order.push('paymentMethod', 'receiptDate', 'receiptNo', 'voucherUrls', 'remark')
+  order.push('paymentType', 'depositAmount', 'paymentMethod', 'receiptDate',
+    'receiptNo', 'voucherUrls', 'remark')
   const firstError = order.map(key => errors[key]).find(Boolean) || ''
   return { valid: Object.keys(errors).length === 0, errors, firstError }
 }

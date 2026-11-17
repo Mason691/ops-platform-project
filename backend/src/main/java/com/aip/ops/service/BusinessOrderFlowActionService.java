@@ -51,6 +51,7 @@ public class BusinessOrderFlowActionService {
     private final OpsBusinessDataMapper itemMapper;
     private final OpsBusinessFlowRecordMapper flowRecordMapper;
     private final BusinessDataFinanceService financeService;
+    private final DispatchEligibilityService dispatchEligibilityService;
     private final ScmStockOutClient scmClient;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -139,6 +140,8 @@ public class BusinessOrderFlowActionService {
      */
     private Map<String, Object> dispatchOutbound(OpsBusinessOrder order,
                                                  WorkflowBusinessEvent event) {
+        // 统一准入（最终防线）：必须已收齐全款 + 已财务核对；所有派工入口都复用本校验
+        dispatchEligibilityService.assertCanDispatch(order);
         Map<String, Object> form = event.getFormData() == null
                 ? Map.of() : event.getFormData();
         String dispatchType = str(form.get("dispatchType"));

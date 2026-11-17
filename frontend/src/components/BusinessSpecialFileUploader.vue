@@ -15,8 +15,8 @@
     </view>
     <view v-else class="upload-box" :class="{ disabled: uploading }" @click="choose">
       <text class="upload-icon">{{ uploading ? percent + '%' : '＋' }}</text>
-      <text class="upload-text">{{ uploading ? '上传中' : '上传特批文件' }}</text>
-      <text class="upload-hint">支持 PDF / JPG / PNG，单个不超过 10MB</text>
+      <text class="upload-text">{{ uploading ? '上传中' : uploadTitle }}</text>
+      <text class="upload-hint">{{ hintText }}</text>
     </view>
     <text v-if="error" class="ferr">{{ error }}</text>
   </view>
@@ -34,7 +34,11 @@ import { assetUrl } from '@/utils/image'
  */
 const props = defineProps({
   modelValue: { type: Object, default: null },
-  error: { type: String, default: '' }
+  error: { type: String, default: '' },
+  /** 业务名称（用于校验提示，如“特批文件/收款凭证”） */
+  label: { type: String, default: '特批文件' },
+  uploadTitle: { type: String, default: '上传特批文件' },
+  hintText: { type: String, default: '支持 PDF / JPG / PNG，单个不超过 10MB' }
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -89,7 +93,7 @@ function validate(fileName, size) {
     return false
   }
   if (size > 10 * 1024 * 1024) {
-    uni.showToast({ title: '特批文件不能超过10MB', icon: 'none' })
+    uni.showToast({ title: props.label + '不能超过10MB', icon: 'none' })
     return false
   }
   return true

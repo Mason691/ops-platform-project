@@ -201,6 +201,12 @@ public class BusinessDataController {
         return R.ok(detail);
     }
 
+    /** 派工资格批量查询：仅返回当前数据范围内订单；H5/PC 待办过滤与任务页提示复用。 */
+    @GetMapping("/dispatch-eligibility")
+    public R<?> dispatchEligibility(@RequestParam List<Long> orderIds) {
+        return R.ok(service.dispatchEligibility(orderIds));
+    }
+
     /** 业务订单详情（按订单编号）：列表双击查看，兼容历史无主表行。 */
     @GetMapping("/orders/by-no")
     public R<?> orderDetailByNo(@RequestParam String orderNo) {

@@ -23,6 +23,24 @@ public interface BusinessOrderService {
                                  BigDecimal totalAmount, String calcStatus, String remark,
                                  String paymentMethod);
 
+    /**
+     * 新建订单头并写入收款方式（员工手工制单使用）。
+     *
+     * <p>paymentType：FULL/DEPOSIT；isFullPayment 由 paymentType 推导（FULL=1/DEPOSIT=0）；
+     * balanceAmount 在方法内部按 totalAmount - depositAmount 计算，不接收调用方传入，
+     * 保证任何入口都无法写入与销售价/定金不一致的余款。</p>
+     */
+    OpsBusinessOrder createOrderWithPayment(Long corpId, String orderKey, String orderNo,
+                                            String batchNo, String businessGroupNo, String receiptNo,
+                                            String company, String customer, String customerPhone,
+                                            Long platformMemberId, Long communityId,
+                                            String communityName, String detailedAddress,
+                                            String receiptDate, LocalDate financeReceiptDate,
+                                            Integer fundDynamicRows, String isReceived,
+                                            String voucherUrl, BigDecimal totalAmount,
+                                            String calcStatus, String remark, String paymentMethod,
+                                            String paymentType, BigDecimal depositAmount);
+
     OpsBusinessOrder findByOrderKey(Long corpId, String orderKey);
 
     OpsBusinessOrder getById(Long id);

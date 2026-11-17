@@ -102,6 +102,36 @@ public class OpsBusinessOrder extends BaseEntity {
 
     @TableField("calc_status")
     private String calcStatus;
+    /**
+     * 付款方式（制单时选择，制单后不变）：FULL=全款支付 / DEPOSIT=定金支付。
+     * 注意：与 payment_method（二维码/现金/转账）是两个维度。
+     */
+    @TableField("payment_type")
+    private String paymentType;
+
+    /** 是否已收齐全款：1=是 / 0=否。定金支付初始 0，货款补录后置 1；派工出库看此字段。 */
+    @TableField("is_full_payment")
+    private Integer isFullPayment;
+
+    @TableField("deposit_amount")
+    private BigDecimal depositAmount;
+
+    /** 应补余款 = 销售价合计 - 定金；服务端计算，不接受前端传值。 */
+    @TableField("balance_amount")
+    private BigDecimal balanceAmount;
+
+    /** 实收余款（货款补录时填写，默认必须等于应补余款）。 */
+    @TableField("balance_received_amount")
+    private BigDecimal balanceReceivedAmount;
+
+    @TableField("balance_paid_at")
+    private LocalDateTime balancePaidAt;
+
+    @TableField("balance_voucher_url")
+    private String balanceVoucherUrl;
+
+    @TableField("balance_remark")
+    private String balanceRemark;
 
     // 订单备注使用 BaseEntity.remark（ops_business_order.remark 列已存在），不重复声明
 

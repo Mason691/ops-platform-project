@@ -72,6 +72,33 @@
           </view>
           <text class="mc-arrow">›</text>
         </view>
+        <view class="menu-card" @click="goBalancePending">
+          <view class="mc-icon mc-icon-pay">
+            <text>💰</text>
+            <text v-if="balancePendingCount" class="mc-badge">{{ balancePendingCount > 99 ? '99+' : balancePendingCount }}</text>
+          </view>
+          <view class="mc-body">
+            <text class="mc-title">货款补录</text>
+            <text class="mc-desc">定金订单收齐余款，解锁派工</text>
+          </view>
+          <text class="mc-arrow">›</text>
+        </view>
+        <view class="menu-card" @click="goMaterialRequisition">
+          <view class="mc-icon mc-icon-data"><text>🧰</text></view>
+          <view class="mc-body">
+            <text class="mc-title">物资领用</text>
+            <text class="mc-desc">申请领用物料，部长审批</text>
+          </view>
+          <text class="mc-arrow">›</text>
+        </view>
+        <view class="menu-card" @click="goMaterialWriteOff2">
+          <view class="mc-icon mc-icon-pending"><text>✅</text></view>
+          <view class="mc-body">
+            <text class="mc-title">物资核销</text>
+            <text class="mc-desc">核销使用与退回，回写领用余量</text>
+          </view>
+          <text class="mc-arrow">›</text>
+        </view>
         <view class="menu-card" @click="goMaterialPick">
           <view class="mc-icon mc-icon-dispatch"><text>📦</text></view>
           <view class="mc-body">
@@ -149,6 +176,7 @@ const yearlyStats = ref({
   totalCommission: '¥0',
   totalSale: '¥0'
 })
+const balancePendingCount = ref(0)
 
 const {
   orgs, sheetVisible, switching, loadOrgs, openSheet, confirmSwitch
@@ -158,6 +186,7 @@ const avatarChar = computed(() => (employeeName.value || '员').charAt(0))
 
 onShow(async () => {
   await loadDashboard()
+  loadBalancePending()
   await loadOrgs()
 })
 
@@ -223,7 +252,23 @@ async function onOrgChanged(data) {
 }
 
 function goBusinessData() { uni.navigateTo({ url: '/pages/employee/business-data' }) }
+function goBalancePending() { uni.navigateTo({ url: '/pages/employee/balance-pending' }) }
+
+async function loadBalancePending() {
+  if (!uni.getStorageSync('ops_employee_token')) {
+    balancePendingCount.value = 0
+    return
+  }
+  try {
+    const list = await api.depositPending()
+    balancePendingCount.value = Array.isArray(list) ? list.length : 0
+  } catch (e) {
+    balancePendingCount.value = 0
+  }
+}
 function goVerifiedBusiness() { uni.navigateTo({ url: '/pages/employee/verified-business' }) }
+function goMaterialRequisition() { uni.navigateTo({ url: '/pages/employee/material-requisition-records' }) }
+function goMaterialWriteOff2()   { uni.navigateTo({ url: '/pages/employee/material-write-off-records' }) }
 function goMaterialPick()     { uni.navigateTo({ url: '/pages/employee/material-pick' }) }
 function goMaterialWriteOff() { uni.navigateTo({ url: '/pages/employee/material-write-off' }) }
 function goTodo()         { uni.redirectTo({ url: '/pages/employee/flow-todo' }) }
@@ -290,8 +335,14 @@ function onTabSwitch(key) {
   box-shadow: 0 2rpx 12rpx rgba(0,0,0,.03);
 }
 .menu-card:active { transform: scale(.985); box-shadow: 0 1rpx 6rpx rgba(0,0,0,.06); }
-.mc-icon { width: 80rpx; height: 80rpx; border-radius: 18rpx; display: flex; align-items: center; justify-content: center; font-size: 40rpx; flex-shrink: 0; }
+.mc-icon { position: relative; width: 80rpx; height: 80rpx; border-radius: 18rpx; display: flex; align-items: center; justify-content: center; font-size: 40rpx; flex-shrink: 0; }
+.mc-badge {
+  position: absolute; top: -10rpx; right: -12rpx; min-width: 30rpx; height: 30rpx; line-height: 30rpx;
+  padding: 0 8rpx; border-radius: 15rpx; background: #F53F3F; color: #fff;
+  font-size: 19rpx; text-align: center; font-weight: 600; box-sizing: border-box;
+}
 .mc-icon-data { background: #FFF3E8; }
+.mc-icon-pay  { background: #FFF1E8; }
 .mc-icon-pending { background: #E8F8E8; }
 .mc-icon-dispatch { background: #FFF0EB; }
 .mc-icon-ai   { background: #E8F3FF; }

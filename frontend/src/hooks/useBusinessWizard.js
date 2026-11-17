@@ -358,6 +358,8 @@ export function useBusinessWizard() {
       customer: String(form.customer || '').trim(),
       communityId: form.communityId || null,
       detailAddress: String(form.detailAddress || '').trim(),
+      paymentType: form.paymentType === 'DEPOSIT' ? 'DEPOSIT' : 'FULL',
+      depositAmount: form.paymentType === 'DEPOSIT' ? normalizeMoney(form.depositAmount) : 0,
       paymentMethod: form.paymentMethod,
       agentUserIds: (form.agentUserIds || []).map(id => Number(id)),
       products: (form.products || []).map(product => ({
@@ -555,6 +557,8 @@ export function useBusinessWizard() {
     form.agentUserIds = uniqueIds
     if (!Array.isArray(form.voucherUrls)) form.voucherUrls = []
     if (!form.paymentMethod) form.paymentMethod = 'QR'
+    if (!form.paymentType) form.paymentType = 'FULL'
+    if (form.depositAmount == null) form.depositAmount = ''
     if (!form.receiptNo) form.receiptNo = ''
     // 草稿里的查重结果是旧值快照，恢复时必须丢弃，避免误报
     delete form.receiptNoCheck

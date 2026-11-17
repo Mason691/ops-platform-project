@@ -53,6 +53,14 @@ public class EmployeeBusinessEntryRequest {
 
     /** 支付方式：QR=二维码 / CASH=现金 / TRANSFER=转账（必填） */
     private String paymentMethod;
+    /**
+     * 付款方式：FULL=全款支付（默认）/ DEPOSIT=定金支付。
+     * 注意与 paymentMethod（二维码/现金/转账）是两个维度。
+     */
+    private String paymentType;
+
+    /** 定金金额（仅 DEPOSIT 必填；>0 且 < 销售价合计；最多两位小数） */
+    private BigDecimal depositAmount;
 
     /** 收款凭证 URL 列表（最多 3 张，整笔业务共用，选填） */
     private List<String> voucherUrls;

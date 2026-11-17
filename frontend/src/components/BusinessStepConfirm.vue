@@ -70,6 +70,9 @@
         <text class="block-title">收款信息</text>
         <text class="edit" @click="$emit('edit', 2)">修改</text>
       </view>
+      <view class="kv"><text class="k">付款方式</text><text class="v">{{ paymentTypeLabel }}</text></view>
+      <view v-if="isDeposit" class="kv"><text class="k">定金金额</text><text class="v">¥{{ money(form.depositAmount) }}</text></view>
+      <view v-if="isDeposit" class="kv"><text class="k">应补余款</text><text class="v amount">¥{{ money(balanceAmount) }}</text></view>
       <view class="kv"><text class="k">支付方式</text><text class="v">{{ paymentLabel }}</text></view>
       <view class="kv"><text class="k">市场收款日期</text><text class="v">{{ form.receiptDate || '—' }}</text></view>
       <view v-if="form.receiptNo" class="kv"><text class="k">收据号</text><text class="v">{{ form.receiptNo }}</text></view>
@@ -144,6 +147,11 @@ const agentNames = computed(() => {
 })
 
 const totalAmount = computed(() => computeProductsTotal(props.form.products))
+const isDeposit = computed(() => props.form.paymentType === 'DEPOSIT')
+const paymentTypeLabel = computed(() => isDeposit.value ? '定金支付' : '全款支付')
+const balanceAmount = computed(() =>
+  Math.max(0, totalAmount.value - normalizeMoney(props.form.depositAmount)))
+const money = value => (Number(value) || 0).toFixed(2)
 const paymentLabel = computed(() => {
   const found = PAYMENT_METHODS.find(item => item.value === props.form.paymentMethod)
   return found ? found.label : '—'
@@ -156,10 +164,6 @@ const detailCount = computed(() => {
 
 function amountOf(product) {
   return computeProductAmount(product).toFixed(2)
-}
-
-function money(value) {
-  return normalizeMoney(value).toFixed(2)
 }
 
 function previewVoucher(index) {

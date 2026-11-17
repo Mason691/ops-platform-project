@@ -10,6 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > - 前端架构、pages.json 路由、组件清单 → `docs/frontend.md`
 > - 增值业务数据（表结构/导入导出/手工新增/财务核对）→ `docs/business-data.md`
 > - 业务数据订单工作流 → `docs/workflow.md`
+> - **制单页 / 分步表单 UE 基线** → `~/.claude/harness/aip-form-ux/docs/business-order-create-ux.md`（技能 `/aip-form-ux`）
+> - **物资领用 / 物资核销（员工 H5）** → `docs/material-requisition.md`
 > - 作战地图/活动复盘/提成/燃气/燃具/直播等模块 → `docs/modules.md`
 > - 配置全表（application.yml / RestTemplate / 前端环境变量）→ `docs/configuration.md`
 > - 生产部署、nginx 白名单细节、数据库备份 → `docs/deployment.md`

@@ -78,6 +78,15 @@ platform:
     - /api/ops/product/**
     - /api/ops/activity/**
 
+# 物资领用/核销工作流（定义在底座工作流管理端维护；callback 指向本服务 8082）
+material:
+  requisition:
+    definition-code: ${MATERIAL_REQUISITION_DEFINITION:OPS_MATERIAL_REQUISITION_APPROVAL}
+    business-type: OPS_MATERIAL_REQUISITION
+  write-off:
+    definition-code: ${MATERIAL_WRITE_OFF_DEFINITION:OPS_MATERIAL_WRITE_OFF_APPROVAL}
+    business-type: OPS_MATERIAL_WRITE_OFF
+
 # mall-service 地址（用于跨子系统调用 InternalProductController）
 mall-service:
   base-url: http://localhost:8083

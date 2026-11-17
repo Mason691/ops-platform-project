@@ -21,6 +21,9 @@ public interface BusinessDataService {
     /** 订单详情（按订单编号）：历史无主表行回退子表分组，供列表双击查看。 */
     Map<String, Object> orderDetailByNo(String orderNo);
 
+    /** 派工资格批量查询（H5/PC 待办过滤与任务页提示共用）。 */
+    List<Map<String, Object>> dispatchEligibility(List<Long> orderIds);
+
     /** 工作流派工节点可选的上门员工（可见组织范围内的在职员工）。 */
     java.util.List<Map<String, Object>> flowAssignees();
     List<String> getBatches();

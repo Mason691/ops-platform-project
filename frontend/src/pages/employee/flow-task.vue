@@ -95,6 +95,9 @@
         </template>
 
         <template v-else-if="actionType === 'OPS_DISPATCH_OUTBOUND'">
+          <view v-if="dispatchBlockedReason" class="block-alert">
+            <text>{{ dispatchBlockedReason }}</text>
+          </view>
           <view class="field"><text class="label">工单类型 <text class="req">*</text></text>
             <view class="chips">
               <view class="chip" :class="{ on: form.dispatchType === 'CONSTRUCTION' }" @click="form.dispatchType = 'CONSTRUCTION'">施工</view>
@@ -178,7 +181,7 @@
 
       <view class="actions">
         <button v-if="showGenericReject" class="btn danger" :disabled="submitting" @click="rejecting = !rejecting">驳回</button>
-        <button class="btn primary" :disabled="submitting" @click="submit">{{ submitting ? '提交中...' : '提交处理' }}</button>
+        <button class="btn primary" :disabled="submitting || !!dispatchBlockedReason" @click="submit">{{ submitting ? '提交中...' : '提交处理' }}</button>
       </view>
     </template>
   </view>
@@ -226,6 +229,21 @@ const conclusions = [
 ]
 
 const actionType = computed(() => (detail.value && detail.value.node && detail.value.node.actionType) || '')
+/** 派工准入：is_full_payment=1 且已财务核对；定金未收齐或未核对时禁止提交。 */
+const dispatchBlockedReason = computed(() => {
+  if (actionType.value !== 'OPS_DISPATCH_OUTBOUND') return ''
+  const o = order.value || {}
+  const full = Number(o.isFullPayment) === 1
+  const finance = Number(o.bizStatus || 0) >= 2 || !!o.financeCheckTime
+    || String(o.financeCheckConclusion || '') === 'PASS'
+  const balance = (Number(o.balanceAmount) || 0).toFixed(2)
+  if (!full && !finance) {
+    return `该订单为定金支付，尚有 ¥${balance} 余款未收，请先在【货款补录】完成收款；且该订单尚未财务核对，暂不能派工出库`
+  }
+  if (!full) return `该订单为定金支付，尚有 ¥${balance} 余款未收，请先在【货款补录】完成收款`
+  if (!finance) return '该订单尚未财务核对，暂不能派工出库'
+  return ''
+})
 const detailNodeName = computed(() => (detail.value && detail.value.task && detail.value.task.nodeName) || '')
 /** SCM 采购订单：同一底座工作流 H5 页面通过 businessType 分支展示与审批 */
 const isPurchase = computed(() => {
@@ -384,6 +402,7 @@ function buildFormData() {
 }
 
 function validate() {
+  if (dispatchBlockedReason.value) return dispatchBlockedReason.value
   if (actionType.value === 'OPS_FINANCE_CHECK') {
     if (!String(form.receiptNo || '').trim()) return '请填写收据号'
     if (!form.financeReceiptDate) return '请选择财务收款日期'
@@ -615,6 +634,11 @@ function goBack() {
 .product-meta { display: block; margin-top: 6rpx; font-size: 22rpx; color: #86909C; }
 .product-amount { font-size: 26rpx; color: #1D2129; font-weight: 600; }
 .negative { color: #F53F3F; }
+.block-alert {
+  margin: 0 0 16rpx; padding: 18rpx 20rpx; border-radius: 12rpx;
+  background: #FFF7E6; border: 2rpx solid #FFD591; color: #B26A00;
+  font-size: 24rpx; line-height: 1.5;
+}
 .field { margin-top: 22rpx; }
 .label { display: block; font-size: 25rpx; color: #4E5969; margin-bottom: 10rpx; }
 .req { color: #F53F3F; }

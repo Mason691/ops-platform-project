@@ -12,7 +12,8 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 const props = defineProps({
   value: { type: [Number, String], default: 0 },
   prefix: { type: String, default: '¥' },
-  duration: { type: Number, default: 260 }
+  duration: { type: Number, default: 260 },
+  decimals: { type: Number, default: 2 }
 })
 
 const display = ref(format(props.value))
@@ -55,7 +56,7 @@ onBeforeUnmount(() => {
 
 function format(value) {
   const n = Number(value)
-  return (Number.isFinite(n) ? n : 0).toFixed(2)
+  return (Number.isFinite(n) ? n : 0).toFixed(props.decimals)
 }
 </script>
 

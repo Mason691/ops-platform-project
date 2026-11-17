@@ -1,5 +1,32 @@
 <template>
   <view class="step-receipt">
+    <view v-if="!onlyErrors || errors.paymentType || errors.depositAmount"
+          id="field-paymentType" class="section">
+      <view class="label-row">
+        <text class="label">付款方式 <text class="req">*</text></text>
+        <text class="sales-total">销售价合计 ¥{{ money(salesTotal) }}</text>
+      </view>
+      <SegmentedControl :model-value="form.paymentType || 'FULL'" :options="paymentTypeOptions"
+                        @update:model-value="changePaymentType" />
+      <text class="section-hint">全款支付 / 定金支付；与下方支付方式（二维码/现金/转账）相互独立。</text>
+      <text v-if="errors.paymentType" class="ferr">{{ errors.paymentType }}</text>
+    </view>
+
+    <view v-if="(form.paymentType || 'FULL') === 'DEPOSIT' && show('depositAmount')"
+          id="field-depositAmount" class="section">
+      <text class="label">定金金额 <text class="req">*</text></text>
+      <input class="input" type="digit" :class="{ 'control-error': errors.depositAmount }"
+             :value="form.depositAmount" placeholder="请输入定金金额（>0 且小于销售价合计）"
+             @input="onDepositInput" @blur="formatDeposit"
+             @focus="keepFieldVisible('field-depositAmount')" />
+      <text v-if="errors.depositAmount" class="ferr">{{ errors.depositAmount }}</text>
+      <view class="balance-row">
+        <text class="balance-label">应补余款</text>
+        <text class="balance-value">¥{{ money(balanceAmount) }}</text>
+      </view>
+      <text class="section-hint">应补余款 = 销售价合计 − 定金金额，由系统自动计算，不支持手工填写。</text>
+    </view>
+
     <view v-if="show('paymentMethod')" id="field-paymentMethod" class="section">
       <text class="label">支付方式 <text class="req">*</text></text>
       <SegmentedControl :model-value="form.paymentMethod" :options="paymentOptions"
@@ -67,7 +94,10 @@ import BusinessVoucherUploader from '@/components/BusinessVoucherUploader.vue'
 import PaymentQr from '@/components/PaymentQr.vue'
 import { computed, ref } from 'vue'
 import { api } from '@/api/index'
-import { MAX_RECEIPT_NO, MAX_REMARK, PAYMENT_METHODS, RECEIPT_NO_RE } from '@/utils/businessForm'
+import {
+  MAX_RECEIPT_NO, MAX_REMARK, PAYMENT_METHODS, RECEIPT_NO_RE,
+  computeProductsTotal, normalizeMoney
+} from '@/utils/businessForm'
 import { focusField, keepFieldVisible } from '@/utils/fieldFocus'
 
 /**
@@ -83,6 +113,14 @@ const props = defineProps({
 })
 
 const paymentOptions = PAYMENT_METHODS
+const paymentTypeOptions = [
+  { value: 'FULL', label: '全款支付' },
+  { value: 'DEPOSIT', label: '定金支付' }
+]
+const salesTotal = computed(() => computeProductsTotal(props.form.products))
+const balanceAmount = computed(() =>
+  Math.max(0, salesTotal.value - normalizeMoney(props.form.depositAmount)))
+const money = value => (Number(value) || 0).toFixed(2)
 const show = key => !props.onlyErrors || !!props.errors[key]
 
 const receiptChecking = ref(false)
@@ -103,6 +141,36 @@ const receiptError = computed(() => {
   const check = props.form.receiptNoCheck
   return check && check.value === value ? check.message : ''
 })
+
+/** 切换付款方式：二次确认，确认后清空定金金额（余款随之为0）。 */
+function changePaymentType(value) {
+  const current = props.form.paymentType || 'FULL'
+  if (value === current) return
+  const hasDeposit = current === 'DEPOSIT' && normalizeMoney(props.form.depositAmount) > 0
+  uni.showModal({
+    title: '切换付款方式',
+    content: hasDeposit
+      ? '切换后将清空已填写的定金金额与应补余款，是否继续？'
+      : '切换付款方式后请按新的方式核对收款信息，是否继续？',
+    success: res => {
+      if (!res.confirm) return
+      props.form.paymentType = value
+      props.form.depositAmount = ''
+    }
+  })
+}
+
+function onDepositInput(event) {
+  // 保留原始输入供校验提示，不静默改写
+  props.form.depositAmount = String(event.detail.value ?? '')
+}
+
+function formatDeposit() {
+  const raw = String(props.form.depositAmount || '').trim()
+  if (raw === '') return
+  const value = Number(raw)
+  if (Number.isFinite(value) && value > 0) props.form.depositAmount = value.toFixed(2)
+}
 
 function setPayment(value) {
   props.form.paymentMethod = value
@@ -157,6 +225,15 @@ async function onReceiptBlur() {
 }
 .qr-section { padding-bottom: 18rpx; }
 .label { display: block; font-size: 26rpx; color: #666; margin-bottom: 14rpx; }
+.label-row { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14rpx; }
+.label-row .label { margin-bottom: 0; }
+.sales-total { font-size: 26rpx; color: #FF6B35; font-weight: 700; }
+.balance-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-top: 16rpx; padding: 16rpx 18rpx; border-radius: 12rpx; background: #FFF8F4;
+}
+.balance-label { font-size: 25rpx; color: #7a4a33; }
+.balance-value { font-size: 34rpx; color: #FF6B35; font-weight: 700; }
 .req { color: #e53935; }
 .input {
   width: 100%; height: 80rpx !important; min-height: 80rpx !important;

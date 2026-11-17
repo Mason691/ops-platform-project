@@ -2,19 +2,22 @@
   <view class="stepper">
     <view class="step-btn" :class="{ disabled: atMin }" @click="step(-1)">－</view>
     <input class="step-input" :value="displayValue" type="number"
-           maxlength="4" @input="onInput" />
+           maxlength="5" @input="onInput" @focus="onFocus" />
     <view class="step-btn" :class="{ disabled: atMax }" @click="step(1)">＋</view>
   </view>
 </template>
 
 <script setup>
 import { computed } from 'vue'
+import { keepFieldVisible } from '@/utils/fieldFocus'
 
 /** 销售数量步进器：可直接输入，也可用 -/＋ 调整，最小 1、最大 9999。 */
 const props = defineProps({
   modelValue: { type: [String, Number], default: 1 },
   min: { type: Number, default: 1 },
-  max: { type: Number, default: 9999 }
+  max: { type: Number, default: 9999 },
+  /** 聚焦时滚动到的字段容器 id（移动端防键盘遮挡） */
+  focusId: { type: String, default: '' }
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -34,6 +37,10 @@ function step(delta) {
   const base = Number.isFinite(current) && current > 0 ? current : props.min
   const next = Math.min(props.max, Math.max(props.min, base + delta))
   emitValue(String(next))
+}
+
+function onFocus() {
+  if (props.focusId) keepFieldVisible(props.focusId)
 }
 
 function onInput(event) {

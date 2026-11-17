@@ -40,7 +40,7 @@
     <text v-else class="emp-empty">当前组织暂无可添加的其他员工</text>
 
     <text v-if="errors.agentUserIds" class="ferr">{{ errors.agentUserIds }}</text>
-    <text v-else class="hint">可添加当前组织内的其他员工共同参与，提成按现有规则均分</text>
+    <text v-else class="hint">{{ hint }}</text>
   </view>
 </template>
 
@@ -55,16 +55,18 @@ import { MAX_AGENTS } from '@/utils/businessForm'
 const props = defineProps({
   form: { type: Object, required: true },
   meta: { type: Object, required: true },
-  errors: { type: Object, default: () => ({}) }
+  errors: { type: Object, default: () => ({}) },
+  hint: { type: String, default: '可添加当前组织内的其他员工共同参与，提成按现有规则均分' }
 })
 
 const keyword = ref('')
 
+const isSelfOf = item => !!(item && (item.isSelf === true || item.self === true))
 const selfName = computed(() => props.meta.employeeName
-  || (props.meta.employees || []).find(item => item && item.isSelf)?.name || '本人')
+  || (props.meta.employees || []).find(isSelfOf)?.name || '本人')
 
 const others = computed(() =>
-  (props.meta.employees || []).filter(item => item && !item.isSelf))
+  (props.meta.employees || []).filter(item => item && !isSelfOf(item)))
 
 const filteredOthers = computed(() => {
   const word = keyword.value.trim().toLowerCase()

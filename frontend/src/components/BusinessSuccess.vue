@@ -24,6 +24,18 @@
         <text class="v amount">¥{{ amount }}</text>
       </view>
       <view class="result-row">
+        <text class="k">付款方式</text>
+        <text class="v">{{ isDeposit ? '定金支付' : '全款支付' }}</text>
+      </view>
+      <view v-if="isDeposit" class="result-row">
+        <text class="k">定金金额</text>
+        <text class="v">¥{{ money(result.depositAmount) }}</text>
+      </view>
+      <view v-if="isDeposit" class="result-row">
+        <text class="k">应补余款</text>
+        <text class="v amount">¥{{ money(result.balanceAmount) }}</text>
+      </view>
+      <view class="result-row">
         <text class="k">生成明细</text>
         <text class="v">{{ detailCount }} 条（{{ productCount }} 个产品 × {{ agentCount }} 名经办人）</text>
       </view>
@@ -53,6 +65,8 @@ const amount = computed(() => {
   const value = Number(props.result && props.result.receiptAmount)
   return Number.isFinite(value) ? value.toFixed(2) : '0.00'
 })
+const isDeposit = computed(() => (props.result && props.result.paymentType) === 'DEPOSIT')
+const money = value => (Number(value) || 0).toFixed(2)
 const detailCount = computed(() => Number(props.result && props.result.detailCount) || 0)
 const productCount = computed(() => Number(props.result && props.result.productCount) || 0)
 const agentCount = computed(() => Number(props.result && props.result.agentCount) || 1)

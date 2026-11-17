@@ -5,6 +5,7 @@ import com.aip.ops.entity.OpsBusinessOrder;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsBusinessOrderMapper;
 import com.aip.ops.service.BusinessOrderService;
+import com.aip.sdk.exception.BusinessException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -41,6 +43,40 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
                                         Integer fundDynamicRows, String isReceived, String voucherUrl,
                                         BigDecimal totalAmount, String calcStatus, String remark,
                                         String paymentMethod) {
+        // 导入/历史回退：默认全款支付，保证改造前数据与行为不变
+        return createOrderWithPayment(corpId, orderKey, orderNo, batchNo, businessGroupNo,
+                receiptNo, company, customer, customerPhone, platformMemberId, communityId,
+                communityName, detailedAddress, receiptDate, financeReceiptDate, fundDynamicRows,
+                isReceived, voucherUrl, totalAmount, calcStatus, remark, paymentMethod,
+                "FULL", BigDecimal.ZERO);
+    }
+
+    @Override
+    public OpsBusinessOrder createOrderWithPayment(Long corpId, String orderKey, String orderNo,
+                                                   String batchNo, String businessGroupNo,
+                                                   String receiptNo, String company, String customer,
+                                                   String customerPhone, Long platformMemberId,
+                                                   Long communityId, String communityName,
+                                                   String detailedAddress, String receiptDate,
+                                                   LocalDate financeReceiptDate, Integer fundDynamicRows,
+                                                   String isReceived, String voucherUrl,
+                                                   BigDecimal totalAmount, String calcStatus,
+                                                   String remark, String paymentMethod,
+                                                   String paymentType, BigDecimal depositAmount) {
+        // 收款语义单一来源：paymentType 是制单时的付款方式，isFullPayment 是收款结果；
+        // 余款只在这里按「销售价合计 - 定金」计算，调用方不得传入 balanceAmount。
+        String type = "DEPOSIT".equalsIgnoreCase(paymentType) ? "DEPOSIT" : "FULL";
+        BigDecimal total = (totalAmount != null ? totalAmount : BigDecimal.ZERO)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal deposit = "DEPOSIT".equals(type) && depositAmount != null
+                ? depositAmount.setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+        if ("DEPOSIT".equals(type)
+                && (deposit.signum() <= 0 || deposit.compareTo(total) >= 0)) {
+            throw BusinessException.of("定金金额必须大于0且小于销售价合计");
+        }
+        BigDecimal balance = "DEPOSIT".equals(type)
+                ? total.subtract(deposit).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
         OpsBusinessOrder order = new OpsBusinessOrder();
         order.setCorpId(corpId);
         order.setOrderKey(orderKey);
@@ -60,11 +96,16 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
         order.setFundDynamicRows(fundDynamicRows);
         order.setIsReceived(isReceived);
         order.setVoucherUrl(voucherUrl);
-        order.setTotalAmount(totalAmount != null ? totalAmount : BigDecimal.ZERO);
+        order.setTotalAmount(total);
         order.setTotalCommission(BigDecimal.ZERO);
         order.setCalcStatus(calcStatus != null ? calcStatus : INITIAL_STATUS);
         order.setRemark(remark);
         order.setPaymentMethod(paymentMethod);
+        order.setPaymentType(type);
+        // 全款=1；定金支付初始 0，货款补录成功后由补录接口置 1
+        order.setIsFullPayment("DEPOSIT".equals(type) ? 0 : 1);
+        order.setDepositAmount(deposit);
+        order.setBalanceAmount(balance);
         order.setDeleteFlag(0);
         orderMapper.insert(order);
         return order;

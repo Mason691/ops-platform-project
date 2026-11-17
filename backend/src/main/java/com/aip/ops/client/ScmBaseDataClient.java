@@ -162,6 +162,20 @@ public class ScmBaseDataClient {
         return material;
     }
 
+    /**
+     * 按 SCM 商品ID取权威商品资料（物资领用/核销快照用）。
+     * 复用 options 的 5 分钟缓存，不额外放大 SCM 压力。
+     */
+    public MaterialOption requireMaterial(Long corpId, Long productId) {
+        if (productId == null || productId <= 0) {
+            throw BusinessException.of("请选择商品");
+        }
+        return options(corpId).materials().stream()
+                .filter(m -> productId.equals(m.id()))
+                .findFirst()
+                .orElseThrow(() -> BusinessException.of("商品不存在或已停用，请重新选择"));
+    }
+
     // ── fetch ──
 
     private ScmOptions fetchOptions() {
@@ -291,7 +305,8 @@ public class ScmBaseDataClient {
             if (!brands.contains(brand) || !categories.contains(category)) continue;
             if (seen.add(brand + "\u0001" + category + "\u0001" + model)) {
                 Long id = toLong(row.get("id"));
-                out.add(new MaterialOption(id, brand, category, model, str(row.get("name"))));
+                out.add(new MaterialOption(id, str(row.get("number")), brand, category, model,
+                        str(row.get("name")), str(row.get("baseUnitName"))));
             }
         }
     }
@@ -444,7 +459,8 @@ public class ScmBaseDataClient {
 
     public record CategoryOption(String key, String name) {}
 
-    public record MaterialOption(Long id, String brand, String category, String model, String name) {}
+    public record MaterialOption(Long id, String number, String brand, String category,
+                                 String model, String name, String unit) {}
 
     public record ScmMaterial(Long id, String number, String name, String brand,
                               String category, String model) {}

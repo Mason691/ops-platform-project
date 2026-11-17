@@ -58,11 +58,35 @@ async function loadData() {
   errorMsg.value = ''
   try {
     const data = await api.workflowTodo({ pageNum: 1, pageSize: 50 })
-    list.value = (data && data.records) || []
+    let records = (data && data.records) || []
+    records = await hideIneligibleDispatchTasks(records)
+    list.value = records
   } catch (e) {
     errorMsg.value = e && e.msg ? e.msg : '加载待办失败，请稍后重试'
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * 派工待办不展示给未收齐全款的订单：底座仍会生成任务（工作流结构决定），
+ * 这里在 H5 待办列表按订单派工资格过滤；任务页与后端节点动作仍会二次拦截。
+ */
+async function hideIneligibleDispatchTasks(records) {
+  const dispatch = records.filter(item => item.businessType === 'OPS_BUSINESS_ORDER'
+    && String((item.task && item.task.nodeName) || item.currentNodeName || '').includes('派工'))
+  const ids = [...new Set(dispatch.map(item => Number(item.businessId)).filter(Boolean))]
+  if (!ids.length) return records
+  try {
+    const infos = await api.businessDispatchEligibility(ids)
+    const blocked = new Set((infos || [])
+      .filter(info => info.canDispatch === false)
+      .map(info => String(info.orderId)))
+    return records.filter(item => !(item.businessType === 'OPS_BUSINESS_ORDER'
+      && blocked.has(String(item.businessId))))
+  } catch (e) {
+    // 资格查询失败不隐藏任务（fail-open），由任务页/后端最终拦截
+    return records
   }
 }
 

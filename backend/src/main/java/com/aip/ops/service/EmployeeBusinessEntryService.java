@@ -1,7 +1,9 @@
 package com.aip.ops.service;
 
+import com.aip.ops.dto.BalanceReceiveRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -20,6 +22,21 @@ public interface EmployeeBusinessEntryService {
 
     /** 保存手工录入的业务数据（同步发起工作流并带回下一审批人）。 */
     Map<String, Object> createManualEntry(EmployeeBusinessEntryRequest request);
+
+    /**
+     * 货款补录：当前经办人名下定金支付且未全款的业务订单。
+     * 经办人判定：当前员工手机号出现在 agent_phones，或 create_user = 当前用户。
+     */
+    List<Map<String, Object>> listDepositPending();
+
+    /** 货款补录详情（校验订单属于当前经办人）。 */
+    Map<String, Object> depositPendingDetail(Long orderId);
+
+    /**
+     * 提交货款补录：实收余款必须等于应补余款；凭证必填；成功后 is_full_payment=1。
+     * 已全款订单幂等返回 alreadyReceived=true。
+     */
+    Map<String, Object> receiveBalance(Long orderId, BalanceReceiveRequest request);
 
     /** 结果页轮询/详情兜底：查询订单当前审批人。 */
     Map<String, Object> currentApprover(Long orderId);

@@ -3,6 +3,7 @@ package com.aip.ops.service.impl;
 import com.aip.ops.client.ScmBaseDataClient;
 import com.aip.ops.client.WorkflowPlatformClient;
 import com.aip.ops.component.OrderNoGenerator;
+import com.aip.ops.dto.BalanceReceiveRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.dto.ProductPriceDtos;
 import com.aip.ops.entity.OpsBusinessData;
@@ -290,6 +291,185 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         return result;
     }
 
+    // ── 货款补录（定金支付 → 收齐余款） ──
+
+    @Override
+    public List<Map<String, Object>> listDepositPending() {
+        EmployeeContext ctx = resolveEmployeeContext();
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, order_no, customer, total_amount, deposit_amount, balance_amount, "
+                        + "create_time, agent_names FROM ops_business_order "
+                        + "WHERE corp_id = ? AND delete_flag = 0 "
+                        + "AND payment_type = 'DEPOSIT' AND is_full_payment = 0 "
+                        + "AND (create_user = ? OR FIND_IN_SET(?, "
+                        + "  REPLACE(COALESCE(agent_phones, ''), '、', ',')) > 0) "
+                        + "ORDER BY create_time DESC, id DESC LIMIT 200",
+                ctx.corpId(), ctx.employeeUserId(), ctx.employeePhone());
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("orderId", longVal(row.get("id")));
+            item.put("orderNo", str(row.get("order_no")));
+            item.put("customer", str(row.get("customer")));
+            item.put("totalAmount", money(row.get("total_amount")));
+            item.put("depositAmount", money(row.get("deposit_amount")));
+            item.put("balanceAmount", money(row.get("balance_amount")));
+            item.put("createTime", row.get("create_time"));
+            item.put("agentNames", str(row.get("agent_names")));
+            result.add(item);
+        }
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> depositPendingDetail(Long orderId) {
+        EmployeeContext ctx = resolveEmployeeContext();
+        OpsBusinessOrder order = requireAgentOrder(ctx, orderId);
+        if (!"DEPOSIT".equals(order.getPaymentType())) {
+            throw BusinessException.of("该订单不是定金支付，无需补录");
+        }
+        return balanceOrderView(order);
+    }
+
+    @Override
+    public Map<String, Object> receiveBalance(Long orderId, BalanceReceiveRequest request) {
+        EmployeeContext ctx = resolveEmployeeContext();
+        if (request == null) throw BusinessException.of("补录信息不能为空");
+        BigDecimal received = request.getReceivedAmount();
+        if (received == null || received.compareTo(BigDecimal.ZERO) <= 0) {
+            throw BusinessException.of("实收余款必须大于0");
+        }
+        if (received.scale() > 2) {
+            throw BusinessException.of("实收余款最多保留两位小数");
+        }
+        BigDecimal amount = received.setScale(2, RoundingMode.HALF_UP);
+        String voucher = str(request.getVoucherUrl());
+        if (voucher.isEmpty()) throw BusinessException.of("请上传收款凭证");
+        // 复用员工特批文件上传目录，但只接受本组织命名空间下的凭证，防止引用其他组织的文件
+        String voucherPrefix = "/uploads/ops/special-approval/" + ctx.corpId() + "/";
+        if (voucher.length() > 500 || !voucher.startsWith(voucherPrefix)) {
+            throw BusinessException.of("收款凭证地址不合法，请重新上传");
+        }
+        String remark = str(request.getRemark());
+        if (remark.length() > MAX_REMARK_LENGTH) {
+            throw BusinessException.of("收款备注不能超过" + MAX_REMARK_LENGTH + "个字");
+        }
+        return transactionTemplate.execute(status -> doReceiveBalance(
+                ctx, orderId, amount, voucher, remark.isEmpty() ? null : remark));
+    }
+
+    /** 事务内：行锁订单 → 重新校验经办人/付款方式/金额 → 原子置全款。 */
+    private Map<String, Object> doReceiveBalance(EmployeeContext ctx, Long orderId,
+                                                 BigDecimal received, String voucher, String remark) {
+        jdbcTemplate.queryForList(
+                "SELECT id FROM ops_business_order WHERE id=? AND delete_flag=0 FOR UPDATE",
+                Long.class, orderId);
+        OpsBusinessOrder order = requireAgentOrder(ctx, orderId);
+        if (!"DEPOSIT".equals(order.getPaymentType())) {
+            throw BusinessException.of("该订单不是定金支付，无需补录");
+        }
+        if (Integer.valueOf(1).equals(order.getIsFullPayment())) {
+            return alreadyReceivedView(order);
+        }
+        BigDecimal due = balanceOf(order);
+        if (due.compareTo(BigDecimal.ZERO) <= 0) {
+            throw BusinessException.of("订单应补余款为0，无需补录");
+        }
+        if (received.compareTo(due) != 0) {
+            throw BusinessException.of("实收余款必须等于应补余款 ¥"
+                    + due.toPlainString());
+        }
+        int updated = jdbcTemplate.update(
+                "UPDATE ops_business_order SET is_full_payment=1, balance_received_amount=?, "
+                        + "balance_paid_at=NOW(), balance_voucher_url=?, balance_remark=?, "
+                        + "modify_time=NOW(), modify_user=?, modify_user_name=? "
+                        + "WHERE id=? AND is_full_payment=0 AND delete_flag=0",
+                received, voucher, remark, ctx.employeeUserId(), ctx.employeeName(), orderId);
+        if (updated != 1) {
+            OpsBusinessOrder latest = orderService.getById(orderId);
+            if (latest != null && Integer.valueOf(1).equals(latest.getIsFullPayment())) {
+                return alreadyReceivedView(latest);
+            }
+            throw BusinessException.of("订单状态已变化，请刷新后重试");
+        }
+        OpsBusinessOrder latest = orderService.getById(orderId);
+        if (latest == null) throw BusinessException.of("订单状态已变化，请刷新后重试");
+        log.info("货款补录成功 orderId={} userId={} received={} voucher={}",
+                orderId, ctx.employeeUserId(), received, voucher);
+        Map<String, Object> result = balanceOrderView(latest);
+        result.put("alreadyReceived", false);
+        result.put("message", "货款补录成功，订单已标记为全款");
+        return result;
+    }
+
+    /** 幂等响应：已补录订单再次提交时返回同一结构，避免重复收款。 */
+    private Map<String, Object> alreadyReceivedView(OpsBusinessOrder order) {
+        Map<String, Object> result = balanceOrderView(order);
+        result.put("alreadyReceived", true);
+        result.put("message", "该订单已完成货款补录");
+        return result;
+    }
+
+    /** 经办人可见性：本组织 + 当前员工手机号在 agent_phones 中（或 create_user 为本人）。 */
+    private OpsBusinessOrder requireAgentOrder(EmployeeContext ctx, Long orderId) {
+        OpsBusinessOrder order = orderId == null ? null : orderService.getById(orderId);
+        if (order == null || Integer.valueOf(1).equals(order.getDeleteFlag())
+                || !Objects.equals(order.getCorpId(), ctx.corpId())
+                || !visibleToAgent(order, ctx)) {
+            throw BusinessException.notFound("订单不存在或不属于当前经办人");
+        }
+        return order;
+    }
+
+    private boolean visibleToAgent(OpsBusinessOrder order, EmployeeContext ctx) {
+        if (Objects.equals(order.getCreateUser(), ctx.employeeUserId())) return true;
+        String phones = str(order.getAgentPhones());
+        if (phones.isEmpty() || ctx.employeePhone() == null) return false;
+        for (String phone : phones.split("、")) {
+            if (ctx.employeePhone().equals(phone.trim())) return true;
+        }
+        return false;
+    }
+
+    private Map<String, Object> balanceOrderView(OpsBusinessOrder order) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("orderId", order.getId());
+        view.put("orderNo", order.getOrderNo());
+        view.put("customer", order.getCustomer());
+        view.put("customerPhone", order.getCustomerPhone());
+        view.put("agentNames", order.getAgentNames());
+        view.put("totalAmount", money(order.getTotalAmount()));
+        view.put("depositAmount", money(order.getDepositAmount()));
+        view.put("balanceAmount", balanceOf(order));
+        view.put("paymentType", order.getPaymentType());
+        view.put("isFullPayment", order.getIsFullPayment());
+        view.put("balanceReceivedAmount", order.getBalanceReceivedAmount());
+        view.put("balancePaidAt", order.getBalancePaidAt());
+        view.put("balanceVoucherUrl", order.getBalanceVoucherUrl());
+        view.put("balanceRemark", order.getBalanceRemark());
+        view.put("createTime", order.getCreateTime());
+        view.put("alreadyReceived", Integer.valueOf(1).equals(order.getIsFullPayment()));
+        return view;
+    }
+
+    private BigDecimal balanceOf(OpsBusinessOrder order) {
+        BigDecimal balance = order.getBalanceAmount() != null ? order.getBalanceAmount()
+                : money(order.getTotalAmount()).subtract(money(order.getDepositAmount()));
+        return balance.max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static BigDecimal money(Object value) {
+        if (value instanceof BigDecimal b) return b.setScale(2, RoundingMode.HALF_UP);
+        if (value instanceof Number n) {
+            return new BigDecimal(n.toString()).setScale(2, RoundingMode.HALF_UP);
+        }
+        return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static Long longVal(Object value) {
+        return value instanceof Number n ? n.longValue() : null;
+    }
+
     @Override
     public Map<String, Object> checkReceiptNo(String receiptNo, String customer) {
         EmployeeIdentity identity = assertEmployee();
@@ -320,12 +500,13 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 .map(ValidatedProduct::amount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         // 主子表拆分：一次提交 = 1 条订单头 + N（产品×经办人）条子表
-        OpsBusinessOrder order = orderService.createOrder(
+        OpsBusinessOrder order = orderService.createOrderWithPayment(
                 ctx.corpId(), "O|" + orderNo, orderNo, batchNo, businessGroupNo,
                 v.receiptNo(), ctx.company(), v.customer(), v.phone(), member.id(),
                 community.id(), community.name(), v.detailAddress(), v.receiptDate(),
                 null, null, null, v.voucherUrl(),
-                totalAmount, INITIAL_CALC_STATUS, v.remark(), v.paymentMethod());
+                totalAmount, INITIAL_CALC_STATUS, v.remark(), v.paymentMethod(),
+                v.paymentType(), v.depositAmount());
         // 多经办人按「产品 × 经办人」拆行：每行独立 agent_phone 归属，
         // 提成计算沿用「同收据号+客户+品类+型号」组内均分规则。
         for (ValidatedProduct product : v.products()) {
@@ -352,6 +533,10 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         result.put("orderNo", orderNo);
         result.put("businessGroupNo", businessGroupNo);
         result.put("receiptAmount", totalAmount);
+        result.put("paymentType", v.paymentType());
+        result.put("depositAmount", v.depositAmount());
+        result.put("balanceAmount", v.balanceAmount());
+        result.put("isFullPayment", v.isFullPayment());
         result.put("platformMemberId", member.id());
         result.put("memberCreated", member.created());
         return result;
@@ -557,9 +742,50 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         String detailAddress = requireText(
                 req.getDetailAddress(), "详细地址", MAX_DETAIL_ADDRESS_LENGTH);
         String remark = normalizeRemark(req.getRemark());
+        BigDecimal salesAmount = products.stream().map(ValidatedProduct::amount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        PaymentTerms terms = validatePaymentTerms(req.getPaymentType(), req.getDepositAmount(),
+                salesAmount);
         return new Validated(phone, customer, products, agents,
                 receiptDate, receiptNo, paymentMethod.name(), voucherUrl,
-                communityId, detailAddress, remark);
+                communityId, detailAddress, remark,
+                terms.paymentType(), terms.isFullPayment(), terms.depositAmount(),
+                terms.balanceAmount());
+    }
+
+    /**
+     * 付款方式校验（服务端最终口径）：
+     * FULL：定金必须为 0，余款 0，is_full_payment=1；
+     * DEPOSIT：定金 >0 且严格小于销售价合计，余款 = 销售价 - 定金（服务端计算）。
+     */
+    private PaymentTerms validatePaymentTerms(String rawType, BigDecimal rawDeposit,
+                                              BigDecimal salesAmount) {
+        String type = rawType == null || rawType.isBlank() ? "FULL" : rawType.trim().toUpperCase();
+        if (!"FULL".equals(type) && !"DEPOSIT".equals(type)) {
+            throw BusinessException.of("付款方式必须是 FULL（全款支付）或 DEPOSIT（定金支付）");
+        }
+        if ("FULL".equals(type)) {
+            if (rawDeposit != null && rawDeposit.compareTo(BigDecimal.ZERO) != 0) {
+                throw BusinessException.of("全款支付时定金金额必须为0");
+            }
+            return new PaymentTerms("FULL", 1, BigDecimal.ZERO, BigDecimal.ZERO);
+        }
+        if (rawDeposit == null) {
+            throw BusinessException.of("定金支付请填写定金金额");
+        }
+        if (rawDeposit.scale() > 2) {
+            throw BusinessException.of("定金金额最多保留两位小数");
+        }
+        BigDecimal deposit = rawDeposit.setScale(2, RoundingMode.HALF_UP);
+        if (deposit.compareTo(BigDecimal.ZERO) <= 0) {
+            throw BusinessException.of("定金金额必须大于0");
+        }
+        if (deposit.compareTo(salesAmount) >= 0) {
+            throw BusinessException.of("定金金额必须小于销售价合计，全额支付请选择全款支付");
+        }
+        BigDecimal balance = salesAmount.subtract(deposit).setScale(2, RoundingMode.HALF_UP);
+        return new PaymentTerms("DEPOSIT", 0, deposit, balance);
     }
 
     /** 收据号选填：去首尾空白；空串落库为 null；非空校验长度与字符集。 */
@@ -957,7 +1183,11 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                              List<ValidatedProduct> products, List<AgentInfo> agents,
                              String receiptDate, String receiptNo, String paymentMethod,
                              String voucherUrl, Long communityId, String detailAddress,
-                             String remark) {}
+                             String remark, String paymentType, Integer isFullPayment,
+                             BigDecimal depositAmount, BigDecimal balanceAmount) {}
+
+    private record PaymentTerms(String paymentType, Integer isFullPayment,
+                                BigDecimal depositAmount, BigDecimal balanceAmount) {}
 
     private record ValidatedProduct(Long productId, String brand, String categoryKey, String model,
                                     BigDecimal price, int qty, BigDecimal amount,

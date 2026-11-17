@@ -16,6 +16,7 @@ import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.BizStatusService;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.BusinessOrderService;
+import com.aip.ops.service.DispatchEligibilityService;
 import com.aip.ops.service.DataScopeService;
 import com.aip.ops.service.GasMemberMatcher;
 import com.aip.ops.service.ImportTaskService;
@@ -72,6 +73,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final BusinessOrderService orderService;
     private final BizStatusService bizStatusService;
     private final com.aip.ops.mapper.OpsBusinessFlowRecordMapper flowRecordMapper;
+    private final DispatchEligibilityService dispatchEligibilityService;
 
     /** 锁定状态：已上报集团的数据禁止删除/修改/重新计算（所有组织一致） */
     public static final String REPORTED_STATUS = "已上报集团";
@@ -132,7 +134,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             GasMemberMatcher memberMatcher,
             BusinessOrderService orderService,
             BizStatusService bizStatusService,
-            com.aip.ops.mapper.OpsBusinessFlowRecordMapper flowRecordMapper) {
+            com.aip.ops.mapper.OpsBusinessFlowRecordMapper flowRecordMapper,
+            DispatchEligibilityService dispatchEligibilityService) {
         this.mapper = mapper;
         this.orderMapper = orderMapper;
         this.productMapper = productMapper;
@@ -147,6 +150,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         this.orderService = orderService;
         this.bizStatusService = bizStatusService;
         this.flowRecordMapper = flowRecordMapper;
+        this.dispatchEligibilityService = dispatchEligibilityService;
     }
     public static String getCategoryDisplayName(String key) {
         if (key == null || key.isEmpty()) return "";
@@ -377,6 +381,30 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
+    public List<Map<String, Object>> dispatchEligibility(List<Long> orderIds) {
+        if (orderIds == null || orderIds.isEmpty()) return List.of();
+        List<Long> ids = orderIds.stream().filter(Objects::nonNull).distinct().limit(50).toList();
+        Set<Long> visible = dataScopeService.getVisibleCorpIds();
+        if (visible != null && visible.isEmpty()) return List.of();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (OpsBusinessOrder order : orderService.findByIds(ids)) {
+            if (Integer.valueOf(1).equals(order.getDeleteFlag())) continue;
+            if (visible != null && !visible.contains(order.getCorpId())) continue;
+            DispatchEligibilityService.Eligibility e = dispatchEligibilityService.evaluate(order);
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("orderId", e.orderId());
+            item.put("orderNo", e.orderNo());
+            item.put("canDispatch", e.canDispatch());
+            item.put("fullPayment", e.fullPayment());
+            item.put("financeChecked", e.financeChecked());
+            item.put("balanceAmount", e.balanceAmount());
+            item.put("reason", e.reason());
+            result.add(item);
+        }
+        return result;
+    }
+
+    @Override
     public Map<String, Object> orderDetail(Long orderId) {
         OpsBusinessOrder order = orderId == null ? null : orderMapper.selectById(orderId);
         if (order == null || Integer.valueOf(1).equals(order.getDeleteFlag())) {
@@ -584,6 +612,23 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 ? master.getPaymentMethod() : firstText(rows, OpsBusinessData::getPaymentMethod);
         order.put("paymentMethod", paymentMethod);
         order.put("paymentMethodName", com.aip.ops.util.PaymentMethod.labelOf(paymentMethod));
+        // 收款方式（与 paymentMethod 的二维码/现金/转账是两个维度）
+        String paymentType = master != null && hasText(master.getPaymentType())
+                ? master.getPaymentType() : "FULL";
+        order.put("paymentType", paymentType);
+        order.put("paymentTypeName", "DEPOSIT".equals(paymentType) ? "定金支付" : "全款支付");
+        order.put("isFullPayment", master != null && master.getIsFullPayment() != null
+                ? master.getIsFullPayment() : 1);
+        order.put("depositAmount", master != null && master.getDepositAmount() != null
+                ? master.getDepositAmount().setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+        order.put("balanceAmount", master != null && master.getBalanceAmount() != null
+                ? master.getBalanceAmount().setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+        order.put("balanceReceivedAmount", master != null ? master.getBalanceReceivedAmount() : null);
+        order.put("balancePaidAt", master != null ? master.getBalancePaidAt() : null);
+        order.put("balanceVoucherUrl", master != null ? master.getBalanceVoucherUrl() : null);
+        order.put("balanceRemark", master != null ? master.getBalanceRemark() : null);
         order.put("voucherUrl", pick(master != null ? master.getVoucherUrl() : null,
                 rows, OpsBusinessData::getVoucherUrl));
         order.put("calcStatus", calcStatus);

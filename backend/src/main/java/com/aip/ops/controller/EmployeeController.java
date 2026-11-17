@@ -1,6 +1,7 @@
 package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
+import com.aip.ops.dto.BalanceReceiveRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.security.JwtTokenInspector;
 import com.aip.ops.service.BusinessDataService;
@@ -264,6 +265,33 @@ public class EmployeeController {
     @GetMapping("/business-data/manual/{orderId}/approver")
     public R<?> manualApprover(@PathVariable Long orderId) {
         return R.ok(employeeBusinessEntryService.currentApprover(orderId));
+    }
+
+    // ═══ 货款补录（定金支付 → 收齐余款） ═══
+
+    /** 当前经办人名下定金支付且未全款的业务订单。 */
+    @GetMapping("/business-data/balance-pending")
+    public R<?> balancePending() {
+        return R.ok(employeeBusinessEntryService.listDepositPending());
+    }
+
+    /** 货款补录详情（只读；校验订单属于当前经办人）。 */
+    @GetMapping("/business-data/balance-pending/{orderId}")
+    public R<?> balancePendingDetail(@PathVariable Long orderId) {
+        return R.ok(employeeBusinessEntryService.depositPendingDetail(orderId));
+    }
+
+    /** 提交货款补录：实收余款=应补余款、凭证必填；成功后 is_full_payment=1。 */
+    @OperationLog(module = "运营管理", action = "货款补录", targetTable = "ops_business_order")
+    @PostMapping("/business-data/{orderId}/balance-receive")
+    // 请求体放在第一个参数：@OperationLog 只序列化第一个非 Servlet 参数，
+    // 这样审计日志能带上补录金额与凭证 URL（orderId 在路径中，日志 detail 外仍有接口上下文）
+    public R<?> receiveBalance(@RequestBody BalanceReceiveRequest request,
+                               @PathVariable Long orderId) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可进行货款补录");
+        }
+        return R.ok(employeeBusinessEntryService.receiveBalance(orderId, request));
     }
 
     /** 经办人核对：仅将本组织 + 本人批次下已计算数据标记为已核对 */
