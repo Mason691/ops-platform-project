@@ -16,7 +16,11 @@
   - `npm run build:h5` 与 `npm run build:mp-weixin` 均通过（入口 `index-BN1Q0oRN.js`，工作台 chunk `pages-employee-dashboard.B65_qiyT.js`）；小程序产物顺序确认：新增业务 → 待办 → 常用功能 → 日志卡片。
   - 纯函数自测通过：时限文案（30 分钟不再误显示为 1 小时）、`remainingHours=null` 不误判超时、紧急度排序（超时 > 临期到达倒序 > 普通）、派工过滤与 fail-open。
   - 独立代码审查 5 项发现已修复：查看更多改 `redirectTo` 防页面栈增长、null SLA 不判超时、静默刷新失败保留旧数据、首屏 loading 初值、切组织清空旧计数。
-- **未执行**：生产部署、微信真机视觉/点击验证（需真实员工账号）；项目无 lint/单测框架，未运行相关检查。
+- **提交**：ops `ad54543 feat(workbench): 工作台首页待办前置 + 新增业务主按钮 + 日志单卡片`（分支 `feat/workbench-home-layout`，基于 `main` 966a294；未合并/推送）。
+- **部署（2026-11-18 07:31）**：仅 ops H5。入口 `index-BN1Q0oRN.js`；工作台 chunk `pages-employee-dashboard.B65_qiyT.js`、待办列表 `pages-employee-flow-todo.DQbKORCg.js`；128 assets；备份 `backups/html-ops-pre-workbench-20261118_0731.tgz`（321K）；`boss-ops-nginx` 配置检查通过并 reload；ops 后端/nginx 容器 healthy。
+- **冒烟**：`/ops/` 标题「金地美家」HTTP 200；新入口与工作台 chunk 公网 200 且含「暂无待办任务/查看更多（共/本周已记录」；旧入口 `index-d8cdf9qx.js` 404；未认证 `/api/wf/task/todo` 401。
+- **未执行**：真实微信员工登录后的视觉与点击 E2E（需真实员工账号）；项目无 lint/单测框架，未运行相关检查。
+- **注意**：本次构建基于 `main`，未包含另一分支 `fix/workflow-h5-reject-focus` 的 `4eafde2`（驳回意见框加高/自动聚焦）；如需上线该修复需另行合并发布。
 
 ## 2026-11-17（员工工作台二级页返回主页链接 + 生产验证）
 
