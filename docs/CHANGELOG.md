@@ -2,6 +2,15 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-17（main 分支重新部署生产：以旧换新批次）
+
+- **背景**：三个 PR 合并到 `main` 后，按要求在 `main` 重新构建并全量部署平台后端、SCM、ops、平台前端与 ops H5。无代码变更；数据库以旧换新迁移已于 19:21 执行并核对，本次未重复执行。
+- **构建**：平台后端 `636066c38b58b37f`、ops 后端 `9c7a8b52a9bf3af3`、SCM 后端 `c0c40cf832e1121c`（SHA-256 前 16 位）；平台前端 225 assets、入口 `index-B6BLLlML.js`；ops H5 121 assets、入口 `index-VTqzTIlZ.js`。
+- **部署（2026-11-17 19:39-19:41）**：main overlay 镜像 `boss-platform/{backend,scm,ops}:main-20261117_1940` → latest，`docker compose up -d --force-recreate --no-deps` 依次重建 platform-backend / scm-backend / ops-backend；两套前端清空 assets 后替换并 reload nginx；临时 overlay 目录已清理。回滚镜像 `boss-platform/{backend,scm,ops}:rollback-main-20261117_1940`。
+- **备份**：`backups/mall_db-main-redeploy-20261117_1940.sql.gz`、`backups/ai_platform-main-redeploy-20261117_1940.sql.gz`、`backups/html-platform-main-20261117_1940.tgz`、`backups/html-ops-main-20261117_1940.tgz`；旧 JAR 另存 `app.jar.bak-main-20261117_1940`。
+- **冒烟**：8080/8082/8084 health 均 200；`/` 标题「协同平台」、`/ops/` 标题「金地美家」；两入口 JS 公网 200；ops/SCM 订单接口未认证 401；平台内部进度接口无 token 403；SCM 以旧换新内部接口可达；三后端启动无 schema/列错误。
+- **未执行**：登录态真实制单/采购审批/入库端到端、微信真机验证。
+
 ## 2026-11-17（业务订单以旧换新 + 自动生成 SCM 未审采购单，生产已发布）
 
 - **ops 后端**：`ops_business_order_item` 增 `is_trade_in/deduction_amount/trade_in_payable_amount`；`ops_business_order` 增 `has_trade_in/trade_in_deduction_amount/payable_amount` 与自动采购单状态/单号/错误字段；新增 `ops_business_order_trade_in` 旧品明细表（`sql/migrate_business_order_trade_in.sql`）。后端全量校验抵扣/旧品（SCM 商品权威资料、手工旧品、每行 ≤50、全单 ≤100 行），`receipt_amount` 仍为销售额、提成基数不变；新增 `payable_amount`，定金/余款按抵扣后应付计算。订单保存事务内落 `trade_in_purchase_status=PENDING`，提交后调用 SCM 幂等接口创建未审采购单并回写 SUCCESS/FAILED/单号/错误；新增员工重试接口 `POST /api/ops/employee/business-data/orders/{id}/trade-in-purchase/retry`。列表/详情补抵扣、应付、旧品明细、采购单及实时入库状态。
