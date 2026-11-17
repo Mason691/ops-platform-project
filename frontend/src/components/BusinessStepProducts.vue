@@ -2,8 +2,8 @@
   <view id="field-products" class="step-products">
     <view v-if="errors.products" class="products-err">{{ errors.products }}</view>
 
-    <view v-if="!visibleRows.length" class="empty-products">
-      <text>暂无待补充的产品信息</text>
+    <view v-if="!visibleRows.length && !onlyErrors" class="empty-products">
+      <text>暂无产品信息，请添加商品</text>
     </view>
 
     <BusinessProductCard v-for="row in visibleRows" :key="row.product.uid || row.index"
@@ -24,18 +24,23 @@
     <text v-if="!onlyErrors" class="hint">
       收款金额 = 销售单价 × 销售数量，由系统自动计算并以服务端结果为准
     </text>
+
+    <!-- 付款方式与销售价强相关：放在商品合计之后，制单人录入商品时同步确认全款/定金 -->
+    <BusinessPaymentSection :form="form" :errors="errors" :only-errors="onlyErrors" />
   </view>
 </template>
 
 <script setup>
 import { computed } from 'vue'
 import BusinessProductCard from '@/components/BusinessProductCard.vue'
+import BusinessPaymentSection from '@/components/BusinessPaymentSection.vue'
 import AnimatedAmount from '@/components/AnimatedAmount.vue'
 import { emptyProduct, computeProductsTotal, MAX_PRODUCTS } from '@/utils/businessForm'
 
 /**
- * 第 2 步：商品明细。可增删产品卡片，底部实时展示合计金额。
- * onlyErrors=true（确认页补填）时仅展示存在错误的行，且不可增删。
+ * 第 2 步：商品明细 + 付款方式。可增删产品卡片，底部实时展示合计金额，
+ * 并在合计下方确认全款/定金及应补余款（付款方式属于订单销售条件，不放到收款步骤）。
+ * onlyErrors=true（确认页补填）时仅展示存在错误的行/付款方式，且不可增删。
  */
 const props = defineProps({
   form: { type: Object, required: true },

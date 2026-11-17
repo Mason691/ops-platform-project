@@ -39,8 +39,8 @@ export const STEPS = [
 
 const BASIC_FIELDS = ['batchNo', 'customerPhone', 'customer', 'communityId',
   'detailAddress', 'agentUserIds']
-const RECEIPT_FIELDS = ['paymentType', 'depositAmount', 'paymentMethod',
-  'receiptDate', 'receiptNo', 'voucherUrls']
+const PRODUCTS_STEP_FIELDS = ['paymentType', 'depositAmount']
+const RECEIPT_FIELDS = ['paymentMethod', 'receiptDate', 'receiptNo', 'voucherUrls']
 const PRODUCT_FIELD_LABELS = {
   category: '品类',
   brand: '品牌',
@@ -289,6 +289,8 @@ export function validateBusinessForm(form, meta = {}) {
 /** 错误键归属的步骤：0 基础信息 / 1 商品明细 / 2 收款信息 / 3 确认页。 */
 export function stepOfErrorKey(key) {
   if (BASIC_FIELDS.includes(key)) return 0
+  // 付款方式/定金已从收款步骤前移到商品明细步骤（销售价合计下方）
+  if (PRODUCTS_STEP_FIELDS.includes(key)) return 1
   if (key === 'products' || key.startsWith('products.')) return 1
   if (RECEIPT_FIELDS.includes(key) || key === 'remark') return 2
   return 3
