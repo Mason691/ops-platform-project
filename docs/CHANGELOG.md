@@ -10,6 +10,7 @@
 - **发布（18:05–18:09，两轮）**：平台 JAR sha256 `59b70bde…`、最终 ops JAR sha256 `95a0dd38…`；overlay 镜像 `boss-platform/backend:latest`、`boss-platform/ops:latest`；回滚镜像 `boss-platform/backend:rollback-community2-20261118_180352`、`boss-platform/ops:rollback-community2b-20261118_180842`；H5 最终入口 `index-BEXDwyxV.js`、页面 chunk `pages-employee-business-data-new.D0kj-ZzR.js`，清空 assets 后上传；H5 备份 `html-ops-pre-community2-20261118_180352.tgz`（首轮）、`html-ops-pre-community2b-20261118_180842.tgz`（次轮）。
 - **审查修复（次轮触发）**：外部员工仅放开小区入口会与业务订单/退款/编辑的既有拦截不一致（形成绕过订单限制的写入口），已恢复 `外部用户暂不可新建小区`；无小区且无区县的矛盾文案改为按能力分支；区县短名解析抽为单函数。
 - **冒烟**：平台内部接口 corp12 新建 id=4500 `existed=false` → 重复提交同 id `existed=true`；corp4 返回「组织未配置所在区县，请联系管理员」；ops 员工接口无 token 401；H5 入口/页面 chunk 200 且 title=金地美家；两容器 healthy（platform 11.3s、ops 8.0s，无新增 ERROR）；最终 ops 类含 `外部用户暂不可新建小区/regionConfigured/existed`。测试行 4499/4500 已清理。
+- **数据配置**：`金厨美家运营商(corp 4)` 的 `region_id` 原为 NULL（`region_name` 仅“重庆市”），已按地址补为 `重庆市/市辖区/渝北区`（region_id=2477）；变更前备份 `sys_corp_id4_before_region_20261118_182145.sql`。补配置后平台内部 corp 接口与新建小区接口均返回 regionId=2477，测试小区 id=4501 已清理。
 - **未执行**：真实员工微信真机 E2E（新建→选中→提交订单），需员工在公众号重开页面验证（旧 WebView 可能缓存旧入口 chunk）。
 
 ## 2026-11-18（员工制单：小区选择支持直接新建）
