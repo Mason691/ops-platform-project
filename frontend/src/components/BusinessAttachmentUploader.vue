@@ -26,7 +26,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { onBeforeUnmount, ref } from 'vue'
 import { BASE_URL } from '@/config'
 import { api } from '@/api/index'
 import { assetUrl } from '@/utils/image'
@@ -35,7 +35,8 @@ import { compressImageBlob } from '@/utils/imageCompress'
 /**
  * 业务附件上传：图片（拍照/相册）与 PDF（合同附件），统一走后端
  * /api/ops/employee/business-data/attachments?fileType=RECEIPT|PAYMENT|CONTRACT。
- * 图片在 H5 端压缩后上传，服务端再次压缩兜底；返回 {id,url,fileName,...} 供提交引用。
+ * 收据图片原图上传（不压缩，保证红字 OCR 清晰度）；支付凭证/合同图片在 H5 端压缩后上传，
+ * 服务端仍会二次压缩兜底；返回 {id,url,fileName,...} 供提交引用。
  */
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },
@@ -54,8 +55,6 @@ const progress = ref(0)
 const uploadError = ref('')
 let disposed = false
 const activeXhrs = new Set()
-const imageUrls = computed(() => props.modelValue
-  .filter(isImage).map(file => assetUrl(file.url)))
 
 onBeforeUnmount(() => {
   disposed = true
@@ -131,7 +130,8 @@ function chooseImages() {
   if (remain <= 0) return
   uni.chooseImage({
     count: remain,
-    sizeType: ['compressed'],
+    // 收据需原图识别红字，必须取原图；其他图片可先由系统压缩再本地二次压缩
+    sizeType: props.fileType === 'RECEIPT' ? ['original'] : ['compressed'],
     sourceType: ['album', 'camera'],
     success: async res => {
       const paths = res.tempFilePaths || []
@@ -202,7 +202,12 @@ async function uploadBatch(items) {
   try {
     for (const item of items) {
       progress.value = 0
-      if (!validateFile(item.name, item.size)) continue
+      if (!validateFile(item.name)) continue
+      // 粗筛：避免把超大原图读进内存做压缩；最终限额在压缩后校验
+      if (Number(item.size) > 50 * 1024 * 1024) {
+        failUpload('文件过大，请选择50MB以内的文件')
+        continue
+      }
       const record = await uploadOne(item)
       if (record) {
         next.push(record)
@@ -229,11 +234,24 @@ async function uploadOne(item) {
   // #ifdef H5
   const blob = item.file || await fetch(item.path).then(r => r.blob())
   const isPdf = /\.pdf$/i.test(item.name || '') || blob.type === 'application/pdf'
-  const payload = isPdf ? blob : await compressImageBlob(blob)
-  const name = isPdf ? (item.name || 'contract.pdf') : (item.name || 'image.jpg').replace(/\.[^.]+$/, '.jpg')
+  // 收据原图不压缩；支付凭证/合同图片压缩后上传
+  const payload = isPdf || props.fileType === 'RECEIPT'
+    ? blob : await compressImageBlob(blob)
+  const name = isPdf
+    ? (item.name || 'contract.pdf')
+    : (props.fileType === 'RECEIPT'
+      ? (item.name || 'receipt.jpg')
+      : (item.name || 'image.jpg').replace(/\.[^.]+$/, '.jpg'))
+  // 收据用原图、其他图片用压缩产物：限额校验必须放在压缩之后
+  if (payload.size > props.maxSizeMB * 1024 * 1024) {
+    throw new Error(`单个文件不能超过${props.maxSizeMB}MB`)
+  }
   return uploadBlob(payload, name)
   // #endif
   // #ifndef H5
+  if (Number(item.size) > props.maxSizeMB * 1024 * 1024) {
+    throw new Error(`单个文件不能超过${props.maxSizeMB}MB`)
+  }
   return uploadMp(item.path, item.name)
   // #endif
 }
@@ -323,7 +341,7 @@ function mapRecord(data) {
   }
 }
 
-function validateFile(name, size) {
+function validateFile(name) {
   const fileName = String(name || '')
   const isPdf = /\.pdf$/i.test(fileName)
   const isImage = /\.(jpe?g|png)$/i.test(fileName)
@@ -334,11 +352,6 @@ function validateFile(name, size) {
     }
   } else if (!isImage) {
     failUpload('仅支持 JPG、PNG 图片')
-    return false
-  }
-  const bytes = Number(size) || 0
-  if (bytes > props.maxSizeMB * 1024 * 1024) {
-    failUpload(`单个文件不能超过${props.maxSizeMB}MB`)
     return false
   }
   return true

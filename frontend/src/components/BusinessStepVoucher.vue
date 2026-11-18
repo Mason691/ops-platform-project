@@ -6,9 +6,10 @@
         v-model="receiptImages"
         file-type="RECEIPT"
         :max="1"
+        :max-size-mb="MAX_RECEIPT_SIZE_MB"
         accept="image"
         add-text="上传收据图片"
-        hint-text="建议上传收据原图，上传后自动识别收据号；最多1张，图片自动压缩"
+        :hint-text="`收据原图上传，不压缩；上传后自动识别收据号；最多1张，单个不超过${MAX_RECEIPT_SIZE_MB}MB`"
         :error="errors.receiptImage"
         @uploaded="onReceiptUploaded" />
       <view v-if="ocrLoading" class="ocr-row">
@@ -31,7 +32,7 @@
              @input="onReceiptInput" @blur="onReceiptBlur"
              @focus="keepFieldVisible('field-receiptNo')" />
       <text class="section-hint">
-        识别规则：取收据「入账日期」后 NO. 的 7 位数字；识别结果可人工修改，修改后不再自动覆盖。
+        识别规则：优先识别收据右上角红色数字（通常为 NO. 后的 7 位）；未识别到红字时回退识别「入账日期」后 NO. 的数字。结果可人工修改，修改后不再自动覆盖。
       </text>
       <text v-if="receiptChecking" class="hint">正在校验收据号...</text>
       <text v-if="receiptError" class="ferr">{{ receiptError }}</text>
@@ -65,17 +66,19 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import BusinessAttachmentUploader from '@/components/BusinessAttachmentUploader.vue'
 import { api } from '@/api/index'
 import {
-  MAX_CONTRACT_ATTACHMENTS, MAX_PAYMENT_VOUCHERS, MAX_RECEIPT_NO, RECEIPT_NO_RE
+  MAX_CONTRACT_ATTACHMENTS, MAX_PAYMENT_VOUCHERS, MAX_RECEIPT_NO,
+  MAX_RECEIPT_SIZE_MB, RECEIPT_NO_RE
 } from '@/utils/businessForm'
 import { keepFieldVisible } from '@/utils/fieldFocus'
 
 /**
  * 第 4 步：凭证信息。
- * 收据图片（可选）→ OCR 识别收据号；收据号必填；支付凭证 1~3 张必填；
+ * 收据图片（可选）→ OCR 识别收据号（优先红色数字，未命中回退 NO. 规则）；
+ * 收据号必填；支付凭证 1~3 张必填；
  * 合同附件 1~5 份必填（图片/PDF）。
  *
  * OCR 覆盖策略：收据号为空或仍等于上次自动识别值时自动填入；用户已手工改动
@@ -107,6 +110,12 @@ const lastAutoReceiptNo = ref('')
 const receiptChecking = ref(false)
 let receiptCheckToken = 0
 let ocrToken = 0
+
+onBeforeUnmount(() => {
+  // 离开凭证步骤后使在途 OCR/查重响应失效，避免在确认页/成功页弹覆盖框或改号
+  ocrToken += 1
+  receiptCheckToken += 1
+})
 
 const receiptError = computed(() => {
   if (props.errors.receiptNo) return props.errors.receiptNo

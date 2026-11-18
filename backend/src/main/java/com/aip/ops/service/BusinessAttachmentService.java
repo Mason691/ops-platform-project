@@ -12,7 +12,7 @@ import java.util.List;
  */
 public interface BusinessAttachmentService {
 
-    /** 员工上传附件；按 fileType 校验格式/大小，图片服务端压缩后落盘。 */
+    /** 员工上传附件；收据原图保存、其余图片压缩，按 fileType 校验格式/大小。 */
     OpsBusinessAttachment upload(MultipartFile file, String fileType);
 
     /** 提交制单时校验附件归属与数量；返回按入参顺序排列的附件。 */
@@ -21,8 +21,8 @@ public interface BusinessAttachmentService {
     /** 校验单个附件（OCR 收据图片使用）。 */
     OpsBusinessAttachment requireOwnedOne(Long id, String fileType, Long corpId);
 
-    /** 提交成功后把附件绑定到订单。 */
-    void bindToOrder(List<Long> ids, Long orderId);
+    /** 提交成功后把附件绑定到订单；按组织过滤，防止跨租户绑定。 */
+    void bindToOrder(List<Long> ids, Long orderId, Long corpId);
 
     /** URL 列表 → 逗号分隔字符串（订单头落库）。 */
     String toUrlCsv(List<OpsBusinessAttachment> files);

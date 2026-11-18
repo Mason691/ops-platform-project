@@ -1,6 +1,6 @@
 <template>
   <view class="wizard-steps">
-    <view class="track">
+    <view class="track" :style="trackStyle">
       <view class="track-fill" :style="{ width: progress }"></view>
     </view>
     <view class="steps-row">
@@ -35,6 +35,15 @@ const progress = computed(() => {
   return `${(Math.min(props.current, total) / total) * 100}%`
 })
 
+/**
+ * 轨道内缩 = 半个圆点宽度：5 步 10%、3 步 16.67%。
+ * 该组件同时用于业务订单（5 步）与物资领用/核销（3 步），不能写死 10%。
+ */
+const trackStyle = computed(() => {
+  const inset = `${50 / Math.max(props.steps.length, 2)}%`
+  return { left: inset, right: inset }
+})
+
 function select(index) {
   if (index === props.current || index > props.maxVisited) return
   emit('select', index)
@@ -48,7 +57,7 @@ function select(index) {
   box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, .04);
 }
 .track {
-  position: absolute; left: 10%; right: 10%; top: 42rpx;
+  position: absolute; top: 42rpx;
   height: 4rpx; background: #f0f0f0; border-radius: 2rpx;
 }
 .track-fill {

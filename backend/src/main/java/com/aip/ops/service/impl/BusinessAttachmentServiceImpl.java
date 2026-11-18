@@ -3,6 +3,7 @@ package com.aip.ops.service.impl;
 import com.aip.ops.entity.OpsBusinessAttachment;
 import com.aip.ops.mapper.OpsBusinessAttachmentMapper;
 import com.aip.ops.service.BusinessAttachmentService;
+import com.aip.ops.service.EmployeeService;
 import com.aip.sdk.exception.BusinessException;
 import com.aip.sdk.security.LoginUser;
 import com.aip.sdk.security.SecurityUtils;
@@ -47,9 +48,9 @@ import java.util.UUID;
 /**
  * 业务订单附件实现。
  *
- * <p>图片统一重编码 JPEG（最长边 2000px / 质量 0.85）后落盘，兼顾 OCR 文字清晰度与
- * 存储体积；PDF 只做魔数与大小校验，不压缩内容。路径固定为
- * {@code /uploads/ops/business/{corpId}/{type}/{yyyyMMdd}/...}，不暴露服务器路径。</p>
+ * <p>收据图片（RECEIPT）原图保存、不压缩，保证红字 OCR 清晰度；支付凭证与合同图片
+ * 仍重编码 JPEG（最长边 2000px / 质量 0.85），PDF 只做魔数与大小校验、内容原样。
+ * 路径固定为 {@code /uploads/ops/business/{corpId}/{type}/{yyyyMMdd}/...}，不暴露服务器路径。</p>
  */
 @Slf4j
 @Service
@@ -57,9 +58,13 @@ import java.util.UUID;
 public class BusinessAttachmentServiceImpl implements BusinessAttachmentService {
 
     private static final long MAX_FILE_BYTES = 10L * 1024 * 1024;
+    /** 收据需原图保存，手机原图可达十几 MB，单独放宽；nginx 上限 50MB。 */
+    private static final long MAX_RECEIPT_BYTES = 20L * 1024 * 1024;
     private static final int MAX_IMAGE_DIMENSION = 2000;
     /** 解码前限制像素数，防压缩炸弹（16MP 已高于手机相机常见尺寸）。 */
     private static final long MAX_IMAGE_PIXELS = 16_000_000L;
+    /** 收据原图不缩放，允许 24MP 以内（覆盖主流手机 12MP/24MP 模式）。 */
+    private static final long MAX_RECEIPT_PIXELS = 24_000_000L;
     /** 单员工 24h 内未绑定附件上限，防止恶意占用共享上传卷。 */
     private static final int MAX_UNBOUND_PER_DAY = 100;
     private static final float JPEG_QUALITY = 0.85f;
@@ -74,12 +79,14 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
             OpsBusinessAttachment.TYPE_CONTRACT, 5);
 
     private final OpsBusinessAttachmentMapper attachmentMapper;
+    private final EmployeeService employeeService;
 
     @Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
     private String uploadBaseDir;
 
     @Override
     public OpsBusinessAttachment upload(MultipartFile file, String fileType) {
+        assertEmployee();
         String type = normalizeType(fileType);
         Long corpId = SecurityUtils.getCurrentCorpIdOrNull();
         if (corpId == null || corpId <= 0) {
@@ -99,8 +106,11 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
             throw BusinessException.of("上传过于频繁，请稍后重试");
         }
         if (file == null || file.isEmpty()) throw BusinessException.of("请选择要上传的文件");
-        if (file.getSize() > MAX_FILE_BYTES) {
-            throw BusinessException.of("单个文件不能超过10MB");
+        long maxBytes = OpsBusinessAttachment.TYPE_RECEIPT.equals(type)
+                ? MAX_RECEIPT_BYTES : MAX_FILE_BYTES;
+        if (file.getSize() > maxBytes) {
+            throw BusinessException.of(OpsBusinessAttachment.TYPE_RECEIPT.equals(type)
+                    ? "收据图片不能超过20MB" : "单个文件不能超过10MB");
         }
         String original = sanitizeFileName(file.getOriginalFilename());
         String ext = extension(original);
@@ -115,9 +125,15 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
         } catch (IOException e) {
             throw BusinessException.of("读取文件失败，请重试");
         }
-        Stored stored = "pdf".equals(ext)
-                ? validatePdf(input)
-                : compressImage(input);
+        Stored stored;
+        if ("pdf".equals(ext)) {
+            stored = validatePdf(input);
+        } else if (OpsBusinessAttachment.TYPE_RECEIPT.equals(type)) {
+            // 收据号是图片中的红色数字，压缩会损失笔画，必须用原图识别/存档
+            stored = validateOriginalImage(input);
+        } else {
+            stored = compressImage(input);
+        }
 
         String datePart = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         String relative = "ops/business/" + corpId + "/" + type.toLowerCase(Locale.ROOT)
@@ -143,7 +159,19 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
         record.setUploaderName(user != null ? user.getUsername() : "");
         record.setUploadTime(LocalDateTime.now());
         record.setDeleteFlag(0);
-        attachmentMapper.insert(record);
+        try {
+            if (attachmentMapper.insert(record) <= 0) {
+                throw BusinessException.of("附件保存失败，请重试");
+            }
+        } catch (RuntimeException e) {
+            // 先落盘后写库：写库失败必须回删文件，否则清理任务只扫数据库行，永远清不到
+            try {
+                Files.deleteIfExists(dest);
+            } catch (IOException ignored) {
+                log.warn("删除孤儿附件文件失败 path={}", dest);
+            }
+            throw e;
+        }
         log.info("业务附件上传成功 corpId={} type={} id={} name={} size={}", corpId, type,
                 record.getId(), original, stored.bytes().length);
         return record;
@@ -205,11 +233,13 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
     }
 
     @Override
-    public void bindToOrder(List<Long> ids, Long orderId) {
+    public void bindToOrder(List<Long> ids, Long orderId, Long corpId) {
         if (ids == null || ids.isEmpty() || orderId == null) return;
+        if (corpId == null) throw BusinessException.of("附件归属信息缺失");
         LinkedHashSet<Long> distinct = new LinkedHashSet<>(ids);
         int updated = attachmentMapper.update(null, Wrappers.<OpsBusinessAttachment>lambdaUpdate()
                 .in(OpsBusinessAttachment::getId, distinct)
+                .eq(OpsBusinessAttachment::getCorpId, corpId)
                 .isNull(OpsBusinessAttachment::getOrderId)
                 .set(OpsBusinessAttachment::getOrderId, orderId));
         if (updated != distinct.size()) {
@@ -254,6 +284,7 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
     @Override
     public void deleteUnbound(Long id, Long corpId) {
         if (id == null || corpId == null) return;
+        assertEmployee();
         LoginUser current = SecurityUtils.getCurrentUser();
         if (current == null || current.getUserId() == null) {
             throw BusinessException.of("登录状态失效，请重新登录");
@@ -295,6 +326,12 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
         return count;
     }
 
+    private void assertEmployee() {
+        // Controller 已拒绝 token_type=sso；这里再确认能解析员工手机号，
+        // 防止主站管理员令牌（tokenType=null）向组织上传目录写入附件。
+        employeeService.getCurrentAgentPhone();
+    }
+
     private static String normalizeType(String fileType) {
         String type = fileType == null ? "" : fileType.trim().toUpperCase(Locale.ROOT);
         if (!ALLOWED_TYPES.contains(type)) {
@@ -334,6 +371,49 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
             throw BusinessException.of("PDF 文件格式不合法");
         }
         return new Stored(bytes, "pdf", "application/pdf");
+    }
+
+    /**
+     * 收据图片原图保存：不缩放、不重编码，仅校验真实格式（JPEG/PNG）与像素上限。
+     * 以 ImageReader 探测到的真实格式决定扩展名/Content-Type，防止改后缀绕过。
+     */
+    private static Stored validateOriginalImage(byte[] bytes) {
+        if (bytes.length == 0) throw BusinessException.of("图片为空");
+        String format;
+        int width;
+        int height;
+        try (ImageInputStream iis = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
+            if (iis == null) throw BusinessException.of("图片文件格式不合法");
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(iis);
+            if (!readers.hasNext()) throw BusinessException.of("图片文件格式不合法");
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(iis, true, true);
+                format = reader.getFormatName();
+                width = reader.getWidth(0);
+                height = reader.getHeight(0);
+            } finally {
+                reader.dispose();
+            }
+        } catch (IOException e) {
+            throw BusinessException.of("图片文件读取失败");
+        }
+        String normalized = format == null ? "" : format.trim().toLowerCase(Locale.ROOT);
+        String storedExt;
+        String contentType;
+        if ("jpeg".equals(normalized) || "jpg".equals(normalized)) {
+            storedExt = "jpg";
+            contentType = "image/jpeg";
+        } else if ("png".equals(normalized)) {
+            storedExt = "png";
+            contentType = "image/png";
+        } else {
+            throw BusinessException.of("收据图片仅支持 JPG、PNG");
+        }
+        if (width <= 0 || height <= 0 || (long) width * height > MAX_RECEIPT_PIXELS) {
+            throw BusinessException.of("收据图片像素过大，请裁剪后重试");
+        }
+        return new Stored(bytes, storedExt, contentType);
     }
 
     /**

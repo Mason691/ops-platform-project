@@ -41,8 +41,8 @@ public interface BusinessOrderService {
                                             String calcStatus, String remark, String paymentMethod,
                                             String paymentType, BigDecimal depositAmount);
 
-    /** 回写凭证信息（收据图片/支付凭证/合同附件 URL 列表，逗号分隔）。 */
-    void updateVoucherAttachments(Long orderId, String receiptImageUrl,
+    /** 回写凭证信息；按订单+组织双条件，防止跨租户改写。 */
+    void updateVoucherAttachments(Long orderId, Long corpId, String receiptImageUrl,
                                   String paymentVoucherUrls, String contractAttachmentUrls);
 
     OpsBusinessOrder findByOrderKey(Long corpId, String orderKey);

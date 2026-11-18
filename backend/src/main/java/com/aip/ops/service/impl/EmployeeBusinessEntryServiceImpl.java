@@ -663,9 +663,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 totalAmount, INITIAL_CALC_STATUS, v.remark(), v.paymentMethod(),
                 v.paymentType(), v.depositAmount());
         // 凭证信息落订单头，并把附件回填 order_id（同一事务内完成）
-        orderService.updateVoucherAttachments(order.getId(), v.receiptImageUrl(),
+        orderService.updateVoucherAttachments(order.getId(), ctx.corpId(), v.receiptImageUrl(),
                 v.paymentVoucherUrls(), v.contractAttachmentUrls());
-        attachmentService.bindToOrder(v.attachmentIds(), order.getId());
+        attachmentService.bindToOrder(v.attachmentIds(), order.getId(), ctx.corpId());
         // 多经办人按「产品 × 经办人」拆行：每行独立 agent_phone 归属，
         // 提成计算沿用「同收据号+客户+品类+型号」组内均分规则。
         for (ValidatedProduct product : v.products()) {

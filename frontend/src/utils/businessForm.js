@@ -39,6 +39,8 @@ export const RECEIPT_NO_RE = /^[A-Za-z0-9_/-]+$/
 /** 凭证信息附件上限（与后端 BusinessAttachmentServiceImpl 保持一致） */
 export const MAX_PAYMENT_VOUCHERS = 3
 export const MAX_CONTRACT_ATTACHMENTS = 5
+/** 收据原图上限（与后端 MAX_RECEIPT_BYTES 一致）；原图不压缩，保证红字 OCR 清晰度 */
+export const MAX_RECEIPT_SIZE_MB = 20
 
 /** 支付方式（与后端 PaymentMethod 保持一致） */
 export const PAYMENT_METHODS = [

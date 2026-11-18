@@ -112,12 +112,14 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
     }
 
     @Override
-    public void updateVoucherAttachments(Long orderId, String receiptImageUrl,
+    public void updateVoucherAttachments(Long orderId, Long corpId, String receiptImageUrl,
                                          String paymentVoucherUrls,
                                          String contractAttachmentUrls) {
         if (orderId == null) return;
+        if (corpId == null) throw BusinessException.of("订单归属信息缺失");
         orderMapper.update(null, new LambdaUpdateWrapper<OpsBusinessOrder>()
                 .eq(OpsBusinessOrder::getId, orderId)
+                .eq(OpsBusinessOrder::getCorpId, corpId)
                 .set(OpsBusinessOrder::getReceiptImageUrl, receiptImageUrl)
                 .set(OpsBusinessOrder::getPaymentVoucherUrls, paymentVoucherUrls)
                 .set(OpsBusinessOrder::getContractAttachmentUrls, contractAttachmentUrls));
