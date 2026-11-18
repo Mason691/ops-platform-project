@@ -137,8 +137,9 @@ function confirm() {
 .reject-input {
   width: 100%;
   box-sizing: border-box;
-  height: 320rpx;
-  min-height: 320rpx;
+  /* 覆盖 App.vue 全局 uni-textarea 高度覆盖，否则宿主塌陷、内层 textarea 高度为 0 */
+  height: 320rpx !important;
+  min-height: 320rpx !important;
   margin-top: 20rpx;
   padding: 22rpx;
   background: #F7F8FA;

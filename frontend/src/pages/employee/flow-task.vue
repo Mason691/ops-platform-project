@@ -813,7 +813,12 @@ function goBack() {
 .label { display: block; font-size: 25rpx; color: #4E5969; margin-bottom: 10rpx; }
 .req { color: #F53F3F; }
 .input, .picker, .textarea { width: 100%; box-sizing: border-box; background: #F7F8FA; border-radius: 12rpx; padding: 20rpx 22rpx; font-size: 26rpx; color: #1D2129; }
-.textarea { min-height: 150rpx; }
+.textarea {
+  /* App.vue 全局 uni-textarea{min-height:auto!important} 会把宿主高度压塌，
+     内层 textarea 绝对定位高度随之为 0，导致无法聚焦录入；按其他页面同口径显式覆盖。 */
+  height: 150rpx !important;
+  min-height: 150rpx !important;
+}
 .picker { display: flex; align-items: center; }
 .row2 { display: flex; gap: 16rpx; }
 .row2 > * { flex: 1; }
