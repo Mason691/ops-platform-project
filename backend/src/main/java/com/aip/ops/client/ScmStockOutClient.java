@@ -54,7 +54,7 @@ public class ScmStockOutClient {
         try {
             Map<String, Object> resp = restTemplate.postForObject(
                     url, new HttpEntity<>(request, headers), Map.class);
-            return parseResponse(resp);
+            return parseResponse(resp, request.dispatchId());
         } catch (RestClientResponseException e) {
             log.warn("SCM 生成出库单失败 dispatchId={}, status={}, body={}",
                     request.dispatchId(), e.getStatusCode().value(), e.getResponseBodyAsString());
@@ -96,19 +96,23 @@ public class ScmStockOutClient {
         try {
             resp = restTemplate.postForObject(url, new HttpEntity<>(body, headers), Map.class);
         } catch (RestClientResponseException e) {
-            log.warn("SCM 查询出库状态失败 status={}, body={}",
-                    e.getStatusCode().value(), e.getResponseBodyAsString());
+            log.warn("SCM 查询出库状态失败 orderIds={}, status={}, body={}",
+                    orderIds, e.getStatusCode().value(), e.getResponseBodyAsString());
             throw BusinessException.of("供应链服务不可用，暂无法校验销售出库状态");
         } catch (Exception e) {
-            log.warn("SCM 查询出库状态异常: {}", e.getMessage());
+            log.warn("SCM 查询出库状态异常 orderIds={}: {}", orderIds, e.getMessage());
             throw BusinessException.of("供应链服务不可用，暂无法校验销售出库状态");
         }
         if (resp == null) {
+            log.error("SCM 查询出库状态无响应 orderIds={}", orderIds);
             throw BusinessException.of("供应链服务无响应，暂无法校验销售出库状态");
         }
         Object code = resp.get("code");
         if (code instanceof Number n && n.intValue() != 200) {
             Object msg = resp.get("msg");
+            // 必须记录 SCM 原始响应：否则只剩“系统内部错误”，无法定位供应链侧根因
+            log.error("SCM 查询出库状态返回失败 orderIds={}, code={}, msg={}, resp={}",
+                    orderIds, n.intValue(), msg, resp);
             throw BusinessException.of("查询销售出库状态失败："
                     + (msg instanceof String s && !s.isBlank() ? s : "未知错误"));
         }
@@ -124,23 +128,28 @@ public class ScmStockOutClient {
     }
 
     @SuppressWarnings("unchecked")
-    private Result parseResponse(Map<String, Object> resp) {
+    private Result parseResponse(Map<String, Object> resp, Long dispatchId) {
         if (resp == null) {
+            log.error("SCM 生成出库单无响应 dispatchId={}", dispatchId);
             throw BusinessException.of("生成销售出库单失败：供应链服务无响应");
         }
         Object code = resp.get("code");
         if (code instanceof Number n && n.intValue() != 200) {
             Object msg = resp.get("msg");
+            log.error("SCM 生成出库单返回失败 dispatchId={}, code={}, msg={}, resp={}",
+                    dispatchId, n.intValue(), msg, resp);
             throw BusinessException.of("生成销售出库单失败："
                     + (msg instanceof String s && !s.isBlank() ? s : "未知错误"));
         }
         Object data = resp.get("data");
         if (!(data instanceof Map<?, ?> map)) {
+            log.error("SCM 生成出库单返回数据异常 dispatchId={}, resp={}", dispatchId, resp);
             throw BusinessException.of("生成销售出库单失败：返回数据异常");
         }
         Long id = map.get("id") instanceof Number n ? n.longValue() : null;
         String billNo = map.get("billNo") instanceof String s ? s : null;
         if (id == null || billNo == null || billNo.isBlank()) {
+            log.error("SCM 生成出库单未返回单号 dispatchId={}, resp={}", dispatchId, resp);
             throw BusinessException.of("生成销售出库单失败：未返回单号");
         }
         Map<String, Object> result = new LinkedHashMap<>();
