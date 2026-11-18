@@ -206,12 +206,15 @@
           </view>
           <view class="field"><text class="label">期望上门 <text class="req">*</text></text>
             <view class="row2">
-              <picker mode="date" :value="expectDate" @change="expectDate = $event.detail.value; syncExpect()">
+              <picker mode="date" :value="expectDate" @change="onExpectDate">
                 <view class="picker">{{ expectDate || '日期' }}</view>
               </picker>
-              <picker mode="time" :value="expectClock" @change="expectClock = $event.detail.value; syncExpect()">
-                <view class="picker">{{ expectClock || '时间' }}</view>
-              </picker>
+              <view class="period-chips">
+                <view class="chip period-chip" :class="{ on: expectPeriod === '上午' }"
+                      @click="choosePeriod('上午')">上午</view>
+                <view class="chip period-chip" :class="{ on: expectPeriod === '下午' }"
+                      @click="choosePeriod('下午')">下午</view>
+              </view>
             </view>
           </view>
           <view v-if="form.dispatchType === 'CONSTRUCTION'" class="field"><text class="label">施工商品</text>
@@ -300,7 +303,7 @@ const order = ref({})
 const assignees = ref([])
 const selectedKeys = ref([])
 const expectDate = ref('')
-const expectClock = ref('')
+const expectPeriod = ref('')
 const opinion = ref('')
 const rejectVisible = ref(false)
 const categoryMap = ref({})
@@ -527,10 +530,19 @@ function onAssignee(e) {
   if (u) form.assigneeUserId = u.userId
 }
 function onProducts(e) { selectedKeys.value = e.detail.value || [] }
+function onExpectDate(e) {
+  expectDate.value = e.detail.value
+  syncExpect()
+}
+function choosePeriod(period) {
+  expectPeriod.value = period
+  syncExpect()
+}
 function syncExpect() {
-  if (expectDate.value && expectClock.value) {
-    form.expectTime = expectDate.value + ' ' + expectClock.value + ':00'
-  }
+  // 只精确到上午/下午，不再采集时分秒
+  form.expectTime = expectDate.value && expectPeriod.value
+    ? expectDate.value + ' ' + expectPeriod.value
+    : ''
 }
 
 function buildFormData() {
@@ -556,7 +568,7 @@ function validate() {
   }
   if (actionType.value === 'OPS_DISPATCH_OUTBOUND') {
     if (!form.assigneeUserId) return '请选择上门员工'
-    if (!form.expectTime) return '请选择期望上门时间'
+    if (!form.expectTime) return '请选择期望上门日期和上午/下午'
     if (form.dispatchType === 'VISIT' && !String(form.visitNote || '').trim()) return '请填写随访任务说明'
   }
   if (actionType.value === 'OPS_ACCEPTANCE') {
@@ -822,6 +834,8 @@ function goBack() {
 .picker { display: flex; align-items: center; }
 .row2 { display: flex; gap: 16rpx; }
 .row2 > * { flex: 1; }
+.period-chips { display: flex; gap: 12rpx; }
+.period-chip { flex: 1; text-align: center; padding-left: 0; padding-right: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 14rpx; }
 .chip { padding: 14rpx 30rpx; border-radius: 40rpx; background: #F2F3F5; color: #4E5969; font-size: 25rpx; }
 .chip.on { background: #FFF0EB; color: #FF6B35; border: 1rpx solid #FF6B35; font-weight: 600; }
