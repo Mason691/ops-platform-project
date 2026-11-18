@@ -8,6 +8,7 @@
 - **修复**：`flow-task` 文本域显式 `height/min-height:150rpx!important`（覆盖核对备注、处理意见及施工/验收等全部文本域）；`RejectPopup` 驳回意见框改为 `height/min-height:320rpx!important`。
 - **验证**：`npm run build:h5`、`npm run build:mp-weixin` 通过；产物 CSS 确认 `.textarea`=`height:4.6875rem!important`（150rpx）、`.reject-input`=`height:10rem!important`（320rpx）。
 - **生产部署（14:26）**：随 ops H5 重发上线（同批补发业务员权限 UI，见业务员 PR）；公网 `/ops/` 200。
+- **平台主站（14:28）**：重发 228 个静态文件（`VITE_BASE=/`），备份 `html-platform-pre-20261118_142815.tgz`，`boss-platform-nginx` reload；`/` 与 `/ops/business-data` 均 200、title=协同平台。
 - **未执行**：微信真机聚焦/录入 E2E。
 
 ## 2026-11-18（城市合伙人「业务员」角色生产部署）
