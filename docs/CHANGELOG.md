@@ -2,6 +2,15 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-18（生产发布：红字 OCR + 收据原图）
+
+- **发布（15:25–15:27）**：`main` `a050e7e`（已推送 origin）。
+- **后端**：clean package JAR sha256 `891d4746…`；overlay 镜像 `boss-platform/ops:receipt-orig-20261118_152557`（FROM 旧 latest `c525df73`，保留 Tesseract）→ latest；`docker compose up -d --force-recreate --no-deps --no-build ops-backend`；容器 healthy，启动 8.0s，无 error/exception/circular；运行 JAR sha 与本地一致，`ReceiptRedDigitExtractor`/`ReceiptOcrServiceImpl`/`BusinessAttachmentServiceImpl` 均在包内。
+- **H5**：入口 `index-DHJ7IdWv.js`，页面 chunk `pages-employee-business-data-new.sURaQ-bA.js`，128 assets；清空 assets 后 rsync，`boss-ops-nginx` 配置检查通过并 reload。
+- **备份/回滚**：JAR `ops-backend/app.jar.bak-receipt-orig-20261118_152557`；镜像 `boss-platform/ops:rollback-receipt-orig-20261118_152557`；H5 `backups/html-ops-pre-receipt-orig-20261118_152557.tgz`。
+- **冒烟**：`/ops/` 200、title=金地美家；新入口/页面 200，旧入口 `index-RdzOIOnr.js`/旧页面 `DJPL4nCG.js` 404；页面 chunk 含「收据原图上传，不压缩/凭证信息/支付凭证/合同附件/正在识别收据号」，「收款凭证」为 0；入口+页面引用的 125 个资源全部 200；`jweixin-1.6.0.js` 200；ops 8082 health 200。
+- **未执行**：真实员工上传原图 E2E（需实际上传后核对落盘字节与源文件一致）、OCR 微信真机 E2E。
+
 ## 2026-11-18（收据图片原图上传/识别，不压缩）
 
 - **业务要求**：收据号是收据图片中的红色数字，压缩会损失笔画；收据图片改为**原图上传、原图识别**。
@@ -10,7 +19,7 @@
 - **前端**：`BusinessAttachmentUploader` 对 RECEIPT 跳过 canvas 压缩、`sizeType=original`，单文件上限 20MB；提示改为「收据原图上传，不压缩」。支付凭证/合同保持压缩；其大小限制改为校验压缩后产物（原图仅做 50MB 粗筛）。
 - **复审修复（同批）**：上传/删除入口补 `EmployeeService` 员工身份断言；`updateVoucherAttachments`/`bindToOrder` 增加 corp 条件；附件写库失败回删文件；离开凭证步骤使在途 OCR/查重响应失效；步骤条轨道内缩按步数计算（修复 3 步物资向导）；移除未使用 `imageUrls`。
 - **验证**：后端 `mvn -o compile`/`package` 通过；H5/小程序构建通过；真实收据文件端到端识别 `0002304`（OCR 直接读文件），支付/合同截图 0 误报；字节级验证 `validateOriginalImage` 对 JPEG/PNG 返回字节完全一致（JPEG 241,821B），GIF 改后缀被拒「收据图片仅支持 JPG、PNG」。
-- **未执行**：生产部署、真实员工上传原图 E2E（需在微信/H5 实际上传后核对落盘字节与源文件一致）。
+- **未执行**：真实员工上传原图 E2E（需在微信/H5 实际上传后核对落盘字节与源文件一致）；生产部署见上条。
 
 ## 2026-11-18（收据号 OCR：优先识别红色数字）
 
