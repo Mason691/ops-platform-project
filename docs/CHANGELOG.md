@@ -2,6 +2,17 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-18（城市合伙人「业务员」基础角色 + 已核对业务权限隔离）
+
+- **角色**：每个城市合伙人组织（`sys_corp.org_role_id=5`）各建「业务员」角色（编码 `salesperson`，写入 `remark`）；组织内所有员工默认拥有；新员工/新加入组织由 `createMembership` 自动绑定，存量员工由迁移脚本回填。
+- **权限**：业务员默认授予工作台物料领取/核销、货款补录、待办/我发起的审批等 H5 菜单；**不授予** `scm:pur-order:h5:create`（已核对业务/采购 H5 制单）与 `scm:pur-order:h5:review`（H5 核审）。多角色权限取并集，其他角色有权限时仍可见已核对业务。
+- **前端**：`employeeSession.js` 新增 `PERM_VERIFIED_BUSINESS` / `hasEmployeePermission()`；工作台按权限隐藏「已核对业务」卡片；`verified-business.vue` 增加页面级无权限拦截态。
+- **后端**：平台新增 `BusinessStaffRoleService`（幂等建角色/授权/绑定、禁止删除基础角色、移除前校验）；`UserCorpService.replaceRoles` 增加移除校验；SCM `H5PurOrderController.financeCheckedOrders/createPurchaseRequest` 增加 `scm:pur-order:h5:create` 权限校验。
+- **数据迁移**：`sql/business_staff_role_migration.sql`（目标库 `ai_platform`，幂等：建角色→按权限码授权→在职员工全量绑定→自检 SQL）。
+- **规格**：`Specs/业务员角色-规格说明.md`。
+- **验证**：平台 `service` 模块编译/单测（80 项）通过；`web` 打包通过；SCM `compile`/单测（11 项）通过；ops 后端打包、`npm run build:h5` 与 `npm run build:mp-weixin` 通过。迁移脚本已在生产库事务试运行并回滚（9 组织 / 9 角色 / 90 菜单 / 0 未绑定员工）。项目无 lint/类型检查框架，未运行相关检查。
+- **未执行**：生产迁移脚本执行、平台/SCM 后端与 ops H5 部署、微信真机 E2E（业务员 / 业务员+部长 两种组合）；存量员工 JWT 内嵌权限需重新登录后生效。
+
 ## 2026-11-18（工作台：工作业务日志改为常用功能入口）
 
 - **调整**：按业务要求，工作业务日志不再在首页单独展示摘要卡片，改为「常用功能」中的菜单入口（📝 工作业务日志 → `/pages/employee/work-log`）。
