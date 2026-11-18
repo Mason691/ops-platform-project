@@ -6,7 +6,7 @@
 
 - **功能**：员工 H5 订单详情在状态 0/1/2 增加「退回草稿」「发起退款申请」；退回草稿终止当前流程 → `biz_status=0`+`draft_flag=1`，订单详情出现「编辑订单」，复用 5 步制单修改后沿用原订单编号/业务组号重新提交；退款终止正常流程后进入「业务订单作废工作流」（部长→财务→总经办），通过后 `biz_status=-1` 锁定。
 - **决策**：任一经办人可发起；退回草稿采用终止实例（非回退节点），重新提交新建实例；退款驳回由部长/财务退回经办人、总经办退回上一节点；退款驳回后提供「重新提交审批」（从部长节点重新开始）；已出库/已上报集团/已生成以旧换新采购单拦截，SCM 不可达 fail-closed；退款金额默认应付合计、≤上限、原因必填。
-- **数据/流程**：`sql/migrate_business_order_draft_refund.sql`（`draft_flag` + `ops_business_refund`）；`sql/business_order_void_workflow_seed.sql`（字典 -1 + `biz_order_void_flow` 定义/节点/角色审批人）；平台新增内部终止接口 `POST /api/internal/wf/instance/{id}/terminate`；消息模板复用现有场景。
+- **数据/流程**：`sql/migrate_business_order_draft_refund.sql`（`draft_flag` + `ops_business_refund`）；`sql/business_order_void_workflow_seed.sql`（字典 -1 + `biz_order_void_flow` 定义/节点/角色审批人）；`sql/ops_entity_config_seed.sql` 注册 `OpsBusinessRefund` 实体；平台新增内部终止接口 `POST /api/internal/wf/instance/{id}/terminate`；消息模板复用现有场景。
 - **后端**：`BusinessOrderRefundService`（退回/退款/详情/重新提交/作废回调）、`BusinessOrderVoidFlowActionService`（节点动作+幂等+事务）、订单行锁、附件 `REFUND` 类型与订单级复用、草稿编辑 `updateDraft`（替换明细/旧品/凭证、解绑旧附件、锁批次、重发流程）、订单详情/列表返回 `draftFlag/refund/canX/refundStatus`；作废置明细 `calc_status=已作废`、提成 0；员工统计/管理端汇总/品类汇总排除作废（作战地图原过滤天然排除）。
 - **前端**：订单详情操作卡+退款进度+`BusinessRefundSheet` 表单；`business-data-new.vue?orderId=` 草稿编辑模式与「重新提交成功」成功页；列表草稿/作废审批中/作废退款标签；`flow-task` 作废退款信息卡；工作日志新增「业务订单作废」筛选；平台主站 -1 红色标签。
 - **验证**：ops 后端 `mvn -o compile` 通过；平台 `web` 编译通过；H5/小程序构建通过；两个 SQL 脚本在生产 MySQL 临时库验证通过（`draft_flag`/退款表；字典 -1/流程定义/4 节点/3 角色审批人）后已 DROP。
