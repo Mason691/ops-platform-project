@@ -286,6 +286,18 @@ export const api = {
   scmInventoryQuery: (params) => request({url:'/api/scm/inventory/query', data:params}),
   scmMaterialPickTaskOrders: () => request({url:'/api/scm/material-pick/task-orders'}),
   scmMaterialPickCreate: (data) => request({url:'/api/scm/material-pick', method:'POST', data}),
+  // 派工自动生成的物料领用草稿（H5 常用功能）
+  scmMaterialPickMyDrafts: (params) => request({url:'/api/scm/material-pick/my-drafts', data:params}),
+  scmMaterialPickDraftCount: () => request({url:'/api/scm/material-pick/draft-count'}),
+  scmMaterialPickDetail: (id) => request({url:'/api/scm/material-pick/' + id}),
+  scmMaterialPickByDispatch: (dispatchId) => request({url:'/api/scm/material-pick/by-dispatch/' + dispatchId}),
+  scmMaterialPickMaterialOptions: () => request({url:'/api/scm/material-pick/material-options'}),
+  scmMaterialPickBatches: (params) => request({url:'/api/scm/material-pick/batches', data:params}),
+  scmMaterialPickSave: (id, data) => request({
+    url: '/api/scm/material-pick/save' + (id ? '?id=' + id : ''), method: 'POST', data
+  }),
+  scmMaterialPickSubmit: (id) => request({url:'/api/scm/material-pick/' + id + '/submit', method:'POST'}),
+  scmMaterialPickDelete: (id) => request({url:'/api/scm/material-pick/' + id, method:'DELETE'}),
   scmMaterialWriteOffPickable: () => request({url:'/api/scm/material-write-off/pickable'}),
   scmMaterialWriteOffFromPick: (pickId) => request({url:'/api/scm/material-write-off/from-pick/' + pickId}),
   scmMaterialWriteOffCreate: (data) => request({url:'/api/scm/material-write-off', method:'POST', data}),

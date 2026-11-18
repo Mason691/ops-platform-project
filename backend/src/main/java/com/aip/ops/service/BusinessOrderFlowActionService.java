@@ -183,18 +183,58 @@ public class BusinessOrderFlowActionService {
             throw BusinessException.of("该订单已产生销售出库单，不可重复派工");
         }
         List<ScmDispatchOutboundRequest.Item> outboundItems = groupItems(items);
+        // 派工物料清单是“需求预填”：随派工一起传给 SCM，由 SCM 同事务生成物料领用草稿；
+        // 为空表示本次派工不需要物料，不生成领用单。
+        List<ScmDispatchOutboundRequest.MaterialItem> materialItems =
+                dispatchMaterialItems(form.get("materialList"));
         String dispatchNo = dispatchNo(order, event.getTaskId(), event.getInstanceId());
         ScmDispatchOutboundRequest request = new ScmDispatchOutboundRequest(
                 order.getCorpId(), event.getTaskId(), dispatchNo,
                 order.getId(), order.getOrderNo(),
                 event.getOperatorUserId(), event.getOperatorName(),
                 order.getCustomer(), order.getCustomerPhone(), order.getPlatformMemberId(),
-                order.getCommunityName(), order.getDetailedAddress(), outboundItems);
+                order.getCommunityName(), order.getDetailedAddress(), outboundItems,
+                materialItems);
         ScmStockOutClient.Result outbound = scmClient.createFromDispatch(request);
         result.put("stockOutId", outbound.id());
         result.put("stockOutNo", outbound.billNo());
         result.put("productCount", outboundItems.size());
+        if (outbound.materialPickId() != null) {
+            result.put("materialPickId", outbound.materialPickId());
+            result.put("materialPickBillNo", outbound.materialPickBillNo());
+            result.put("materialPickCount", materialItems.size());
+        }
         return result;
+    }
+
+    /** 物料清单解析：允许为空；同一商品多行合并，数量必须大于 0。 */
+    private List<ScmDispatchOutboundRequest.MaterialItem> dispatchMaterialItems(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return List.of();
+        }
+        Map<String, BigDecimal> merged = new LinkedHashMap<>();
+        for (Object row : list) {
+            if (!(row instanceof Map<?, ?> map)) {
+                continue;
+            }
+            String number = str(map.get("materialNumber"));
+            if (number.isEmpty()) {
+                continue;
+            }
+            BigDecimal qty;
+            try {
+                qty = new BigDecimal(str(map.get("qty")));
+            } catch (NumberFormatException e) {
+                throw BusinessException.of("物料数量格式不正确：" + number);
+            }
+            if (qty.compareTo(BigDecimal.ZERO) <= 0) {
+                throw BusinessException.of("物料数量必须大于0：" + number);
+            }
+            merged.merge(number, qty, BigDecimal::add);
+        }
+        return merged.entrySet().stream()
+                .map(e -> new ScmDispatchOutboundRequest.MaterialItem(e.getKey(), e.getValue()))
+                .toList();
     }
 
     /** 正数销售分录；formData.selectedItemIds 为空时取订单全部正数分录。 */

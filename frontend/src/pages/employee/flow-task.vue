@@ -226,6 +226,8 @@
             </checkbox-group>
             <text class="hint">不勾选表示订单全部正数商品</text>
           </view>
+          <DispatchMaterialList v-if="form.dispatchType === 'CONSTRUCTION'"
+                                v-model="dispatchMaterials" />
           <view v-if="form.dispatchType === 'VISIT'" class="field"><text class="label">随访任务说明 <text class="req">*</text></text>
             <textarea v-model="form.visitNote" class="textarea" maxlength="500" placeholder="请填写随访任务说明" />
           </view>
@@ -291,6 +293,7 @@ import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 import { REQUISITION_STATUS, WRITE_OFF_STATUS } from '@/utils/materialForm'
 import ApproverCard from '@/components/ApproverCard.vue'
 import RejectPopup from '@/components/RejectPopup.vue'
+import DispatchMaterialList from '@/components/DispatchMaterialList.vue'
 
 const loading = ref(true)
 const submitting = ref(false)
@@ -302,6 +305,8 @@ const detail = ref(null)
 const order = ref({})
 const assignees = ref([])
 const selectedKeys = ref([])
+/** 派工出库物料清单（需求预填；为空不生成领用单） */
+const dispatchMaterials = ref([])
 const expectDate = ref('')
 const expectPeriod = ref('')
 const opinion = ref('')
@@ -552,6 +557,13 @@ function buildFormData() {
     data.selectedItemIds = dispatchProducts.value
       .filter(p => selected.has(p.productKey))
       .flatMap(p => p.rowIds || [])
+    // 物料清单只随施工派工传递；入户随访无物料
+    data.materialList = form.dispatchType === 'CONSTRUCTION'
+      ? dispatchMaterials.value.map(row => ({
+          materialNumber: row.materialNumber,
+          qty: Number(row.qty)
+        }))
+      : []
   }
   return data
 }
@@ -570,6 +582,11 @@ function validate() {
     if (!form.assigneeUserId) return '请选择上门员工'
     if (!form.expectTime) return '请选择期望上门日期和上午/下午'
     if (form.dispatchType === 'VISIT' && !String(form.visitNote || '').trim()) return '请填写随访任务说明'
+    if (form.dispatchType === 'CONSTRUCTION') {
+      const invalid = dispatchMaterials.value.find(row =>
+        !row.materialNumber || !(Number(row.qty) > 0))
+      if (invalid) return '请填写完整的物料清单（商品与数量）'
+    }
   }
   if (actionType.value === 'OPS_ACCEPTANCE') {
     if (!form.acceptanceConclusion) return '请选择验收结论'
@@ -645,6 +662,15 @@ async function doSubmit() {
       opinion: opinion.value,
       formData
     })
+    // 派工出库带物料清单时，SCM 已同事务生成领用草稿：按派工记录（=当前 taskId）查回单号提示
+    if (actionType.value === 'OPS_DISPATCH_OUTBOUND'
+        && form.dispatchType === 'CONSTRUCTION' && dispatchMaterials.value.length) {
+      const pick = await api.scmMaterialPickByDispatch(Number(taskId.value)).catch(() => null)
+      if (pick && pick.billNo) {
+        showDispatchMaterialResult(pick)
+        return
+      }
+    }
     showSubmitResult(result, '处理成功，流程已推进')
   } catch (e) {
     toast((e && e.msg) || '处理失败，请重试')
@@ -654,6 +680,23 @@ async function doSubmit() {
 }
 
 /** 提交结果：显示实际下一审批人；取不到时展示兜底文案，不静默 */
+/** 派工成功 + 已生成物料领用草稿：引导员工补充仓库/批次并提交。 */
+function showDispatchMaterialResult(pick) {
+  uni.showModal({
+    title: '派工出库成功',
+    content: `已生成物料领用单 ${pick.billNo}，请前往【常用功能 → 物料领取】补充仓库、批次并提交审批`,
+    confirmText: '去处理',
+    cancelText: '稍后',
+    success: (res) => {
+      if (res.confirm) {
+        uni.navigateTo({ url: '/pages/employee/material-pick-drafts' })
+      } else {
+        goTodo()
+      }
+    }
+  })
+}
+
 function showSubmitResult(result, fallback) {
   const info = normalizeResult(result)
   if (info.names.length) {

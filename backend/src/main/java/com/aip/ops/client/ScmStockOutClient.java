@@ -152,10 +152,9 @@ public class ScmStockOutClient {
             log.error("SCM 生成出库单未返回单号 dispatchId={}, resp={}", dispatchId, resp);
             throw BusinessException.of("生成销售出库单失败：未返回单号");
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("id", id);
-        result.put("billNo", billNo);
-        return new Result(id, billNo);
+        Long materialPickId = map.get("materialPickId") instanceof Number n ? n.longValue() : null;
+        String materialPickBillNo = map.get("materialPickBillNo") instanceof String s ? s : null;
+        return new Result(id, billNo, materialPickId, materialPickBillNo);
     }
 
     /** 从 SCM 的 R 响应体里提取可读错误（兼容 JSON 与纯文本）。 */
@@ -172,6 +171,6 @@ public class ScmStockOutClient {
         return body.length() > 200 ? body.substring(0, 200) : body;
     }
 
-    public record Result(Long id, String billNo) {
+    public record Result(Long id, String billNo, Long materialPickId, String materialPickBillNo) {
     }
 }

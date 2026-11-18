@@ -19,7 +19,9 @@ public record ScmDispatchOutboundRequest(
         Long platformMemberId,
         String communityName,
         String detailedAddress,
-        List<Item> items
+        List<Item> items,
+        /** 派工物料清单（可选）：SCM 在同一事务内生成物料领用草稿；空则只出库不生成领用单 */
+        List<MaterialItem> materialList
 ) {
     public record Item(
             Long sourceItemId,
@@ -29,5 +31,8 @@ public record ScmDispatchOutboundRequest(
             Integer quantity,
             BigDecimal salePrice
     ) {
+    }
+
+    public record MaterialItem(String materialNumber, BigDecimal qty) {
     }
 }

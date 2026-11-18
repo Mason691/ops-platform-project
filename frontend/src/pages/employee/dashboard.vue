@@ -61,6 +61,7 @@
       <text class="section-title">常用功能</text>
       <view class="menu-grid">
         <view v-for="card in visibleCards" :key="card.code" class="menu-card" @click="openCard(card)">
+          <text v-if="card.badge" class="mc-badge">{{ card.badge > 99 ? '99+' : card.badge }}</text>
           <view class="mc-icon" :class="card.tone"><text>{{ card.icon }}</text></view>
           <view class="mc-body">
             <text class="mc-title">{{ card.name }}</text>
@@ -211,6 +212,30 @@ async function loadCards() {
     // 配置接口不可用时保留基础功能入口，且兜底列表不包含仅内部可见卡片
     cards.value = FALLBACK_CARDS
   }
+  await loadPickBadge()
+}
+
+/**
+ * 物料领用草稿角标：只统计当前登录人的 DRAFT，不含审批中/已通过。
+ * 无权限或接口失败不阻塞工作台（角标是提醒，不是功能前提）。
+ */
+async function loadPickBadge() {
+  try {
+    const count = Number(await api.scmMaterialPickDraftCount()) || 0
+    let card = (cards.value || []).find(item => item.code === 'material-pick'
+      || String(item.path || '').includes('material-pick'))
+    if (!card && count > 0) {
+      card = {
+        code: 'material-pick-drafts', name: '物料领用单',
+        desc: '补充仓库/批次并提交审批', icon: '📦', tone: 'mc-icon-dispatch',
+        path: '/pages/employee/material-pick-drafts'
+      }
+      cards.value = [...cards.value, card]
+    }
+    if (card) card.badge = count
+  } catch (_) {
+    // 角标失败不影响常用功能展示
+  }
 }
 
 async function onOrgChanged(data) {
@@ -224,7 +249,13 @@ async function onOrgChanged(data) {
 }
 
 function openCard(card) {
-  if (!card || !card.path) return
+  if (!card) return
+  // 物料领取统一进“我的领用单”（含派工自动生成的草稿），新建入口在列表页内
+  if (card.code === 'material-pick' || card.code === 'material-pick-drafts') {
+    uni.navigateTo({ url: '/pages/employee/material-pick-drafts' })
+    return
+  }
+  if (!card.path) return
   if (card.code === 'ai-chat' || card.code === 'profile') {
     uni.redirectTo({ url: card.path })
     return
@@ -289,9 +320,16 @@ function onTabSwitch(key) {
 .section-title { font-size: 26rpx; color: #86909C; margin-bottom: 16rpx; display: block; padding-left: 4rpx; }
 .menu-grid { display: flex; flex-direction: column; gap: 12rpx; }
 .menu-card {
+  position: relative;
   background: #fff; border-radius: 16rpx; padding: 28rpx 24rpx;
   display: flex; align-items: center; gap: 20rpx;
   box-shadow: 0 2rpx 12rpx rgba(0,0,0,.03);
+}
+.mc-badge {
+  position: absolute; top: 10rpx; right: 16rpx;
+  min-width: 32rpx; height: 32rpx; padding: 0 8rpx;
+  border-radius: 16rpx; background: #F53F3F; color: #fff;
+  font-size: 20rpx; line-height: 32rpx; text-align: center;
 }
 .menu-card:active { transform: scale(.985); box-shadow: 0 1rpx 6rpx rgba(0,0,0,.06); }
 .mc-icon { position: relative; width: 80rpx; height: 80rpx; border-radius: 18rpx; display: flex; align-items: center; justify-content: center; font-size: 40rpx; flex-shrink: 0; }
