@@ -127,6 +127,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         result.put("batches", selectableBatches(ctx.corpId()));
         result.put("newBatchPrefix", monthlyBatchNo(ctx.company()));
         result.put("communities", loadCommunities(ctx.corpId()));
+        result.put("regionId", ctx.regionId());
+        result.put("regionName", ctx.regionName());
+        result.put("regionConfigured", ctx.regionId() != null && ctx.regionId() > 0);
         fillProductOptions(result, ctx.corpId());
         return result;
     }
@@ -165,7 +168,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     /**
      * 员工制单新建小区：corp_id / 操作人只从登录态派生，区县由平台按组织 region_id 关联。
-     * 同名重复提交由平台侧幂等返回已有小区。
+     * 同名重复提交由平台侧幂等返回已有小区。外部员工与业务订单策略一致，暂不允许
+     * （否则只开放小区入口却无法下单，且形成绕过订单限制的写入口）。
      */
     @Override
     public Map<String, Object> createCommunity(CommunityCreateRequest request) {
@@ -199,6 +203,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         result.put("name", data.get("name"));
         result.put("regionId", data.get("regionId"));
         result.put("regionName", data.get("regionName"));
+        result.put("existed", Boolean.TRUE.equals(data.get("existed")));
         log.info("员工新建小区 corpId={} name={} id={} operator={}", ctx.corpId(), name,
                 id.longValue(), ctx.employeeName());
         return result;
@@ -1099,7 +1104,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         EmployeeIdentity identity = assertEmployee();
         CorpInfo corp = fetchCorpInfo(identity.corpId());
         return new EmployeeContext(identity.corpId(), corp.corpName(), corp.company(),
-                identity.name(), identity.phone(), SecurityUtils.getCurrentUserId());
+                identity.name(), identity.phone(), SecurityUtils.getCurrentUserId(),
+                corp.regionId(), corp.regionName());
     }
 
     /** 校验当前 JWT 确为在职员工；返回组织 + 经办人姓名/手机号。 */
@@ -1180,7 +1186,10 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 throw BusinessException.of("所属公司名称为空，请联系管理员");
             }
             if (company.length() > 32) company = company.substring(0, 32);
-            return new CorpInfo(name.isEmpty() ? company : name, company);
+            Object rawRegionId = data.get("regionId");
+            Long regionId = rawRegionId instanceof Number n ? n.longValue() : null;
+            return new CorpInfo(name.isEmpty() ? company : name, company,
+                    regionId, str(data.get("regionName")));
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
@@ -1857,9 +1866,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     private record EmployeeContext(Long corpId, String corpName, String company,
                                    String employeeName, String employeePhone,
-                                   Long employeeUserId) {}
+                                   Long employeeUserId, Long regionId, String regionName) {}
 
-    private record CorpInfo(String corpName, String company) {}
+    private record CorpInfo(String corpName, String company, Long regionId, String regionName) {}
 
     private record Validated(String phone, String customer,
                              List<ValidatedProduct> products, List<AgentInfo> agents,

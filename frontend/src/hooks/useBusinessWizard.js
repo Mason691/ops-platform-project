@@ -15,7 +15,9 @@ function emptyMeta() {
     corpId: null, corpName: '', company: '',
     employeeUserId: null, employeeName: '', employeePhone: '',
     batches: [], newBatchPrefix: '', brands: [], categories: [], materials: [],
-    communities: [], employees: [], productError: ''
+    communities: [], employees: [], productError: '',
+    // 组织所在区县：仅用于新建小区弹层展示/未配置时禁用入口，实际归属由服务端派生
+    regionId: null, regionName: '', regionConfigured: true
   }
 }
 

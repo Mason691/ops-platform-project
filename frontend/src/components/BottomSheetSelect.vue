@@ -25,6 +25,9 @@
           <text>{{ keyword ? '没有匹配的选项' : emptyText }}</text>
         </view>
       </scroll-view>
+      <view v-if="actionText" class="sheet-action" @click="triggerAction">
+        <text>{{ actionText }}</text>
+      </view>
       <view class="sheet-safe"></view>
     </view>
   </view>
@@ -47,9 +50,11 @@ const props = defineProps({
   searchable: { type: Boolean, default: true },
   placeholder: { type: String, default: '搜索' },
   emptyText: { type: String, default: '暂无可选项' },
-  listMaxHeight: { type: String, default: '58vh' }
+  listMaxHeight: { type: String, default: '58vh' },
+  /** 可选底部动作（如「＋ 新建小区」），为空时不渲染；点击回传当前搜索词。 */
+  actionText: { type: String, default: '' }
 })
-const emit = defineEmits(['update:visible', 'select', 'close'])
+const emit = defineEmits(['update:visible', 'select', 'close', 'action'])
 
 const keyword = ref('')
 let bodyLocked = false
@@ -84,6 +89,10 @@ function isSelected(value) {
 function select(option) {
   emit('select', option)
   close()
+}
+
+function triggerAction() {
+  emit('action', keyword.value.trim())
 }
 
 function close() {
@@ -138,6 +147,12 @@ onBeforeUnmount(() => {
 .item-desc { font-size: 23rpx; color: #999; margin-top: 4rpx; }
 .item-check { font-size: 30rpx; color: #FF6B35; margin-left: 16rpx; }
 .sheet-item.on .item-label { color: #FF6B35; font-weight: 600; }
+.sheet-action {
+  margin: 12rpx 32rpx 0; height: 76rpx; line-height: 76rpx; text-align: center;
+  border: 2rpx solid #FF6B35; border-radius: 38rpx;
+  color: #FF6B35; font-size: 27rpx; font-weight: 600;
+}
+.sheet-action:active { background: #fff5f0; }
 .sheet-empty { padding: 48rpx 0; text-align: center; font-size: 26rpx; color: #999; }
 .sheet-safe { height: env(safe-area-inset-bottom); }
 @keyframes panelUp {

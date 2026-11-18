@@ -2,6 +2,16 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-18（员工制单新建小区：生产发布 + 入口/区县/幂等反馈增强）
+
+- **背景**：上一版已上线但员工反馈「工作台业务订单没生效」——入口只有标题旁一行小字，选择器搜索无结果时无新建入口；组织未配置区县时提交后才报错；同名命中时无「已存在」提示。本次增强并重新发布。
+- **前端**：`BottomSheetSelect` 新增可选底部动作（小区选择器显示「＋ 新建小区」，带入弹层搜索词）；标题旁入口改为胶囊按钮，区县未配置时置灰并提示；新建弹层只读展示「归属区县：XX县（自动关联）」；`existed=true` 提示「该小区已存在，已为您选中」。
+- **后端**：`manual/options` 增加 `regionId/regionName/regionConfigured`（随平台内部 `/api/internal/corp/{id}` 返回区县，遵守子系统不跨库查询）；平台/ops 新建小区接口增加 `existed`；外部员工与业务订单策略一致，继续拒绝。
+- **发布（18:05–18:09，两轮）**：平台 JAR sha256 `59b70bde…`、最终 ops JAR sha256 `95a0dd38…`；overlay 镜像 `boss-platform/backend:latest`、`boss-platform/ops:latest`；回滚镜像 `boss-platform/backend:rollback-community2-20261118_180352`、`boss-platform/ops:rollback-community2b-20261118_180842`；H5 最终入口 `index-BEXDwyxV.js`、页面 chunk `pages-employee-business-data-new.D0kj-ZzR.js`，清空 assets 后上传；H5 备份 `html-ops-pre-community2-20261118_180352.tgz`（首轮）、`html-ops-pre-community2b-20261118_180842.tgz`（次轮）。
+- **审查修复（次轮触发）**：外部员工仅放开小区入口会与业务订单/退款/编辑的既有拦截不一致（形成绕过订单限制的写入口），已恢复 `外部用户暂不可新建小区`；无小区且无区县的矛盾文案改为按能力分支；区县短名解析抽为单函数。
+- **冒烟**：平台内部接口 corp12 新建 id=4500 `existed=false` → 重复提交同 id `existed=true`；corp4 返回「组织未配置所在区县，请联系管理员」；ops 员工接口无 token 401；H5 入口/页面 chunk 200 且 title=金地美家；两容器 healthy（platform 11.3s、ops 8.0s，无新增 ERROR）；最终 ops 类含 `外部用户暂不可新建小区/regionConfigured/existed`。测试行 4499/4500 已清理。
+- **未执行**：真实员工微信真机 E2E（新建→选中→提交订单），需员工在公众号重开页面验证（旧 WebView 可能缓存旧入口 chunk）。
+
 ## 2026-11-18（员工制单：小区选择支持直接新建）
 
 - **功能**：公众号员工 H5 业务订单「基础信息」步骤，小区标题右侧新增「＋ 新建小区」；弹层输入名称创建成功后自动选中；搜索词自动预填名称；组织无小区时提示可直接新建。
@@ -9,7 +19,7 @@
 - **接口**：平台新增内部接口 `POST /api/internal/community/create`（X-Internal-Token，组织+区县校验、同组织同区县同名幂等）；ops 新增 `POST /api/ops/employee/business-data/communities`（仅员工 JWT，经 `PlatformInternalClient` 调用平台落库）。
 - **前端**：新增 `BusinessCommunityCreateSheet.vue`；`BusinessStepBasic.vue` 增加入口与创建后加入 `meta.communities` 并自动选中。
 - **验证**：平台 `mvn package -pl web -am -DskipTests` 通过；ops `mvn -o clean package` 通过；H5/小程序构建通过（产物含「新建小区」）。
-- **未执行**：生产部署、员工真机 E2E（创建小区→选中→提交订单）。
+- **未执行**：员工真机 E2E（创建小区→选中→提交订单）；生产发布见上条（2026-11-18 18:05）。
 
 ## 2026-11-18（业务订单：退回草稿 + 作废退款）
 
