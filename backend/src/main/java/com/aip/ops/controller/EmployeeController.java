@@ -3,6 +3,7 @@ package com.aip.ops.controller;
 import com.aip.common.annotation.OperationLog;
 import com.aip.ops.dto.BalanceReceiveRequest;
 import com.aip.ops.dto.BusinessRefundApplyRequest;
+import com.aip.ops.dto.CommunityCreateRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.security.JwtTokenInspector;
 import com.aip.ops.service.BusinessAttachmentService;
@@ -310,6 +311,16 @@ public class EmployeeController {
     @GetMapping("/business-data/manual/member")
     public R<?> manualMember(@RequestParam String phone) {
         return R.ok(employeeBusinessEntryService.lookupMember(phone));
+    }
+
+    /** 员工制单新建小区：自动关联当前组织所在区县，同名幂等。 */
+    @OperationLog(module = "运营管理", action = "员工新建小区", targetTable = "sys_community")
+    @PostMapping("/business-data/communities")
+    public R<?> createCommunity(@RequestBody CommunityCreateRequest request) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可新建小区");
+        }
+        return R.ok(employeeBusinessEntryService.createCommunity(request));
     }
 
     /**

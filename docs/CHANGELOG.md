@@ -2,6 +2,15 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-18（员工制单：小区选择支持直接新建）
+
+- **功能**：公众号员工 H5 业务订单「基础信息」步骤，小区标题右侧新增「＋ 新建小区」；弹层输入名称创建成功后自动选中；搜索词自动预填名称；组织无小区时提示可直接新建。
+- **归属/区县**：`sys_community.corp_id` = 当前员工组织（JWT 派生），`region_id` = 组织 `sys_corp.region_id`（生产城市合伙人组织为区县级）；组织未配置区县时拒绝。
+- **接口**：平台新增内部接口 `POST /api/internal/community/create`（X-Internal-Token，组织+区县校验、同组织同区县同名幂等）；ops 新增 `POST /api/ops/employee/business-data/communities`（仅员工 JWT，经 `PlatformInternalClient` 调用平台落库）。
+- **前端**：新增 `BusinessCommunityCreateSheet.vue`；`BusinessStepBasic.vue` 增加入口与创建后加入 `meta.communities` 并自动选中。
+- **验证**：平台 `mvn package -pl web -am -DskipTests` 通过；ops `mvn -o clean package` 通过；H5/小程序构建通过（产物含「新建小区」）。
+- **未执行**：生产部署、员工真机 E2E（创建小区→选中→提交订单）。
+
 ## 2026-11-18（业务订单：退回草稿 + 作废退款）
 
 - **功能**：员工 H5 订单详情在状态 0/1/2 增加「退回草稿」「发起退款申请」；退回草稿终止当前流程 → `biz_status=0`+`draft_flag=1`，订单详情出现「编辑订单」，复用 5 步制单修改后沿用原订单编号/业务组号重新提交；退款终止正常流程后进入「业务订单作废工作流」（部长→财务→总经办），通过后 `biz_status=-1` 锁定。

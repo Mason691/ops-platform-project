@@ -260,6 +260,7 @@ export const api = {
   // 员工手工新增业务数据
   employeeManualOptions: () => request({url:'/api/ops/employee/business-data/manual/options'}),
   employeeLookupMember: (phone) => request({url:'/api/ops/employee/business-data/manual/member',data:{phone}}),
+  employeeCreateCommunity: (data) => request({url:'/api/ops/employee/business-data/communities',method:'POST',data}),
   employeeProductPrice: (params) => request({url:'/api/ops/employee/business-data/product-price', data:params}),
   employeeCheckReceiptNo: (params) => request({url:'/api/ops/employee/business-data/receipt-no/check', data:params}),
   employeeReceiptOcr: (data) => request({url:'/api/ops/employee/business-data/receipt-ocr', method:'POST', data}),

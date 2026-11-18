@@ -52,7 +52,10 @@
     </view>
 
     <view v-if="show('communityId')" id="field-communityId" class="section">
-      <text class="label">小区 <text class="req">*</text></text>
+      <view class="label-row">
+        <text class="label" @click="focusField('field-communityId')">小区 <text class="req">*</text></text>
+        <text class="create-link" @click="openCommunityCreate">＋ 新建小区</text>
+      </view>
       <template v-if="communities.length > 8">
         <view class="picker-trigger" :class="{ 'control-error': errors.communityId }"
               @click="communitySheet = true">
@@ -71,7 +74,7 @@
                     :options="communityChips" :model-value="form.communityId"
                     @update:model-value="setCommunity" compact />
       </template>
-      <text v-else class="warn-text">组织暂未配置小区，请联系管理员在后台维护后再制单</text>
+      <text v-else class="warn-text">组织暂未配置小区，可直接点击「新建小区」创建</text>
       <text v-if="errors.communityId" class="ferr">{{ errors.communityId }}</text>
     </view>
 
@@ -99,6 +102,9 @@
     <BottomSheetSelect v-model:visible="communitySheet" title="选择小区" :options="communityOptions"
                        :model-value="form.communityId" placeholder="搜索小区名称"
                        @select="option => setCommunity(option.value)" />
+    <BusinessCommunityCreateSheet v-model:visible="communityCreateVisible"
+                                  :initial-name="communityCreateInitial"
+                                  @created="onCommunityCreated" />
   </view>
 </template>
 
@@ -107,6 +113,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import FieldChips from '@/components/FieldChips.vue'
 import BottomSheetSelect from '@/components/BottomSheetSelect.vue'
 import BusinessAgentPicker from '@/components/BusinessAgentPicker.vue'
+import BusinessCommunityCreateSheet from '@/components/BusinessCommunityCreateSheet.vue'
 import { normalizePhone } from '@/utils/businessForm'
 import { focusField, keepFieldVisible } from '@/utils/fieldFocus'
 
@@ -126,6 +133,8 @@ const emit = defineEmits(['query-member'])
 
 const batchSheet = ref(false)
 const communitySheet = ref(false)
+const communityCreateVisible = ref(false)
+const communityCreateInitial = ref('')
 const communityKeyword = ref('')
 let queryTimer = null
 
@@ -175,6 +184,24 @@ function setCommunity(value) {
   props.form.communityName = found ? found.name : ''
 }
 
+/** 新建小区：用当前搜索词预填名称，创建成功后加入下拉并自动选中。 */
+function openCommunityCreate() {
+  communityCreateInitial.value = communityKeyword.value.trim()
+  communityCreateVisible.value = true
+}
+
+function onCommunityCreated(created) {
+  const id = created && created.id
+  if (id == null) return
+  const list = props.meta.communities || []
+  if (!list.some(item => String(item.id) === String(id))) {
+    list.push({ id, name: created.name })
+    props.meta.communities = list
+  }
+  setCommunity(id)
+  communityKeyword.value = ''
+}
+
 function onPhoneInput(event) {
   props.form.customerPhone = normalizePhone(event.detail.value)
 }
@@ -196,6 +223,11 @@ onBeforeUnmount(() => clearTimeout(queryTimer))
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, .04);
 }
 .label-row { display: flex; align-items: baseline; justify-content: space-between; }
+.label-row .label { margin-bottom: 0; }
+.create-link {
+  font-size: 23rpx; font-weight: 600; color: #FF6B35;
+  padding: 4rpx 0 4rpx 16rpx;
+}
 .label {
   display: block; font-size: 26rpx; color: #666; margin-bottom: 14rpx;
 }

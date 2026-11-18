@@ -5,6 +5,7 @@ import com.aip.ops.client.ScmPurchaseOrderClient;
 import com.aip.ops.client.WorkflowPlatformClient;
 import com.aip.ops.component.OrderNoGenerator;
 import com.aip.ops.dto.BalanceReceiveRequest;
+import com.aip.ops.dto.CommunityCreateRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.dto.ProductPriceDtos;
 import com.aip.ops.entity.OpsBusinessAttachment;
@@ -161,6 +162,47 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     }
 
     // ── 小区 / 详细地址 ──
+
+    /**
+     * 员工制单新建小区：corp_id / 操作人只从登录态派生，区县由平台按组织 region_id 关联。
+     * 同名重复提交由平台侧幂等返回已有小区。
+     */
+    @Override
+    public Map<String, Object> createCommunity(CommunityCreateRequest request) {
+        if (jwtTokenInspector.isExternalUser()) {
+            throw BusinessException.forbidden("外部用户暂不可新建小区");
+        }
+        String name = requireText(request == null ? null : request.getName(), "小区名称", 200);
+        EmployeeContext ctx = resolveEmployeeContext();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("corpId", ctx.corpId());
+        body.put("name", name);
+        body.put("operatorUserId", ctx.employeeUserId());
+        body.put("operatorName", ctx.employeeName());
+        Map<String, Object> resp;
+        try {
+            resp = platformInternalClient.post("/api/internal/community/create", body, null);
+        } catch (Exception e) {
+            log.warn("新建小区调用平台失败 corpId={} name={}: {}",
+                    ctx.corpId(), name, e.getMessage());
+            throw BusinessException.of("新建小区失败，请稍后重试");
+        }
+        if (resp == null || !(resp.get("code") instanceof Number n) || n.intValue() != 200) {
+            String msg = resp == null ? "" : str(resp.get("msg"));
+            throw BusinessException.of(msg.isEmpty() ? "新建小区失败，请稍后重试" : msg);
+        }
+        if (!(resp.get("data") instanceof Map<?, ?> data) || !(data.get("id") instanceof Number id)) {
+            throw BusinessException.of("新建小区失败，请稍后重试");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", id.longValue());
+        result.put("name", data.get("name"));
+        result.put("regionId", data.get("regionId"));
+        result.put("regionName", data.get("regionName"));
+        log.info("员工新建小区 corpId={} name={} id={} operator={}", ctx.corpId(), name,
+                id.longValue(), ctx.employeeName());
+        return result;
+    }
 
     /** 当前员工所属组织的小区下拉（sys_community.corp_id 精确过滤）。 */
     private List<Map<String, Object>> loadCommunities(Long corpId) {

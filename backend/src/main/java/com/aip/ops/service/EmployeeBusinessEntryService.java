@@ -1,6 +1,7 @@
 package com.aip.ops.service;
 
 import com.aip.ops.dto.BalanceReceiveRequest;
+import com.aip.ops.dto.CommunityCreateRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 
 import java.util.List;
@@ -19,6 +20,9 @@ public interface EmployeeBusinessEntryService {
 
     /** 按客户手机号查询平台会员姓名（仅返回会员 id + 姓名）。 */
     Map<String, Object> lookupMember(String phone);
+
+    /** 员工制单新建小区：自动关联当前组织所在区县。 */
+    Map<String, Object> createCommunity(CommunityCreateRequest request);
 
     /** 保存手工录入的业务数据（同步发起工作流并带回下一审批人）。 */
     Map<String, Object> createManualEntry(EmployeeBusinessEntryRequest request);
