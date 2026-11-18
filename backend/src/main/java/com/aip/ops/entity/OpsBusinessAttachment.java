@@ -24,6 +24,7 @@ public class OpsBusinessAttachment extends BaseEntity {
     public static final String TYPE_RECEIPT = "RECEIPT";
     public static final String TYPE_PAYMENT = "PAYMENT";
     public static final String TYPE_CONTRACT = "CONTRACT";
+    public static final String TYPE_REFUND = "REFUND";
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -35,7 +36,7 @@ public class OpsBusinessAttachment extends BaseEntity {
     @TableField("order_id")
     private Long orderId;
 
-    /** RECEIPT / PAYMENT / CONTRACT。 */
+    /** RECEIPT / PAYMENT / CONTRACT / REFUND。 */
     @TableField("file_type")
     private String fileType;
 

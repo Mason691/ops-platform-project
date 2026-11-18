@@ -99,6 +99,44 @@ public class WorkflowPlatformClient {
     }
 
     /**
+     * 终止运行中的流程实例（退回草稿 / 发起作废退款）。
+     * 调用方应先查实例进度；实例已结束时不要调用本方法。
+     */
+    public void terminate(Long instanceId, String reason, Long operatorId, String operatorName) {
+        if (instanceId == null) return;
+        String url = baseUrl + "/api/internal/wf/instance/" + instanceId + "/terminate";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Internal-Token", internalToken);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("reason", reason);
+        body.put("operatorUserId", operatorId);
+        body.put("operatorName", operatorName);
+        try {
+            Map<String, Object> resp = restTemplate.postForObject(
+                    url, new HttpEntity<>(body, headers), Map.class);
+            if (resp == null) {
+                throw BusinessException.of("工作流服务无响应");
+            }
+            Object code = resp.get("code");
+            if (code instanceof Number n && n.intValue() != 200) {
+                Object msg = resp.get("msg");
+                throw BusinessException.of("终止工作流失败："
+                        + (msg instanceof String s && !s.isBlank() ? s : "未知错误"));
+            }
+        } catch (RestClientResponseException e) {
+            log.warn("终止工作流失败 status={}, body={}",
+                    e.getStatusCode().value(), e.getResponseBodyAsString());
+            throw BusinessException.of("工作流服务不可用，请稍后重试");
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("终止工作流异常 instanceId={}: {}", instanceId, e.getMessage());
+            throw BusinessException.of("工作流服务不可用，请稍后重试");
+        }
+    }
+
+    /**
      * 按实例查询当前审批人（用于结果页轮询/详情页兜底）。
      *
      * <p>底座实例详情接口需要用户 JWT；从当前请求透传员工 Bearer Token。

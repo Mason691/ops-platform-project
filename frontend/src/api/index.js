@@ -245,6 +245,12 @@ export const api = {
   employeeOverview: (params) => request({url:'/api/ops/employee/business-data/overview',data:params}),
   employeeOrders: (params) => request({url:'/api/ops/employee/business-data/orders',data:params}),
   employeeOrderDetail: (orderId) => request({url:'/api/ops/employee/business-data/orders/' + orderId}),
+  employeeReturnDraft: (orderId) => request({url:'/api/ops/employee/business-data/orders/' + orderId + '/return-draft', method:'POST'}),
+  employeeApplyRefund: (orderId, data) => request({url:'/api/ops/employee/business-data/orders/' + orderId + '/refund', method:'POST', data}),
+  employeeRefundDetail: (orderId) => request({url:'/api/ops/employee/business-data/orders/' + orderId + '/refund'}),
+  employeeRestartFlow: (orderId) => request({url:'/api/ops/employee/business-data/orders/' + orderId + '/restart-flow', method:'POST'}),
+  employeeDraftEditData: (orderId) => request({url:'/api/ops/employee/business-data/orders/' + orderId + '/edit'}),
+  employeeUpdateDraft: (orderId, data) => request({url:'/api/ops/employee/business-data/orders/' + orderId + '/draft', method:'PUT', data}),
   employeeRetryTradeInPurchase: (orderId) => request({
     url: '/api/ops/employee/business-data/orders/' + orderId + '/trade-in-purchase/retry',
     method: 'POST'

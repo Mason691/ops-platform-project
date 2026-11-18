@@ -1,6 +1,7 @@
 package com.aip.ops.service;
 
 import com.aip.ops.client.ScmStockOutClient;
+import com.aip.ops.client.WorkflowPlatformClient;
 import com.aip.ops.dto.FinanceCheckRequest;
 import com.aip.ops.dto.ScmDispatchOutboundRequest;
 import com.aip.ops.dto.WorkflowBusinessEvent;
@@ -53,6 +54,8 @@ public class BusinessOrderFlowActionService {
     private final BusinessDataFinanceService financeService;
     private final DispatchEligibilityService dispatchEligibilityService;
     private final ScmStockOutClient scmClient;
+    private final BusinessOrderRefundService refundService;
+    private final WorkflowPlatformClient workflowClient;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
 
@@ -91,6 +94,13 @@ public class BusinessOrderFlowActionService {
         String actionType = event.getActionType();
         if (actionType == null || actionType.isBlank()) {
             return Map.of("skipped", true);
+        }
+        // 作废/草稿订单的正常流程待办已终止：迟到的节点动作直接拒绝，避免作废后仍执行出库/核对
+        if ("-1".equals(order.getBizStatus())) {
+            throw BusinessException.of("订单已作废退款，不可继续审批");
+        }
+        if (Integer.valueOf(1).equals(order.getDraftFlag())) {
+            throw BusinessException.of("订单已退回草稿，请重新提交后再审批");
         }
         OpsBusinessFlowRecord existing = findRecord(event.getTaskId(), actionType);
         if (existing != null) {
@@ -304,23 +314,45 @@ public class BusinessOrderFlowActionService {
     // ═══ 状态同步 ═══
 
     private void syncStatus(OpsBusinessOrder order, WorkflowBusinessEvent event) {
+        // 终止/驳回事件可能晚于新实例（作废流程）到达：不能覆盖新的实例/节点字段
+        boolean terminal = "INSTANCE_TERMINATED".equals(event.getEvent())
+                || "INSTANCE_REJECTED".equals(event.getEvent());
+        // 作废流程占用期间（PENDING）、已作废或草稿态时，正常流程的迟到事件不得覆盖 wf 字段
+        boolean voidOwned = "-1".equals(order.getBizStatus())
+                || Integer.valueOf(1).equals(order.getDraftFlag())
+                || (event.getInstanceId() != null
+                && !event.getInstanceId().equals(order.getWfInstanceId())
+                && refundService.findPending(order.getId()) != null);
+        // 旧实例的迟到 NODE_ENTERED：实例已结束则跳过，避免覆盖新实例字段/业务状态
+        boolean staleInstance = false;
+        if (event.getInstanceId() != null
+                && !event.getInstanceId().equals(order.getWfInstanceId())) {
+            Map<Long, WorkflowPlatformClient.InstanceProgress> progress =
+                    workflowClient.instanceProgressBatch(List.of(event.getInstanceId()));
+            WorkflowPlatformClient.InstanceProgress p = progress.get(event.getInstanceId());
+            staleInstance = p != null && !"RUNNING".equals(p.status());
+        }
+        boolean skipWf = terminal || voidOwned || staleInstance;
+        boolean skipStatus = voidOwned || staleInstance;
         LambdaUpdateWrapper<OpsBusinessOrder> update = new LambdaUpdateWrapper<>();
         update.eq(OpsBusinessOrder::getId, order.getId())
+                // 并发退回草稿时（回调读到的是退回前状态）不得把 biz_status 冲回去
+                .ne(OpsBusinessOrder::getDraftFlag, 1)
                 .set(OpsBusinessOrder::getModifyTime, LocalDateTime.now());
-        if (event.getBizStatus() != null && !event.getBizStatus().isBlank()) {
+        if (!skipStatus && event.getBizStatus() != null && !event.getBizStatus().isBlank()) {
             update.set(OpsBusinessOrder::getBizStatus, event.getBizStatus().trim());
         }
-        if (event.getInstanceId() != null) {
+        if (event.getInstanceId() != null && !skipWf) {
             update.set(OpsBusinessOrder::getWfInstanceId, event.getInstanceId());
         }
-        if (event.getNodeOrder() != null) {
+        if (event.getNodeOrder() != null && !skipWf) {
             update.set(OpsBusinessOrder::getWfNodeOrder, event.getNodeOrder());
         }
-        if (event.getNodeName() != null) {
+        if (event.getNodeName() != null && !skipWf) {
             update.set(OpsBusinessOrder::getWfNodeName, event.getNodeName());
         }
         orderMapper.update(null, update);
-        if (event.getBizStatus() != null && !event.getBizStatus().isBlank()) {
+        if (!skipStatus && event.getBizStatus() != null && !event.getBizStatus().isBlank()) {
             order.setBizStatus(event.getBizStatus().trim());
         }
         log.info("订单 {} 业务状态同步：{} -> {} ({})", order.getId(),

@@ -36,6 +36,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
             + "SUM(CASE WHEN sale_quantity &lt; 0 THEN 0 ELSE 1 END) as orderCount "
             + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
+            + "AND calc_status != '已作废' "
             + "<if test='month != null and month != \"\"'>AND SUBSTRING(sale_date, 1, 7) = #{month}</if> "
             + "GROUP BY category ORDER BY totalSale DESC"
             + "</script>")
@@ -54,6 +55,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
             + "is_received as isReceived, voucher_url as voucherUrl "
             + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
+            + "AND calc_status != '已作废' "
             + "<if test='month != null and month != \"\"'>AND SUBSTRING(sale_date, 1, 7) = #{month}</if> "
             + "<if test='category != null and category != \"\"'>AND category = #{category}</if> "
             + "ORDER BY sale_date DESC"
@@ -68,6 +70,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
             + "SUM(CASE WHEN sale_quantity < 0 THEN 0 ELSE 1 END) as orderCount "
             + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
+            + "AND calc_status != '已作废' "
             + "AND SUBSTRING(sale_date, 1, 7) = #{month}")
     Map<String, Object> selectMonthlyStats(@Param("agentPhone") String agentPhone,
                                             @Param("month") String month);
@@ -83,6 +86,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
             + "is_received as isReceived, voucher_url as voucherUrl "
             + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
             + "AND delete_flag = 0 "
+            + "AND calc_status != '已作废' "
             + "ORDER BY sale_date DESC")
     List<Map<String, Object>> selectAllRecords(@Param("agentPhone") String agentPhone);
 
@@ -91,6 +95,7 @@ public interface OpsBusinessDataEmployeeMapper extends BaseMapper<OpsBusinessDat
             + "COALESCE(SUM(commission_amount),0) as totalCommission, "
             + "SUM(CASE WHEN sale_quantity < 0 THEN 0 ELSE 1 END) as orderCount "
             + "FROM ops_business_order_item WHERE agent_phone = #{agentPhone} "
-            + "AND delete_flag = 0")
+            + "AND delete_flag = 0 "
+            + "AND calc_status != '已作废'")
     Map<String, Object> selectAllTimeTotals(@Param("agentPhone") String agentPhone);
 }

@@ -118,6 +118,29 @@
         <view class="info-row"><text class="k">计算状态</text><text class="v">{{ order.calcStatus || '未计算' }}</text></view>
       </view>
 
+      <view v-if="isBusinessOrder && order.refund" class="card">
+        <view class="card-title">
+          <text>作废退款申请</text>
+          <text class="node">{{ order.refund.statusName || '' }}</text>
+        </view>
+        <view class="info-row"><text class="k">退款金额</text>
+          <text class="v money">¥{{ money(order.refund.amount) }}</text>
+        </view>
+        <view class="info-row"><text class="k">退款原因</text>
+          <text class="v">{{ order.refund.reason || '-' }}</text>
+        </view>
+        <view v-if="order.refund.remark" class="info-row"><text class="k">备注</text>
+          <text class="v">{{ order.refund.remark }}</text>
+        </view>
+        <view v-if="order.refund.applicantName" class="info-row"><text class="k">申请人</text>
+          <text class="v">{{ order.refund.applicantName }} {{ order.refund.applicantPhone || '' }}</text>
+        </view>
+        <view v-if="order.refund.flow && order.refund.flow.currentNodeName" class="info-row">
+          <text class="k">当前节点</text>
+          <text class="v">{{ order.refund.flow.currentNodeName }}</text>
+        </view>
+      </view>
+
       <view v-if="isBusinessOrder && tradeInInboundDone && isConstructionStage" class="inbound-done">
         <text class="inbound-done-title">✓ 旧品已入库</text>
         <text v-if="order.tradeInPurchaseBillNo" class="inbound-done-sub">

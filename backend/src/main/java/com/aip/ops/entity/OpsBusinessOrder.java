@@ -175,9 +175,13 @@ public class OpsBusinessOrder extends BaseEntity {
 
     // 订单备注使用 BaseEntity.remark（ops_business_order.remark 列已存在），不重复声明
 
-    /** 业务状态（工作流驱动，字典 business_order_status：0~6）。 */
+    /** 业务状态（工作流驱动，字典 business_order_status：-1~6）。 */
     @TableField("biz_status")
     private String bizStatus;
+
+    /** 草稿标记：1=退回草稿待编辑重提；重新提交后置 0。 */
+    @TableField("draft_flag")
+    private Integer draftFlag;
 
     /** 当前工作流实例 ID（wf_instance.id，平台工作流组件）。 */
     @TableField("wf_instance_id")

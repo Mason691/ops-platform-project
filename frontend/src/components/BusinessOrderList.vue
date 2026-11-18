@@ -6,6 +6,8 @@
           <view class="order-no-row">
             <text class="order-no">{{ order.orderNo || '未编号订单' }}</text>
             <text class="status-tag" :class="statusClass(order)">{{ order.bizStatusName || '状态未知' }}</text>
+            <text v-if="order.draftFlag" class="status-tag draft">草稿 · 待重提</text>
+            <text v-if="order.refundStatus === 'PENDING'" class="status-tag refunding">作废审批中</text>
             <text v-if="order.hasTradeIn" class="trade-tag">以旧换新</text>
           </view>
           <text class="order-sub">{{ order.customer || '—' }}</text>
@@ -102,6 +104,8 @@ function openDetail(order) {
 }
 
 function statusClass(order) {
+  if (String(order.bizStatus) === '-1') return 'void'
+  if (order.draftFlag) return 'draft'
   const status = order.flow && order.flow.status
   if (status === 'COMPLETED') return 'done'
   if (status === 'REJECTED' || status === 'TERMINATED') return 'stopped'
@@ -140,6 +144,9 @@ function formatDate(value) {
 .status-tag.done { background: #E8F8E8; color: #0B7A42; }
 .status-tag.stopped { background: #FFF1F0; color: #C62828; }
 .status-tag.pending { background: #F2F3F5; color: #86909C; }
+.status-tag.void { background: #FFF1F0; color: #C62828; font-weight: 700; }
+.status-tag.draft { background: #F2F3F5; color: #86909C; }
+.status-tag.refunding { background: #FFF7E6; color: #B26A00; }
 .trade-tag {
   flex-shrink: 0; font-size: 19rpx; padding: 2rpx 10rpx; border-radius: 6rpx;
   background: #FFF0E8; color: #C2410C;

@@ -20,6 +20,7 @@ import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
 import com.aip.ops.mapper.OpsValueAddedProductMapper;
 import com.aip.ops.service.BizStatusService;
 import com.aip.ops.service.BusinessDataService;
+import com.aip.ops.service.BusinessOrderRefundService;
 import com.aip.ops.service.BusinessOrderService;
 import com.aip.ops.service.DispatchEligibilityService;
 import com.aip.ops.service.DataScopeService;
@@ -77,6 +78,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private final ImportTaskService importTaskService;
     private final GasMemberMatcher memberMatcher;
     private final BusinessOrderService orderService;
+    private final BusinessOrderRefundService refundService;
     private final BizStatusService bizStatusService;
     private final com.aip.ops.mapper.OpsBusinessFlowRecordMapper flowRecordMapper;
     private final DispatchEligibilityService dispatchEligibilityService;
@@ -143,6 +145,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             ImportTaskService importTaskService,
             GasMemberMatcher memberMatcher,
             BusinessOrderService orderService,
+            BusinessOrderRefundService refundService,
             BizStatusService bizStatusService,
             com.aip.ops.mapper.OpsBusinessFlowRecordMapper flowRecordMapper,
             DispatchEligibilityService dispatchEligibilityService,
@@ -162,6 +165,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         this.importTaskService = importTaskService;
         this.memberMatcher = memberMatcher;
         this.orderService = orderService;
+        this.refundService = refundService;
         this.bizStatusService = bizStatusService;
         this.flowRecordMapper = flowRecordMapper;
         this.dispatchEligibilityService = dispatchEligibilityService;
@@ -353,16 +357,20 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 continue;
             }
             orders.add(order);
-            totalSale = totalSale.add((BigDecimal) order.get("totalAmount"));
-            totalCommission = totalCommission.add((BigDecimal) order.get("totalCommission"));
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> products = (List<Map<String, Object>>) order.get("products");
-            for (Map<String, Object> product : products) {
-                String key = Objects.toString(product.get("category"), "");
-                BigDecimal[] sums = categoryTotals.computeIfAbsent(key,
-                        k -> new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO});
-                sums[0] = sums[0].add((BigDecimal) product.get("receiptAmount"));
-                sums[1] = sums[1].add((BigDecimal) product.get("commissionAmount"));
+            // 作废退款订单保留在列表供审计，但不计入销售/提成合计与品类汇总
+            boolean voided = "-1".equals(String.valueOf(order.get("bizStatus")));
+            if (!voided) {
+                totalSale = totalSale.add((BigDecimal) order.get("totalAmount"));
+                totalCommission = totalCommission.add((BigDecimal) order.get("totalCommission"));
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> products = (List<Map<String, Object>>) order.get("products");
+                for (Map<String, Object> product : products) {
+                    String key = Objects.toString(product.get("category"), "");
+                    BigDecimal[] sums = categoryTotals.computeIfAbsent(key,
+                            k -> new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO});
+                    sums[0] = sums[0].add((BigDecimal) product.get("receiptAmount"));
+                    sums[1] = sums[1].add((BigDecimal) product.get("commissionAmount"));
+                }
             }
         }
         orders.sort((a, b) -> Long.compare((Long) b.get("_maxId"), (Long) a.get("_maxId")));
@@ -436,8 +444,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 continue;
             }
             orders.add(order);
-            totalSale = totalSale.add((BigDecimal) order.get("totalAmount"));
-            totalCommission = totalCommission.add((BigDecimal) order.get("totalCommission"));
+            // 作废退款订单保留在列表供审计，但不计入销售/提成合计
+            if (!"-1".equals(String.valueOf(order.get("bizStatus")))) {
+                totalSale = totalSale.add((BigDecimal) order.get("totalAmount"));
+                totalCommission = totalCommission.add((BigDecimal) order.get("totalCommission"));
+            }
         }
         orders.sort((a, b) -> Long.compare((Long) b.get("_maxId"), (Long) a.get("_maxId")));
         int total = orders.size();
@@ -447,6 +458,20 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         int to = Math.min(total, from + safeSize);
         // 只对当前页订单查流程进度：避免一次把全部订单实例传给底座（上限100）
         List<Map<String, Object>> pageOrders = orders.subList(from, to);
+        Set<Long> pageOrderIds = pageOrders.stream()
+                .map(order -> order.get("orderId"))
+                .filter(value -> value instanceof Number)
+                .map(value -> ((Number) value).longValue())
+                .collect(Collectors.toSet());
+        Map<Long, String> pendingRefunds =
+                refundService.pendingStatuses(new ArrayList<>(pageOrderIds));
+        for (Map<String, Object> order : pageOrders) {
+            Object oid = order.get("orderId");
+            if (oid instanceof Number n && pendingRefunds.containsKey(n.longValue())) {
+                order.put("refundStatus", "PENDING");
+                order.put("refundStatusName", "作废审批中");
+            }
+        }
         Set<Long> instanceIds = pageOrders.stream()
                 .map(order -> order.get("wfInstanceId"))
                 .filter(value -> value instanceof Number)
@@ -513,6 +538,12 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                         .eq(com.aip.ops.entity.OpsBusinessFlowRecord::getDeleteFlag, 0)
                         .orderByDesc(com.aip.ops.entity.OpsBusinessFlowRecord::getId));
         view.put("flowRecords", records);
+        view.put("draftFlag", master.getDraftFlag() == null ? 0 : master.getDraftFlag());
+        view.put("refund", refundService.latestRefundView(orderId));
+        view.put("canReturnDraft", refundService.canReturnDraft(master));
+        view.put("canApplyRefund", refundService.canApplyRefund(master));
+        view.put("canEdit", refundService.canEdit(master));
+        view.put("canRestartFlow", refundService.canRestartFlow(master));
         attachTradeInItems(List.of(view));
         enrichTradeInStatus(view);
         return view;
@@ -637,6 +668,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                         .eq(com.aip.ops.entity.OpsBusinessFlowRecord::getDeleteFlag, 0)
                         .orderByDesc(com.aip.ops.entity.OpsBusinessFlowRecord::getId));
         view.put("flowRecords", records);
+        view.put("draftFlag", order.getDraftFlag() == null ? 0 : order.getDraftFlag());
+        view.put("refund", refundService.latestRefundView(orderId));
         attachTradeInItems(List.of(view));
         enrichTradeInStatus(view);
         return view;
@@ -872,6 +905,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 ? master.getBizStatus() : "0";
         order.put("bizStatus", bizStatus);
         order.put("bizStatusName", bizStatusService.label(bizStatus));
+        order.put("draftFlag", master != null && Integer.valueOf(1).equals(master.getDraftFlag())
+                ? 1 : 0);
         order.put("wfInstanceId", master != null ? master.getWfInstanceId() : null);
         order.put("wfNodeOrder", master != null ? master.getWfNodeOrder() : null);
         order.put("wfNodeName", master != null ? master.getWfNodeName() : null);

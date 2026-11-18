@@ -16,6 +16,7 @@ import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsBusinessOrderTradeInMapper;
 import com.aip.ops.security.JwtTokenInspector;
 import com.aip.ops.service.BusinessAttachmentService;
+import com.aip.ops.service.BusinessOrderRefundService;
 import com.aip.ops.service.BusinessOrderService;
 import com.aip.ops.service.BusinessOrderWorkflowService;
 import com.aip.ops.service.BusinessSpecialFileService;
@@ -26,6 +27,7 @@ import com.aip.ops.util.PaymentMethod;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.exception.BusinessException;
 import com.aip.sdk.security.SecurityUtils;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -95,6 +97,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private final JwtTokenInspector jwtTokenInspector;
     private final PlatformTransactionManager transactionManager;
     private final BusinessOrderService orderService;
+    private final BusinessOrderRefundService refundService;
     private final OrderNoGenerator orderNoGenerator;
     private final BusinessOrderWorkflowService workflowService;
     private final ProductPriceService productPriceService;
@@ -288,6 +291,287 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 result.put("approverResolved", false);
                 result.put("approverMessage", "审批流程发起失败，请联系管理员");
             }
+        }
+        return result;
+    }
+
+    // ═══ 退回草稿后的编辑（沿用原订单编号/业务组号）═══
+
+    @Override
+    public Map<String, Object> draftEditData(Long orderId) {
+        if (jwtTokenInspector.isExternalUser()) {
+            throw BusinessException.forbidden("外部用户暂不可编辑业务");
+        }
+        EmployeeContext ctx = resolveEmployeeContext();
+        OpsBusinessOrder order = requireDraftOrder(ctx, orderId);
+        List<OpsBusinessData> rows = businessDataMapper.selectList(
+                new LambdaQueryWrapper<OpsBusinessData>()
+                        .eq(OpsBusinessData::getOrderId, orderId)
+                        .eq(OpsBusinessData::getDeleteFlag, 0)
+                        .orderByAsc(OpsBusinessData::getId));
+        if (rows.isEmpty()) {
+            throw BusinessException.of("草稿订单没有商品明细，无法编辑");
+        }
+        List<OpsBusinessOrderTradeIn> tradeIns = tradeInMapper.selectList(
+                new LambdaQueryWrapper<OpsBusinessOrderTradeIn>()
+                        .eq(OpsBusinessOrderTradeIn::getOrderId, orderId)
+                        .eq(OpsBusinessOrderTradeIn::getDeleteFlag, 0)
+                        .orderByAsc(OpsBusinessOrderTradeIn::getId));
+        Map<String, List<OpsBusinessOrderTradeIn>> tradeByKey = new LinkedHashMap<>();
+        for (OpsBusinessOrderTradeIn row : tradeIns) {
+            tradeByKey.computeIfAbsent(str(row.getProductKey()), k -> new ArrayList<>()).add(row);
+        }
+        // 按「品类|品牌|型号|单价」合并商品行；多经办人行只回显一行
+        Map<String, List<OpsBusinessData>> groups = new LinkedHashMap<>();
+        for (OpsBusinessData row : rows) {
+            groups.computeIfAbsent(draftProductKey(row), k -> new ArrayList<>()).add(row);
+        }
+        List<Map<String, Object>> products = new ArrayList<>();
+        for (Map.Entry<String, List<OpsBusinessData>> entry : groups.entrySet()) {
+            OpsBusinessData first = entry.getValue().get(0);
+            Map<String, Object> product = new LinkedHashMap<>();
+            product.put("uid", "p" + first.getId());
+            product.put("productId", null);
+            product.put("category", BusinessDataServiceImpl.KEY_TO_CN.getOrDefault(
+                    str(first.getCategory()), first.getCategory()));
+            product.put("brand", first.getBrand());
+            product.put("model", first.getModel());
+            product.put("salePrice", first.getSalePrice());
+            product.put("saleQuantity",
+                    String.valueOf(first.getSaleQuantity() == null ? 1 : first.getSaleQuantity()));
+            product.put("standardSalePrice", first.getStandardSalePrice());
+            product.put("priceConfigured", true);
+            product.put("priceLoading", false);
+            product.put("priceError", "");
+            product.put("isSpecial", "是".equals(first.getIsSpecial()));
+            product.put("specialFileId", first.getSpecialFileId());
+            product.put("specialFileUrl", first.getSpecialFileUrl());
+            product.put("specialFileName", first.getSpecialFileName());
+            product.put("commissionRate",
+                    first.getCommissionRate() == null ? "" : first.getCommissionRate());
+            product.put("isTradeIn", "是".equals(first.getIsTradeIn()));
+            product.put("deductionAmount",
+                    first.getDeductionAmount() == null ? "" : first.getDeductionAmount());
+            product.put("tradeInItems", draftTradeInItems(tradeByKey.get(entry.getKey())));
+            products.add(product);
+        }
+        Set<String> agentPhones = rows.stream().map(OpsBusinessData::getAgentPhone)
+                .filter(Objects::nonNull).map(String::trim).filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        List<Map<String, Object>> employees = loadCorpEmployees(ctx.corpId(),
+                ctx.employeeUserId(), ctx.employeeName(), ctx.employeePhone());
+        List<Long> agentUserIds = new ArrayList<>();
+        for (Map<String, Object> employee : employees) {
+            if (employee.get("userId") instanceof Number userId
+                    && agentPhones.contains(str(employee.get("phone")))) {
+                agentUserIds.add(userId.longValue());
+            }
+        }
+        if (!agentUserIds.contains(ctx.employeeUserId())) {
+            agentUserIds.add(ctx.employeeUserId());
+        }
+        List<OpsBusinessAttachment> files = attachmentService.listByOrder(orderId);
+        Map<String, Object> form = new LinkedHashMap<>();
+        form.put("orderId", orderId);
+        form.put("orderNo", order.getOrderNo());
+        form.put("batchNo", order.getBatchNo());
+        form.put("newBatch", false);
+        form.put("customerPhone", order.getCustomerPhone());
+        form.put("customer", order.getCustomer());
+        form.put("communityId", order.getCommunityId());
+        form.put("communityName", order.getCommunityName());
+        form.put("detailAddress", order.getDetailedAddress());
+        form.put("paymentType", order.getPaymentType() == null ? "FULL" : order.getPaymentType());
+        form.put("depositAmount",
+                order.getDepositAmount() == null ? "" : order.getDepositAmount());
+        form.put("paymentMethod",
+                order.getPaymentMethod() == null ? "QR" : order.getPaymentMethod());
+        form.put("receiptDate", order.getReceiptDate());
+        form.put("receiptNo", order.getReceiptNo());
+        form.put("remark", order.getRemark());
+        form.put("agentUserIds", agentUserIds);
+        form.put("products", products);
+        form.put("receiptImage", firstAttachment(files, OpsBusinessAttachment.TYPE_RECEIPT));
+        form.put("paymentVouchers", attachmentsOfType(files, OpsBusinessAttachment.TYPE_PAYMENT));
+        form.put("contractAttachments",
+                attachmentsOfType(files, OpsBusinessAttachment.TYPE_CONTRACT));
+        return form;
+    }
+
+    @Override
+    public Map<String, Object> updateDraft(Long orderId, EmployeeBusinessEntryRequest request) {
+        if (jwtTokenInspector.isExternalUser()) {
+            throw BusinessException.forbidden("外部用户暂不可编辑业务");
+        }
+        if (request == null) throw BusinessException.of("请求参数不能为空");
+        EmployeeContext ctx = resolveEmployeeContext();
+        OpsBusinessOrder order = requireDraftOrder(ctx, orderId);
+        Validated v = validateRequest(request, ctx, orderId);
+        Map<String, Object> result = transactionTemplate.execute(
+                status -> persistDraftUpdate(request, ctx, v, order));
+        if (result != null && Boolean.TRUE.equals(result.get("hasTradeIn"))
+                && result.get("orderId") instanceof Number oid) {
+            autoCreateTradeInPurchase(oid.longValue(), ctx.corpId(),
+                    str(result.get("orderNo")), result);
+        }
+        if (result != null) {
+            try {
+                WorkflowPlatformClient.StartResult started = workflowService.start(
+                        orderId, ctx.employeeUserId(), ctx.employeeName(), true);
+                result.put("wfInstanceId", started.instanceId());
+                result.put("currentApproverName", started.approverName());
+                result.put("currentApproverRole", started.approverRole());
+                result.put("approverResolved", started.resolved());
+                result.put("approverMessage", started.message());
+            } catch (Exception e) {
+                log.warn("草稿编辑后发起工作流失败 orderId={}: {}", orderId, e.getMessage());
+                result.put("approverResolved", false);
+                result.put("approverMessage", "审批流程发起失败，请联系管理员");
+            }
+        }
+        return result;
+    }
+
+    private OpsBusinessOrder requireDraftOrder(EmployeeContext ctx, Long orderId) {
+        OpsBusinessOrder order = requireAgentOrder(ctx, orderId);
+        if (!Integer.valueOf(1).equals(order.getDraftFlag())) {
+            throw BusinessException.of("订单不是草稿状态，无法编辑");
+        }
+        if (refundService.findPending(orderId) != null) {
+            throw BusinessException.of("订单正在作废退款审批中，不可编辑");
+        }
+        return order;
+    }
+
+    private Map<String, Object> persistDraftUpdate(EmployeeBusinessEntryRequest request,
+                                                   EmployeeContext ctx, Validated v,
+                                                   OpsBusinessOrder order) {
+        // 事务内锁定订单并复查：与并发退款/重复提交串行化
+        OpsBusinessOrder locked = orderService.lockById(order.getId());
+        if (locked == null || !Integer.valueOf(1).equals(locked.getDraftFlag())) {
+            throw BusinessException.of("订单不是草稿状态，无法编辑");
+        }
+        if (refundService.findPending(order.getId()) != null) {
+            throw BusinessException.of("订单正在作废退款审批中，不可编辑");
+        }
+        order = locked;
+        String batchNo = resolveBatch(request, ctx);
+        MemberResolution member = resolveOrCreateMember(v.phone(), v.customer(), ctx.corpId());
+        CommunityInfo community = resolveCommunity(v.communityId(), ctx.corpId());
+        BigDecimal totalAmount = v.products().stream().map(ValidatedProduct::amount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        orderService.updateDraftOrder(order.getId(), ctx.corpId(), batchNo, v.receiptNo(),
+                ctx.company(), v.customer(), v.phone(), member.id(), community.id(),
+                community.name(), v.detailAddress(), v.receiptDate(), totalAmount, v.remark(),
+                v.paymentMethod(), v.paymentType(), v.depositAmount(), v.isFullPayment(),
+                v.balanceAmount(), INITIAL_CALC_STATUS);
+        orderService.updateVoucherAttachments(order.getId(), ctx.corpId(), v.receiptImageUrl(),
+                v.paymentVoucherUrls(), v.contractAttachmentUrls());
+        // 替换旧明细/旧品（逻辑删除，保留历史审计）
+        businessDataMapper.delete(new LambdaQueryWrapper<OpsBusinessData>()
+                .eq(OpsBusinessData::getOrderId, order.getId()));
+        tradeInMapper.delete(new LambdaQueryWrapper<OpsBusinessOrderTradeIn>()
+                .eq(OpsBusinessOrderTradeIn::getOrderId, order.getId()));
+        // 新附件绑定；未被复用的旧凭证解绑（文件由定时任务清理）
+        attachmentService.bindToOrder(v.attachmentIds(), order.getId(), ctx.corpId());
+        Set<Long> keep = new LinkedHashSet<>(v.attachmentIds());
+        List<Long> stale = attachmentService.listByOrder(order.getId()).stream()
+                .filter(file -> OpsBusinessAttachment.TYPE_RECEIPT.equals(file.getFileType())
+                        || OpsBusinessAttachment.TYPE_PAYMENT.equals(file.getFileType())
+                        || OpsBusinessAttachment.TYPE_CONTRACT.equals(file.getFileType()))
+                .map(OpsBusinessAttachment::getId)
+                .filter(id -> !keep.contains(id))
+                .toList();
+        attachmentService.unbindFromOrder(order.getId(), stale);
+        List<Long> ids = new ArrayList<>();
+        Map<String, Long> firstItemIds = new LinkedHashMap<>();
+        for (ValidatedProduct product : v.products()) {
+            for (AgentInfo agent : v.agents()) {
+                OpsBusinessData entity = buildEntity(ctx, v, product, agent, batchNo,
+                        order.getOrderNo(), order.getBusinessGroupNo(), member.id(), community);
+                entity.setOrderId(order.getId());
+                businessDataMapper.insert(entity);
+                ids.add(entity.getId());
+                firstItemIds.putIfAbsent(tradeInProductKey(product), entity.getId());
+            }
+        }
+        int tradeInCount = insertTradeInItems(ctx, v, order.getId(), firstItemIds);
+        orderService.updateTradeInPurchaseStatus(order.getId(),
+                tradeInCount > 0 ? "PENDING" : null, null, null, null);
+        orderService.refreshAgentSummary(order.getId());
+        orderService.refreshTotals(order.getId());
+        lockAndCheckBatch(ctx.corpId(), batchNo);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("orderId", order.getId());
+        result.put("orderNo", order.getOrderNo());
+        result.put("batchNo", batchNo);
+        result.put("businessGroupNo", order.getBusinessGroupNo());
+        result.put("ids", ids);
+        result.put("detailCount", ids.size());
+        result.put("productCount", v.products().size());
+        result.put("agentCount", v.agents().size());
+        BigDecimal deductionTotal = v.products().stream().map(ValidatedProduct::deduction)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        boolean hasTradeIn = v.products().stream().anyMatch(ValidatedProduct::tradeIn);
+        result.put("hasTradeIn", hasTradeIn);
+        result.put("tradeInCount", tradeInCount);
+        result.put("receiptAmount", totalAmount);
+        result.put("tradeInDeduction", deductionTotal);
+        result.put("payableAmount", totalAmount.subtract(deductionTotal).max(BigDecimal.ZERO));
+        result.put("paymentType", v.paymentType());
+        result.put("depositAmount", v.depositAmount());
+        result.put("balanceAmount", v.balanceAmount());
+        result.put("isFullPayment", v.isFullPayment());
+        result.put("platformMemberId", member.id());
+        result.put("memberCreated", member.created());
+        return result;
+    }
+
+    private static String draftProductKey(OpsBusinessData row) {
+        return str(row.getCategory()) + "|" + str(row.getBrand()) + "|" + str(row.getModel())
+                + "|" + (row.getSalePrice() == null ? ""
+                : row.getSalePrice().stripTrailingZeros().toPlainString());
+    }
+
+    private List<Map<String, Object>> draftTradeInItems(List<OpsBusinessOrderTradeIn> rows) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (rows == null) return result;
+        for (OpsBusinessOrderTradeIn row : rows) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("uid", "t" + row.getId());
+            item.put("productId", row.getOldProductId());
+            item.put("materialNumber", row.getOldMaterialNumber());
+            item.put("productName", row.getOldProductName());
+            item.put("brand", row.getBrand());
+            item.put("model", row.getModel());
+            item.put("category", row.getCategory());
+            item.put("quantity", String.valueOf(row.getQuantity() == null ? 1 : row.getQuantity()));
+            item.put("unit", row.getUnit());
+            item.put("remark", row.getRemark());
+            item.put("isManual", Integer.valueOf(1).equals(row.getIsManual()));
+            result.add(item);
+        }
+        return result;
+    }
+
+    private Map<String, Object> firstAttachment(List<OpsBusinessAttachment> files, String type) {
+        List<Map<String, Object>> list = attachmentsOfType(files, type);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    private List<Map<String, Object>> attachmentsOfType(List<OpsBusinessAttachment> files,
+                                                        String type) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (OpsBusinessAttachment file : files) {
+            if (!type.equals(file.getFileType())) continue;
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", file.getId());
+            item.put("url", file.getFileUrl());
+            item.put("fileName", file.getFileName());
+            item.put("contentType", file.getContentType());
+            item.put("fileSize", file.getFileSize());
+            item.put("fileType", file.getFileType());
+            result.add(item);
         }
         return result;
     }
@@ -942,6 +1226,11 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     // ── 校验 ──
 
     private Validated validateRequest(EmployeeBusinessEntryRequest req, EmployeeContext ctx) {
+        return validateRequest(req, ctx, null);
+    }
+
+    private Validated validateRequest(EmployeeBusinessEntryRequest req, EmployeeContext ctx,
+                                      Long allowOrderId) {
         if (req == null) throw BusinessException.of("请求参数不能为空");
         String phone = normalizePhone(req.getCustomerPhone());
         if (!GasMemberMatcher.PHONE_PATTERN.matcher(phone).matches()) {
@@ -959,18 +1248,21 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         List<AgentInfo> agents = validateAgents(req.getAgentUserIds(), ctx);
         String receiptDate = normalizeDate(req.getReceiptDate());
         String receiptNo = normalizeReceiptNo(req.getReceiptNo());
-        // 收据号必填（OCR 或手填）；制单阶段仍二次查重，防止绕过前端直接提交
-        assertReceiptNoAvailable(ctx.corpId(), receiptNo, customer);
+        // 收据号必填（OCR 或手填）；制单阶段仍二次查重，防止绕过前端直接提交；
+        // 草稿编辑时排除本订单旧行，避免改客户后与自己历史收据号冲突
+        assertReceiptNoAvailable(ctx.corpId(), receiptNo, customer, allowOrderId);
         PaymentMethod paymentMethod = PaymentMethod.normalize(req.getPaymentMethod());
         // 凭证信息：支付凭证/合同附件必填；收据图片可选（用于 OCR）
         List<OpsBusinessAttachment> receiptImages = req.getReceiptImageId() == null
                 ? List.of()
                 : attachmentService.requireOwnedList(List.of(req.getReceiptImageId()),
-                        OpsBusinessAttachment.TYPE_RECEIPT, ctx.corpId());
+                        OpsBusinessAttachment.TYPE_RECEIPT, ctx.corpId(), allowOrderId);
         List<OpsBusinessAttachment> paymentVouchers = attachmentService.requireOwnedList(
-                req.getPaymentVoucherIds(), OpsBusinessAttachment.TYPE_PAYMENT, ctx.corpId());
+                req.getPaymentVoucherIds(), OpsBusinessAttachment.TYPE_PAYMENT,
+                ctx.corpId(), allowOrderId);
         List<OpsBusinessAttachment> contracts = attachmentService.requireOwnedList(
-                req.getContractAttachmentIds(), OpsBusinessAttachment.TYPE_CONTRACT, ctx.corpId());
+                req.getContractAttachmentIds(), OpsBusinessAttachment.TYPE_CONTRACT,
+                ctx.corpId(), allowOrderId);
         String receiptImageUrl = receiptImages.isEmpty() ? null : receiptImages.get(0).getFileUrl();
         String paymentVoucherUrls = attachmentService.toUrlCsv(paymentVouchers);
         String contractAttachmentUrls = attachmentService.toUrlCsv(contracts);
@@ -1056,7 +1348,12 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     }
 
     private void assertReceiptNoAvailable(Long corpId, String receiptNo, String customer) {
-        String conflict = findReceiptConflict(corpId, receiptNo, customer);
+        assertReceiptNoAvailable(corpId, receiptNo, customer, null);
+    }
+
+    private void assertReceiptNoAvailable(Long corpId, String receiptNo, String customer,
+                                          Long excludeOrderId) {
+        String conflict = findReceiptConflict(corpId, receiptNo, customer, excludeOrderId);
         if (conflict != null) throw BusinessException.of(conflict);
     }
 
@@ -1065,11 +1362,17 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
      * 被其他客户占用时返回可读冲突说明，未冲突返回 null。
      */
     private String findReceiptConflict(Long corpId, String receiptNo, String customer) {
+        return findReceiptConflict(corpId, receiptNo, customer, null);
+    }
+
+    private String findReceiptConflict(Long corpId, String receiptNo, String customer,
+                                       Long excludeOrderId) {
         List<Map<String, Object>> dups = jdbcTemplate.queryForList(
                 "SELECT batch_no, customer FROM ops_business_order_item "
                         + "WHERE corp_id = ? AND receipt_no = ? AND delete_flag = 0 "
+                        + "AND (? IS NULL OR order_id <> ?) "
                         + "ORDER BY id LIMIT 20",
-                corpId, receiptNo);
+                corpId, receiptNo, excludeOrderId, excludeOrderId);
         for (Map<String, Object> dup : dups) {
             if (!customer.equals(str(dup.get("customer")))) {
                 return "收据号 " + receiptNo + " 已被其他客户占用（批次 "

@@ -2,10 +2,12 @@ package com.aip.ops.controller;
 
 import com.aip.common.annotation.OperationLog;
 import com.aip.ops.dto.BalanceReceiveRequest;
+import com.aip.ops.dto.BusinessRefundApplyRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.security.JwtTokenInspector;
 import com.aip.ops.service.BusinessAttachmentService;
 import com.aip.ops.service.BusinessDataService;
+import com.aip.ops.service.BusinessOrderRefundService;
 import com.aip.ops.service.BusinessSpecialFileService;
 import com.aip.ops.service.EmployeeAuthService;
 import com.aip.ops.service.EmployeeBusinessEntryService;
@@ -56,6 +58,7 @@ public class EmployeeController {
     private final BusinessSpecialFileService businessSpecialFileService;
     private final BusinessAttachmentService businessAttachmentService;
     private final ReceiptOcrService receiptOcrService;
+    private final BusinessOrderRefundService businessOrderRefundService;
     private final JwtTokenInspector jwtTokenInspector;
     private final PlatformInternalClient platformInternalClient;
 
@@ -128,6 +131,70 @@ public class EmployeeController {
         }
         return R.ok(businessDataService.employeeOrderDetail(
                 SecurityUtils.getCurrentCorpId(), employeeService.getCurrentAgentPhone(), orderId));
+    }
+
+    /** 退回草稿：终止当前流程、状态回 0、允许编辑后沿用原订单编号重新提交。 */
+    @OperationLog(module = "运营管理", action = "员工退回业务订单草稿",
+            targetTable = "ops_business_order")
+    @PostMapping("/business-data/orders/{orderId}/return-draft")
+    public R<?> returnDraft(@PathVariable Long orderId) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可退回草稿");
+        }
+        return R.ok(businessOrderRefundService.returnDraft(orderId));
+    }
+
+    /** 发起作废退款：部长→财务→总经办审批，通过后订单置 -1。 */
+    @OperationLog(module = "运营管理", action = "员工发起作废退款",
+            targetTable = "ops_business_refund")
+    @PostMapping("/business-data/orders/{orderId}/refund")
+    public R<?> applyRefund(@PathVariable Long orderId,
+                            @RequestBody BusinessRefundApplyRequest request) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可发起退款");
+        }
+        return R.ok(businessOrderRefundService.apply(orderId, request));
+    }
+
+    /** 当前订单最近一次作废退款（含流程进度与审批人）。 */
+    @GetMapping("/business-data/orders/{orderId}/refund")
+    public R<?> refundDetail(@PathVariable Long orderId) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可查看退款进度");
+        }
+        return R.ok(businessOrderRefundService.detail(orderId));
+    }
+
+    /** 作废驳回后重新发起正常审批（状态 0/1/2 且当前无流程实例）。 */
+    @OperationLog(module = "运营管理", action = "员工重新提交业务订单审批",
+            targetTable = "ops_business_order")
+    @PostMapping("/business-data/orders/{orderId}/restart-flow")
+    public R<?> restartFlow(@PathVariable Long orderId) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可重新提交审批");
+        }
+        return R.ok(businessOrderRefundService.restartFlow(orderId));
+    }
+
+    /** 草稿编辑回显数据（订单头 + 商品/旧品/凭证附件）。 */
+    @GetMapping("/business-data/orders/{orderId}/edit")
+    public R<?> draftEditData(@PathVariable Long orderId) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可编辑业务订单");
+        }
+        return R.ok(employeeBusinessEntryService.draftEditData(orderId));
+    }
+
+    /** 草稿编辑提交：沿用原订单编号/业务组号，替换明细并重新发起审批。 */
+    @OperationLog(module = "运营管理", action = "员工编辑业务订单草稿",
+            targetTable = "ops_business_order")
+    @PutMapping("/business-data/orders/{orderId}/draft")
+    public R<?> updateDraft(@PathVariable Long orderId,
+                            @RequestBody EmployeeBusinessEntryRequest request) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可编辑业务订单");
+        }
+        return R.ok(employeeBusinessEntryService.updateDraft(orderId, request));
     }
 
     private static final int AVATAR_SIZE = 200;
@@ -287,7 +354,7 @@ public class EmployeeController {
     }
 
     /**
-     * 业务附件上传：fileType=RECEIPT（收据图片）/PAYMENT（支付凭证）/CONTRACT（合同附件）。
+     * 业务附件上传：fileType=RECEIPT（收据图片）/PAYMENT（支付凭证）/CONTRACT（合同附件）/REFUND（退款补充附件）。
      * 图片服务端压缩为 JPEG，PDF 原样保存；返回附件 ID 供提交与 OCR 引用。
      */
     @PostMapping("/business-data/attachments")

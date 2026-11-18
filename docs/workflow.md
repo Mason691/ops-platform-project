@@ -18,6 +18,18 @@
 
 ---
 
+## 业务订单退回草稿 / 作废退款（2026-11-18）
+
+- **状态扩展**：字典 `business_order_status` 新增 `-1 / 作废退款`；退回草稿沿用 `0 经办人上报` + `ops_business_order.draft_flag=1`。
+- **退回草稿**：经办人（任一经办人）在状态 0/1/2 发起 → 平台内部终止当前 `biz_order_flow` 实例（待办 SKIPPED、终止消息）→ 状态 0、`draft_flag=1`、清空 `wf_*`；H5 复用 5 步制单编辑（原订单编号/业务组号），提交后新实例重新进入部长审核。
+- **作废退款**：终止正常流程 → 新流程 `biz_order_void_flow`（`OPS_BUSINESS_ORDER_VOID`）：部长审核 → 财务审核 → 总经办审核；部长/财务驳回退回经办人（INITIATOR），总经办驳回退回财务（PREVIOUS）；终审动作 `OPS_VOID_COMPLETE` 置 `biz_status=-1`、明细 `calc_status=已作废`、提成 0 并锁定。
+- **拦截**：已出库（SCM fail-closed）、已上报集团、已生成以旧换新采购单、已有 PENDING 退款；作废审批中不可编辑/退草稿/重复退款；退款驳回后提供「重新提交审批」。
+- **数据**：`sql/migrate_business_order_draft_refund.sql`（`draft_flag` + `ops_business_refund`）；`sql/business_order_void_workflow_seed.sql`（字典 -1 + 流程定义/节点/角色审批人）。
+- **平台**：内部终止接口 `POST /api/internal/wf/instance/{id}/terminate`（X-Internal-Token）；消息模板复用现有场景。
+- **统计**：作废订单保留列表供审计，但排除员工销售/提成合计、员工月度/品类统计、管理端汇总/品类提成汇总/作战地图。
+
+---
+
 ## 工作业务日志与订单流程进度（2026-11-17）
 
 - **底座日志接口**：`GET /api/wf/log/my`（当前员工发起/处理的流程操作，业务类型/动作/日期筛选 + 分页）、`GET /api/wf/log/detail?key=L:<logId>|I:<instanceId>`（详情，含 `formData` 附件提取）。发起记录由 `wf_instance` 合成（`I:`），历史实例无需补日志；审批操作人优先取 `wf_task.approver_name` 真实姓名；日志/实例逻辑删除仍可查并返回 `deleted` 标记。

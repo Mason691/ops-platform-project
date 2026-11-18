@@ -74,6 +74,9 @@ cd frontend && npm run build:mp-weixin  # 输出 dist/build/mp-weixin/
 - `Specs/业务数据退货反写-规格说明.md`
 - `Specs/公众号消息模板组织共享-规格说明.md`
 - `Specs/员工微信授权登录-规格说明.md`
+- `Specs/员工制单凭证信息与收据OCR-规格说明.md`
+- `Specs/员工制单零售底价展示-规格说明.md`
+- `Specs/业务订单退回草稿与作废退款-规格说明.md`
 - `Specs/派工单与公众号消息提醒-规格说明.md`（**已下线**：派工单体系 2026-11-14 由底座工作流替代，仅存历史参考）
 - `specs/annual-plan-spec.md`（英文）
 

@@ -1,6 +1,6 @@
 <template>
   <view class="page">
-    <EmployeePageHead title="新增业务订单" />
+    <EmployeePageHead :title="pageTitle" />
     <view v-if="loading" class="state">
       <text class="state-text">加载中...</text>
     </view>
@@ -9,7 +9,7 @@
       <view class="retry-btn" @click="loadOptions"><text>重试</text></view>
     </view>
 
-    <BusinessSuccess v-else-if="success" :result="success"
+    <BusinessSuccess v-else-if="success" :result="success" :edit-mode="!!success.editMode"
                      @continue="continueOrdering" @view-order="viewOrder" />
 
     <template v-else>
@@ -79,6 +79,7 @@
 <script setup>
 import EmployeePageHead from '@/components/EmployeePageHead.vue'
 import { computed, onMounted, ref, watch } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
 import { useBusinessWizard } from '@/hooks/useBusinessWizard'
 import { computeProductsDeductionTotal, computeProductsPayableTotal, computeProductsTotal } from '@/utils/businessForm'
 import BusinessWizardSteps from '@/components/BusinessWizardSteps.vue'
@@ -93,8 +94,10 @@ import AnimatedAmount from '@/components/AnimatedAmount.vue'
 const {
   loading, errorMsg, querying, submitting, step, maxVisited, success, banner,
   bannerType, memberStatus, meta, form, errors, steps, missing, loadOptions, queryMember,
-  next, back, goStep, submit, continueOrdering, viewOrder
+  next, back, goStep, submit, continueOrdering, viewOrder, editOrderId, setEditOrderId
 } = useBusinessWizard()
+
+const pageTitle = computed(() => editOrderId.value ? '编辑业务订单' : '新增业务订单')
 
 const animClass = ref('')
 const productsTotal = computed(() => computeProductsTotal(form.products))
@@ -108,6 +111,11 @@ watch(step, (current, previous) => {
   animClass.value = current > previous ? 'enter-forward' : 'enter-back'
   clearTimeout(animTimer)
   animTimer = setTimeout(() => { animClass.value = '' }, 240)
+})
+
+onLoad(options => {
+  const id = options && options.orderId ? decodeURIComponent(options.orderId) : ''
+  if (id) setEditOrderId(id)
 })
 
 onMounted(() => {

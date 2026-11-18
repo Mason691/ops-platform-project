@@ -39,6 +39,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "<if test='receiptDateStart != null and receiptDateStart != \"\"'>AND receipt_date >= #{receiptDateStart}</if> "
             + "<if test='receiptDateEnd != null and receiptDateEnd != \"\"'>AND receipt_date &lt;= #{receiptDateEnd}</if> "   // &lt;= 而非 <=：<script> 注解 SQL 是 XML，< 会破坏标签解析（2026-10-19 生产启动崩溃回滚教训）
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
+            + "AND calc_status != '已作废' "
             + "GROUP BY 1, category, brand, model"
             + ") t"
             + "</script>")
@@ -79,6 +80,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "<if test='receiptDateStart != null and receiptDateStart != \"\"'>AND receipt_date >= #{receiptDateStart}</if> "
             + "<if test='receiptDateEnd != null and receiptDateEnd != \"\"'>AND receipt_date &lt;= #{receiptDateEnd}</if> "   // &lt;= 而非 <=：<script> 注解 SQL 是 XML，< 会破坏标签解析（2026-10-19 生产启动崩溃回滚教训）
             + "<if test='corpIds != null and corpIds.size() > 0'>AND corp_id IN <foreach collection='corpIds' item='cid' open='(' separator=',' close=')'>#{cid}</foreach></if> "
+            + "AND calc_status != '已作废' "
             + "GROUP BY 1, category, brand, model"
             + ") t GROUP BY t.category ORDER BY SUM(t.receipt_amount) DESC"
             + "</script>")
@@ -154,7 +156,8 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "CASE WHEN category = '6' THEN 0 ELSE 1 END as salePri, "
             + "CASE category WHEN '10' THEN '保险' WHEN '4' THEN '壁挂炉' WHEN '5' THEN '壁挂炉以旧换新销售' WHEN '2' THEN '抽油烟机' WHEN '7' THEN '定尺波纹管' WHEN '8' THEN '户内美装工程' WHEN '6' THEN '户内美装销售' WHEN '9' THEN '户内美装运维' WHEN '12' THEN '美装安全评估' WHEN '11' THEN '美装管道整改' WHEN 'qimi' THEN '气密性检测' WHEN '1' THEN '燃气灶' WHEN '3' THEN '热水器' ELSE category END as catName "
             + "FROM ops_business_order_item WHERE delete_flag=0 "
-            + "AND calc_status != '已上报集团' "   // != 而非 <>：<script> XML 解析器中 <> 会破坏标签解析
+            + "AND calc_status != '已上报集团' "
+            + "AND calc_status != '已作废' "   // != 而非 <>：<script> XML 解析器中 <> 会破坏标签解析
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
             + "<if test='batchNo != null and batchNo != \"\"'>AND batch_no = #{batchNo}</if> "
             + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "
@@ -199,6 +202,7 @@ public interface OpsBusinessDataMapper extends BaseMapper<OpsBusinessData> {
             + "CASE category WHEN '10' THEN '保险' WHEN '4' THEN '壁挂炉' WHEN '5' THEN '壁挂炉以旧换新销售' WHEN '2' THEN '抽油烟机' WHEN '7' THEN '定尺波纹管' WHEN '8' THEN '户内美装工程' WHEN '6' THEN '户内美装销售' WHEN '9' THEN '户内美装运维' WHEN '12' THEN '美装安全评估' WHEN '11' THEN '美装管道整改' WHEN 'qimi' THEN '气密性检测' WHEN '1' THEN '燃气灶' WHEN '3' THEN '热水器' ELSE category END as catName "
             + "FROM ops_business_order_item WHERE delete_flag=0 "
             + "AND calc_status != '已上报集团' "
+            + "AND calc_status != '已作废' "
             + "<if test='company != null and company != \"\"'>AND company = #{company}</if> "
             + "<if test='batchNo != null and batchNo != \"\"'>AND batch_no = #{batchNo}</if> "
             + "<if test='agent != null and agent != \"\"'>AND agent = #{agent}</if> "

@@ -27,7 +27,11 @@
       <view class="card">
         <view class="head-line">
           <text class="order-no">{{ order.orderNo || '未编号订单' }}</text>
-          <text class="status">{{ order.bizStatusName || '状态未知' }}</text>
+          <text class="status" :class="{ void: String(order.bizStatus) === '-1', draft: order.draftFlag }">
+            {{ order.draftFlag ? '草稿 · 待重新提交' : (order.bizStatusName || '状态未知') }}
+          </text>
+          <text v-if="order.refund && order.refund.status === 'PENDING'"
+                class="status refunding">作废审批中</text>
         </view>
         <view class="kv"><text class="k">客户</text><text class="v">{{ order.customer || '—' }}</text></view>
         <view class="kv"><text class="k">小区/地址</text>
@@ -50,6 +54,57 @@
           <text class="v amount">¥{{ money(order.payableAmount) }}</text>
         </view>
         <view class="kv"><text class="k">提成合计</text><text class="v commission">¥{{ money(order.totalCommission) }}</text></view>
+      </view>
+
+      <view v-if="showActions" class="card action-card">
+        <text class="card-title">订单操作</text>
+        <view class="action-row">
+          <view v-if="order.canEdit" class="action-btn primary" @click="editDraft">编辑订单</view>
+          <view v-if="order.canReturnDraft" class="action-btn ghost" @click="returnDraft">退回草稿</view>
+          <view v-if="order.canApplyRefund" class="action-btn danger" @click="openRefund">发起退款申请</view>
+          <view v-if="order.canRestartFlow" class="action-btn primary" @click="restartFlow">重新提交审批</view>
+        </view>
+        <text v-if="order.draftFlag" class="action-hint">
+          当前为草稿状态，修改后提交将沿用原订单编号重新进入审批。
+        </text>
+        <text v-else class="action-hint">
+          仅在派工出库前可操作；已出库、已上报集团或已作废订单不可操作。
+        </text>
+      </view>
+
+      <view v-if="order.refund" class="card refund-card">
+        <view class="refund-head">
+          <text class="card-title">作废退款</text>
+          <text class="refund-status" :class="String(order.refund.status || '').toLowerCase()">
+            {{ order.refund.statusName || '—' }}
+          </text>
+        </view>
+        <view class="kv"><text class="k">退款金额</text>
+          <text class="v amount">¥{{ money(order.refund.amount) }}</text>
+        </view>
+        <view class="kv"><text class="k">退款原因</text>
+          <text class="v">{{ order.refund.reason || '—' }}</text>
+        </view>
+        <view v-if="order.refund.remark" class="kv"><text class="k">备注</text>
+          <text class="v">{{ order.refund.remark }}</text>
+        </view>
+        <view v-if="order.refund.rejectReason" class="kv"><text class="k">驳回/终止原因</text>
+          <text class="v danger">{{ order.refund.rejectReason }}</text>
+        </view>
+        <view v-if="order.refund.flow" class="refund-flow">
+          <text class="refund-flow-line">
+            当前节点：{{ order.refund.flow.currentNodeName || order.refund.currentNodeName || '—' }}
+          </text>
+          <text v-if="refundApproverText" class="refund-flow-line">
+            处理人：{{ refundApproverText }}
+          </text>
+        </view>
+        <view v-if="(order.refund.attachmentUrls || []).length" class="refund-files">
+          <text v-for="(url, index) in order.refund.attachmentUrls" :key="index"
+                class="refund-file" @click="previewRefundFile(url)">
+            附件{{ index + 1 }}
+          </text>
+        </view>
       </view>
 
       <view v-if="order.hasTradeIn" class="card">
@@ -121,6 +176,9 @@
           </view>
         </view>
       </view>
+
+      <BusinessRefundSheet v-model:visible="refundVisible" :order="order"
+                           :order-id="orderId" @submitted="load" />
     </template>
   </view>
 </template>
@@ -131,6 +189,8 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/api'
 import BusinessFlowProgress from '@/components/BusinessFlowProgress.vue'
+import BusinessRefundSheet from '@/components/BusinessRefundSheet.vue'
+import { assetUrl } from '@/utils/image'
 
 /**
  * 员工端业务订单详情：本人参与的商品明细 + 流程进度 + 节点处理留痕。
@@ -141,6 +201,7 @@ const loading = ref(true)
 const errorMsg = ref('')
 const order = ref(null)
 const retrying = ref(false)
+const refundVisible = ref(false)
 
 onLoad(options => {
   orderId.value = options && options.orderId ? decodeURIComponent(options.orderId) : ''
@@ -168,6 +229,92 @@ const flowRecords = computed(() => {
   const list = order.value && order.value.flowRecords
   return Array.isArray(list) ? list : []
 })
+
+const showActions = computed(() => {
+  const o = order.value || {}
+  return !!(o.canEdit || o.canReturnDraft || o.canApplyRefund || o.canRestartFlow)
+})
+
+const refundApproverText = computed(() => {
+  const list = (order.value && order.value.refund && order.value.refund.flow
+    && order.value.refund.flow.currentApprovers) || []
+  return list
+    .map(item => item.userName || item.approverName || item.roleName)
+    .filter(Boolean)
+    .join('、')
+})
+
+function editDraft() {
+  uni.navigateTo({
+    url: '/pages/employee/business-data-new?orderId=' + encodeURIComponent(orderId.value)
+  })
+}
+
+function returnDraft() {
+  uni.showModal({
+    title: '退回草稿',
+    content: '退回后订单将回到草稿状态，需重新提交审批',
+    confirmText: '确认退回',
+    success: async modal => {
+      if (!modal.confirm) return
+      try {
+        await api.employeeReturnDraft(orderId.value)
+        uni.showToast({ title: '已退回草稿', icon: 'success' })
+        load()
+      } catch (e) {
+        uni.showToast({ title: (e && e.msg) || '退回失败，请重试', icon: 'none' })
+      }
+    }
+  })
+}
+
+function openRefund() {
+  refundVisible.value = true
+}
+
+function restartFlow() {
+  uni.showModal({
+    title: '重新提交审批',
+    content: '确认重新提交后进入部长审核？',
+    success: async modal => {
+      if (!modal.confirm) return
+      try {
+        await api.employeeRestartFlow(orderId.value)
+        uni.showToast({ title: '已重新提交', icon: 'success' })
+        load()
+      } catch (e) {
+        uni.showToast({ title: (e && e.msg) || '提交失败，请重试', icon: 'none' })
+      }
+    }
+  })
+}
+
+function previewRefundFile(url) {
+  if (!url) return
+  const full = assetUrl(url)
+  if (/\.pdf(\?|$)/i.test(String(url))) {
+    // #ifdef H5
+    if (typeof window !== 'undefined') window.open(full, '_blank')
+    // #endif
+    // #ifndef H5
+    uni.downloadFile({
+      url: full,
+      success: res => {
+        if (res.statusCode === 200) {
+          uni.openDocument({ filePath: res.tempFilePath, fileType: 'pdf', showMenu: true })
+        } else {
+          uni.showToast({ title: '文件下载失败', icon: 'none' })
+        }
+      },
+      fail: () => uni.showToast({ title: '文件下载失败', icon: 'none' })
+    })
+    // #endif
+    return
+  }
+  const urls = (order.value && order.value.refund && order.value.refund.attachmentUrls
+    ? order.value.refund.attachmentUrls : []).map(assetUrl)
+  uni.previewImage({ urls, current: full })
+}
 
 /** 旧品入库完成（SCM inboundStatus=ALL）后提醒消失，改为已入库标识。 */
 const tradeInInboundDone = computed(() => {
@@ -269,12 +416,16 @@ function formatTime(value) {
 .head-line { display: flex; align-items: center; gap: 12rpx; flex-wrap: wrap; }
 .order-no { font-size: 30rpx; font-weight: 700; color: #1D2129; }
 .status { font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 6rpx; background: #E8F3FF; color: #2F6FEB; }
+.status.void { background: #FFF1F0; color: #C62828; }
+.status.draft { background: #F2F3F5; color: #86909C; }
+.status.refunding { background: #FFF7E6; color: #B26A00; }
 .kv { display: flex; align-items: flex-start; gap: 16rpx; font-size: 23rpx; line-height: 1.5; }
 .kv .k { flex: 0 0 168rpx; color: #86909C; }
 .kv .v { flex: 1; min-width: 0; color: #1D2129; word-break: break-all; }
 .kv .v.amount { color: #FF6B35; font-weight: 700; }
 .kv .v.commission { color: #0B7A42; font-weight: 600; }
 .kv .v.deduction { color: #C62828; font-weight: 700; }
+.kv .v.danger { color: #C62828; }
 .inbound-alert {
   background: #FFF7E6; border: 2rpx solid #FFB74D; border-radius: 16rpx;
   padding: 22rpx 24rpx; margin-bottom: 16rpx;
@@ -312,6 +463,32 @@ function formatTime(value) {
 }
 .product-old { font-size: 20rpx; color: #A9812F; line-height: 1.5; }
 .card-title { font-size: 24rpx; font-weight: 600; color: #4E5969; margin-bottom: 4rpx; }
+.action-card { gap: 16rpx; }
+.action-row { display: flex; flex-wrap: wrap; gap: 14rpx; }
+.action-btn {
+  min-width: 190rpx; height: 72rpx; line-height: 72rpx; padding: 0 26rpx;
+  border-radius: 36rpx; font-size: 25rpx; font-weight: 600;
+  text-align: center; box-sizing: border-box;
+}
+.action-btn.primary { background: #FF6B35; color: #fff; }
+.action-btn.ghost { background: #fff; color: #FF6B35; border: 2rpx solid #FF6B35; }
+.action-btn.danger { background: #FFF1F0; color: #C62828; border: 2rpx solid #FFC9C4; }
+.action-hint { font-size: 21rpx; color: #999; line-height: 1.5; }
+.refund-head { display: flex; align-items: center; justify-content: space-between; }
+.refund-status {
+  font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 6rpx;
+  background: #F2F3F5; color: #86909C;
+}
+.refund-status.pending { background: #FFF7E6; color: #B26A00; }
+.refund-status.approved { background: #FFF1F0; color: #C62828; }
+.refund-status.rejected, .refund-status.terminated { background: #F2F3F5; color: #86909C; }
+.refund-flow { display: flex; flex-direction: column; gap: 4rpx; margin-top: 4rpx; }
+.refund-flow-line { font-size: 22rpx; color: #4E5969; line-height: 1.5; }
+.refund-files { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 4rpx; }
+.refund-file {
+  font-size: 22rpx; color: #FF6B35; background: #FFF3ED;
+  border-radius: 6rpx; padding: 4rpx 12rpx;
+}
 .product-row {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 16rpx;
   padding: 14rpx 0; border-bottom: 1rpx solid #F7F8FA;

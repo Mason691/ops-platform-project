@@ -23,6 +23,12 @@ public interface EmployeeBusinessEntryService {
     /** 保存手工录入的业务数据（同步发起工作流并带回下一审批人）。 */
     Map<String, Object> createManualEntry(EmployeeBusinessEntryRequest request);
 
+    /** 草稿编辑数据：订单头 + 商品/旧品/凭证附件回显。 */
+    Map<String, Object> draftEditData(Long orderId);
+
+    /** 草稿编辑提交：沿用原订单编号/业务组号，替换明细并重新发起审批。 */
+    Map<String, Object> updateDraft(Long orderId, EmployeeBusinessEntryRequest request);
+
     /** 以旧换新采购单创建失败/状态待同步时重试（SCM 侧幂等）。 */
     Map<String, Object> retryTradeInPurchase(Long orderId);
 

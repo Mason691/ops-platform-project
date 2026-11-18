@@ -16,6 +16,7 @@ public interface OpsBusinessOrderMapper extends BaseMapper<OpsBusinessOrder> {
     @Update("UPDATE ops_business_order m SET m.calc_status = ("
             + "  SELECT CASE "
             + "    WHEN COUNT(*) = 0 THEN m.calc_status "
+            + "    WHEN SUM(i.calc_status = '已作废') = COUNT(*) THEN '已作废' "
             + "    WHEN SUM(i.calc_status = '已上报集团') > 0 THEN '已上报集团' "
             + "    WHEN SUM(i.calc_status = '未计算') > 0 THEN '未计算' "
             + "    WHEN SUM(i.calc_status = '已计算') > 0 THEN '已计算' "

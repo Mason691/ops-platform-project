@@ -126,6 +126,46 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
     }
 
     @Override
+    public void updateDraftOrder(Long orderId, Long corpId, String batchNo, String receiptNo,
+                                 String company, String customer, String customerPhone,
+                                 Long platformMemberId, Long communityId, String communityName,
+                                 String detailedAddress, String receiptDate, BigDecimal totalAmount,
+                                 String remark, String paymentMethod, String paymentType,
+                                 BigDecimal depositAmount, Integer isFullPayment,
+                                 BigDecimal balanceAmount, String calcStatus) {
+        if (orderId == null || corpId == null) {
+            throw BusinessException.of("订单归属信息缺失");
+        }
+        orderMapper.update(null, new LambdaUpdateWrapper<OpsBusinessOrder>()
+                .eq(OpsBusinessOrder::getId, orderId)
+                .eq(OpsBusinessOrder::getCorpId, corpId)
+                .set(OpsBusinessOrder::getBatchNo, batchNo)
+                .set(OpsBusinessOrder::getReceiptNo, receiptNo)
+                .set(OpsBusinessOrder::getCompany, company)
+                .set(OpsBusinessOrder::getCustomer, customer)
+                .set(OpsBusinessOrder::getCustomerPhone, customerPhone)
+                .set(OpsBusinessOrder::getPlatformMemberId, platformMemberId)
+                .set(OpsBusinessOrder::getCommunityId, communityId)
+                .set(OpsBusinessOrder::getCommunityName, communityName)
+                .set(OpsBusinessOrder::getDetailedAddress, detailedAddress)
+                .set(OpsBusinessOrder::getReceiptDate, receiptDate)
+                .set(OpsBusinessOrder::getTotalAmount, totalAmount)
+                .set(OpsBusinessOrder::getRemark, remark)
+                .set(OpsBusinessOrder::getPaymentMethod, paymentMethod)
+                .set(OpsBusinessOrder::getPaymentType, paymentType)
+                .set(OpsBusinessOrder::getDepositAmount, depositAmount)
+                .set(OpsBusinessOrder::getIsFullPayment, isFullPayment)
+                .set(OpsBusinessOrder::getBalanceAmount, balanceAmount)
+                .set(OpsBusinessOrder::getCalcStatus, calcStatus)
+                .set(OpsBusinessOrder::getDraftFlag, 0)
+                .set(OpsBusinessOrder::getBizStatus, "0")
+                .set(OpsBusinessOrder::getWfInstanceId, null)
+                .set(OpsBusinessOrder::getWfNodeOrder, null)
+                .set(OpsBusinessOrder::getWfNodeName, null)
+                .set(OpsBusinessOrder::getModifyTime, LocalDateTime.now()));
+    }
+
+    @Override
     public OpsBusinessOrder findByOrderKey(Long corpId, String orderKey) {
         if (corpId == null || orderKey == null || orderKey.isBlank()) return null;
         return orderMapper.selectOne(new LambdaQueryWrapper<OpsBusinessOrder>()
@@ -138,6 +178,14 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
     @Override
     public OpsBusinessOrder getById(Long id) {
         return id == null ? null : orderMapper.selectById(id);
+    }
+
+    @Override
+    public OpsBusinessOrder lockById(Long id) {
+        if (id == null) return null;
+        return orderMapper.selectOne(new LambdaQueryWrapper<OpsBusinessOrder>()
+                .eq(OpsBusinessOrder::getId, id)
+                .last("FOR UPDATE"));
     }
 
     @Override

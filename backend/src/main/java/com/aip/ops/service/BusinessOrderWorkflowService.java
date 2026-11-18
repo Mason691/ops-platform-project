@@ -14,6 +14,8 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -27,24 +29,29 @@ import java.util.Objects;
 public class BusinessOrderWorkflowService {
 
     public static final String BUSINESS_TYPE = "OPS_BUSINESS_ORDER";
+    public static final String BUSINESS_TYPE_VOID = "OPS_BUSINESS_ORDER_VOID";
 
     private final OpsBusinessOrderMapper orderMapper;
     private final WorkflowPlatformClient workflowClient;
     private final JdbcTemplate jdbcTemplate;
     private final ThreadPoolTaskExecutor executor;
     private final String definitionCode;
+    private final String voidDefinitionCode;
 
     public BusinessOrderWorkflowService(OpsBusinessOrderMapper orderMapper,
                                         WorkflowPlatformClient workflowClient,
                                         JdbcTemplate jdbcTemplate,
                                         @Qualifier("workflowTaskExecutor") ThreadPoolTaskExecutor executor,
                                         @Value("${workflow.business-order.definition-code:biz_order_flow}")
-                                        String definitionCode) {
+                                        String definitionCode,
+                                        @Value("${workflow.business-order.void-definition-code:biz_order_void_flow}")
+                                        String voidDefinitionCode) {
         this.orderMapper = orderMapper;
         this.workflowClient = workflowClient;
         this.jdbcTemplate = jdbcTemplate;
         this.executor = executor;
         this.definitionCode = definitionCode;
+        this.voidDefinitionCode = voidDefinitionCode;
     }
 
     /** 结果页轮询/详情兜底：按实例查询当前审批人（失败返回 resolved=false）。 */
@@ -117,6 +124,64 @@ public class BusinessOrderWorkflowService {
         log.info("订单 {} 已发起工作流 instanceId={} approver={}",
                 orderId, started.instanceId(), started.approverName());
         return started;
+    }
+
+    /**
+     * 终止当前运行中的实例（退回草稿 / 发起作废退款）。
+     * 先查进度：已结束的实例直接跳过，避免平台报「不在运行中」。
+     */
+    public void terminateActive(Long instanceId, String reason,
+                                Long operatorId, String operatorName) {
+        if (instanceId == null) return;
+        Map<Long, WorkflowPlatformClient.InstanceProgress> progress =
+                workflowClient.instanceProgressBatch(List.of(instanceId));
+        WorkflowPlatformClient.InstanceProgress p = progress.get(instanceId);
+        if (p != null && !"RUNNING".equals(p.status())) {
+            return;
+        }
+        workflowClient.terminate(instanceId, reason, operatorId, operatorName);
+    }
+
+    /** 发起「业务订单作废工作流」：businessType=OPS_BUSINESS_ORDER_VOID。 */
+    public WorkflowPlatformClient.StartResult startVoid(OpsBusinessOrder order,
+                                                        Long refundId,
+                                                        String reason,
+                                                        Long initiatorUserId,
+                                                        String initiatorName) {
+        String requestId = BUSINESS_TYPE_VOID + ":" + order.getId() + ":" + refundId + ":1";
+        String summary = "业务订单作废 "
+                + (order.getOrderNo() == null ? "#" + order.getId() : order.getOrderNo());
+        if (order.getCustomer() != null && !order.getCustomer().isBlank()) {
+            summary += " | " + order.getCustomer();
+        }
+        if (order.getPayableAmount() != null) {
+            summary += " | 退款 " + order.getPayableAmount().stripTrailingZeros().toPlainString();
+        }
+        if (reason != null && !reason.isBlank()) {
+            summary += " | " + reason.trim();
+        }
+        if (summary.length() > 200) {
+            summary = summary.substring(0, 200);
+        }
+        WorkflowPlatformClient.StartResult started = workflowClient.start(
+                new WorkflowPlatformClient.StartRequest(
+                        voidDefinitionCode, BUSINESS_TYPE_VOID, String.valueOf(order.getId()),
+                        summary, address(order), requestId, order.getCorpId(),
+                        initiatorUserId, initiatorName));
+        // 只回写实例/节点展示字段，不改 biz_status（作废流程节点 biz_status 为空）
+        orderMapper.update(null, new LambdaUpdateWrapper<OpsBusinessOrder>()
+                .eq(OpsBusinessOrder::getId, order.getId())
+                .set(OpsBusinessOrder::getWfInstanceId, started.instanceId())
+                .set(OpsBusinessOrder::getWfNodeOrder, 2)
+                .set(OpsBusinessOrder::getWfNodeName, "部长审核")
+                .set(OpsBusinessOrder::getModifyTime, LocalDateTime.now()));
+        return started;
+    }
+
+    /** 作废驳回后重新发起正常审批（沿用原订单编号/订单）。 */
+    public WorkflowPlatformClient.StartResult restartNormal(Long orderId, Long initiatorUserId,
+                                                            String initiatorName) {
+        return start(orderId, initiatorUserId, initiatorName, true);
     }
 
     private String summary(OpsBusinessOrder order) {

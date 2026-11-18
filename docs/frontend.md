@@ -38,7 +38,7 @@
 |------|------|------|
 | `EmployeeTabBar` | `components/EmployeeTabBar.vue` | 员工端底部导航栏（AI助手/主页/待办/我的） |
 | `BusinessStepBasic` / `BusinessStepProducts` / `BusinessStepPayment` / `BusinessStepVoucher` / `BusinessStepConfirm` / `BusinessWizardSteps` / `BusinessSuccess` | `components/BusinessStep*.vue` 等 | 员工手工新增业务 5 步向导（2026-11-18 收款信息拆分为支付信息/凭证信息），状态机在 `hooks/useBusinessWizard.js`，校验共用 `utils/businessForm.js` |
-| `BusinessAgentPicker` / `BusinessProductCard` / `BusinessSpecialApproval` / `BusinessSpecialFileUploader` / `BusinessAttachmentUploader` / `BusinessMonthList` | `components/Business*.vue` | 经办人勾选、产品行、低价特批文件与提成比例、收据图片原图上传/支付凭证与合同图片压缩（`imageCompress.js`）、月度明细 |
+| `BusinessAgentPicker` / `BusinessProductCard` / `BusinessSpecialApproval` / `BusinessSpecialFileUploader` / `BusinessAttachmentUploader` / `BusinessRefundSheet` / `BusinessMonthList` | `components/Business*.vue` | 经办人勾选、产品行（部长及以上可展开零售底价）、低价特批文件与提成比例、收据图片原图上传/支付凭证与合同图片压缩（`imageCompress.js`）、退款申请表单、月度明细 |
 | `OrgSwitcher` / `OrgSwitchSheet` | `components/OrgSwitch*.vue` | 员工多组织切换入口与底部弹层（复用底座 orgs/switch-org） |
 | `EmployeePasswordLogin` / `EmployeeWechatLogin` / `EmployeeWechatBindCard` | `components/Employee*Login*.vue` 等 | 员工登录页三块：密码登录、微信授权登录、微信绑定卡片 |
 | `PaymentQr` | `components/PaymentQr.vue` | 鉴权收款码展示（员工制单收款步骤，取图后逐次 SHA-256 校验） |

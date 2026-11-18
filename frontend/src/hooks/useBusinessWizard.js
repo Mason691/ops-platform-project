@@ -37,6 +37,7 @@ export function useBusinessWizard() {
   const banner = ref('')
   const bannerType = ref('error')
   const memberStatus = ref('idle')
+  const editOrderId = ref('')
   const meta = reactive(emptyMeta())
   const form = reactive(emptyBusinessForm())
   const errors = reactive({})
@@ -95,6 +96,11 @@ export function useBusinessWizard() {
       const data = await api.employeeManualOptions()
       Object.assign(meta, emptyMeta(), data || {})
       normalizeMeta()
+      if (editOrderId.value) {
+        const draft = await api.employeeDraftEditData(editOrderId.value)
+        applyDraftForm(draft)
+        return
+      }
       form.agentUserIds = meta.employeeUserId ? [meta.employeeUserId] : []
       if (!Array.isArray(form.products) || !form.products.length) {
         form.products = [emptyProduct()]
@@ -115,6 +121,36 @@ export function useBusinessWizard() {
     meta.materials = Array.isArray(meta.materials) ? meta.materials : []
     meta.communities = Array.isArray(meta.communities) ? meta.communities : []
     meta.employees = Array.isArray(meta.employees) ? meta.employees : []
+  }
+
+  function setEditOrderId(id) {
+    editOrderId.value = id ? String(id) : ''
+  }
+
+  /** 草稿编辑回显：沿用原订单编号/批次/经办人，允许跨步骤修改后重新提交。 */
+  function applyDraftForm(draft) {
+    Object.assign(form, emptyBusinessForm(), draft || {})
+    if (!Array.isArray(form.products) || !form.products.length) {
+      form.products = [emptyProduct()]
+    }
+    form.products.forEach(product => {
+      if (!product) return
+      if (!product.uid) product.uid = newProductUid()
+      if (!Array.isArray(product.tradeInItems)) product.tradeInItems = []
+      product.tradeInItems.forEach(item => {
+        if (item && !item.uid) item.uid = newTradeInUid()
+      })
+      if (product.isTradeIn == null) product.isTradeIn = false
+      if (product.deductionAmount == null) product.deductionAmount = ''
+    })
+    const agentIds = (Array.isArray(draft && draft.agentUserIds) ? draft.agentUserIds : [])
+      .map(Number)
+      .filter(Boolean)
+    form.agentUserIds = agentIds.length ? agentIds
+      : (meta.employeeUserId ? [meta.employeeUserId] : [])
+    draftEnabled = false
+    step.value = 0
+    maxVisited.value = steps.length - 1
   }
 
   /** 默认使用当前月批次（已存在则复用），历史未上报批次仍可手动选择。 */
@@ -303,11 +339,13 @@ export function useBusinessWizard() {
     }
     submitting.value = true
     try {
-      const created = await api.employeeCreateBusiness(buildPayload())
+      const created = editOrderId.value
+        ? await api.employeeUpdateDraft(editOrderId.value, buildPayload())
+        : await api.employeeCreateBusiness(buildPayload())
       // 提交成功后取消排队中的草稿写入，避免 600ms 后把已提交数据重新存成草稿
       clearTimeout(draftTimer)
       clearDraft()
-      success.value = created || {}
+      success.value = { ...(created || {}), editMode: !!editOrderId.value }
       // 发起成功但审批人未即时解析（组件延迟/解析失败）时异步补齐，避免成功页空白
       if (success.value.orderId && success.value.approverResolved === false) {
         pollApprover(success.value.orderId)
@@ -418,6 +456,7 @@ export function useBusinessWizard() {
     lastMemberCommunityId = null
     memberStatus.value = 'idle'
     draftEnabled = true
+    editOrderId.value = ''
     Object.assign(form, emptyBusinessForm())
     clearErrors()
     showErrors.value = false
@@ -627,6 +666,7 @@ export function useBusinessWizard() {
   return {
     loading, errorMsg, querying, submitting, step, maxVisited, success, banner,
     bannerType, memberStatus, meta, form, errors, showErrors, steps, missing,
+    editOrderId, setEditOrderId,
     loadOptions, queryMember, next, back, goStep, submit,
     continueOrdering, viewOrder, showBanner
   }

@@ -45,9 +45,21 @@ public interface BusinessOrderService {
     void updateVoucherAttachments(Long orderId, Long corpId, String receiptImageUrl,
                                   String paymentVoucherUrls, String contractAttachmentUrls);
 
+    /** 草稿编辑提交：更新订单头，清除草稿标记/流程字段；订单编号保持不变。 */
+    void updateDraftOrder(Long orderId, Long corpId, String batchNo, String receiptNo,
+                          String company, String customer, String customerPhone,
+                          Long platformMemberId, Long communityId, String communityName,
+                          String detailedAddress, String receiptDate, BigDecimal totalAmount,
+                          String remark, String paymentMethod, String paymentType,
+                          BigDecimal depositAmount, Integer isFullPayment,
+                          BigDecimal balanceAmount, String calcStatus);
+
     OpsBusinessOrder findByOrderKey(Long corpId, String orderKey);
 
     OpsBusinessOrder getById(Long id);
+
+    /** 事务内锁定订单行（发起退款/退回草稿串行化）。 */
+    OpsBusinessOrder lockById(Long id);
 
     List<OpsBusinessOrder> findByIds(Collection<Long> ids);
 

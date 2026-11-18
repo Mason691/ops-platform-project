@@ -72,11 +72,13 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
     private static final Set<String> ALLOWED_TYPES =
             Set.of(OpsBusinessAttachment.TYPE_RECEIPT,
                     OpsBusinessAttachment.TYPE_PAYMENT,
-                    OpsBusinessAttachment.TYPE_CONTRACT);
+                    OpsBusinessAttachment.TYPE_CONTRACT,
+                    OpsBusinessAttachment.TYPE_REFUND);
     private static final Map<String, Integer> MAX_COUNT = Map.of(
             OpsBusinessAttachment.TYPE_RECEIPT, 1,
             OpsBusinessAttachment.TYPE_PAYMENT, 3,
-            OpsBusinessAttachment.TYPE_CONTRACT, 5);
+            OpsBusinessAttachment.TYPE_CONTRACT, 5,
+            OpsBusinessAttachment.TYPE_REFUND, 5);
 
     private final OpsBusinessAttachmentMapper attachmentMapper;
     private final EmployeeService employeeService;
@@ -179,6 +181,12 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
 
     @Override
     public List<OpsBusinessAttachment> requireOwnedList(List<Long> ids, String fileType, Long corpId) {
+        return requireOwnedList(ids, fileType, corpId, null);
+    }
+
+    @Override
+    public List<OpsBusinessAttachment> requireOwnedList(List<Long> ids, String fileType, Long corpId,
+                                                        Long allowOrderId) {
         String type = normalizeType(fileType);
         LinkedHashSet<Long> distinct = new LinkedHashSet<>();
         if (ids != null) {
@@ -213,12 +221,18 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
             if (!type.equals(row.getFileType())) {
                 throw BusinessException.of("附件类型不匹配，请重新上传");
             }
-            // 附件只允许上传人本人在制单/OCR 中引用，避免同事间借用附件 ID
-            if (row.getUploaderUserId() == null || currentUserId == null
-                    || !row.getUploaderUserId().equals(currentUserId)) {
+            // 附件只允许上传人本人在制单/OCR 中引用；草稿编辑时允许复用已绑定到
+            // 当前订单的附件（订单可能由其他经办人上传）
+            boolean boundToAllowedOrder = allowOrderId != null
+                    && allowOrderId.equals(row.getOrderId());
+            if (!boundToAllowedOrder
+                    && (row.getUploaderUserId() == null || currentUserId == null
+                    || !row.getUploaderUserId().equals(currentUserId))) {
                 throw BusinessException.of("附件不属于当前员工，请重新上传");
             }
-            if (row.getOrderId() != null) {
+            // 编辑草稿时允许引用已绑定到当前订单的附件；其他订单的附件仍拒绝
+            if (row.getOrderId() != null
+                    && (allowOrderId == null || !allowOrderId.equals(row.getOrderId()))) {
                 throw BusinessException.of("附件已关联其他订单，请重新上传");
             }
             ordered.add(row);
@@ -236,15 +250,26 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
     public void bindToOrder(List<Long> ids, Long orderId, Long corpId) {
         if (ids == null || ids.isEmpty() || orderId == null) return;
         if (corpId == null) throw BusinessException.of("附件归属信息缺失");
-        LinkedHashSet<Long> distinct = new LinkedHashSet<>(ids);
-        int updated = attachmentMapper.update(null, Wrappers.<OpsBusinessAttachment>lambdaUpdate()
+        List<Long> distinct = new ArrayList<>(new LinkedHashSet<>(ids));
+        List<OpsBusinessAttachment> rows = attachmentMapper.selectBatchIds(distinct);
+        if (rows.size() != distinct.size()) {
+            throw BusinessException.of("附件不存在或已失效，请重新上传");
+        }
+        for (OpsBusinessAttachment row : rows) {
+            if (!corpId.equals(row.getCorpId())) {
+                throw BusinessException.of("附件不属于当前组织，请重新上传");
+            }
+            // 已绑定当前订单的附件允许复用（草稿编辑），其他订单仍拒绝
+            if (row.getOrderId() != null && !orderId.equals(row.getOrderId())) {
+                throw BusinessException.of("附件已被其他订单占用，请重新上传");
+            }
+        }
+        // 只回填未绑定行；已绑定当前订单的行无需更新
+        attachmentMapper.update(null, Wrappers.<OpsBusinessAttachment>lambdaUpdate()
                 .in(OpsBusinessAttachment::getId, distinct)
                 .eq(OpsBusinessAttachment::getCorpId, corpId)
                 .isNull(OpsBusinessAttachment::getOrderId)
                 .set(OpsBusinessAttachment::getOrderId, orderId));
-        if (updated != distinct.size()) {
-            throw BusinessException.of("附件已被其他订单占用，请重新上传");
-        }
     }
 
     @Override
@@ -279,6 +304,24 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
             throw BusinessException.of("收据图片不存在，请重新上传");
         }
         return path;
+    }
+
+    @Override
+    public List<OpsBusinessAttachment> listByOrder(Long orderId) {
+        if (orderId == null) return List.of();
+        return attachmentMapper.selectList(Wrappers.<OpsBusinessAttachment>lambdaQuery()
+                .eq(OpsBusinessAttachment::getOrderId, orderId)
+                .eq(OpsBusinessAttachment::getDeleteFlag, 0)
+                .orderByAsc(OpsBusinessAttachment::getId));
+    }
+
+    @Override
+    public void unbindFromOrder(Long orderId, List<Long> ids) {
+        if (orderId == null || ids == null || ids.isEmpty()) return;
+        attachmentMapper.update(null, Wrappers.<OpsBusinessAttachment>lambdaUpdate()
+                .eq(OpsBusinessAttachment::getOrderId, orderId)
+                .in(OpsBusinessAttachment::getId, ids)
+                .set(OpsBusinessAttachment::getOrderId, null));
     }
 
     @Override
@@ -341,7 +384,8 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
     }
 
     private static boolean allowedExtension(String type, String ext) {
-        if (OpsBusinessAttachment.TYPE_CONTRACT.equals(type)) {
+        if (OpsBusinessAttachment.TYPE_CONTRACT.equals(type)
+                || OpsBusinessAttachment.TYPE_REFUND.equals(type)) {
             return IMAGE_EXTS.contains(ext) || "pdf".equals(ext);
         }
         return IMAGE_EXTS.contains(ext);
@@ -351,6 +395,7 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
         return switch (type) {
             case OpsBusinessAttachment.TYPE_PAYMENT -> "请上传支付凭证（银行或微信支付凭证）";
             case OpsBusinessAttachment.TYPE_CONTRACT -> "请上传合同附件";
+            case OpsBusinessAttachment.TYPE_REFUND -> "请上传退款补充附件";
             default -> "请上传收据图片";
         };
     }
@@ -359,6 +404,7 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
         return switch (type) {
             case OpsBusinessAttachment.TYPE_PAYMENT -> "支付凭证";
             case OpsBusinessAttachment.TYPE_CONTRACT -> "合同附件";
+            case OpsBusinessAttachment.TYPE_REFUND -> "退款补充附件";
             default -> "收据图片";
         };
     }

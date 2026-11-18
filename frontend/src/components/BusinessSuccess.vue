@@ -3,8 +3,10 @@
     <view class="icon-wrap">
       <view class="success-icon"><text>✓</text></view>
     </view>
-    <text class="title">制单成功</text>
-    <text class="subtitle">业务订单已提交，等待后续审批流转</text>
+    <text class="title">{{ editMode ? '重新提交成功' : '制单成功' }}</text>
+    <text class="subtitle">
+      {{ editMode ? '草稿修改已提交，重新进入审批流程' : '业务订单已提交，等待后续审批流转' }}
+    </text>
 
     <view class="result-card">
       <view class="result-row">
@@ -68,7 +70,9 @@
     </view>
 
     <view class="actions">
-      <view class="btn ghost" @click="$emit('continue')"><text>继续制单</text></view>
+      <view class="btn ghost" @click="$emit('continue')">
+        <text>{{ editMode ? '继续新增' : '继续制单' }}</text>
+      </view>
       <view class="btn primary" @click="$emit('view-order')"><text>查看订单</text></view>
     </view>
   </view>
@@ -79,7 +83,8 @@ import { computed } from 'vue'
 
 /** 提交成功页：展示订单编号/金额/明细条数，支持继续制单或跳转订单列表。 */
 const props = defineProps({
-  result: { type: Object, default: () => ({}) }
+  result: { type: Object, default: () => ({}) },
+  editMode: { type: Boolean, default: false }
 })
 defineEmits(['continue', 'view-order'])
 

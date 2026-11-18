@@ -2,6 +2,7 @@ package com.aip.ops.controller;
 
 import com.aip.ops.dto.WorkflowBusinessEvent;
 import com.aip.ops.service.BusinessOrderFlowActionService;
+import com.aip.ops.service.BusinessOrderVoidFlowActionService;
 import com.aip.ops.service.BusinessOrderWorkflowService;
 import com.aip.sdk.result.R;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ import java.util.Map;
 public class InternalWorkflowController {
 
     private final BusinessOrderFlowActionService actionService;
+    private final BusinessOrderVoidFlowActionService voidActionService;
 
     @Value("${platform.internal-token:}")
     private String internalToken;
@@ -35,10 +37,15 @@ public class InternalWorkflowController {
             log.warn("工作流业务回调：X-Internal-Token 校验失败");
             return R.forbidden();
         }
-        if (!BusinessOrderWorkflowService.BUSINESS_TYPE.equals(event.getBusinessType())) {
+        if (!BusinessOrderWorkflowService.BUSINESS_TYPE.equals(event.getBusinessType())
+                && !BusinessOrderWorkflowService.BUSINESS_TYPE_VOID.equals(
+                        event.getBusinessType())) {
             return R.fail("不支持的业务类型：" + event.getBusinessType());
         }
-        Map<String, Object> result = actionService.handle(event);
+        Map<String, Object> result = BusinessOrderWorkflowService.BUSINESS_TYPE_VOID.equals(
+                event.getBusinessType())
+                ? voidActionService.handle(event)
+                : actionService.handle(event);
         return R.ok(result);
     }
 
