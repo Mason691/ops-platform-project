@@ -2,6 +2,15 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-18（凭证/OCR 合并 main + 修复生产 H5 版本错配）
+
+- **合并**：`merge/business-voucher-ocr` 快进合并到 `main`（`801dfff..bdc713f`），包含支付/凭证信息拆分、收据号 OCR、支付凭证与合同附件必填、业务员角色、财务核对文本域修复。`origin/main` 未推送（等确认）。
+- **生产错配（已修复）**：生产 ops 后端 12:10 已切换为凭证必填版本，但 ops H5 于 14:13 从 main 系重发，回退为旧 4 步流程（入口 `index-CHxgGm0W.js`，页面 chunk `pages-employee-business-data-new.BdLTzf9v.js`，`凭证信息/支付凭证/合同附件` 均为 0），导致线上新增业务订单提交会被后端拒绝。
+- **重新发布（14:57）**：本地 `npm run build:h5`（入口 `index-RdzOIOnr.js`，页面 chunk `pages-employee-business-data-new.DJPL4nCG.js`，128 assets）；备份 `backups/html-ops-pre-voucher-20261118_145739.tgz`（322K）；清空 assets 后 rsync 全量覆盖；`boss-ops-nginx` 配置检查通过并 reload。
+- **验证**：`/ops/` 200、title=金地美家；新入口/页面 chunk 200，旧入口/旧 chunk 404；页面 chunk 含「凭证信息/支付凭证/合同附件/正在识别收据号」，「收款凭证」为 0；入口+页面引用的 125 个资源全部 200；`jweixin-1.6.0.js` 200（12938B）；ops 后端 `actuator/health` UP。
+- **后端/数据库未变**：运行中 JAR（12:10，sha256 `70da7d8d…`）已含 `ReceiptOcrService`/`BusinessAttachmentService`/`ReceiptNoParser`；`mall_db` 已有 3 个凭证列与 `ops_business_attachment` 表（4 条记录，均未绑定）。
+- **未执行**：微信真机 E2E（上传收据→OCR→手改→重传、支付凭证/合同附件预览与提交落库）；`origin/main` 推送。
+
 ## 2026-11-18（任务处理：修复财务核对不通过原因/处理意见无法录入）
 
 - **根因**：`App.vue` 全局 `uni-input,uni-textarea{height:auto!important;min-height:auto!important}` 会压塌 H5 `uni-textarea` 宿主高度，内层绝对定位 textarea 高度为 0，点击无法聚焦。其他页面均已用 `!important` 高度规避，`flow-task` 的 `.textarea` 与 `RejectPopup` 的 `.reject-input` 漏加。
