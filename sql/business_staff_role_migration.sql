@@ -10,10 +10,17 @@
 --
 -- 执行：DBA / CI 对底座库执行；幂等，可重复执行（重复执行会把默认工作台
 --       权限补回业务员角色，不会重复建角色/绑定员工）。
+-- 时机：建议在平台后端重启前执行（重启会清空 PermissionLoader 本地缓存），
+--       或执行后重启平台；员工仍需重新登录/切换组织刷新 JWT 内嵌权限。
+-- 客户端：必须带 --default-character-set=utf8mb4（脚本内已 SET NAMES）。
 -- 注意：sys_corp_user_role 没有 role_code 列，角色编码写入 remark='salesperson'。
 -- =====================================================================
 
 USE ai_platform;
+
+-- docker exec mysql 客户端默认 latin1（本项目已知陷阱）：显式声明连接字符集，
+-- 否则「业务员」/描述会双重编码，Java 侧按名称匹配不到。
+SET NAMES utf8mb4;
 
 -- ── 1. 为每个城市合伙人组织创建业务员角色（幂等）────────────────────
 INSERT INTO sys_corp_user_role
@@ -60,6 +67,19 @@ WHERE r.delete_flag = 0
       'h5:biz-order:balance-receive'
   );
 
+-- ── 2.1 强制移除疑似误授予的「已核对业务」权限（幂等）──────────────
+-- 若 SCM 菜单种子（doc/pur_order_approval_menu.sql）先于本脚本执行，
+-- 存量 2095 可能已授予业务员角色；这里统一收回，保证角色基线。
+DELETE crm FROM sys_corp_user_role_menu crm
+JOIN sys_corp_user_role r ON r.id = crm.corp_role_id
+JOIN sys_corp c ON c.id = r.corp_id
+JOIN sys_menu m ON m.id = crm.menu_id
+WHERE r.delete_flag = 0
+  AND r.role_name = '业务员'
+  AND c.delete_flag = 0
+  AND c.org_role_id = 5
+  AND m.permission_code = 'scm:pur-order:h5:create';
+
 -- ── 3. 存量员工全量绑定业务员角色（幂等）──────────────────────────
 -- 只绑定在职任职（sys_user_corp.status = 1），已离职/停用关系不补；
 -- 含已另有部长/财务/派工员等角色的员工（多角色权限取并集）。
@@ -94,6 +114,17 @@ SELECT '业务员角色菜单数' AS item,COUNT(*) AS cnt FROM (
   WHERE r.delete_flag = 0 AND r.role_name = '业务员'
     AND c.delete_flag = 0 AND c.org_role_id = 5
 ) t;
+
+SELECT '业务员角色仍持有已核对业务权限的数量' AS item, COUNT(*) AS cnt
+FROM sys_corp_user_role r
+JOIN sys_corp_user_role_menu crm ON crm.corp_role_id = r.id
+JOIN sys_menu m ON m.id = crm.menu_id
+JOIN sys_corp c ON c.id = r.corp_id
+WHERE r.delete_flag = 0
+  AND r.role_name = '业务员'
+  AND c.delete_flag = 0
+  AND c.org_role_id = 5
+  AND m.permission_code = 'scm:pur-order:h5:create';
 
 SELECT '未绑定业务员角色的在职员工数' AS item, COUNT(*) AS cnt
 FROM sys_user_corp uc
