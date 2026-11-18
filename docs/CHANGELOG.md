@@ -2,6 +2,14 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-18（任务处理：修复财务核对不通过原因/处理意见无法录入）
+
+- **根因**：`App.vue` 全局 `uni-input,uni-textarea{height:auto!important;min-height:auto!important}` 会压塌 H5 `uni-textarea` 宿主高度，内层绝对定位 textarea 高度为 0，点击无法聚焦。其他页面均已用 `!important` 高度规避，`flow-task` 的 `.textarea` 与 `RejectPopup` 的 `.reject-input` 漏加。
+- **修复**：`flow-task` 文本域显式 `height/min-height:150rpx!important`（覆盖核对备注、处理意见及施工/验收等全部文本域）；`RejectPopup` 驳回意见框改为 `height/min-height:320rpx!important`。
+- **验证**：`npm run build:h5`、`npm run build:mp-weixin` 通过；产物 CSS 确认 `.textarea`=`height:4.6875rem!important`（150rpx）、`.reject-input`=`height:10rem!important`（320rpx）。
+- **生产部署（14:26）**：随 ops H5 重发上线（同批补发业务员权限 UI，见业务员 PR）；公网 `/ops/` 200。
+- **未执行**：微信真机聚焦/录入 E2E。
+
 ## 2026-11-18（城市合伙人「业务员」角色生产部署）
 
 - **数据库迁移（11:26）**：执行 `sql/business_staff_role_migration.sql`；9 个城市合伙人组织（含 3 个停用）/ 9 个业务员角色 / 90 条默认菜单 / 174 名在职员工绑定；自检：已核对业务权限持有 0、未绑定员工 0。迁移前备份：本机 `ai_platform_20261118_112517.sql.gz`、`mall_db_20261118_112517.sql.gz`。
