@@ -7,19 +7,22 @@
     <text class="hint">
       派工成功后自动生成物料领用草稿，员工补充仓库、批次后提交审批；
       不指定物料则不生成领用单（派工不扣库存、不发起审批）。
+      数量支持 －/＋ 步进、长按连续调整，也可点击数字直接输入。
     </text>
 
     <view v-if="!rows.length" class="dm-empty">
       <text>暂未指定物料</text>
     </view>
-    <view v-for="(row, idx) in rows" :key="row.materialNumber" class="dm-row">
+    <view v-for="(row, idx) in rows" :id="'dm-qty-' + row.materialNumber"
+          :key="row.materialNumber" class="dm-row">
       <view class="dm-info">
         <text class="dm-name">{{ labelOf(row) }}</text>
         <text v-if="row.unitName" class="dm-unit">单位：{{ row.unitName }}</text>
       </view>
       <view class="dm-actions">
-        <input v-model="row.qty" type="digit" class="dm-qty" placeholder="数量"
-               @blur="normalizeQty(row)" />
+        <QuantityStepper v-model="row.qty" :min="1" :max="9999" compact
+                         :focus-id="'dm-qty-' + row.materialNumber"
+                         @blur="normalizeQty(row)" />
         <text class="dm-remove" @click="remove(idx)">删除</text>
       </view>
     </view>
@@ -53,6 +56,7 @@
 import { computed, ref, watch } from 'vue'
 import { api } from '@/api/index'
 import { formatMaterialLabel } from '@/utils/materialForm'
+import QuantityStepper from '@/components/QuantityStepper.vue'
 
 /**
  * 派工出库物料清单（需求预填）。
@@ -95,7 +99,9 @@ async function openPicker() {
   if (options.value.length || loading.value) return
   loading.value = true
   try {
-    options.value = (await api.scmMaterialPickMaterialOptions()) || []
+    const list = (await api.scmMaterialPickMaterialOptions()) || []
+    // 接口字段为 materialNumber；formatMaterialLabel 统一读 number，补齐后列表可显示编号
+    options.value = list.map(m => ({ ...m, number: m.materialNumber || m.number }))
   } catch (e) {
     uni.showToast({ title: (e && e.msg) || '物料加载失败', icon: 'none' })
   } finally {
@@ -124,9 +130,18 @@ function remove(index) {
   rows.value = next
 }
 
+/** 个/件/台等计件单位不允许小数；空值、负数、非法输入回退到 1 并提示。 */
+const PIECE_UNITS = ['个', '件', '台', '套', '把', '张', '块', '只', '支']
+
 function normalizeQty(row) {
   const qty = Number(row.qty)
-  if (!Number.isFinite(qty) || qty <= 0) row.qty = '1'
+  const piece = PIECE_UNITS.includes(String(row.unitName || '').trim())
+  if (!Number.isFinite(qty) || qty <= 0 || (piece && !Number.isInteger(qty))) {
+    row.qty = '1'
+    uni.showToast({ title: '数量已调整为 1', icon: 'none' })
+  } else {
+    row.qty = String(qty)
+  }
 }
 
 watch(pickerVisible, visible => { if (!visible) keyword.value = '' })
@@ -143,8 +158,7 @@ watch(pickerVisible, visible => { if (!visible) keyword.value = '' })
 .dm-name { font-size: 26rpx; color: #1D2129; word-break: break-all; }
 .dm-unit { font-size: 22rpx; color: #86909C; }
 .dm-actions { display: flex; align-items: center; gap: 12rpx; flex-shrink: 0; }
-.dm-qty { width: 120rpx; height: 60rpx; text-align: right; border: 1rpx solid #E5E6EB; border-radius: 8rpx; padding: 0 10rpx; font-size: 26rpx; background: #fff; }
-.dm-remove { font-size: 24rpx; color: #F53F3F; }
+.dm-remove { font-size: 24rpx; color: #F53F3F; padding: 8rpx 4rpx; }
 .dm-add { margin-top: 16rpx; height: 72rpx; border: 1rpx dashed #FFB99A; border-radius: 12rpx; display: flex; align-items: center; justify-content: center; font-size: 26rpx; color: #FF6B35; background: #FFF7F3; }
 .dm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: flex-end; z-index: 80; }
 .dm-sheet { width: 100%; max-height: 78vh; background: #fff; border-radius: 24rpx 24rpx 0 0; padding: 24rpx; display: flex; flex-direction: column; }
