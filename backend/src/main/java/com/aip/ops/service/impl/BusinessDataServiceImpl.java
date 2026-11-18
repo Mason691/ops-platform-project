@@ -732,25 +732,40 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
-    public List<Map<String, Object>> flowAssignees() {
+    public List<Map<String, Object>> flowAssignees(Long orderId) {
+        if (orderId != null) {
+            OpsBusinessOrder order = orderMapper.selectById(orderId);
+            if (order == null || Integer.valueOf(1).equals(order.getDeleteFlag())) {
+                throw com.aip.sdk.exception.BusinessException.notFound("业务订单不存在");
+            }
+            requireVisibleOrder(dataScopeService.getVisibleCorpIds(), order.getCorpId());
+            Long orderCorpId = order.getCorpId();
+            if (orderCorpId == null || orderCorpId <= 0) return List.of();
+            return queryFlowAssignees(Set.of(orderCorpId));
+        }
         Set<Long> visible = dataScopeService.getVisibleCorpIds();
         if (noVisibleCorp(visible)) {
             return List.of();
         }
+        return queryFlowAssignees(visible);
+    }
+
+    /** 可选员工 SQL：corpIds=null 表示超管全量；空集合已在调用方拦截。 */
+    private List<Map<String, Object>> queryFlowAssignees(Set<Long> corpIds) {
         StringBuilder sql = new StringBuilder(
                 "SELECT u.id AS userId, COALESCE(u.real_name, u.username) AS name, "
                         + "u.username AS phone, u.corp_id AS corpId "
                         + "FROM ai_platform.sys_user u WHERE u.status = 1 AND u.delete_flag = 0");
         List<Object> args = new ArrayList<>();
-        if (visible != null && !visible.isEmpty()) {
+        if (corpIds != null && !corpIds.isEmpty()) {
             sql.append(" AND (u.corp_id IN (")
-                    .append(String.join(",", Collections.nCopies(visible.size(), "?")))
+                    .append(String.join(",", Collections.nCopies(corpIds.size(), "?")))
                     .append(") OR EXISTS (SELECT 1 FROM ai_platform.sys_user_corp uc "
                             + "WHERE uc.user_id = u.id AND uc.corp_id IN (")
-                    .append(String.join(",", Collections.nCopies(visible.size(), "?")))
+                    .append(String.join(",", Collections.nCopies(corpIds.size(), "?")))
                     .append(") AND uc.status = 1 AND uc.delete_flag = 0))");
-            args.addAll(visible);
-            args.addAll(visible);
+            args.addAll(corpIds);
+            args.addAll(corpIds);
         }
         sql.append(" ORDER BY u.corp_id, u.id LIMIT 500");
         try {

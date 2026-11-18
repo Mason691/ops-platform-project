@@ -219,10 +219,10 @@ public class BusinessDataController {
         return R.ok(bizStatusService.options());
     }
 
-    /** 工作流派工节点可选员工（可见组织范围内）。 */
+    /** 工作流派工节点可选员工：传 orderId 时按订单归属组织取人；不传沿用当前可见组织范围。 */
     @GetMapping("/flow/assignees")
-    public R<?> flowAssignees() {
-        return R.ok(service.flowAssignees());
+    public R<?> flowAssignees(@RequestParam(value = "orderId", required = false) Long orderId) {
+        return R.ok(service.flowAssignees(orderId));
     }
 
     /**

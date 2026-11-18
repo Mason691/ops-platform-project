@@ -33,7 +33,7 @@ public interface BusinessDataService {
     List<Map<String, Object>> dispatchEligibility(List<Long> orderIds);
 
     /** 工作流派工节点可选的上门员工（可见组织范围内的在职员工）。 */
-    java.util.List<Map<String, Object>> flowAssignees();
+    java.util.List<Map<String, Object>> flowAssignees(Long orderId);
     List<String> getBatches();
     /** 导入阶段一（异步工作线程）：文件校验 + 品牌型号匹配解析，结果 JSON（fail/confirm/ready）写入任务 progressMsg */
     void runAsyncCheck(SysImportTask task);

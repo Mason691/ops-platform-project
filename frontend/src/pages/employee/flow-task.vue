@@ -497,7 +497,7 @@ async function loadData() {
     form.fundDynamicRows = r.fundDynamicRows == null ? null : r.fundDynamicRows
     form.isReceived = r.isReceived || '是'
     if (actionType.value === 'OPS_DISPATCH_OUTBOUND') {
-      try { assignees.value = await api.businessFlowAssignees() || [] } catch (_) { assignees.value = [] }
+      try { assignees.value = await api.businessFlowAssignees(order.value.orderId) || [] } catch (_) { assignees.value = [] }
       selectedKeys.value = dispatchProducts.value.map(p => p.productKey)
     }
     loadCategoryDict()

@@ -326,7 +326,7 @@ export const api = {
   }),
   // 业务订单详情 / 派工可选员工 / 财务暂缓（ops，员工 JWT + 数据范围）
   businessOrderDetail: (orderId) => request({url:'/api/ops/admin/business-data/orders/' + orderId}),
-  businessFlowAssignees: () => request({url:'/api/ops/admin/business-data/flow/assignees'}),
+  businessFlowAssignees: (orderId) => request({url:'/api/ops/admin/business-data/flow/assignees', data: orderId ? {orderId} : undefined}),
   businessHoldFinance: (orderId, data) => request({url:'/api/ops/admin/business-data/orders/' + orderId + '/flow/hold', method:'POST', data}),
   // 平台公开字典
   getDictData: (typeCode) => request({url:'/api/dict/data', data:{typeCode}}),
