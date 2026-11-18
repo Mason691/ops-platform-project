@@ -1,0 +1,105 @@
+# 员工制单「支付信息 / 凭证信息」拆分与收据号 OCR — 规格说明
+
+> 状态：✅ 代码已实现（2026-11-18）；生产迁移/部署/微信真机待执行
+> 范围：ops 公众号 H5 员工制单向导 + ops 后端附件/OCR + mall_db 数据模型
+
+## 一、功能概述
+
+员工工作台「新增业务订单」由 4 步调整为 5 步：
+
+```
+基础信息 → 商品明细 → 支付信息 → 凭证信息 → 确认提交
+```
+
+- **支付信息**：支付方式（二维码/现金/转账）、市场收款日期、备注；付款方式（全款/定金）与特批/提成仍按现有商品行模型在「商品明细」维护，本步只读提示。
+- **凭证信息**：收据图片（可选，用于 OCR）→ 收据号（必填，可 OCR 回填/手改）→ 支付凭证（必填，1~3 张）→ 合同附件（必填，1~5 份，图片/PDF）。
+- **确认提交**：展示支付信息与凭证信息汇总，支持跳转修改；缺失项在待补充事项卡片就地补填。
+
+## 二、用户故事
+
+1. 员工在凭证信息步骤上传收据图片，系统自动识别收据号并提示核对；识别失败可手填，不阻塞继续填写。
+2. 收据号必填；人工修改后，重新上传图片时系统弹窗询问是否用新识别结果覆盖。
+3. 支付凭证未上传时红色必填提示生效，无法进入确认/提交；支付凭证可预览、删除重传。
+4. 合同附件支持 JPG/PNG/PDF，可预览/下载、删除重传；未上传无法提交。
+5. 确认提交页完整展示支付信息与凭证信息，缺失项可就地补填后提交。
+6. 提交后订单头保存收据图片、收据号、支付凭证、合同附件；附件表记录上传人/时间/原文件名，订单可追溯。
+
+## 三、验收标准
+
+| # | 验收项 | 实现 |
+|---|--------|------|
+| 1 | 步骤条为「基础信息 → 商品明细 → 支付信息 → 凭证信息 → 确认提交」 | 5 步 STEPS + 向导组件 |
+| 2 | 原收款信息中的收据号/收款凭证不在支付信息出现 | 已移入凭证信息 |
+| 3 | 上传收据图片自动识别 `NO.` 后 7 位数字并回填 | 后端 Tesseract + `ReceiptNoParser` |
+| 4 | 人工修改后不被识别结果静默覆盖 | 收据号为空/仍为上次识别值才自动填；否则弹窗确认 |
+| 5 | 识别失败/超时提示手填，收据号仍必填 | OCR 失败返回 `receiptNo=null` + 提示；前端可重试 |
+| 6 | 支付凭证必填、1~3 张、可预览/删除 | 前端校验 + 后端 `requireOwnedList` |
+| 7 | 合同附件必填、1~5 份、JPG/PNG/PDF、≤10MB | 同上 |
+| 8 | 确认页展示支付信息/凭证信息，可跳转修改 | `BusinessStepConfirm` 两个汇总卡 |
+| 9 | 提交后数据正确落库、文件可访问且为压缩版本 | 订单头 3 字段 + `ops_business_attachment` |
+| 10 | 回归：以旧换新/支付方式/多商品多经办人/批次订单号/工作流不变 | 未改动相关逻辑；`voucher_url` 兼容写支付凭证 |
+
+## 四、交互与校验
+
+### 4.1 收据号 OCR
+
+- 规则：定位「入账日期」后的 `NO.`（兼容 `N0`、全角、数字间空格），取其后 7 位数字；6/8 位返回候选并提示「识别结果可能不准确」；多候选取入账日期后的第一个。
+- 后端：`POST /api/ops/employee/business-data/receipt-ocr`（员工 JWT），入参 `{attachmentId}`；服务端 `tesseract -l chi_sim+eng --psm 6`，15s 超时；`chi_sim` 不可用时降级 `eng`；二进制缺失/失败/超时均返回手填提示，不阻塞。
+- 前端：上传成功自动触发；加载态「正在识别收据号…」；失败可「重新识别」；收据号可手改，修改后旧识别值失效。
+- 覆盖策略：收据号为空或等于上次自动识别值 → 自动填入；用户已手改 → 弹窗询问是否覆盖（默认保留）。
+
+### 4.2 附件
+
+| 类型 | 数量 | 格式 | 单文件 | 压缩 |
+|------|------|------|--------|------|
+| 收据图片 RECEIPT | 0~1（可选） | JPG/PNG | ≤10MB | 服务端 JPEG 最长边 2000px / 0.85 |
+| 支付凭证 PAYMENT | 1~3（必填） | JPG/PNG | ≤10MB | 同上 |
+| 合同附件 CONTRACT | 1~5（必填） | JPG/PNG/PDF | ≤10MB | 图片同上；PDF 原样 |
+
+- 上传接口：`POST /api/ops/employee/business-data/attachments?fileType=RECEIPT|PAYMENT|CONTRACT`（multipart `file`），仅员工 JWT。
+- 上传先落 `ops_business_attachment`（order_id 为空），提交时按 corp + 类型 + 未绑定校验并回填 order_id。
+- 图片服务端统一重编码 JPEG；收据 OCR 与展示/存档使用同一份高质量压缩图。
+
+### 4.3 提交校验
+
+- 收据号非空 + 长度/字符集 + 同组织同客户查重（后端二次校验）。
+- 支付凭证 1~3 张、合同附件 1~5 份，均需属于当前组织且未绑定其他订单。
+- 缺项返回具体提示（如「请上传支付凭证（银行或微信支付凭证）」）。
+
+## 五、数据模型与接口
+
+### 5.1 数据库（mall_db）
+
+- `ops_business_order` 新增：
+  - `receipt_image_url VARCHAR(1000)` 收据图片 URL
+  - `payment_voucher_urls VARCHAR(3000)` 支付凭证 URL 列表（逗号分隔）
+  - `contract_attachment_urls VARCHAR(3000)` 合同附件 URL 列表（逗号分隔）
+- 新表 `ops_business_attachment`：corp_id / order_id / file_type / file_name / file_url / file_size / content_type / uploader_user_id / uploader_name / upload_time + 审计字段。
+- 迁移：`sql/migrate_business_order_vouchers.sql`（幂等，须先于新 JAR 执行）。
+
+### 5.2 接口
+
+- `POST /api/ops/employee/business-data/attachments` 上传附件，返回 `{id,fileUrl,fileName,fileSize,contentType,fileType}`。
+- `POST /api/ops/employee/business-data/receipt-ocr` 识别收据号，返回 `{receiptNo,exact,multiple,confidence,message}`（confidence=HIGH/MEDIUM/LOW）。
+- `POST /api/ops/employee/business-data/manual` 新增 `receiptImageId` / `paymentVoucherIds` / `contractAttachmentIds`；移除旧 `voucherUrls` 入参（旧客户端需同步升级）。
+- 订单详情增加 `receiptImageUrl` / `paymentVoucherUrls` / `contractAttachmentUrls` / `attachments`。
+
+## 六、安全
+
+- 上传/OCR 仅员工 JWT；`JwtTokenInspector` 拒绝会员 SSO 令牌。
+- 附件归属按 corp + 类型校验；已绑定其他订单的附件拒绝复用。
+- 上传路径固定 `ops/business/{corpId}/{type}/{date}/`；OCR 解析本地路径时做前缀 + 规范路径校验，防目录穿越。
+- 文件类型二次校验：图片解码 + 像素上限（防压缩炸弹）；PDF `%PDF-` 魔数；大小上限 10MB。
+- URL 相对路径 `/uploads/ops/...`，不暴露服务器文件路径。
+
+## 七、与平台 AI 的关系
+
+平台现有 AI 服务（DeepSeek 文本对话 / ASR / TTS）没有视觉/OCR 能力；按需求允许自行安装组件，采用服务端 Tesseract OCR。识别接口与 OCR 实现隔离，后续平台提供视觉服务时可替换 `ReceiptOcrService` 实现，不影响前端契约。
+
+## 八、已知限制 / 部署注意
+
+- 需重建 ops 镜像安装 `tesseract-ocr` + `tesseract-ocr-chi-sim`（仅换 JAR 的 overlay 发布不会安装 OCR 组件）。
+- 迁移脚本必须先于新 JAR 执行；后端与 ops H5 需同一发布窗口切换（旧客户端不再传新附件 ID）。
+- 旧草稿中的 `voucherUrls` 不会自动迁移为附件 ID，恢复后需重新上传支付凭证/合同附件（收据号保留）。
+- 确认页已展示支付信息与凭证信息；付款方式/定金与特批/提成仍按现有商品行模型在商品明细维护。
+- 项目无自动化测试框架；OCR 解析规则以独立解析器测试样例验证。

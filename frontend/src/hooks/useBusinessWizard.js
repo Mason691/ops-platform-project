@@ -20,7 +20,7 @@ function emptyMeta() {
 }
 
 /**
- * 员工手工新增业务 — 4 步向导状态机。
+ * 员工手工新增业务 — 5 步向导状态机。
  *
  * 校验策略：下一步只拦截当前步骤；确认页执行全量校验，缺失项在
  * errors 中实时维护，供“待补充事项”卡片就地渲染与收缩。
@@ -62,7 +62,7 @@ export function useBusinessWizard() {
     if (normalizePhone(form.customerPhone) !== memberPhone) {
       memberStatus.value = 'idle'
     }
-    if (step.value === 3) {
+    if (step.value === 4) {
       // 防抖刷新：输入过程中不立即重算，避免“刚输入一个字校验通过→
       // 待补充卡片被卸载→后续字符丢失”的焦点中断问题。
       scheduleConfirmRefresh()
@@ -224,7 +224,7 @@ export function useBusinessWizard() {
     clearBanner()
     step.value = Math.min(step.value + 1, steps.length - 1)
     maxVisited.value = Math.max(maxVisited.value, step.value)
-    if (step.value === 3) refreshConfirmErrors()
+    if (step.value === 4) refreshConfirmErrors()
     saveDraft()
     scrollTop()
     return true
@@ -389,7 +389,11 @@ export function useBusinessWizard() {
       })),
       receiptDate: form.receiptDate,
       receiptNo: String(form.receiptNo || '').trim() || null,
-      voucherUrls: form.voucherUrls || [],
+      receiptImageId: form.receiptImage ? form.receiptImage.id : null,
+      paymentVoucherIds: (form.paymentVouchers || [])
+        .map(file => file && file.id).filter(Boolean),
+      contractAttachmentIds: (form.contractAttachments || [])
+        .map(file => file && file.id).filter(Boolean),
       remark: String(form.remark || '').trim()
     }
   }
@@ -580,7 +584,9 @@ export function useBusinessWizard() {
     const uniqueIds = [...new Set(restoredIds)].map(Number)
     if (!uniqueIds.length && meta.employeeUserId) uniqueIds.push(meta.employeeUserId)
     form.agentUserIds = uniqueIds
-    if (!Array.isArray(form.voucherUrls)) form.voucherUrls = []
+    if (!form.receiptImage) form.receiptImage = null
+    if (!Array.isArray(form.paymentVouchers)) form.paymentVouchers = []
+    if (!Array.isArray(form.contractAttachments)) form.contractAttachments = []
     if (!form.paymentMethod) form.paymentMethod = 'QR'
     if (!form.paymentType) form.paymentType = 'FULL'
     if (form.depositAmount == null) form.depositAmount = ''
@@ -589,7 +595,7 @@ export function useBusinessWizard() {
     delete form.receiptNoCheck
     step.value = Math.min(Math.max(Number(draft.step) || 0, 0), steps.length - 1)
     maxVisited.value = step.value
-    if (step.value === 3) refreshConfirmErrors()
+    if (step.value === 4) refreshConfirmErrors()
     showBanner('已恢复上次填写', 'success')
   }
 

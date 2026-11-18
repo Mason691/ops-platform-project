@@ -2,6 +2,19 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-18（员工制单：支付信息/凭证信息拆分 + 收据号 OCR + 合同附件）
+
+- **流程**：员工 H5「新增业务订单」4 步 → 5 步：基础信息 → 商品明细 → 支付信息 → 凭证信息 → 确认提交。原收款信息中的收据号/收款凭证移入凭证信息；支付信息保留支付方式、市场收款日期、备注。
+- **凭证信息**：收据图片（可选）→ OCR 识别收据号；收据号必填；支付凭证必填 1~3 张；合同附件必填 1~5 份（JPG/PNG/PDF ≤10MB）。
+- **OCR**：服务端 Tesseract（chi_sim+eng，15s 超时，失败降级手填），规则为「入账日期」后 NO. 的 7 位数字；人工修改后重新上传时弹窗确认是否覆盖。
+- **后端**：新增 `BusinessAttachmentService` / `ReceiptOcrService` / `ReceiptNoParser`；`EmployeeBusinessEntryServiceImpl` 强制校验收据号/支付凭证/合同附件；订单头新增 `receipt_image_url` / `payment_voucher_urls` / `contract_attachment_urls`；新表 `ops_business_attachment` 记录上传人/时间/原文件名；订单详情返回凭证字段与附件。
+- **存储**：图片服务端重编码 JPEG（最长边 2000px/0.85），PDF 原样；URL `/uploads/ops/business/{corpId}/{type}/...`。
+- **前端**：新增 `BusinessAttachmentUploader`（图片/PDF 上传/预览/删除）、`BusinessStepPayment`（原 Receipt 改造）、`BusinessStepVoucher`；确认页拆分支付/凭证汇总；删除 `BusinessStepReceipt`/`BusinessVoucherUploader`。
+- **迁移**：`sql/migrate_business_order_vouchers.sql`（mall_db，幂等，须先于新 JAR）。
+- **规格**：`Specs/员工制单凭证信息与收据OCR-规格说明.md`。
+- **验证**：ops 后端 `mvn -o compile` 通过；H5/小程序构建通过；`ReceiptNoParser` 样例 9 项通过（含全角/空格/6-8 位/多候选）；迁移脚本在生产 MySQL 临时库试运行通过（3 个订单头列 + `ops_business_attachment` 表，验证后 DROP）。OCR 真机识别、生产迁移/部署待执行。
+- **注意**：需重建 ops 镜像安装 tesseract；后端与 H5 同窗口发布；旧草稿需重新上传附件。
+
 ## 2026-11-18（工作台：工作业务日志改为常用功能入口）
 
 - **调整**：按业务要求，工作业务日志不再在首页单独展示摘要卡片，改为「常用功能」中的菜单入口（📝 工作业务日志 → `/pages/employee/work-log`）。

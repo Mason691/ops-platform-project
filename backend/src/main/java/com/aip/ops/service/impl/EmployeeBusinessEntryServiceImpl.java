@@ -7,6 +7,7 @@ import com.aip.ops.component.OrderNoGenerator;
 import com.aip.ops.dto.BalanceReceiveRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.dto.ProductPriceDtos;
+import com.aip.ops.entity.OpsBusinessAttachment;
 import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsBusinessOrder;
 import com.aip.ops.entity.OpsBusinessOrderTradeIn;
@@ -14,6 +15,7 @@ import com.aip.ops.entity.OpsBusinessSpecialFile;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsBusinessOrderTradeInMapper;
 import com.aip.ops.security.JwtTokenInspector;
+import com.aip.ops.service.BusinessAttachmentService;
 import com.aip.ops.service.BusinessOrderService;
 import com.aip.ops.service.BusinessOrderWorkflowService;
 import com.aip.ops.service.BusinessSpecialFileService;
@@ -62,7 +64,6 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     private static final String REPORTED_STATUS = "已上报集团";
     private static final String INITIAL_CALC_STATUS = "未计算";
-    private static final int MAX_VOUCHERS = 3;
     /** 单笔业务最多产品行/经办人数，防止超大批量录入拖垮事务 */
     private static final int MAX_PRODUCTS = 50;
     private static final int MAX_AGENTS = 20;
@@ -98,6 +99,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private final BusinessOrderWorkflowService workflowService;
     private final ProductPriceService productPriceService;
     private final BusinessSpecialFileService specialFileService;
+    private final BusinessAttachmentService attachmentService;
 
     private TransactionTemplate transactionTemplate;
 
@@ -624,12 +626,13 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     @Override
     public Map<String, Object> checkReceiptNo(String receiptNo, String customer) {
         EmployeeIdentity identity = assertEmployee();
-        String normalized = normalizeReceiptNo(receiptNo);
         Map<String, Object> result = new LinkedHashMap<>();
-        if (normalized == null) {
+        // 收据号在提交时必填；查重接口对空值保持“无冲突”以兼容失焦调用
+        if (str(receiptNo).isEmpty()) {
             result.put("duplicate", false);
             return result;
         }
+        String normalized = normalizeReceiptNo(receiptNo);
         String conflict = findReceiptConflict(identity.corpId(), normalized, str(customer));
         result.put("duplicate", conflict != null);
         if (conflict != null) result.put("message", conflict);
@@ -659,6 +662,10 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 null, null, null, v.voucherUrl(),
                 totalAmount, INITIAL_CALC_STATUS, v.remark(), v.paymentMethod(),
                 v.paymentType(), v.depositAmount());
+        // 凭证信息落订单头，并把附件回填 order_id（同一事务内完成）
+        orderService.updateVoucherAttachments(order.getId(), v.receiptImageUrl(),
+                v.paymentVoucherUrls(), v.contractAttachmentUrls());
+        attachmentService.bindToOrder(v.attachmentIds(), order.getId());
         // 多经办人按「产品 × 经办人」拆行：每行独立 agent_phone 归属，
         // 提成计算沿用「同收据号+客户+品类+型号」组内均分规则。
         for (ValidatedProduct product : v.products()) {
@@ -943,12 +950,27 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         List<AgentInfo> agents = validateAgents(req.getAgentUserIds(), ctx);
         String receiptDate = normalizeDate(req.getReceiptDate());
         String receiptNo = normalizeReceiptNo(req.getReceiptNo());
-        if (receiptNo != null) {
-            // 制单阶段仅做提示性校验，真正写入仍在此处二次确认，防止绕过前端直接提交
-            assertReceiptNoAvailable(ctx.corpId(), receiptNo, customer);
-        }
+        // 收据号必填（OCR 或手填）；制单阶段仍二次查重，防止绕过前端直接提交
+        assertReceiptNoAvailable(ctx.corpId(), receiptNo, customer);
         PaymentMethod paymentMethod = PaymentMethod.normalize(req.getPaymentMethod());
-        String voucherUrl = normalizeVouchers(req.getVoucherUrls());
+        // 凭证信息：支付凭证/合同附件必填；收据图片可选（用于 OCR）
+        List<OpsBusinessAttachment> receiptImages = req.getReceiptImageId() == null
+                ? List.of()
+                : attachmentService.requireOwnedList(List.of(req.getReceiptImageId()),
+                        OpsBusinessAttachment.TYPE_RECEIPT, ctx.corpId());
+        List<OpsBusinessAttachment> paymentVouchers = attachmentService.requireOwnedList(
+                req.getPaymentVoucherIds(), OpsBusinessAttachment.TYPE_PAYMENT, ctx.corpId());
+        List<OpsBusinessAttachment> contracts = attachmentService.requireOwnedList(
+                req.getContractAttachmentIds(), OpsBusinessAttachment.TYPE_CONTRACT, ctx.corpId());
+        String receiptImageUrl = receiptImages.isEmpty() ? null : receiptImages.get(0).getFileUrl();
+        String paymentVoucherUrls = attachmentService.toUrlCsv(paymentVouchers);
+        String contractAttachmentUrls = attachmentService.toUrlCsv(contracts);
+        // 订单头 legacy voucher_url 继续写支付凭证，兼容既有列表/财务视图
+        String voucherUrl = paymentVoucherUrls;
+        List<Long> attachmentIds = new ArrayList<>();
+        if (!receiptImages.isEmpty()) attachmentIds.add(receiptImages.get(0).getId());
+        paymentVouchers.forEach(file -> attachmentIds.add(file.getId()));
+        contracts.forEach(file -> attachmentIds.add(file.getId()));
         Long communityId = req.getCommunityId();
         if (communityId != null && communityId <= 0) communityId = null;
         // 小区必填：订单需归属到具体小区，便于后续网格/台账统计
@@ -970,6 +992,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 payableAmount);
         return new Validated(phone, customer, products, agents,
                 receiptDate, receiptNo, paymentMethod.name(), voucherUrl,
+                receiptImageUrl, paymentVoucherUrls, contractAttachmentUrls, attachmentIds,
                 communityId, detailAddress, remark,
                 terms.paymentType(), terms.isFullPayment(), terms.depositAmount(),
                 terms.balanceAmount());
@@ -1010,10 +1033,10 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         return new PaymentTerms("DEPOSIT", 0, deposit, balance);
     }
 
-    /** 收据号选填：去首尾空白；空串落库为 null；非空校验长度与字符集。 */
+    /** 收据号必填：去首尾空白；空值拒绝；校验长度与字符集。 */
     private static String normalizeReceiptNo(String raw) {
         String value = str(raw);
-        if (value.isEmpty()) return null;
+        if (value.isEmpty()) throw BusinessException.of("请填写收据号");
         if (value.length() > MAX_RECEIPT_NO_LENGTH) {
             throw BusinessException.of("收据号不能超过" + MAX_RECEIPT_NO_LENGTH + "个字符");
         }
@@ -1329,29 +1352,6 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         }
     }
 
-    private String normalizeVouchers(List<String> urls) {
-        if (urls == null || urls.isEmpty()) return null;
-        List<String> cleaned = new ArrayList<>();
-        for (String url : urls) {
-            String value = str(url);
-            if (value.isEmpty()) continue;
-            if (value.contains(",") || value.length() > 500
-                    || !value.startsWith("/uploads/")) {
-                throw BusinessException.of("收款凭证地址不合法");
-            }
-            cleaned.add(value);
-        }
-        if (cleaned.isEmpty()) return null;
-        if (cleaned.size() > MAX_VOUCHERS) {
-            throw BusinessException.of("收款凭证最多上传" + MAX_VOUCHERS + "张");
-        }
-        String joined = String.join(",", cleaned);
-        if (joined.length() > 1000) {
-            throw BusinessException.of("收款凭证地址过长");
-        }
-        return joined;
-    }
-
     private static String requireText(String raw, String label) {
         return requireText(raw, label, MAX_TEXT_LENGTH);
     }
@@ -1510,7 +1510,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private record Validated(String phone, String customer,
                              List<ValidatedProduct> products, List<AgentInfo> agents,
                              String receiptDate, String receiptNo, String paymentMethod,
-                             String voucherUrl, Long communityId, String detailAddress,
+                             String voucherUrl, String receiptImageUrl,
+                             String paymentVoucherUrls, String contractAttachmentUrls,
+                             List<Long> attachmentIds, Long communityId, String detailAddress,
                              String remark, String paymentType, Integer isFullPayment,
                              BigDecimal depositAmount, BigDecimal balanceAmount) {}
 

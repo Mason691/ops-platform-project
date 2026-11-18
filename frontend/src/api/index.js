@@ -253,6 +253,7 @@ export const api = {
   employeeLookupMember: (phone) => request({url:'/api/ops/employee/business-data/manual/member',data:{phone}}),
   employeeProductPrice: (params) => request({url:'/api/ops/employee/business-data/product-price', data:params}),
   employeeCheckReceiptNo: (params) => request({url:'/api/ops/employee/business-data/receipt-no/check', data:params}),
+  employeeReceiptOcr: (data) => request({url:'/api/ops/employee/business-data/receipt-ocr', method:'POST', data}),
   employeeCreateBusiness: (data) => request({url:'/api/ops/employee/business-data/manual',method:'POST',data}),
   employeeOrderApprover: (orderId) => request({url:'/api/ops/employee/business-data/manual/' + orderId + '/approver'}),
   // 货款补录（定金支付 → 收齐余款）

@@ -4,12 +4,14 @@ import com.aip.common.annotation.OperationLog;
 import com.aip.ops.dto.BalanceReceiveRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.security.JwtTokenInspector;
+import com.aip.ops.service.BusinessAttachmentService;
 import com.aip.ops.service.BusinessDataService;
 import com.aip.ops.service.BusinessSpecialFileService;
 import com.aip.ops.service.EmployeeAuthService;
 import com.aip.ops.service.EmployeeBusinessEntryService;
 import com.aip.ops.service.EmployeeService;
 import com.aip.ops.service.ProductPriceService;
+import com.aip.ops.service.ReceiptOcrService;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.LoginUser;
@@ -52,6 +54,8 @@ public class EmployeeController {
     private final EmployeeBusinessEntryService employeeBusinessEntryService;
     private final ProductPriceService productPriceService;
     private final BusinessSpecialFileService businessSpecialFileService;
+    private final BusinessAttachmentService businessAttachmentService;
+    private final ReceiptOcrService receiptOcrService;
     private final JwtTokenInspector jwtTokenInspector;
     private final PlatformInternalClient platformInternalClient;
 
@@ -280,6 +284,29 @@ public class EmployeeController {
             return R.fail(403, "仅员工可上传特批文件");
         }
         return R.ok(businessSpecialFileService.upload(file));
+    }
+
+    /**
+     * 业务附件上传：fileType=RECEIPT（收据图片）/PAYMENT（支付凭证）/CONTRACT（合同附件）。
+     * 图片服务端压缩为 JPEG，PDF 原样保存；返回附件 ID 供提交与 OCR 引用。
+     */
+    @PostMapping("/business-data/attachments")
+    public R<?> uploadBusinessAttachment(@RequestParam("file") MultipartFile file,
+                                         @RequestParam("fileType") String fileType) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可上传业务附件");
+        }
+        return R.ok(businessAttachmentService.upload(file, fileType));
+    }
+
+    /** 收据图片 OCR：返回识别到的收据号与提示；失败时返回手填提示，不阻塞制单。 */
+    @PostMapping("/business-data/receipt-ocr")
+    public R<?> recognizeReceiptNo(@RequestBody Map<String, Long> body) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可识别收据号");
+        }
+        Long attachmentId = body == null ? null : body.get("attachmentId");
+        return R.ok(receiptOcrService.recognize(attachmentId));
     }
 
     /** 保存手工录入业务数据：组织/经办人由服务端从 JWT 派生。 */

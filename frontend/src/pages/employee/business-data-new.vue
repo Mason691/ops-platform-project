@@ -34,7 +34,8 @@
                            :querying="querying" :member-status="memberStatus"
                            @query-member="queryMember" />
         <BusinessStepProducts v-else-if="step === 1" :form="form" :meta="meta" :errors="errors" />
-        <BusinessStepReceipt v-else-if="step === 2" :form="form" :meta="meta" :errors="errors" />
+        <BusinessStepPayment v-else-if="step === 2" :form="form" :meta="meta" :errors="errors" />
+        <BusinessStepVoucher v-else-if="step === 3" :form="form" :meta="meta" :errors="errors" />
         <BusinessStepConfirm v-else :form="form" :meta="meta" :errors="errors" :missing="missing"
                              :querying="querying" :member-status="memberStatus"
                              @edit="goStep" @query-member="queryMember" />
@@ -58,7 +59,7 @@
         </view>
         <view class="btn-row">
           <view v-if="step > 0" class="btn ghost" @click="back"><text>上一步</text></view>
-          <view v-if="step < 3" class="btn primary" @click="next"><text>下一步</text></view>
+          <view v-if="step < 4" class="btn primary" @click="next"><text>下一步</text></view>
           <view v-else class="btn primary" :class="{ disabled: submitting }" @click="submit">
             <text>{{ submitting ? '提交中...' : '提交制单' }}</text>
           </view>
@@ -83,7 +84,8 @@ import { computeProductsDeductionTotal, computeProductsPayableTotal, computeProd
 import BusinessWizardSteps from '@/components/BusinessWizardSteps.vue'
 import BusinessStepBasic from '@/components/BusinessStepBasic.vue'
 import BusinessStepProducts from '@/components/BusinessStepProducts.vue'
-import BusinessStepReceipt from '@/components/BusinessStepReceipt.vue'
+import BusinessStepPayment from '@/components/BusinessStepPayment.vue'
+import BusinessStepVoucher from '@/components/BusinessStepVoucher.vue'
 import BusinessStepConfirm from '@/components/BusinessStepConfirm.vue'
 import BusinessSuccess from '@/components/BusinessSuccess.vue'
 import AnimatedAmount from '@/components/AnimatedAmount.vue'

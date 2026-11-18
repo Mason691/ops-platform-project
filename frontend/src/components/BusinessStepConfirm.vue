@@ -14,7 +14,9 @@
                          :only-errors="true" @query-member="$emit('query-member')" />
       <BusinessStepProducts v-if="hasStepErrors(errors, 1)" :form="form" :meta="meta"
                             :errors="errors" :only-errors="true" />
-      <BusinessStepReceipt v-if="hasStepErrors(errors, 2)" :form="form" :meta="meta"
+      <BusinessStepPayment v-if="hasStepErrors(errors, 2)" :form="form" :meta="meta"
+                           :errors="errors" :only-errors="true" />
+      <BusinessStepVoucher v-if="hasStepErrors(errors, 3)" :form="form" :meta="meta"
                            :errors="errors" :only-errors="true" />
     </view>
 
@@ -76,7 +78,7 @@
 
     <view class="summary-card">
       <view class="block-head">
-        <text class="block-title">收款信息</text>
+        <text class="block-title">支付信息</text>
         <text class="edit" @click="$emit('edit', 2)">修改</text>
       </view>
       <view class="kv"><text class="k">付款方式</text><text class="v">{{ paymentTypeLabel }}</text></view>
@@ -84,15 +86,53 @@
       <view v-if="isDeposit" class="kv"><text class="k">应补余款</text><text class="v amount">¥{{ money(balanceAmount) }}</text></view>
       <view class="kv"><text class="k">支付方式</text><text class="v">{{ paymentLabel }}</text></view>
       <view class="kv"><text class="k">市场收款日期</text><text class="v">{{ form.receiptDate || '—' }}</text></view>
-      <view v-if="form.receiptNo" class="kv"><text class="k">收据号</text><text class="v">{{ form.receiptNo }}</text></view>
-      <view v-if="form.voucherUrls && form.voucherUrls.length" class="kv">
-        <text class="k">收款凭证</text>
-        <view class="vouchers">
-          <image v-for="(url, index) in form.voucherUrls" :key="url + index" class="voucher-thumb"
-                 :src="assetUrl(url)" mode="aspectFill" @click="previewVoucher(index)" />
+      <view v-if="specialProducts.length" class="kv">
+        <text class="k">特批/提成</text>
+        <view class="special-list">
+          <text v-for="(product, index) in specialProducts" :key="index" class="special-line">
+            {{ product.brand }} · {{ product.model }}：提成 {{ product.commissionRate || '—' }}%
+          </text>
         </view>
       </view>
       <view class="kv"><text class="k">备注</text><text class="v">{{ form.remark || '—' }}</text></view>
+    </view>
+
+    <view class="summary-card">
+      <view class="block-head">
+        <text class="block-title">凭证信息</text>
+        <text class="edit" @click="$emit('edit', 3)">修改</text>
+      </view>
+      <view class="kv">
+        <text class="k">收据图片</text>
+        <view v-if="form.receiptImage && form.receiptImage.url" class="vouchers">
+          <image class="voucher-thumb" :src="assetUrl(form.receiptImage.url)"
+                 mode="aspectFill" @click="previewReceiptImage" />
+        </view>
+        <text v-else class="v">—</text>
+      </view>
+      <view class="kv"><text class="k">收据号</text><text class="v">{{ form.receiptNo || '—' }}</text></view>
+      <view class="kv">
+        <text class="k">支付凭证</text>
+        <view v-if="paymentVouchers.length" class="vouchers">
+          <image v-for="(file, index) in paymentVouchers" :key="file.id || index"
+                 class="voucher-thumb" :src="assetUrl(file.url)" mode="aspectFill"
+                 @click="previewPaymentVoucher(index)" />
+        </view>
+        <text v-else class="v">—</text>
+      </view>
+      <view class="kv">
+        <text class="k">合同附件</text>
+        <view v-if="contractAttachments.length" class="attachment-list">
+          <view v-for="(file, index) in contractAttachments" :key="file.id || index"
+                class="attachment-chip" @click="previewContract(file)">
+            <image v-if="isImageFile(file)" class="attachment-mini"
+                   :src="assetUrl(file.url)" mode="aspectFill" />
+            <text v-else class="attachment-pdf">PDF</text>
+            <text class="attachment-name">{{ file.fileName || file.name || '合同附件' }}</text>
+          </view>
+        </view>
+        <text v-else class="v">—</text>
+      </view>
     </view>
 
     <view class="totals-card">
@@ -120,7 +160,8 @@
 import { computed } from 'vue'
 import BusinessStepBasic from '@/components/BusinessStepBasic.vue'
 import BusinessStepProducts from '@/components/BusinessStepProducts.vue'
-import BusinessStepReceipt from '@/components/BusinessStepReceipt.vue'
+import BusinessStepPayment from '@/components/BusinessStepPayment.vue'
+import BusinessStepVoucher from '@/components/BusinessStepVoucher.vue'
 import AnimatedAmount from '@/components/AnimatedAmount.vue'
 import {
   PAYMENT_METHODS, computeProductAmount, computeProductPayable,
@@ -130,7 +171,7 @@ import {
 import { assetUrl } from '@/utils/image'
 
 /**
- * 第 4 步：确认提交。顶部待补充事项卡片就地补填缺失字段；
+ * 第 5 步：确认提交。顶部待补充事项卡片就地补填缺失字段；
  * 下方为只读订单汇总，每块可跳回对应步骤修改。
  */
 const props = defineProps({
@@ -177,6 +218,12 @@ const paymentLabel = computed(() => {
   const found = PAYMENT_METHODS.find(item => item.value === props.form.paymentMethod)
   return found ? found.label : '—'
 })
+const specialProducts = computed(() => (props.form.products || [])
+  .filter(product => product && product.isSpecial))
+const paymentVouchers = computed(() => Array.isArray(props.form.paymentVouchers)
+  ? props.form.paymentVouchers : [])
+const contractAttachments = computed(() => Array.isArray(props.form.contractAttachments)
+  ? props.form.contractAttachments : [])
 const detailCount = computed(() => {
   const products = (props.form.products || []).length
   const agents = Math.max(1, (props.form.agentUserIds || []).length)
@@ -195,9 +242,46 @@ function tradeInSummary(product) {
   return parts.join('、')
 }
 
-function previewVoucher(index) {
-  const urls = (props.form.voucherUrls || []).map(assetUrl)
+function previewReceiptImage() {
+  const url = props.form.receiptImage && props.form.receiptImage.url
+  if (!url) return
+  uni.previewImage({ urls: [assetUrl(url)], current: assetUrl(url) })
+}
+
+function previewPaymentVoucher(index) {
+  const urls = paymentVouchers.value.map(file => assetUrl(file.url))
   uni.previewImage({ urls, current: urls[index] })
+}
+
+function isImageFile(file) {
+  if (!file) return false
+  if (String(file.contentType || '').startsWith('image/')) return true
+  return /\.(jpe?g|png)$/i.test(file.fileName || file.name || file.url || '')
+}
+
+function previewContract(file) {
+  if (!file || !file.url) return
+  if (isImageFile(file)) {
+    const urls = contractAttachments.value.filter(isImageFile).map(item => assetUrl(item.url))
+    uni.previewImage({ urls, current: assetUrl(file.url) })
+    return
+  }
+  // #ifdef H5
+  if (typeof window !== 'undefined') window.open(assetUrl(file.url), '_blank')
+  // #endif
+  // #ifndef H5
+  uni.downloadFile({
+    url: assetUrl(file.url),
+    success: res => {
+      if (res.statusCode === 200) {
+        uni.openDocument({ filePath: res.tempFilePath, fileType: 'pdf', showMenu: true })
+      } else {
+        uni.showToast({ title: '文件下载失败', icon: 'none' })
+      }
+    },
+    fail: () => uni.showToast({ title: '文件下载失败', icon: 'none' })
+  })
+  // #endif
 }
 </script>
 
@@ -257,6 +341,26 @@ function previewVoucher(index) {
 .voucher-thumb {
   width: 96rpx; height: 96rpx; border-radius: 8rpx; background: #f5f5f5;
 }
+.attachment-list { flex: 1; display: flex; flex-direction: column; gap: 10rpx; }
+.attachment-chip {
+  display: flex; align-items: center; gap: 12rpx;
+  padding: 10rpx 12rpx; border-radius: 10rpx; background: #FAFBFC;
+}
+.attachment-mini {
+  width: 56rpx; height: 56rpx; border-radius: 8rpx; background: #f5f5f5;
+  flex-shrink: 0;
+}
+.attachment-pdf {
+  width: 56rpx; height: 56rpx; line-height: 56rpx; text-align: center;
+  border-radius: 8rpx; background: #FFF7F2; color: #C2410C;
+  font-size: 20rpx; font-weight: 700; flex-shrink: 0;
+}
+.attachment-name {
+  flex: 1; min-width: 0; font-size: 23rpx; color: #333;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.special-list { flex: 1; display: flex; flex-direction: column; gap: 4rpx; }
+.special-line { font-size: 24rpx; color: #C2410C; line-height: 1.5; word-break: break-all; }
 .totals-card { background: linear-gradient(135deg, #FFF6F1, #FFF); }
 .total-line { display: flex; align-items: baseline; justify-content: space-between; }
 .total-label { font-size: 27rpx; color: #666; font-weight: 600; }

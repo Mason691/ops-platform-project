@@ -35,7 +35,7 @@ import { assetUrl } from '@/utils/image'
 const props = defineProps({
   modelValue: { type: Object, default: null },
   error: { type: String, default: '' },
-  /** 业务名称（用于校验提示，如“特批文件/收款凭证”） */
+  /** 业务名称（用于校验提示，如“特批文件/合同附件”） */
   label: { type: String, default: '特批文件' },
   uploadTitle: { type: String, default: '上传特批文件' },
   hintText: { type: String, default: '支持 PDF / JPG / PNG，单个不超过 10MB' }

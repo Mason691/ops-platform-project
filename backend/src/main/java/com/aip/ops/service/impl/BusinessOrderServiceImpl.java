@@ -112,6 +112,18 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
     }
 
     @Override
+    public void updateVoucherAttachments(Long orderId, String receiptImageUrl,
+                                         String paymentVoucherUrls,
+                                         String contractAttachmentUrls) {
+        if (orderId == null) return;
+        orderMapper.update(null, new LambdaUpdateWrapper<OpsBusinessOrder>()
+                .eq(OpsBusinessOrder::getId, orderId)
+                .set(OpsBusinessOrder::getReceiptImageUrl, receiptImageUrl)
+                .set(OpsBusinessOrder::getPaymentVoucherUrls, paymentVoucherUrls)
+                .set(OpsBusinessOrder::getContractAttachmentUrls, contractAttachmentUrls));
+    }
+
+    @Override
     public OpsBusinessOrder findByOrderKey(Long corpId, String orderKey) {
         if (corpId == null || orderKey == null || orderKey.isBlank()) return null;
         return orderMapper.selectOne(new LambdaQueryWrapper<OpsBusinessOrder>()
