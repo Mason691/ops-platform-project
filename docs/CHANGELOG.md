@@ -2,6 +2,16 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-18（城市合伙人「业务员」角色生产部署）
+
+- **数据库迁移（11:26）**：执行 `sql/business_staff_role_migration.sql`；9 个城市合伙人组织（含 3 个停用）/ 9 个业务员角色 / 90 条默认菜单 / 174 名在职员工绑定；自检：已核对业务权限持有 0、未绑定员工 0。迁移前备份：本机 `ai_platform_20261118_112517.sql.gz`、`mall_db_20261118_112517.sql.gz`。
+- **平台后端（11:27–11:28）**：feature 分支 JAR 覆盖 `/data2/boss-platform/platform-backend/app.jar`，overlay 构建 `boss-platform/backend:latest`；容器 healthy（启动 11.1s）。启动时 `DataInitRunner` 按既有全局行为给 70 个企业角色补授 23/24 两个组织设置按钮（业务员角色因此实际 12 个菜单，仍不含 2095）。
+- **SCM 后端（11:28）**：`deploy/deploy-prod.sh --confirm` 构建/上传/重建 `boss-scm-backend`；healthy（启动 8.0s）。
+- **ops H5（11:29）**：feature 分支 `npm run build:h5`，rsync --delete 到 `/data2/boss-platform/html/ops/`，`boss-ops-nginx` reload；入口 `index-DVySAcUk.js`，旧入口 `index-D2S0TVOg.js` 404；产物含权限常量、无权限文案与卡片条件渲染。
+- **回滚资产**：`/data2/boss-platform/backups/platform-app.jar.20261118_112631`、`scm-app.jar.20261118_112745`、`html-ops-pre-20261118_112631.tgz`；镜像 `boss-platform/backend:rollback-20261118_112631`、`boss-platform/scm:rollback-20261118_112631`。
+- **冒烟**：平台/SCM `/actuator/health` UP；H5 `/ops/` 200、标题「金地美家」；部署脚本旧管理员口令登录冒烟未通过（凭据已变更，非本次改动），真实员工 E2E 待验证。
+- **未执行**：微信真机 E2E（业务员 / 业务员+部长）；存量员工需重新登录刷新 JWT 权限。
+
 ## 2026-11-18（城市合伙人「业务员」基础角色 + 已核对业务权限隔离）
 
 - **角色**：每个城市合伙人组织（`sys_corp.org_role_id=5`）各建「业务员」角色（编码 `salesperson`，写入 `remark`）；组织内所有员工默认拥有；新员工/新加入组织由 `createMembership` 自动绑定，存量员工由迁移脚本回填。
