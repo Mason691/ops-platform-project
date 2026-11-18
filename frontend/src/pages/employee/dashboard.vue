@@ -68,7 +68,7 @@
           </view>
           <text class="mc-arrow">›</text>
         </view>
-        <view class="menu-card" @click="goVerifiedBusiness">
+        <view v-if="canViewVerifiedBusiness" class="menu-card" @click="goVerifiedBusiness">
           <view class="mc-icon mc-icon-data"><text>🧾</text></view>
           <view class="mc-body">
             <text class="mc-title">已核对业务</text>
@@ -168,12 +168,16 @@ import OrgSwitchSheet from '@/components/OrgSwitchSheet.vue'
 import WorkTodoCard from '@/components/WorkTodoCard.vue'
 import AddBusinessButton from '@/components/AddBusinessButton.vue'
 import { useOrgSwitch } from '@/hooks/useOrgSwitch'
-import { getActiveCompany, getEmployeeInfo } from '@/utils/employeeSession'
+import {
+  getActiveCompany, getEmployeeInfo, getEmployeePermissions, PERM_VERIFIED_BUSINESS
+} from '@/utils/employeeSession'
 
 const company      = ref({})
 const employeeName = ref('')
 const roleName     = ref('员工')
 const noPermissionTip = ref(uni.getStorageSync('ops_employee_no_permission') === '1')
+// 卡片按角色权限并集渲染：业务员默认无「已核对业务」权限，其他角色有则仍展示
+const permissions  = ref(getEmployeePermissions())
 const currentYear  = new Date().getFullYear().toString()
 
 const yearlyStats = ref({
@@ -190,6 +194,8 @@ const {
 } = useOrgSwitch({ onChanged: onOrgChanged })
 
 const avatarChar = computed(() => (employeeName.value || '员').charAt(0))
+const canViewVerifiedBusiness = computed(() =>
+  permissions.value.includes(PERM_VERIFIED_BUSINESS))
 
 onShow(async () => {
   await loadDashboard()
@@ -203,6 +209,7 @@ onShow(async () => {
 
 function refreshCompany() {
   noPermissionTip.value = uni.getStorageSync('ops_employee_no_permission') === '1'
+  permissions.value = getEmployeePermissions()
   const info = getEmployeeInfo()
   const active = getActiveCompany()
   employeeName.value = info.name || ''
@@ -258,6 +265,7 @@ async function loadStats() {
 
 async function onOrgChanged(data) {
   noPermissionTip.value = !(data.permissions || []).length
+  // refreshCompany 会从会话缓存重新读取权限，保证切组织后卡片立即按新角色渲染
   refreshCompany()
   await loadStats()
   todoCardRef.value?.reload()

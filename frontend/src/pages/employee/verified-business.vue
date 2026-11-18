@@ -8,7 +8,7 @@
       <text class="sub">财务核对完成的业务数据，可发起采购申请</text>
     </view>
 
-    <view class="pending-summary">
+    <view v-if="!forbidden" class="pending-summary">
       <view class="pending-main">
         <text class="pending-label">待发起采购申请</text>
         <text class="pending-hint">已核对 · 未发起 · 未派工出库</text>
@@ -16,7 +16,13 @@
       <text class="pending-value">{{ pendingCount }} 单</text>
     </view>
 
-    <view v-if="loading" class="state"><text>加载中...</text></view>
+    <view v-if="forbidden" class="state">
+      <text class="empty-icon">🔒</text>
+      <text class="state-err">无权限访问已核对业务</text>
+      <text class="state-sub">该功能仅对具备采购 H5 制单权限的角色开放</text>
+      <view class="btn ghost" @click="goHome"><text>返回工作台</text></view>
+    </view>
+    <view v-else-if="loading" class="state"><text>加载中...</text></view>
     <view v-else-if="errorMsg" class="state">
       <text class="state-err">{{ errorMsg }}</text>
       <view class="btn ghost" @click="loadData"><text>重试</text></view>
@@ -91,9 +97,12 @@ import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { ref } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
-import { isEmployeeLoggedIn } from '@/utils/employeeSession'
+import {
+  isEmployeeLoggedIn, hasEmployeePermission, PERM_VERIFIED_BUSINESS
+} from '@/utils/employeeSession'
 
 const loading = ref(true)
+const forbidden = ref(false)
 const errorMsg = ref('')
 const list = ref([])
 const truncated = ref(false)
@@ -108,13 +117,26 @@ onShow(() => {
     })
     return
   }
+  // 直接访问页面时按角色权限拦截（多角色并集；业务员默认无此权限）
+  if (!hasEmployeePermission(PERM_VERIFIED_BUSINESS)) {
+    forbidden.value = true
+    loading.value = false
+    return
+  }
+  forbidden.value = false
   loadData()
 })
 
 onPullDownRefresh(async () => {
-  await loadData()
+  if (!forbidden.value) {
+    await loadData()
+  }
   uni.stopPullDownRefresh()
 })
+
+function goHome() {
+  uni.reLaunch({ url: '/pages/employee/dashboard' })
+}
 
 async function loadData() {
   loading.value = true
@@ -226,7 +248,8 @@ function money(v) {
 .pending-hint { font-size: 20rpx; color: #86909C; }
 .pending-value { font-size: 38rpx; line-height: 1; font-weight: 700; color: #F53F3F; }
 .state { padding: 120rpx 40rpx; display: flex; flex-direction: column; align-items: center; color: #86909C; font-size: 28rpx; }
-.state-err { color: #F53F3F; margin-bottom: 24rpx; text-align: center; }
+.state-err { color: #F53F3F; margin-bottom: 12rpx; text-align: center; }
+.state-sub { color: #86909C; font-size: 24rpx; text-align: center; margin-bottom: 24rpx; }
 .empty-icon { font-size: 72rpx; margin-bottom: 16rpx; }
 .list { padding: 24rpx; }
 .warn { background: #fff7e8; color: #FF7D00; font-size: 24rpx; padding: 16rpx 20rpx; border-radius: 12rpx; margin-bottom: 16rpx; }

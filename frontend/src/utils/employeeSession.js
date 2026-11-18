@@ -112,6 +112,14 @@ export function getEmployeePermissions() {
   return readJson('ops_employee_permissions', [])
 }
 
+/** 员工工作台「已核对业务」卡片权限（采购订单 H5 制单）。业务员角色默认不含此权限。 */
+export const PERM_VERIFIED_BUSINESS = 'scm:pur-order:h5:create'
+
+/** 当前登录员工是否拥有指定权限（多角色权限并集，由登录/切换组织响应下发）。 */
+export function hasEmployeePermission(code) {
+  return !!code && getEmployeePermissions().includes(code)
+}
+
 /**
  * 应用切换组织响应：替换 token、当前组织、角色与权限缓存。
  * 切换接口返回 orgs 时同步刷新 companies，保证下次打开面板立即正确。
