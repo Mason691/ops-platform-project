@@ -18,7 +18,9 @@ public final class ReceiptNoParser {
 
     private static final Pattern NO_PATTERN = Pattern.compile(
             "(?i)N\\s*[O0][\\s.。:：]*([0-9](?:\\s*[0-9]){5,7})");
-    private static final String[] ANCHORS = {"入账日期", "入账", "日期", "DATE"};
+    /** 需求锚点：优先「入账日期」；缺失时才退化为通用日期词。 */
+    private static final String[] PRIMARY_ANCHORS = {"入账日期"};
+    private static final String[] FALLBACK_ANCHORS = {"入账", "日期", "DATE"};
 
     private ReceiptNoParser() {
     }
@@ -29,7 +31,10 @@ public final class ReceiptNoParser {
             return null;
         }
         String normalized = Normalizer.normalize(text, Normalizer.Form.NFKC);
-        int anchor = firstAnchorIndex(normalized);
+        int anchor = firstAnchorIndex(normalized, PRIMARY_ANCHORS);
+        if (anchor < 0) {
+            anchor = firstAnchorIndex(normalized, FALLBACK_ANCHORS);
+        }
         Matcher matcher = NO_PATTERN.matcher(normalized);
         List<Candidate> candidates = new ArrayList<>();
         while (matcher.find()) {
@@ -49,14 +54,15 @@ public final class ReceiptNoParser {
                 .filter(Candidate::afterAnchor)
                 .findFirst()
                 .orElse(pool.get(0));
-        boolean multiple = pool.size() > 1;
+        // 多候选提示按全部候选（含 6/8 位）计算，避免漏报
+        boolean multiple = candidates.size() > 1;
         return new Result(chosen.digits(), chosen.digits().length() == 7, multiple);
     }
 
-    private static int firstAnchorIndex(String text) {
+    private static int firstAnchorIndex(String text, String[] anchors) {
         int best = -1;
         String upper = text.toUpperCase(java.util.Locale.ROOT);
-        for (String anchor : ANCHORS) {
+        for (String anchor : anchors) {
             int index = "DATE".equals(anchor)
                     ? upper.indexOf(anchor)
                     : text.indexOf(anchor);

@@ -248,7 +248,7 @@ export function useBusinessWizard() {
     clearErrors()
     showErrors.value = false
     clearBanner()
-    if (index === 3) refreshConfirmErrors()
+    if (index === 4) refreshConfirmErrors()
     saveDraft()
     scrollTop()
   }

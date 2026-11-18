@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -34,6 +35,9 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
 
     private final BusinessAttachmentService attachmentService;
 
+    /** 并发上限：OCR 为 CPU 密集的外部进程，限制并发避免拖垮请求线程池。 */
+    private final Semaphore ocrSlots = new Semaphore(2);
+
     @Override
     public Map<String, Object> recognize(Long attachmentId) {
         if (attachmentId == null || attachmentId <= 0) {
@@ -47,9 +51,24 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
                 attachmentId, OpsBusinessAttachment.TYPE_RECEIPT, corpId);
         Path path = attachmentService.resolveLocalPath(image);
 
-        String text = runTesseract(path, "chi_sim+eng");
-        if (text == null || text.isBlank()) {
-            text = runTesseract(path, "eng");
+        boolean acquired;
+        try {
+            acquired = ocrSlots.tryAcquire(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw BusinessException.of("识别任务繁忙，请稍后重试");
+        }
+        if (!acquired) {
+            throw BusinessException.of("识别任务繁忙，请稍后重试");
+        }
+        String text;
+        try {
+            text = runTesseract(path, "chi_sim+eng");
+            if (text == null || text.isBlank()) {
+                text = runTesseract(path, "eng");
+            }
+        } finally {
+            ocrSlots.release();
         }
         Map<String, Object> result = new LinkedHashMap<>();
         if (text == null || text.isBlank()) {

@@ -28,6 +28,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { BASE_URL } from '@/config'
+import { api } from '@/api/index'
 import { assetUrl } from '@/utils/image'
 import { compressImageBlob } from '@/utils/imageCompress'
 
@@ -96,9 +97,14 @@ function preview(file) {
 
 function remove(index) {
   if (uploading.value) return
+  const removed = props.modelValue[index]
   const next = [...props.modelValue]
   next.splice(index, 1)
   emit('update:modelValue', next)
+  // 尽力删除未绑定附件（服务端也会每日清理）；删除失败不阻塞表单
+  if (removed && removed.id) {
+    api.employeeDeleteBusinessAttachment(removed.id).catch(() => {})
+  }
 }
 
 function add() {

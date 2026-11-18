@@ -299,6 +299,20 @@ public class EmployeeController {
         return R.ok(businessAttachmentService.upload(file, fileType));
     }
 
+    /** 移除表单中未绑定的业务附件（文件+记录）；已绑定订单的附件不可删。 */
+    @DeleteMapping("/business-data/attachments/{id}")
+    public R<?> deleteBusinessAttachment(@PathVariable Long id) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可删除业务附件");
+        }
+        Long corpId = SecurityUtils.getCurrentCorpIdOrNull();
+        if (corpId == null || corpId <= 0) {
+            return R.fail("请先切换到具体组织");
+        }
+        businessAttachmentService.deleteUnbound(id, corpId);
+        return R.ok(null);
+    }
+
     /** 收据图片 OCR：返回识别到的收据号与提示；失败时返回手填提示，不阻塞制单。 */
     @PostMapping("/business-data/receipt-ocr")
     public R<?> recognizeReceiptNo(@RequestBody Map<String, Long> body) {

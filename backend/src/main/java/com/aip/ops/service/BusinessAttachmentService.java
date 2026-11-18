@@ -4,6 +4,7 @@ import com.aip.ops.entity.OpsBusinessAttachment;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.file.Path;
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -28,4 +29,10 @@ public interface BusinessAttachmentService {
 
     /** 把受控 URL 解析为上传根目录下的本地文件（OCR 用，防目录穿越）。 */
     Path resolveLocalPath(OpsBusinessAttachment file);
+
+    /** 员工在表单中移除附件：仅允许删除本人、未绑定订单的附件（文件+记录）。 */
+    void deleteUnbound(Long id, Long corpId);
+
+    /** 定时清理：删除 cutoff 之前未绑定订单的附件（文件+记录），返回清理数量。 */
+    int purgeUnboundBefore(LocalDateTime cutoff, int limit);
 }

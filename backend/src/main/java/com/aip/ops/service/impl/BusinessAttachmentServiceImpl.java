@@ -40,6 +40,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -57,8 +58,10 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
 
     private static final long MAX_FILE_BYTES = 10L * 1024 * 1024;
     private static final int MAX_IMAGE_DIMENSION = 2000;
-    /** 解码前限制像素数，防压缩炸弹。 */
-    private static final long MAX_IMAGE_PIXELS = 40_000_000L;
+    /** 解码前限制像素数，防压缩炸弹（16MP 已高于手机相机常见尺寸）。 */
+    private static final long MAX_IMAGE_PIXELS = 16_000_000L;
+    /** 单员工 24h 内未绑定附件上限，防止恶意占用共享上传卷。 */
+    private static final int MAX_UNBOUND_PER_DAY = 100;
     private static final float JPEG_QUALITY = 0.85f;
     private static final Set<String> IMAGE_EXTS = Set.of("jpg", "jpeg", "png");
     private static final Set<String> ALLOWED_TYPES =
@@ -83,6 +86,18 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
             throw BusinessException.of("请先切换到具体组织后再上传附件");
         }
         LoginUser user = SecurityUtils.getCurrentUser();
+        if (user == null || user.getUserId() == null) {
+            throw BusinessException.of("登录状态失效，请重新登录");
+        }
+        // 配额：同一员工 24h 内未绑定附件最多 100 个，防止恶意占满共享上传卷
+        Long pending = attachmentMapper.selectCount(Wrappers.<OpsBusinessAttachment>lambdaQuery()
+                .eq(OpsBusinessAttachment::getCorpId, corpId)
+                .eq(OpsBusinessAttachment::getUploaderUserId, user.getUserId())
+                .isNull(OpsBusinessAttachment::getOrderId)
+                .ge(OpsBusinessAttachment::getUploadTime, LocalDateTime.now().minusDays(1)));
+        if (pending != null && pending >= MAX_UNBOUND_PER_DAY) {
+            throw BusinessException.of("上传过于频繁，请稍后重试");
+        }
         if (file == null || file.isEmpty()) throw BusinessException.of("请选择要上传的文件");
         if (file.getSize() > MAX_FILE_BYTES) {
             throw BusinessException.of("单个文件不能超过10MB");
@@ -171,8 +186,8 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
                 throw BusinessException.of("附件类型不匹配，请重新上传");
             }
             // 附件只允许上传人本人在制单/OCR 中引用，避免同事间借用附件 ID
-            if (row.getUploaderUserId() != null && currentUserId != null
-                    && !row.getUploaderUserId().equals(currentUserId)) {
+            if (row.getUploaderUserId() == null || currentUserId == null
+                    || !row.getUploaderUserId().equals(currentUserId)) {
                 throw BusinessException.of("附件不属于当前员工，请重新上传");
             }
             if (row.getOrderId() != null) {
@@ -234,6 +249,50 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
             throw BusinessException.of("收据图片不存在，请重新上传");
         }
         return path;
+    }
+
+    @Override
+    public void deleteUnbound(Long id, Long corpId) {
+        if (id == null || corpId == null) return;
+        LoginUser current = SecurityUtils.getCurrentUser();
+        if (current == null || current.getUserId() == null) {
+            throw BusinessException.of("登录状态失效，请重新登录");
+        }
+        OpsBusinessAttachment row = attachmentMapper.selectById(id);
+        if (row == null || !corpId.equals(row.getCorpId())
+                || row.getOrderId() != null
+                || !Objects.equals(row.getUploaderUserId(), current.getUserId())) {
+            throw BusinessException.of("附件不存在或无权删除");
+        }
+        try {
+            Files.deleteIfExists(resolveLocalPath(row));
+        } catch (Exception e) {
+            log.warn("删除附件文件失败 id={}：{}", id, e.getMessage());
+        }
+        attachmentMapper.deleteById(id);
+    }
+
+    @Override
+    public int purgeUnboundBefore(LocalDateTime cutoff, int limit) {
+        if (cutoff == null) return 0;
+        int safeLimit = Math.min(Math.max(limit, 1), 1000);
+        List<OpsBusinessAttachment> rows = attachmentMapper.selectList(
+                Wrappers.<OpsBusinessAttachment>lambdaQuery()
+                        .isNull(OpsBusinessAttachment::getOrderId)
+                        .lt(OpsBusinessAttachment::getUploadTime, cutoff)
+                        .orderByAsc(OpsBusinessAttachment::getId)
+                        .last("LIMIT " + safeLimit));
+        int count = 0;
+        for (OpsBusinessAttachment row : rows) {
+            try {
+                Files.deleteIfExists(resolveLocalPath(row));
+            } catch (Exception e) {
+                log.warn("清理附件文件失败 id={}：{}", row.getId(), e.getMessage());
+            }
+            attachmentMapper.deleteById(row.getId());
+            count++;
+        }
+        return count;
     }
 
     private static String normalizeType(String fileType) {
