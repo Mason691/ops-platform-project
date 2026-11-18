@@ -33,6 +33,7 @@
           <text v-if="order.refund && order.refund.status === 'PENDING'"
                 class="status refunding">作废审批中</text>
         </view>
+        <view class="kv"><text class="k">创建时间</text><text class="v">{{ formatTime(order.createTime) || '—' }}</text></view>
         <view class="kv"><text class="k">客户</text><text class="v">{{ order.customer || '—' }}</text></view>
         <view class="kv"><text class="k">小区/地址</text>
           <text class="v">{{ [order.communityName, order.detailedAddress].filter(Boolean).join(' ') || '—' }}</text>

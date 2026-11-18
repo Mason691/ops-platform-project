@@ -15,6 +15,9 @@
             {{ order.receiptDate || formatDate(order.createTime) || '—' }}
             · {{ order.batchNo || '无批次' }}
           </text>
+          <text v-if="order.receiptDate && order.createTime" class="order-meta">
+            创建 {{ formatDate(order.createTime) }}
+          </text>
         </view>
         <view class="order-right">
           <text class="order-amount">¥{{ money(order.hasTradeIn ? order.payableAmount : order.totalAmount) }}</text>

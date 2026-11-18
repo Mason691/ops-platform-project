@@ -92,7 +92,7 @@ public class MemberLedgerController {
                     WHERE bd.delete_flag = 0 AND bd.platform_member_id IS NOT NULL
                       AND (bd.sale_quantity IS NULL OR bd.sale_quantity >= 0){scopeBiz}
                     GROUP BY bd.platform_member_id,
-                             COALESCE(NULLIF(bd.order_no,''), NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__row_', bd.id)),
+                             COALESCE(CONCAT('ID|', NULLIF(bd.order_id, 0)), NULLIF(bd.order_no,''), NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__row_', bd.id)),
                              bd.category, bd.brand, bd.model
                 ) g
             ) t

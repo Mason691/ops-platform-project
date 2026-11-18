@@ -316,7 +316,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         if (hasText(batchNo)) qw.eq(OpsBusinessData::getBatchNo, batchNo);
         if (hasText(receiptNo)) qw.eq(OpsBusinessData::getReceiptNo, receiptNo);
         if (hasText(customer)) qw.like(OpsBusinessData::getCustomer, customer.trim());
-        if (hasText(orderNo)) qw.eq(OpsBusinessData::getOrderNo, orderNo.trim());
+        // 订单编号支持精确/模糊查询（dd+每日流水，跨月可能同号，配合创建时间辨识）
+        if (hasText(orderNo)) qw.like(OpsBusinessData::getOrderNo, orderNo.trim());
         if (hasText(category)) qw.eq(OpsBusinessData::getCategory, category);
         if (hasText(isSpecial)) qw.eq(OpsBusinessData::getIsSpecial, isSpecial);
         if (hasText(brand)) qw.eq(OpsBusinessData::getBrand, brand);
@@ -419,7 +420,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 .eq(OpsBusinessData::getAgentPhone, phone)
                 .eq(OpsBusinessData::getDeleteFlag, 0)
                 .eq(hasText(batchNo), OpsBusinessData::getBatchNo, batchNo)
-                .eq(hasText(orderNo), OpsBusinessData::getOrderNo, orderNo)
+                .like(hasText(orderNo), OpsBusinessData::getOrderNo, orderNo == null ? null : orderNo.trim())
                 .orderByDesc(OpsBusinessData::getId);
         List<OpsBusinessData> rows = mapper.selectList(qw);
         Map<String, List<OpsBusinessData>> grouped = new LinkedHashMap<>();
@@ -1959,6 +1960,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 + "|" + Objects.toString(d.getBrand(), "")
                 + "|" + Objects.toString(d.getModel(), "");
         String customer = Objects.toString(d.getCustomer(), "");
+        // 新表行优先按订单主键分组，避免跨月同日同号被合并
+        if (d.getOrderId() != null) {
+            return "D|" + d.getOrderId() + product;
+        }
         String orderNo = d.getOrderNo();
         if (orderNo != null && !orderNo.isEmpty()) {
             return "O|" + orderNo + "|" + customer + product;

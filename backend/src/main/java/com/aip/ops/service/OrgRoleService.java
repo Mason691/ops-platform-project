@@ -1,6 +1,7 @@
 package com.aip.ops.service;
 
 import com.aip.sdk.client.PlatformInternalClient;
+import com.aip.sdk.exception.BusinessException;
 import com.aip.sdk.security.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -91,6 +92,59 @@ public class OrgRoleService {
         if (!isCityPartner(corpId)) return corpId;
         Long parent = resolveCorpInfo(corpId).parentCorpId;
         return parent != null && parent > 0L ? parent : corpId;
+    }
+
+    /**
+     * 订单编号计数域：严格解析运营商（城市合伙人 → parent_corp_id，运营商 → 自身）。
+     *
+     * <p>与 {@link #getOperatorCorpId(Long)} 不同，平台不可达或城市合伙人缺少上级时
+     * 直接抛业务异常，不允许退回 org 自身计数——否则同一运营商体系会生成重复编号。</p>
+     */
+    public Long getOperatorCorpIdStrict(Long corpId) {
+        if (corpId == null || corpId <= 0L) {
+            throw BusinessException.of("订单归属组织无效，无法生成订单编号");
+        }
+        CacheEntry info = resolveCorpInfoStrict(corpId);
+        if (info.orgRoleId == null) {
+            throw BusinessException.of("组织角色未配置，无法生成订单编号");
+        }
+        if (info.orgRoleId == CITY_PARTNER_ROLE_ID) {
+            if (info.parentCorpId == null || info.parentCorpId <= 0L) {
+                throw BusinessException.of("城市合伙人未配置所属运营商，无法生成订单编号");
+            }
+            return info.parentCorpId;
+        }
+        return corpId;
+    }
+
+    /** 严格解析：查询失败不复用 (null,null) 兜底缓存，直接抛异常交上层回滚。 */
+    @SuppressWarnings("unchecked")
+    private CacheEntry resolveCorpInfoStrict(Long corpId) {
+        CacheEntry cached = cache.get(corpId);
+        long now = System.currentTimeMillis();
+        if (cached != null && cached.orgRoleId != null
+                && (now - cached.ts) < CACHE_TTL_MS) {
+            return cached;
+        }
+        try {
+            Map<String, Object> resp = platformClient.get("/api/internal/corp/" + corpId, null);
+            Map<String, Object> data = (Map<String, Object>) resp.get("data");
+            if (data == null) {
+                throw new IllegalStateException("empty corp response");
+            }
+            Object orgRoleIdObj = data.get("orgRoleId");
+            Long orgRoleId = orgRoleIdObj instanceof Number
+                    ? ((Number) orgRoleIdObj).longValue() : null;
+            Object parentIdObj = data.get("parentCorpId");
+            Long parentCorpId = parentIdObj instanceof Number
+                    ? ((Number) parentIdObj).longValue() : null;
+            CacheEntry resolved = new CacheEntry(orgRoleId, parentCorpId);
+            cache.put(corpId, resolved);
+            return resolved;
+        } catch (Exception e) {
+            log.warn("Strict operator resolve failed corpId={}: {}", corpId, e.getMessage());
+            throw BusinessException.of("组织信息查询失败，无法生成订单编号，请稍后重试");
+        }
     }
 
     /** 指定组织的上级组织ID（可能为 null）。 */

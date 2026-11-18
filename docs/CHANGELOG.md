@@ -2,6 +2,15 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-18（业务订单编号：运营商体系每日流水，开发完成待发布）
+
+- **规则**：订单编号固定 `dd + 3位流水`（如 18001）；流水按“运营商 + 全部下属城市合伙人”统一计数、每日归零；第 1000 单起自动进位 4 位（181000），不阻断下单；时区固定 `Asia/Shanghai`。
+- **数据**：新增 `ops_order_daily_sequence(operator_corp_id, seq_date, last_seq)`，主键 `(operator_corp_id, seq_date)`；迁移 `sql/migrate_order_no_daily_sequence.sql` 含当天运营商体系最大流水回填（当前生产 corp4=613，下一单 18614）。
+- **并发/唯一**：`INSERT ... LAST_INSERT_ID(1) ON DUPLICATE KEY UPDATE last_seq=LAST_INSERT_ID(last_seq+1)`，`REQUIRES_NEW` 独立事务；50 并发临时表压测得到 1..50 唯一连续。方案A：`order_no` 允许跨月同号，`order_key` 改为 `O|yyyyMMdd|orderNo` 保证 `(corp_id, order_key)` 唯一。
+- **代码**：`OrderNoGenerator.next(corpId)` 严格解析运营商（平台不可达/合伙人缺上级直接失败回滚）；员工手工制单与 Excel 导入改用新生成器；统计/提成/会员台账/作战地图分组优先 `order_id`，避免跨月同号合并；列表订单编号筛选改为模糊匹配。
+- **验证**：ops 后端 `mvn -o clean package -DskipTests` 通过；生产 MySQL 临时表 50 并发取号 1..50 无重复；迁移回填查询 corp4→613。
+- **上线**：需停旧 ops 容器 → 执行迁移 → 启动新 JAR；旧 `ops_order_sequence` 保留回滚，回滚前须把其 `last_seq` 提升到当日所有运营商最大值。尚未生产发布。
+
 ## 2026-11-18（业务订单退回草稿/作废退款：生产 E2E 验证通过）
 
 - **结论**：该功能已于 2026-11-18 17:23 提交（ops `846d508`、平台 `dac08c2`）并随生产发布上线；本次完成生产端到端复核，并补充“退款金额低于应付合计时备注必填”的前后端校验。

@@ -985,7 +985,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         MemberResolution member = resolveOrCreateMember(v.phone(), v.customer(), ctx.corpId());
         CommunityInfo community = resolveCommunity(v.communityId(), ctx.corpId());
         // 订单编号由独立事务生成（REQUIRES_NEW），避免长事务持有流水行锁；回滚可能产生号段空洞
-        String orderNo = orderNoGenerator.next();
+        OrderNoGenerator.Generated generated = orderNoGenerator.next(ctx.corpId());
+        String orderNo = generated.orderNo();
         // 订单编号即业务组号：提成/统计/财务核对均以订单为维度；
         // 同时写入 business_group_no 兼容历史分组逻辑
         String businessGroupNo = orderNo;
@@ -996,7 +997,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         // 主子表拆分：一次提交 = 1 条订单头 + N（产品×经办人）条子表
         OpsBusinessOrder order = orderService.createOrderWithPayment(
-                ctx.corpId(), "O|" + orderNo, orderNo, batchNo, businessGroupNo,
+                ctx.corpId(), generated.orderKey(), orderNo, batchNo, businessGroupNo,
                 v.receiptNo(), ctx.company(), v.customer(), v.phone(), member.id(),
                 community.id(), community.name(), v.detailAddress(), v.receiptDate(),
                 null, null, null, v.voucherUrl(),
@@ -1273,7 +1274,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         return !rows.isEmpty();
     }
 
-    // 订单编号由 OrderNoGenerator 统一生成（导入/手工共用同一全局流水）。
+    // 订单编号由 OrderNoGenerator 统一生成（导入/手工共用同一运营商体系每日流水）。
     // ── 校验 ──
 
     private Validated validateRequest(EmployeeBusinessEntryRequest req, EmployeeContext ctx) {

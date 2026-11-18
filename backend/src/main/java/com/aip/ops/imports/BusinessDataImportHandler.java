@@ -708,11 +708,12 @@ public class BusinessDataImportHandler implements ImportHandler {
         for (List<ParsedRow> group : groups.values()) {
             ParsedRow first = group.get(0);
             String batchNo = batchNoMap.computeIfAbsent(first.company, c -> c + ts);
-            String orderNo = orderNoGenerator.next();
+            OrderNoGenerator.Generated generated = orderNoGenerator.next(corpId);
+            String orderNo = generated.orderNo();
             String businessGroupNo = orderNo;
             BigDecimal totalAmount = groupProductTotal(group);
             OpsBusinessOrder order = orderService.createOrder(
-                    corpId, "O|" + orderNo, orderNo, batchNo, businessGroupNo,
+                    corpId, generated.orderKey(), orderNo, batchNo, businessGroupNo,
                     emptyToNull(first.receiptNo), first.company, first.customer,
                     first.customerPhone, first.platformMemberId, first.communityId,
                     emptyToNull(first.communityName), emptyToNull(first.detailedAddress),

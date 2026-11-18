@@ -247,7 +247,7 @@ public class BattleMapEtlService {
                 "SELECT bd.category AS category_key," +
                 "CASE WHEN bd.sale_quantity < 0 " +
                 "  THEN CONCAT('__RET__', COALESCE(bd.source_return_id, 0), '_', COALESCE(bd.order_id, bd.id)) " +
-                "  ELSE COALESCE(NULLIF(bd.order_no,''), NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__NULL__', bd.id)) END AS grp," +
+                "  ELSE COALESCE(CONCAT('ID|', NULLIF(bd.order_id, 0)), NULLIF(bd.order_no,''), NULLIF(bd.business_group_no,''), NULLIF(bd.receipt_no,''), CONCAT('__NULL__', bd.id)) END AS grp," +
                 "bd.brand, bd.model, MAX(bd.receipt_amount) AS amount, " +
                 "MAX(CASE WHEN bd.sale_quantity < 0 THEN 1 ELSE 0 END) AS is_return " +
                 "FROM ops_business_order_item bd " +
