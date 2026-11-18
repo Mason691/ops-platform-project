@@ -4,6 +4,7 @@ import com.aip.sdk.exception.BusinessException;
 import com.aip.ops.client.ScmPurchaseOrderClient;
 import com.aip.ops.client.WorkflowPlatformClient;
 import com.aip.ops.dto.ModelConfirmDecision;
+import com.aip.ops.entity.OpsBusinessAttachment;
 import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsBusinessOrder;
 import com.aip.ops.entity.OpsBusinessOrderTradeIn;
@@ -12,6 +13,7 @@ import com.aip.ops.entity.OpsValueAddedProduct;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.imports.BusinessDataImportHandler;
 import com.aip.ops.imports.ImportResult;
+import com.aip.ops.mapper.OpsBusinessAttachmentMapper;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsBusinessOrderMapper;
 import com.aip.ops.mapper.OpsPersonalCommissionRuleMapper;
@@ -64,6 +66,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     private final OpsBusinessDataMapper mapper;
     private final OpsBusinessOrderMapper orderMapper;
+    private final OpsBusinessAttachmentMapper attachmentMapper;
     private final OpsValueAddedProductMapper productMapper;
     private final OpsPersonalCommissionRuleMapper ruleMapper;
     private final DataScopeService dataScopeService;
@@ -129,6 +132,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     public BusinessDataServiceImpl(
             OpsBusinessDataMapper mapper,
             OpsBusinessOrderMapper orderMapper,
+            OpsBusinessAttachmentMapper attachmentMapper,
             OpsValueAddedProductMapper productMapper,
             OpsPersonalCommissionRuleMapper ruleMapper,
             DataScopeService dataScopeService,
@@ -147,6 +151,7 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             com.aip.ops.mapper.OpsBusinessOrderTradeInMapper tradeInMapper) {
         this.mapper = mapper;
         this.orderMapper = orderMapper;
+        this.attachmentMapper = attachmentMapper;
         this.productMapper = productMapper;
         this.ruleMapper = ruleMapper;
         this.dataScopeService = dataScopeService;
@@ -495,6 +500,12 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 workflowClient.instanceProgressBatch(new ArrayList<>(instanceIds));
         view.put("flow", buildEmployeeFlow(view, progress));
         view.put("bizStatusOptions", bizStatusService.options());
+        view.putIfAbsent("receiptImageUrl", master != null ? master.getReceiptImageUrl() : null);
+        view.putIfAbsent("paymentVoucherUrls", splitUrlCsv(
+                master != null ? master.getPaymentVoucherUrls() : null));
+        view.putIfAbsent("contractAttachmentUrls", splitUrlCsv(
+                master != null ? master.getContractAttachmentUrls() : null));
+        view.put("attachments", loadAttachments(orderId));
         view.remove("_maxId");
         List<com.aip.ops.entity.OpsBusinessFlowRecord> records = flowRecordMapper.selectList(
                 new LambdaQueryWrapper<com.aip.ops.entity.OpsBusinessFlowRecord>()
@@ -616,6 +627,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                 ? "0" : order.getBizStatus();
         view.put("bizStatus", status);
         view.put("bizStatusName", bizStatusService.label(status));
+        view.put("receiptImageUrl", order.getReceiptImageUrl());
+        view.put("paymentVoucherUrls", splitUrlCsv(order.getPaymentVoucherUrls()));
+        view.put("contractAttachmentUrls", splitUrlCsv(order.getContractAttachmentUrls()));
+        view.put("attachments", loadAttachments(orderId));
         List<com.aip.ops.entity.OpsBusinessFlowRecord> records = flowRecordMapper.selectList(
                 new LambdaQueryWrapper<com.aip.ops.entity.OpsBusinessFlowRecord>()
                         .eq(com.aip.ops.entity.OpsBusinessFlowRecord::getOrderId, orderId)
@@ -715,6 +730,23 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     private static boolean hasText(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    /** 订单凭证附件（收据图片/支付凭证/合同附件），按上传顺序返回。 */
+    private List<OpsBusinessAttachment> loadAttachments(Long orderId) {
+        if (orderId == null) return List.of();
+        return attachmentMapper.selectList(new LambdaQueryWrapper<OpsBusinessAttachment>()
+                .eq(OpsBusinessAttachment::getOrderId, orderId)
+                .eq(OpsBusinessAttachment::getDeleteFlag, 0)
+                .orderByAsc(OpsBusinessAttachment::getId));
+    }
+
+    private static List<String> splitUrlCsv(String value) {
+        if (value == null || value.isBlank()) return List.of();
+        return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(text -> !text.isEmpty())
+                .toList();
     }
 
     /** 订单键：主表 order_id 优先；历史无 order_id 行按订单编号/业务组号/收据号+客户回退。 */
@@ -829,6 +861,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         order.put("balanceRemark", master != null ? master.getBalanceRemark() : null);
         order.put("voucherUrl", pick(master != null ? master.getVoucherUrl() : null,
                 rows, OpsBusinessData::getVoucherUrl));
+        order.put("receiptImageUrl", master != null ? master.getReceiptImageUrl() : null);
+        order.put("paymentVoucherUrls", splitUrlCsv(
+                master != null ? master.getPaymentVoucherUrls() : null));
+        order.put("contractAttachmentUrls", splitUrlCsv(
+                master != null ? master.getContractAttachmentUrls() : null));
         order.put("calcStatus", calcStatus);
         // 业务状态与计算状态完全解耦：业务状态只看主表工作流字段
         String bizStatus = master != null && hasText(master.getBizStatus())

@@ -48,7 +48,7 @@ function select(index) {
   box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, .04);
 }
 .track {
-  position: absolute; left: 12.5%; right: 12.5%; top: 42rpx;
+  position: absolute; left: 10%; right: 10%; top: 42rpx;
   height: 4rpx; background: #f0f0f0; border-radius: 2rpx;
 }
 .track-fill {

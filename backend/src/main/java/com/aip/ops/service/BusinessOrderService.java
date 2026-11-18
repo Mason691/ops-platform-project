@@ -41,6 +41,10 @@ public interface BusinessOrderService {
                                             String calcStatus, String remark, String paymentMethod,
                                             String paymentType, BigDecimal depositAmount);
 
+    /** 回写凭证信息（收据图片/支付凭证/合同附件 URL 列表，逗号分隔）。 */
+    void updateVoucherAttachments(Long orderId, String receiptImageUrl,
+                                  String paymentVoucherUrls, String contractAttachmentUrls);
+
     OpsBusinessOrder findByOrderKey(Long corpId, String orderKey);
 
     OpsBusinessOrder getById(Long id);

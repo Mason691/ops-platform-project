@@ -43,10 +43,19 @@ public class EmployeeBusinessEntryRequest {
     private String receiptDate;
 
     /**
-     * 收据号（选填）：制单时可能尚未取得收据，留空由财务核对阶段补录。
+     * 收据号（必填）：可由收据图片 OCR 自动识别后人工核对修改。
      * 填写时需在当前组织内唯一（同客户可复用），长度 ≤50。
      */
     private String receiptNo;
+
+    /** 收据图片附件 ID（可选；上传后用于 OCR 识别收据号）。 */
+    private Long receiptImageId;
+
+    /** 支付凭证附件 ID 列表（必填，1~3 张；ops_business_attachment.id）。 */
+    private List<Long> paymentVoucherIds;
+
+    /** 合同附件 ID 列表（必填，1~5 份；ops_business_attachment.id，图片/PDF）。 */
+    private List<Long> contractAttachmentIds;
 
     /** 是否收款（是/否）——历史字段保留兼容，新前端不再传值 */
     private Boolean isReceived;
@@ -61,9 +70,6 @@ public class EmployeeBusinessEntryRequest {
 
     /** 定金金额（仅 DEPOSIT 必填；>0 且 < 销售价合计；最多两位小数） */
     private BigDecimal depositAmount;
-
-    /** 收款凭证 URL 列表（最多 3 张，整笔业务共用，选填） */
-    private List<String> voucherUrls;
 
     /** 订单备注（选填，≤500 字，落库 ops_business_order.remark） */
     private String remark;

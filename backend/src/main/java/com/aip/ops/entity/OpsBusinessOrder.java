@@ -46,6 +46,18 @@ public class OpsBusinessOrder extends BaseEntity {
     @TableField("receipt_no")
     private String receiptNo;
 
+    /** 收据图片 URL（用于 OCR 识别收据号；可空）。 */
+    @TableField("receipt_image_url")
+    private String receiptImageUrl;
+
+    /** 支付凭证 URL 列表（逗号分隔，最多 3 张；与 legacy voucher_url 双写）。 */
+    @TableField("payment_voucher_urls")
+    private String paymentVoucherUrls;
+
+    /** 合同附件 URL 列表（逗号分隔，最多 5 份，图片/PDF）。 */
+    @TableField("contract_attachment_urls")
+    private String contractAttachmentUrls;
+
     @TableField("company")
     private String company;
 

@@ -36,6 +36,10 @@ export const MAX_RECEIPT_NO = 50
 /** 收据号允许字符集：字母/数字/短横线/下划线/斜杠，不含空格 */
 export const RECEIPT_NO_RE = /^[A-Za-z0-9_/-]+$/
 
+/** 凭证信息附件上限（与后端 BusinessAttachmentServiceImpl 保持一致） */
+export const MAX_PAYMENT_VOUCHERS = 3
+export const MAX_CONTRACT_ATTACHMENTS = 5
+
 /** 支付方式（与后端 PaymentMethod 保持一致） */
 export const PAYMENT_METHODS = [
   { value: 'QR', label: '二维码' },
@@ -47,14 +51,16 @@ export const PAYMENT_METHODS = [
 export const STEPS = [
   { key: 'basic', title: '基础信息' },
   { key: 'products', title: '商品明细' },
-  { key: 'receipt', title: '收款信息' },
+  { key: 'payment', title: '支付信息' },
+  { key: 'voucher', title: '凭证信息' },
   { key: 'confirm', title: '确认提交' }
 ]
 
 const BASIC_FIELDS = ['batchNo', 'customerPhone', 'customer', 'communityId',
   'detailAddress', 'agentUserIds']
 const PRODUCTS_STEP_FIELDS = ['paymentType', 'depositAmount']
-const RECEIPT_FIELDS = ['paymentMethod', 'receiptDate', 'receiptNo', 'voucherUrls']
+const PAYMENT_FIELDS = ['paymentMethod', 'receiptDate', 'remark']
+const VOUCHER_FIELDS = ['receiptNo', 'receiptImage', 'paymentVouchers', 'contractAttachments']
 const PRODUCT_FIELD_LABELS = {
   category: '品类',
   brand: '品牌',
@@ -80,7 +86,9 @@ const FIELD_LABELS = {
   paymentMethod: '支付方式',
   receiptDate: '市场收款日期',
   receiptNo: '收据号',
-  voucherUrls: '收款凭证',
+  receiptImage: '收据图片',
+  paymentVouchers: '支付凭证',
+  contractAttachments: '合同附件',
   remark: '备注'
 }
 
@@ -199,7 +207,7 @@ export function emptyBusinessForm() {
     products: [emptyProduct()],
     paymentType: 'FULL', depositAmount: '',
     paymentMethod: 'QR', receiptDate: today(), receiptNo: '', receiptNoCheck: null,
-    voucherUrls: [], remark: '',
+    receiptImage: null, paymentVouchers: [], contractAttachments: [], remark: '',
     agentUserIds: []
   }
 }
@@ -352,15 +360,33 @@ export function validateBusinessForm(form, meta = {}) {
     errors.paymentMethod = '请选择支付方式'
   }
   if (!form.receiptDate) errors.receiptDate = '请选择市场收款日期'
-  // 收据号选填：未取得收据可由财务核对补录；填写时校验长度/字符集/重复占用
+  // 收据号必填（OCR 或手填）；填写时校验长度/字符集/重复占用
   const receiptNo = String(form.receiptNo || '').trim()
-  if (receiptNo.length > MAX_RECEIPT_NO) {
+  if (!receiptNo) {
+    errors.receiptNo = '请填写收据号'
+  } else if (receiptNo.length > MAX_RECEIPT_NO) {
     errors.receiptNo = `收据号不能超过${MAX_RECEIPT_NO}个字符`
-  } else if (receiptNo && !RECEIPT_NO_RE.test(receiptNo)) {
+  } else if (!RECEIPT_NO_RE.test(receiptNo)) {
     errors.receiptNo = '收据号只能包含字母、数字、短横线、下划线和斜杠'
-  } else if (receiptNo && form.receiptNoCheck
+  } else if (form.receiptNoCheck
     && form.receiptNoCheck.value === receiptNo && form.receiptNoCheck.message) {
     errors.receiptNo = form.receiptNoCheck.message
+  }
+  // 凭证信息：支付凭证/合同附件必填；收据图片可选（用于 OCR）
+  const paymentVouchers = Array.isArray(form.paymentVouchers) ? form.paymentVouchers : []
+  if (!paymentVouchers.length) {
+    errors.paymentVouchers = '请上传支付凭证（银行或微信支付凭证）'
+  } else if (paymentVouchers.length > MAX_PAYMENT_VOUCHERS) {
+    errors.paymentVouchers = `支付凭证最多上传${MAX_PAYMENT_VOUCHERS}张`
+  }
+  const contracts = Array.isArray(form.contractAttachments) ? form.contractAttachments : []
+  if (!contracts.length) {
+    errors.contractAttachments = '请上传合同附件'
+  } else if (contracts.length > MAX_CONTRACT_ATTACHMENTS) {
+    errors.contractAttachments = `合同附件最多上传${MAX_CONTRACT_ATTACHMENTS}份`
+  }
+  if (form.receiptImage && (!form.receiptImage.id || !form.receiptImage.url)) {
+    errors.receiptImage = '收据图片无效，请重新上传'
   }
   if (String(form.remark || '').trim().length > MAX_REMARK) {
     errors.remark = `备注不能超过${MAX_REMARK}个字`
@@ -374,19 +400,20 @@ export function validateBusinessForm(form, meta = {}) {
       .forEach(field => order.push(`products.${index}.${field}`))
   })
   order.push('paymentType', 'depositAmount', 'paymentMethod', 'receiptDate',
-    'receiptNo', 'voucherUrls', 'remark')
+    'receiptNo', 'receiptImage', 'paymentVouchers', 'contractAttachments', 'remark')
   const firstError = order.map(key => errors[key]).find(Boolean) || ''
   return { valid: Object.keys(errors).length === 0, errors, firstError }
 }
 
-/** 错误键归属的步骤：0 基础信息 / 1 商品明细 / 2 收款信息 / 3 确认页。 */
+/** 错误键归属的步骤：0 基础 / 1 商品 / 2 支付 / 3 凭证 / 4 确认。 */
 export function stepOfErrorKey(key) {
   if (BASIC_FIELDS.includes(key)) return 0
-  // 付款方式/定金已从收款步骤前移到商品明细步骤（销售价合计下方）
+  // 付款方式/定金与商品应付合计强关联，保留在商品明细步骤
   if (PRODUCTS_STEP_FIELDS.includes(key)) return 1
   if (key === 'products' || key.startsWith('products.')) return 1
-  if (RECEIPT_FIELDS.includes(key) || key === 'remark') return 2
-  return 3
+  if (PAYMENT_FIELDS.includes(key)) return 2
+  if (VOUCHER_FIELDS.includes(key)) return 3
+  return 4
 }
 
 /** 只保留指定步骤的错误，供“下一步”拦截当前步骤使用。 */

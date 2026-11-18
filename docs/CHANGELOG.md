@@ -11,6 +11,26 @@
 - **平台主站（14:28）**：重发 228 个静态文件（`VITE_BASE=/`），备份 `html-platform-pre-20261118_142815.tgz`，`boss-platform-nginx` reload；`/` 与 `/ops/business-data` 均 200、title=协同平台。
 - **未执行**：微信真机聚焦/录入 E2E。
 
+## 2026-11-18（员工制单凭证/OCR 复审修复与生产发布）
+
+- **复审修复**：OCR 锚点优先「入账日期」（缺失才退化）；向导 `goStep` 确认页步号 3→4；附件上传配额 100/24h、像素上限 16MP、上传人必须一致；新增删除未绑定附件接口与每日清理 7 天前未绑定附件；OCR 并发上限 2；`OpsBusinessAttachment` 加入实体注册 seed。
+- **生产部署（12:00–12:11）**：DB 备份 → `migrate_business_order_vouchers.sql`（3 列+新表）→ ops 镜像重建（Tesseract 5.5.0，chi_sim/eng）→ 复审修复 overlay JAR → H5 `index-DOW831jb.js`（旧入口 404）→ 实体注册。回滚：`ops-app.jar.20261118_120156` / `ops-app-fix-prev.20261118_121026`、镜像 `ops:rollback-20261118_120156` / `ops:rollback-fix-20261118_121026`、`html-ops-pre-20261118_120156.tgz`。
+- **验证**：ops/platform/SCM health 200；新上传/OCR/删除接口未登录 401；Tesseract 样例 `NO.1234567` 识别通过；解析器 12 项（含锚点/多候选修复）通过。
+- **未执行**：真实员工 H5 E2E / 微信真机。
+
+## 2026-11-18（员工制单：支付信息/凭证信息拆分 + 收据号 OCR + 合同附件）
+
+- **流程**：员工 H5「新增业务订单」4 步 → 5 步：基础信息 → 商品明细 → 支付信息 → 凭证信息 → 确认提交。原收款信息中的收据号/收款凭证移入凭证信息；支付信息保留支付方式、市场收款日期、备注。
+- **凭证信息**：收据图片（可选）→ OCR 识别收据号；收据号必填；支付凭证必填 1~3 张；合同附件必填 1~5 份（JPG/PNG/PDF ≤10MB）。
+- **OCR**：服务端 Tesseract（chi_sim+eng，15s 超时，失败降级手填），规则为「入账日期」后 NO. 的 7 位数字；人工修改后重新上传时弹窗确认是否覆盖。
+- **后端**：新增 `BusinessAttachmentService` / `ReceiptOcrService` / `ReceiptNoParser`；`EmployeeBusinessEntryServiceImpl` 强制校验收据号/支付凭证/合同附件；订单头新增 `receipt_image_url` / `payment_voucher_urls` / `contract_attachment_urls`；新表 `ops_business_attachment` 记录上传人/时间/原文件名；订单详情返回凭证字段与附件。
+- **存储**：图片服务端重编码 JPEG（最长边 2000px/0.85），PDF 原样；URL `/uploads/ops/business/{corpId}/{type}/...`。
+- **前端**：新增 `BusinessAttachmentUploader`（图片/PDF 上传/预览/删除）、`BusinessStepPayment`（原 Receipt 改造）、`BusinessStepVoucher`；确认页拆分支付/凭证汇总；删除 `BusinessStepReceipt`/`BusinessVoucherUploader`。
+- **迁移**：`sql/migrate_business_order_vouchers.sql`（mall_db，幂等，须先于新 JAR）。
+- **规格**：`Specs/员工制单凭证信息与收据OCR-规格说明.md`。
+- **验证**：ops 后端 `mvn -o compile` 通过；H5/小程序构建通过；`ReceiptNoParser` 样例 9 项通过（含全角/空格/6-8 位/多候选）；迁移脚本在生产 MySQL 临时库试运行通过（3 个订单头列 + `ops_business_attachment` 表，验证后 DROP）。OCR 真机识别、生产迁移/部署待执行。
+- **注意**：需重建 ops 镜像安装 tesseract；后端与 H5 同窗口发布；旧草稿需重新上传附件。
+
 ## 2026-11-18（城市合伙人「业务员」角色生产部署）
 
 - **数据库迁移（11:26）**：执行 `sql/business_staff_role_migration.sql`；9 个城市合伙人组织（含 3 个停用）/ 9 个业务员角色 / 90 条默认菜单 / 174 名在职员工绑定；自检：已核对业务权限持有 0、未绑定员工 0。迁移前备份：本机 `ai_platform_20261118_112517.sql.gz`、`mall_db_20261118_112517.sql.gz`。
