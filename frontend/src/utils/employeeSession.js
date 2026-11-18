@@ -114,6 +114,27 @@ export function getEmployeePermissions() {
   return readJson('ops_employee_permissions', [])
 }
 
+/** 当前员工角色名列表（登录/切换组织下发；多角色并集）。 */
+export function getEmployeeRoles() {
+  return readJson('ops_employee_roles', [])
+}
+
+/**
+ * 零售底价可见角色：部长及以上。
+ * 业务员/售后/施工员/派工员/验收员/供应链/财务等不可见。
+ * 说明：价格接口沿用既有返回字段（后端制单计算使用），此处为 H5 展示层控制。
+ */
+export const RETAIL_FLOOR_PRICE_ROLES = [
+  '部长', '总经办', '业务管理员', '企业管理员', '管理员',
+  '城市合伙人', '总经理', '副总', '老板'
+]
+
+/** 当前员工是否可查看零售底价（多角色并集，任一命中即可）。 */
+export function canViewRetailFloorPrice() {
+  const roles = getEmployeeRoles()
+  return roles.some(role => RETAIL_FLOOR_PRICE_ROLES.includes(String(role || '').trim()))
+}
+
 /** 用户类型：0内部 1外部（历史会话无值时按内部处理）。 */
 export function getEmployeeUserType() {
   return Number(uni.getStorageSync('ops_employee_user_type')) === 1 ? 1 : 0

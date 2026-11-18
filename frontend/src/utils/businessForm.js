@@ -151,7 +151,7 @@ export function emptyProduct() {
     uid: newProductUid(),
     productId: null, category: '', brand: '', model: '',
     salePrice: '', saleQuantity: '1',
-    standardSalePrice: null, priceConfigured: null, priceLoading: false,
+    standardSalePrice: null, retailFloorPrice: null, priceConfigured: null, priceLoading: false,
     priceError: '',
     isSpecial: false, specialFileId: null, specialFileUrl: '', specialFileName: '',
     commissionRate: '',

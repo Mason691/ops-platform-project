@@ -51,9 +51,15 @@
     </view>
 
     <view :id="fieldId('salePrice')" class="field">
-      <text class="label" @click="focusField(fieldId('salePrice'))">
-        销售单价 <text class="req">*</text>
-      </text>
+      <view class="label-row">
+        <text class="label" @click="focusField(fieldId('salePrice'))">
+          销售单价 <text class="req">*</text>
+        </text>
+        <text v-if="canShowFloorPrice" class="floor-toggle"
+              @click.stop="toggleFloorPrice">
+          {{ floorVisible ? '隐藏' : '显示' }}
+        </text>
+      </view>
       <view class="price-card" :class="{ 'price-card-special': product.isSpecial }">
         <view class="price-main">
           <text v-if="!editingPrice" class="price-value" :class="{ placeholder: !hasPrice }">
@@ -90,6 +96,14 @@
         <text v-else-if="product.priceConfigured === false" class="price-contact">
           请联系管理员配置该商品的标准售价
         </text>
+      </view>
+
+      <view v-if="canShowFloorPrice" class="floor-price-wrap"
+            :class="{ open: floorVisible }">
+        <view class="floor-price">
+          <text class="floor-price-label">零售底价：</text>
+          <text class="floor-price-amount">¥{{ floorText }}</text>
+        </view>
       </view>
 
       <text :id="fieldId('standardPrice')" v-if="!product.priceLoading && errors.standardPrice"
@@ -144,7 +158,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import FieldChips from '@/components/FieldChips.vue'
 import BottomSheetSelect from '@/components/BottomSheetSelect.vue'
 import QuantityStepper from '@/components/QuantityStepper.vue'
@@ -158,6 +172,7 @@ import {
   computeProductPayable, emptyTradeInItem, isOldGoodsBrand
 } from '@/utils/businessForm'
 import { focusField, keepFieldVisible } from '@/utils/fieldFocus'
+import { canViewRetailFloorPrice } from '@/utils/employeeSession'
 
 /**
  * 单张产品卡片：品类/品牌直接点选，型号底部弹层搜索；单价两位小数，
@@ -177,6 +192,8 @@ const modelSheet = ref(false)
 // 价格卡片：默认展示当前单价，点“修改单价”后才进入输入态；
 // 每个产品卡片独立维护，互不影响。
 const editingPrice = ref(false)
+// 零售底价：每张卡片独立展开；仅部长及以上角色可见（展示层控制）
+const floorVisible = ref(false)
 const { lookup: lookupPrice, resetPrice, evaluateSpecial, useStandardPrice }
   = useProductPrice(props.product)
 
@@ -266,6 +283,27 @@ const isStandardPrice = computed(() => {
     && Math.abs(current - standard) < 0.005
 })
 
+/** 零售底价仅展示：需已配置售价、底价 > 0，且当前员工角色允许查看。 */
+const canShowFloorPrice = computed(() => {
+  if (!canViewRetailFloorPrice()) return false
+  const value = Number(props.product.retailFloorPrice)
+  return props.product.priceConfigured === true && Number.isFinite(value) && value > 0
+})
+const floorText = computed(() => {
+  const value = Number(props.product.retailFloorPrice)
+  return Number.isFinite(value) && value > 0 ? value.toFixed(2) : ''
+})
+
+// 型号切换/权限变化导致不可展示时，收起已展开内容
+watch(canShowFloorPrice, value => {
+  if (!value) floorVisible.value = false
+})
+
+function toggleFloorPrice() {
+  if (!canShowFloorPrice.value) return
+  floorVisible.value = !floorVisible.value
+}
+
 function fieldId(field) {
   return `field-products-${props.index}-${field}`
 }
@@ -276,6 +314,7 @@ function setCategory(value) {
   props.product.model = ''
   props.product.productId = null
   editingPrice.value = false
+  floorVisible.value = false
   resetPrice()
   clearTradeInState()
 }
@@ -285,6 +324,7 @@ function setBrand(value) {
   props.product.model = ''
   props.product.productId = null
   editingPrice.value = false
+  floorVisible.value = false
   resetPrice()
   clearTradeInState()
 }
@@ -296,6 +336,7 @@ function setModel(value) {
     && item.category === props.product.category && item.model === value)
   props.product.productId = material && material.id != null ? material.id : null
   editingPrice.value = false
+  floorVisible.value = false
   resetPrice()
   if (value) lookupPrice()
   else clearTradeInState()
@@ -381,6 +422,28 @@ function restoreStandardPrice() {
 .field:last-child { margin-bottom: 0; }
 .label { display: block; font-size: 25rpx; color: #666; margin-bottom: 10rpx; }
 .req { color: #e53935; }
+.label-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10rpx;
+}
+.label-row .label { margin-bottom: 0; }
+.floor-toggle {
+  font-size: 22rpx; font-weight: 600; color: #FF6B35;
+  padding: 4rpx 12rpx; border-radius: 6rpx; background: #FFF3ED;
+  text-decoration: underline; line-height: 1.4;
+}
+.floor-price-wrap {
+  max-height: 0; opacity: 0; overflow: hidden;
+  transition: max-height .18s ease, opacity .18s ease;
+}
+.floor-price-wrap.open { max-height: 200rpx; opacity: 1; }
+.floor-price {
+  display: flex; align-items: baseline; gap: 4rpx;
+  margin-top: 10rpx; padding: 10rpx 16rpx;
+  background: #F2F7FF; border-radius: 10rpx;
+}
+.floor-price-label { font-size: 22rpx; color: #4A7DF0; }
+.floor-price-amount { font-size: 26rpx; font-weight: 700; color: #2F5BB7; }
 .input {
   width: 100%; height: 76rpx !important; min-height: 76rpx !important;
   background: #f2f2f2; border-radius: 10rpx;

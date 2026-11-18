@@ -25,6 +25,13 @@ function cacheKey(product) {
   return corpKey + '#' + productKey
 }
 
+/** 零售底价：null/0/非法值一律视为未配置，返回 null。 */
+function normalizeRetail(value) {
+  if (value == null || value === '') return null
+  const amount = normalizeMoney(value)
+  return Number.isFinite(amount) && amount > 0 ? amount : null
+}
+
 export function useProductPrice(product) {
   const checking = ref(false)
   let lookupToken = 0
@@ -32,6 +39,7 @@ export function useProductPrice(product) {
   function resetPrice() {
     lookupToken += 1
     product.standardSalePrice = null
+    product.retailFloorPrice = null
     product.priceConfigured = null
     product.priceError = ''
     product.priceLoading = false
@@ -72,6 +80,7 @@ export function useProductPrice(product) {
     } catch (e) {
       if (token !== lookupToken) return
       product.priceConfigured = false
+      product.retailFloorPrice = null
       product.priceError = (e && (e.msg || e.message)) || '标准售价查询失败，请重试'
       product.priceLoading = false
     } finally {
@@ -85,6 +94,7 @@ export function useProductPrice(product) {
       product.priceConfigured = false
       product.priceError = (info && info.message) || '该商品未配置售价，请联系管理员'
       product.standardSalePrice = null
+      product.retailFloorPrice = null
       product.salePrice = ''
       product.isSpecial = false
       product.specialNotified = false
@@ -95,6 +105,8 @@ export function useProductPrice(product) {
     product.priceConfigured = true
     product.priceError = ''
     product.standardSalePrice = standard
+    // 零售底价仅用于展示（部长及以上可见），不参与任何金额计算
+    product.retailFloorPrice = normalizeRetail(info.retailFloorPrice)
     const currentPrice = normalizeMoney(product.salePrice)
     if (preservePrice && currentPrice > 0) {
       // 草稿/步骤切换回显：保留用户已填价格与特批附件，只按最新标准价重判
