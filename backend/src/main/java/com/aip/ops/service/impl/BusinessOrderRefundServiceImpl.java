@@ -147,6 +147,10 @@ public class BusinessOrderRefundServiceImpl implements BusinessOrderRefundServic
             throw BusinessException.of("退款金额必须大于0且不超过应付合计 ¥"
                     + payable.toPlainString());
         }
+        // 下调退款金额必须在备注说明理由，避免无依据少退（需求三.4）
+        if (amount.compareTo(payable) < 0 && remark.isEmpty()) {
+            throw BusinessException.of("退款金额低于应付合计时，请在备注中说明调整理由");
+        }
         List<Long> attachmentIds = request.getAttachmentIds() == null ? List.of()
                 : request.getAttachmentIds().stream().filter(Objects::nonNull).distinct().toList();
         if (attachmentIds.size() > MAX_ATTACHMENTS) {

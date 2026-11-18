@@ -31,7 +31,9 @@
         <view class="field">
           <text class="label">备注</text>
           <textarea class="textarea" :value="form.remark" maxlength="500"
-                    placeholder="选填，最多500字" @input="onRemark" />
+                    placeholder="选填；退款金额低于应付合计时必填，请说明调整理由"
+                    @input="onRemark" />
+          <text v-if="remarkError" class="ferr">{{ remarkError }}</text>
         </view>
 
         <view class="field">
@@ -71,6 +73,7 @@ const emit = defineEmits(['update:visible', 'submitted'])
 const submitting = ref(false)
 const amountError = ref('')
 const reasonError = ref('')
+const remarkError = ref('')
 const form = reactive({ amount: '', reason: '', remark: '', attachments: [] })
 
 const payable = computed(() => {
@@ -89,11 +92,13 @@ function reset() {
   form.attachments = []
   amountError.value = ''
   reasonError.value = ''
+  remarkError.value = ''
 }
 
 function onAmount(event) {
   form.amount = String(event.detail.value ?? '')
   amountError.value = ''
+  remarkError.value = ''
 }
 
 function onReason(event) {
@@ -103,14 +108,17 @@ function onReason(event) {
 
 function onRemark(event) {
   form.remark = String(event.detail.value ?? '')
+  remarkError.value = ''
 }
 
 async function submit() {
   if (submitting.value) return
   const amount = Number(form.amount)
   const reason = String(form.reason || '').trim()
+  const remark = String(form.remark || '').trim()
   amountError.value = ''
   reasonError.value = ''
+  remarkError.value = ''
   let invalid = false
   if (!reason) {
     reasonError.value = '请填写退款原因'
@@ -123,13 +131,18 @@ async function submit() {
     amountError.value = `退款金额不能超过应付合计 ¥${money(payable.value)}`
     invalid = true
   }
+  if (Number.isFinite(amount) && amount > 0
+      && amount < payable.value - 0.005 && !remark) {
+    remarkError.value = '退款金额低于应付合计，请在备注中说明调整理由'
+    invalid = true
+  }
   if (invalid) return
   submitting.value = true
   try {
     await api.employeeApplyRefund(props.orderId, {
       amount: Math.round(amount * 100) / 100,
       reason,
-      remark: String(form.remark || '').trim(),
+      remark,
       attachmentIds: (form.attachments || []).map(file => file && file.id).filter(Boolean)
     })
     uni.showToast({ title: '退款申请已提交', icon: 'success' })
