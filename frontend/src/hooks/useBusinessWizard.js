@@ -85,6 +85,13 @@ export function useBusinessWizard() {
     loading.value = true
     errorMsg.value = ''
     try {
+      // 可发起业务类型由底座按 userType + 权限下发；外部用户默认白名单为空
+      const types = await api.workbenchBusinessTypes()
+      if (!Array.isArray(types)
+          || !types.some(type => type.code === 'OPS_BUSINESS_ORDER')) {
+        errorMsg.value = '当前账号暂无可发起的业务类型'
+        return
+      }
       const data = await api.employeeManualOptions()
       Object.assign(meta, emptyMeta(), data || {})
       normalizeMeta()

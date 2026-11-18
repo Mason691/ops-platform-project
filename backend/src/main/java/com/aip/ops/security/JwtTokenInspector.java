@@ -48,6 +48,28 @@ public class JwtTokenInspector {
         }
     }
 
+    /** 当前请求的用户类型：0内部 1外部；历史 token 无 claim 按内部处理。 */
+    public Integer currentUserType() {
+        String header = currentAuthorizationHeader();
+        if (header == null) return 0;
+        try {
+            SignedJWT jwt = SignedJWT.parse(header.substring(7));
+            if (!jwt.verify(new MACVerifier(secretBytes))) {
+                return 0;
+            }
+            Object raw = jwt.getJWTClaimsSet().getClaim("user_type");
+            return raw instanceof Number number ? number.intValue() : 0;
+        } catch (Exception e) {
+            log.debug("解析 user_type 失败: {}", e.getMessage());
+            return 0;
+        }
+    }
+
+    /** 当前员工是否为外部用户。 */
+    public boolean isExternalUser() {
+        return com.aip.common.enums.UserTypeEnum.isExternal(currentUserType());
+    }
+
     private String currentAuthorizationHeader() {
         if (!(RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs)) {
             return null;

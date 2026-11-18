@@ -1,5 +1,6 @@
 package com.aip.ops.config;
 
+import com.aip.ops.security.ExternalUserGuardFilter;
 import com.aip.sdk.security.PlatformAuthenticationFilter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
@@ -22,6 +23,7 @@ import java.util.*;
 public class SecurityConfig {
 
     private final PlatformAuthenticationFilter platformAuthenticationFilter;
+    private final ExternalUserGuardFilter externalUserGuardFilter;
     private final ObjectMapper objectMapper;
 
     @Bean
@@ -50,6 +52,8 @@ public class SecurityConfig {
                 .accessDeniedHandler((req, res, ex) ->
                     writeJson(res, 403, "无权限")))
             .addFilterBefore(platformAuthenticationFilter,
+                    UsernamePasswordAuthenticationFilter.class)
+            .addFilterAfter(externalUserGuardFilter,
                     UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

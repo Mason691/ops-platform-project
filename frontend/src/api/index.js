@@ -228,6 +228,9 @@ export const api = {
 
   // 员工身份 & 业务数据
   employeeIdentity: () => request({url:'/api/ops/employee/identity'}),
+  // 工作台卡片/可发起业务类型：由平台按 userType + 权限下发，前端不硬编码
+  workbenchCards: () => request({url:'/api/workbench/cards'}),
+  workbenchBusinessTypes: () => request({url:'/api/workbench/business-types'}),
   // 复用底座组织接口：公众号 H5 与平台同域，/api/auth/** 由 platform-nginx 承载
   employeeOrgs: () => request({url:'/api/auth/orgs'}),
   employeeSwitchOrg: (corpId) => request({

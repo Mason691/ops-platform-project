@@ -32,7 +32,7 @@ const props = defineProps({
   enabled: { type: Boolean, default: true }
 })
 
-const { types, buttonText } = useBusinessTypes()
+const { types, buttonText, load } = useBusinessTypes()
 const sheetVisible = ref(false)
 
 const sheetOptions = computed(() => types.value.map(type => ({
@@ -63,7 +63,7 @@ function go(type) {
   uni.navigateTo({ url: type.route })
 }
 
-defineExpose({ open })
+defineExpose({ open, reload: load })
 </script>
 
 <style scoped>

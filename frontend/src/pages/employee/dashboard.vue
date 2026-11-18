@@ -60,85 +60,11 @@
     <view v-if="!noPermissionTip" class="menu-section">
       <text class="section-title">常用功能</text>
       <view class="menu-grid">
-        <view class="menu-card" @click="goBusinessData">
-          <view class="mc-icon mc-icon-data"><text>📊</text></view>
+        <view v-for="card in visibleCards" :key="card.code" class="menu-card" @click="openCard(card)">
+          <view class="mc-icon" :class="card.tone"><text>{{ card.icon }}</text></view>
           <view class="mc-body">
-            <text class="mc-title">业务数据</text>
-            <text class="mc-desc">查看提成与业绩明细</text>
-          </view>
-          <text class="mc-arrow">›</text>
-        </view>
-        <view v-if="canViewVerifiedBusiness" class="menu-card" @click="goVerifiedBusiness">
-          <view class="mc-icon mc-icon-data"><text>🧾</text></view>
-          <view class="mc-body">
-            <text class="mc-title">已核对业务</text>
-            <text class="mc-desc">财务核对订单发起采购申请</text>
-          </view>
-          <text class="mc-arrow">›</text>
-        </view>
-        <view class="menu-card" @click="goBalancePending">
-          <view class="mc-icon mc-icon-pay">
-            <text>💰</text>
-          </view>
-          <view class="mc-body">
-            <text class="mc-title">货款补录</text>
-            <text class="mc-desc">定金订单收齐余款，解锁派工</text>
-          </view>
-          <text class="mc-arrow">›</text>
-        </view>
-        <view class="menu-card" @click="goMaterialRequisition">
-          <view class="mc-icon mc-icon-data"><text>🧰</text></view>
-          <view class="mc-body">
-            <text class="mc-title">物资领用</text>
-            <text class="mc-desc">申请领用物料，部长审批</text>
-          </view>
-          <text class="mc-arrow">›</text>
-        </view>
-        <view class="menu-card" @click="goMaterialWriteOff2">
-          <view class="mc-icon mc-icon-pending"><text>✅</text></view>
-          <view class="mc-body">
-            <text class="mc-title">物资核销</text>
-            <text class="mc-desc">核销使用与退回，回写领用余量</text>
-          </view>
-          <text class="mc-arrow">›</text>
-        </view>
-        <view class="menu-card" @click="goMaterialPick">
-          <view class="mc-icon mc-icon-dispatch"><text>📦</text></view>
-          <view class="mc-body">
-            <text class="mc-title">物料领取</text>
-            <text class="mc-desc">派工施工领取物料，财务审批</text>
-          </view>
-          <text class="mc-arrow">›</text>
-        </view>
-        <view class="menu-card" @click="goMaterialWriteOff">
-          <view class="mc-icon mc-icon-dispatch"><text>♻️</text></view>
-          <view class="mc-body">
-            <text class="mc-title">物料核销</text>
-            <text class="mc-desc">剩余物料退回与消耗核销</text>
-          </view>
-          <text class="mc-arrow">›</text>
-        </view>
-        <view class="menu-card" @click="goWorkLog">
-          <view class="mc-icon mc-icon-data"><text>📝</text></view>
-          <view class="mc-body">
-            <text class="mc-title">工作业务日志</text>
-            <text class="mc-desc">查看我发起与处理的流程操作</text>
-          </view>
-          <text class="mc-arrow">›</text>
-        </view>
-        <view class="menu-card" @click="goAiChat">
-          <view class="mc-icon mc-icon-ai"><text>🤖</text></view>
-          <view class="mc-body">
-            <text class="mc-title">AI 助手</text>
-            <text class="mc-desc">智能问答，随时解答</text>
-          </view>
-          <text class="mc-arrow">›</text>
-        </view>
-        <view class="menu-card" @click="goProfile">
-          <view class="mc-icon mc-icon-me"><text>👤</text></view>
-          <view class="mc-body">
-            <text class="mc-title">个人中心</text>
-            <text class="mc-desc">账户信息与密码管理</text>
+            <text class="mc-title">{{ card.name }}</text>
+            <text class="mc-desc">{{ card.desc }}</text>
           </view>
           <text class="mc-arrow">›</text>
         </view>
@@ -169,16 +95,31 @@ import WorkTodoCard from '@/components/WorkTodoCard.vue'
 import AddBusinessButton from '@/components/AddBusinessButton.vue'
 import { useOrgSwitch } from '@/hooks/useOrgSwitch'
 import {
-  getActiveCompany, getEmployeeInfo, getEmployeePermissions, PERM_VERIFIED_BUSINESS
+  getActiveCompany, getEmployeeInfo
 } from '@/utils/employeeSession'
 
 const company      = ref({})
 const employeeName = ref('')
 const roleName     = ref('员工')
 const noPermissionTip = ref(uni.getStorageSync('ops_employee_no_permission') === '1')
-// 卡片按角色权限并集渲染：业务员默认无「已核对业务」权限，其他角色有则仍展示
-const permissions  = ref(getEmployeePermissions())
+// 常用功能卡片由底座按 userType + 权限下发；前端不硬编码“已核对业务”等敏感卡片
+const cards = ref([])
+const visibleCards = computed(() => (cards.value || [])
+  .filter(card => card.visible !== false))
 const currentYear  = new Date().getFullYear().toString()
+
+/** 后端配置接口失败时的兜底卡片（不含仅内部可见的“已核对业务”）。 */
+const FALLBACK_CARDS = [
+  { code: 'business-data', name: '业务数据', desc: '查看提成与业绩明细', icon: '📊', tone: 'mc-icon-data', path: '/pages/employee/business-data' },
+  { code: 'balance-pending', name: '货款补录', desc: '定金订单收齐余款，解锁派工', icon: '💰', tone: 'mc-icon-pay', path: '/pages/employee/balance-pending' },
+  { code: 'material-requisition', name: '物资领用', desc: '申请领用物料，部长审批', icon: '🧰', tone: 'mc-icon-data', path: '/pages/employee/material-requisition-records' },
+  { code: 'material-write-off-records', name: '物资核销', desc: '核销使用与退回，回写领用余量', icon: '✅', tone: 'mc-icon-pending', path: '/pages/employee/material-write-off-records' },
+  { code: 'material-pick', name: '物料领取', desc: '派工施工领取物料，财务审批', icon: '📦', tone: 'mc-icon-dispatch', path: '/pages/employee/material-pick' },
+  { code: 'material-write-off', name: '物料核销', desc: '剩余物料退回与消耗核销', icon: '♻️', tone: 'mc-icon-dispatch', path: '/pages/employee/material-write-off' },
+  { code: 'work-log', name: '工作业务日志', desc: '查看我发起与处理的流程操作', icon: '📝', tone: 'mc-icon-data', path: '/pages/employee/work-log' },
+  { code: 'ai-chat', name: 'AI 助手', desc: '智能问答，随时解答', icon: '🤖', tone: 'mc-icon-ai', path: '/pages/employee/ai-chat' },
+  { code: 'profile', name: '个人中心', desc: '账户信息与密码管理', icon: '👤', tone: 'mc-icon-me', path: '/pages/employee/profile' }
+]
 
 const yearlyStats = ref({
   orderCount: '0',
@@ -194,12 +135,12 @@ const {
 } = useOrgSwitch({ onChanged: onOrgChanged })
 
 const avatarChar = computed(() => (employeeName.value || '员').charAt(0))
-const canViewVerifiedBusiness = computed(() =>
-  permissions.value.includes(PERM_VERIFIED_BUSINESS))
 
 onShow(async () => {
   await loadDashboard()
   await loadOrgs()
+  await loadCards()
+  addBusinessRef.value?.reload()
   // 卡片自身在 mounted 已加载一次；后续回到工作台（含查看全部返回）再刷新
   if (dashboardShown) {
     todoCardRef.value?.reload({ silent: true })
@@ -209,7 +150,6 @@ onShow(async () => {
 
 function refreshCompany() {
   noPermissionTip.value = uni.getStorageSync('ops_employee_no_permission') === '1'
-  permissions.value = getEmployeePermissions()
   const info = getEmployeeInfo()
   const active = getActiveCompany()
   employeeName.value = info.name || ''
@@ -263,23 +203,34 @@ async function loadStats() {
   }
 }
 
+async function loadCards() {
+  try {
+    const list = await api.workbenchCards()
+    cards.value = Array.isArray(list) ? list : []
+  } catch (_) {
+    // 配置接口不可用时保留基础功能入口，且兜底列表不包含仅内部可见卡片
+    cards.value = FALLBACK_CARDS
+  }
+}
+
 async function onOrgChanged(data) {
   noPermissionTip.value = !(data.permissions || []).length
   // refreshCompany 会从会话缓存重新读取权限，保证切组织后卡片立即按新角色渲染
   refreshCompany()
   await loadStats()
+  await loadCards()
+  addBusinessRef.value?.reload()
   todoCardRef.value?.reload()
 }
 
-function goBusinessData() { uni.navigateTo({ url: '/pages/employee/business-data' }) }
-function goBalancePending() { uni.navigateTo({ url: '/pages/employee/balance-pending' }) }
-function goVerifiedBusiness() { uni.navigateTo({ url: '/pages/employee/verified-business' }) }
-function goMaterialRequisition() { uni.navigateTo({ url: '/pages/employee/material-requisition-records' }) }
-function goMaterialWriteOff2()   { uni.navigateTo({ url: '/pages/employee/material-write-off-records' }) }
-function goMaterialPick()     { uni.navigateTo({ url: '/pages/employee/material-pick' }) }
-function goMaterialWriteOff() { uni.navigateTo({ url: '/pages/employee/material-write-off' }) }
-function goWorkLog()      { uni.navigateTo({ url: '/pages/employee/work-log' }) }
-function goAiChat()       { uni.redirectTo({ url: '/pages/employee/ai-chat' }) }
+function openCard(card) {
+  if (!card || !card.path) return
+  if (card.code === 'ai-chat' || card.code === 'profile') {
+    uni.redirectTo({ url: card.path })
+    return
+  }
+  uni.navigateTo({ url: card.path })
+}
 function goProfile()      { uni.redirectTo({ url: '/pages/employee/profile' }) }
 function openAddBusiness() { addBusinessRef.value?.open() }
 

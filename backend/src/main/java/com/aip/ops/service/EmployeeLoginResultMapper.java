@@ -36,6 +36,7 @@ public final class EmployeeLoginResultMapper {
         result.put("roleNames", data.getOrDefault("roleNames", List.of()));     // 当前组织角色
         result.put("roles", data.getOrDefault("roles", result.get("roleNames")));
         result.put("avatar", data.getOrDefault("avatar", ""));               // sys_user 头像
+        result.put("userType", data.getOrDefault("userType", 0));             // 0内部 1外部
         return result;
     }
 

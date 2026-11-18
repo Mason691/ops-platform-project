@@ -257,6 +257,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     @Override
     public Map<String, Object> createManualEntry(EmployeeBusinessEntryRequest request) {
+        if (jwtTokenInspector.isExternalUser()) {
+            throw BusinessException.forbidden("外部用户暂不可发起业务");
+        }
         EmployeeContext ctx = resolveEmployeeContext();
         Validated v = validateRequest(request, ctx);
         // 平台/SCM 的 HTTP 查询在事务外完成；事务只包裹批次取号+行锁、会员创建、INSERT，
@@ -291,6 +294,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     @Override
     public Map<String, Object> retryTradeInPurchase(Long orderId) {
+        if (jwtTokenInspector.isExternalUser()) {
+            throw BusinessException.forbidden("外部用户暂不可发起业务");
+        }
         EmployeeContext ctx = resolveEmployeeContext();
         OpsBusinessOrder order = requireAgentOrder(ctx, orderId);
         if (!Integer.valueOf(1).equals(order.getHasTradeIn())) {
@@ -482,6 +488,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     @Override
     public Map<String, Object> receiveBalance(Long orderId, BalanceReceiveRequest request) {
+        if (jwtTokenInspector.isExternalUser()) {
+            throw BusinessException.forbidden("外部用户暂不可操作货款补录");
+        }
         EmployeeContext ctx = resolveEmployeeContext();
         if (request == null) throw BusinessException.of("补录信息不能为空");
         BigDecimal received = request.getReceivedAmount();

@@ -170,6 +170,8 @@ public class EmployeeAuthServiceImpl implements EmployeeAuthService {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("token", token);
             result.put("expiresIn", jwtExpiration);
+            Integer currentUserType = SecurityUtils.getCurrentUser().getUserType();
+            result.put("userType", currentUserType == null ? 0 : currentUserType);
             return result;
         } catch (RuntimeException e) {
             throw e;

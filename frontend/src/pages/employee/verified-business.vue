@@ -19,7 +19,7 @@
     <view v-if="forbidden" class="state">
       <text class="empty-icon">🔒</text>
       <text class="state-err">无权限访问已核对业务</text>
-      <text class="state-sub">该功能仅对具备采购 H5 制单权限的角色开放</text>
+      <text class="state-sub">{{ forbiddenText }}</text>
       <view class="btn ghost" @click="goHome"><text>返回工作台</text></view>
     </view>
     <view v-else-if="loading" class="state"><text>加载中...</text></view>
@@ -98,11 +98,12 @@ import { ref } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import {
-  isEmployeeLoggedIn, hasEmployeePermission, PERM_VERIFIED_BUSINESS
+  isEmployeeLoggedIn, hasEmployeePermission, isExternalUser, PERM_VERIFIED_BUSINESS
 } from '@/utils/employeeSession'
 
 const loading = ref(true)
 const forbidden = ref(false)
+const forbiddenText = ref('该功能仅对具备采购 H5 制单权限的角色开放')
 const errorMsg = ref('')
 const list = ref([])
 const truncated = ref(false)
@@ -117,8 +118,16 @@ onShow(() => {
     })
     return
   }
+  // 外部用户即使角色误配了采购权限，也不允许访问“已核对业务”（接口层同样拒绝）
+  if (isExternalUser()) {
+    forbidden.value = true
+    forbiddenText.value = '外部用户无权限访问已核对业务'
+    loading.value = false
+    return
+  }
   // 直接访问页面时按角色权限拦截（多角色并集；业务员默认无此权限）
   if (!hasEmployeePermission(PERM_VERIFIED_BUSINESS)) {
+    forbiddenText.value = '该功能仅对具备采购 H5 制单权限的角色开放'
     forbidden.value = true
     loading.value = false
     return

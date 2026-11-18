@@ -327,6 +327,9 @@ public class EmployeeController {
     @OperationLog(module = "运营管理", action = "员工手工新增业务数据", targetTable = "ops_business_order_item")
     @PostMapping("/business-data/manual")
     public R<?> createManual(@RequestBody EmployeeBusinessEntryRequest request) {
+        if (jwtTokenInspector.isExternalUser()) {
+            return R.fail(403, "外部用户暂不可发起业务");
+        }
         return R.ok(employeeBusinessEntryService.createManualEntry(request));
     }
 
