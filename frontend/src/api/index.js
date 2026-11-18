@@ -326,7 +326,17 @@ export const api = {
   }),
   // 业务订单详情 / 派工可选员工 / 财务暂缓（ops，员工 JWT + 数据范围）
   businessOrderDetail: (orderId) => request({url:'/api/ops/admin/business-data/orders/' + orderId}),
-  businessFlowAssignees: (orderId) => request({url:'/api/ops/admin/business-data/flow/assignees', data: orderId ? {orderId} : undefined}),
+  businessTaskOrderDetail: (taskId) => request({url:'/api/ops/employee/business-data/tasks/' + taskId + '/order'}),
+  businessFlowAssignees: (orderId, keyword, limit) => request({
+    url:'/api/ops/admin/business-data/flow/assignees',
+    data: { ...(orderId ? {orderId} : {}), ...(keyword ? {keyword} : {}), ...(limit ? {limit} : {}) }
+  }),
+  dispatchWorkerCheckPhone: (orderId, phone) => request({
+    url:'/api/ops/admin/business-data/dispatch-worker/check-phone', data:{orderId, phone}
+  }),
+  createExternalWorker: (data) => request({
+    url:'/api/ops/admin/business-data/dispatch-worker/external', method:'POST', data
+  }),
   businessHoldFinance: (orderId, data) => request({url:'/api/ops/admin/business-data/orders/' + orderId + '/flow/hold', method:'POST', data}),
   // 平台公开字典
   getDictData: (typeCode) => request({url:'/api/dict/data', data:{typeCode}}),

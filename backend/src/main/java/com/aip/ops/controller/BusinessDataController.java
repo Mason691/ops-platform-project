@@ -5,7 +5,9 @@ import com.aip.ops.dto.FinanceCheckRequest;
 import com.aip.ops.dto.ModelConfirmDecision;
 import com.aip.ops.entity.SysImportTask;
 import com.aip.ops.entity.SysExportTask;
+import com.aip.ops.entity.OpsBusinessAttachment;
 import com.aip.ops.service.BizStatusService;
+import com.aip.ops.service.BusinessAttachmentService;
 import com.aip.ops.service.BusinessDataFinanceService;
 import com.aip.ops.service.BusinessDataReconcileService;
 import com.aip.ops.service.BusinessDataService;
@@ -52,6 +54,7 @@ public class BusinessDataController {
     private final BizStatusService bizStatusService;
     private final BusinessOrderWorkflowService workflowService;
     private final BusinessDataFinanceService financeService;
+    private final BusinessAttachmentService attachmentService;
     private final com.aip.ops.service.WorkflowFinancePermissionService workflowFinancePermissionService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ExecutorService importExecutor;
@@ -127,6 +130,7 @@ public class BusinessDataController {
                                   BizStatusService bizStatusService,
                                   BusinessOrderWorkflowService workflowService,
                                   BusinessDataFinanceService financeService,
+                                  BusinessAttachmentService attachmentService,
                                   com.aip.ops.service.WorkflowFinancePermissionService workflowFinancePermissionService,
                                   @Qualifier("importExecutor") ExecutorService importExecutor) {
         this.service = service;
@@ -138,6 +142,7 @@ public class BusinessDataController {
         this.bizStatusService = bizStatusService;
         this.workflowService = workflowService;
         this.financeService = financeService;
+        this.attachmentService = attachmentService;
         this.workflowFinancePermissionService = workflowFinancePermissionService;
         this.importExecutor = importExecutor;
     }
@@ -207,6 +212,39 @@ public class BusinessDataController {
         return R.ok(service.dispatchEligibility(orderIds));
     }
 
+    /**
+     * PC 端完工验收凭证上传：图片/短视频；返回附件 ID 供工作流节点动作引用。
+     * 外部用户由 ExternalUserGuardFilter 拦截，仅内部员工可用。
+     */
+    @PostMapping("/attachments/acceptance")
+    public R<?> uploadAcceptanceAttachment(@RequestParam("file") MultipartFile file,
+                                           @RequestParam(value = "orderId", required = false)
+                                           Long orderId) {
+        Long corpId = SecurityUtils.getCurrentCorpIdOrNull();
+        // 传 orderId 时按订单归属组织落附件：多组织经办人/上级组织操作时，
+        // 避免“上传用当前组织、验收校验用订单组织”导致提交时附件归属不匹配。
+        if (orderId != null) {
+            Map<String, Object> detail = service.orderDetail(orderId);
+            Object orderCorp = detail.get("corpId");
+            if (orderCorp instanceof Number n) {
+                corpId = n.longValue();
+            }
+        }
+        Long userId = SecurityUtils.getCurrentUserId();
+        String userName = SecurityUtils.getCurrentUser() == null
+                ? "" : SecurityUtils.getCurrentUser().getUsername();
+        return R.ok(attachmentService.uploadForUser(file,
+                OpsBusinessAttachment.TYPE_ACCEPTANCE, corpId, userId, userName));
+    }
+
+    /** 删除未绑定的验收凭证（仅上传人本人；已绑定订单的附件保留供回看）。 */
+    @DeleteMapping("/attachments/{id}")
+    public R<?> deleteAcceptanceAttachment(@PathVariable Long id) {
+        attachmentService.deleteUnboundForUser(id, SecurityUtils.getCurrentCorpIdOrNull(),
+                SecurityUtils.getCurrentUserId());
+        return R.ok();
+    }
+
     /** 业务订单详情（按订单编号）：列表双击查看，兼容历史无主表行。 */
     @GetMapping("/orders/by-no")
     public R<?> orderDetailByNo(@RequestParam String orderNo) {
@@ -221,8 +259,10 @@ public class BusinessDataController {
 
     /** 工作流派工节点可选员工：传 orderId 时按订单归属组织取人；不传沿用当前可见组织范围。 */
     @GetMapping("/flow/assignees")
-    public R<?> flowAssignees(@RequestParam(value = "orderId", required = false) Long orderId) {
-        return R.ok(service.flowAssignees(orderId));
+    public R<?> flowAssignees(@RequestParam(value = "orderId", required = false) Long orderId,
+                              @RequestParam(value = "keyword", required = false) String keyword,
+                              @RequestParam(value = "limit", required = false) Integer limit) {
+        return R.ok(service.flowAssignees(orderId, keyword, limit));
     }
 
     /**

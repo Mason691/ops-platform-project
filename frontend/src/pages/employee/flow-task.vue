@@ -151,8 +151,10 @@
         <text class="inbound-title">⚠️ 本订单含以旧换新旧品，请及时办理旧品入库。</text>
         <text v-if="order.tradeInSummary" class="inbound-line">旧品：{{ order.tradeInSummary }}</text>
         <text v-if="order.tradeInPurchaseBillNo" class="inbound-line">
-          关联采购单：{{ order.tradeInPurchaseBillNo }}（未审核）
+          关联采购单：{{ order.tradeInPurchaseBillNo }}{{ purchaseAuditLabel }}
         </text>
+        <text v-if="order.tradeInPurchaseStatus === 'SUCCESS' && !order.tradeInAutoApproved && order.tradeInAutoApproveReason"
+              class="inbound-line">{{ order.tradeInAutoApproveReason }}</text>
         <text class="inbound-line">入库状态：{{ order.tradeInInboundStatusName || '旧品未入库' }}</text>
         <text v-if="order.tradeInPurchaseStatus === 'FAILED'" class="inbound-line error">
           关联采购单生成失败，请联系经办人在订单详情重试
@@ -223,9 +225,12 @@
             </view>
           </view>
           <view class="field"><text class="label">上门员工 <text class="req">*</text></text>
-            <picker mode="selector" :range="assigneeNames" :value="assigneeIndex" @change="onAssignee">
-              <view class="picker">{{ assigneeName || '请选择上门员工' }}</view>
-            </picker>
+            <DispatchWorkerPicker
+              v-model="form.assigneeUserId"
+              :order-id="order.orderId"
+              :corp-name="order.company || order.corpName"
+              @selected="onWorkerSelected"
+            />
           </view>
           <view class="field"><text class="label">期望上门 <text class="req">*</text></text>
             <view class="row2">
@@ -272,17 +277,13 @@
               <view class="chip" :class="{ on: form.acceptanceConclusion === 'REJECT' }" @click="form.acceptanceConclusion = 'REJECT'">不通过</view>
             </view>
           </view>
-          <view class="field"><text class="label">验收说明</text>
-            <textarea v-model="form.acceptanceNote" class="textarea" maxlength="1000" placeholder="验收说明/不通过原因（≥5字）" />
+          <view class="field"><text class="label">验收意见 <text class="req">*</text></text>
+            <textarea v-model="form.acceptanceNote" class="textarea" maxlength="500"
+                      placeholder="请填写验收意见（5-500字），通过/不通过均必填" />
           </view>
-        </template>
-
-        <template v-else-if="actionType === 'OPS_AFTER_SALES'">
-          <view class="field"><text class="label">售后内容</text>
-            <textarea v-model="form.serviceNote" class="textarea" maxlength="1000" placeholder="售后维护内容" />
-          </view>
-          <view class="field"><text class="label">回访结果</text>
-            <textarea v-model="form.visitResult" class="textarea" maxlength="1000" placeholder="回访结果" />
+          <view class="field">
+            <text class="label">验收凭证 <text class="req">*</text></text>
+            <AcceptanceEvidence v-model="form.acceptanceEvidence" />
           </view>
         </template>
 
@@ -309,7 +310,7 @@
 
 <script setup>
 import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
@@ -317,6 +318,8 @@ import { REQUISITION_STATUS, WRITE_OFF_STATUS } from '@/utils/materialForm'
 import ApproverCard from '@/components/ApproverCard.vue'
 import RejectPopup from '@/components/RejectPopup.vue'
 import DispatchMaterialList from '@/components/DispatchMaterialList.vue'
+import AcceptanceEvidence from '@/components/AcceptanceEvidence.vue'
+import DispatchWorkerPicker from '@/components/DispatchWorkerPicker.vue'
 
 const loading = ref(true)
 const submitting = ref(false)
@@ -326,7 +329,7 @@ const taskId = ref('')
 const instanceId = ref('')
 const detail = ref(null)
 const order = ref({})
-const assignees = ref([])
+const selectedWorker = ref(null)
 const selectedKeys = ref([])
 /** 派工出库物料清单（需求预填；为空不生成领用单） */
 const dispatchMaterials = ref([])
@@ -340,11 +343,34 @@ const approverExpanded = ref(false)
 const form = reactive({
   receiptNo: '', financeReceiptDate: '', fundDynamicRows: null,
   isReceived: '是', checkConclusion: 'PASS', checkRemark: '',
-  dispatchType: 'CONSTRUCTION', assigneeUserId: null, expectTime: '', visitNote: '',
+  dispatchType: 'CONSTRUCTION', assigneeUserId: null, assignSource: 'SELECTED',
+  expectTime: '', visitNote: '',
   constructionNote: '', completionNote: '',
-  acceptanceConclusion: 'PASS', acceptanceNote: '',
-  serviceNote: '', visitResult: ''
+  acceptanceConclusion: 'PASS', acceptanceNote: '', acceptanceEvidence: []
 })
+
+/** 验收凭证草稿：刷新/返回后恢复已上传附件，避免重复上传与孤儿文件。 */
+function evidenceDraftKey() {
+  return taskId.value ? 'acceptance_evidence_' + taskId.value : ''
+}
+function restoreEvidenceDraft() {
+  const key = evidenceDraftKey()
+  if (!key) return
+  try {
+    const list = uni.getStorageSync(key)
+    if (Array.isArray(list)) form.acceptanceEvidence = list
+  } catch (e) { /* ignore */ }
+}
+function clearEvidenceDraft() {
+  const key = evidenceDraftKey()
+  if (!key) return
+  try { uni.removeStorageSync(key) } catch (e) { /* ignore */ }
+}
+watch(() => form.acceptanceEvidence, list => {
+  const key = evidenceDraftKey()
+  if (!key) return
+  try { uni.setStorageSync(key, list || []) } catch (e) { /* ignore */ }
+}, { deep: true })
 
 const yesNo = ['是', '否']
 const conclusions = [
@@ -387,6 +413,15 @@ const tradeInInboundDone = computed(() => {
   return !!o.hasTradeIn && (o.tradeInInboundStatus === 'ALL'
     || o.tradeInInboundStatusName === '旧品已入库')
 })
+
+/** 采购单审核状态文案：自动审核 / 人工已审核 / 待完善。 */
+const purchaseAuditLabel = computed(() => {
+  const o = order.value || {}
+  if (o.tradeInAutoApproved) return '（已审核·系统自动）'
+  if (o.tradeInAuditStatus === 'AUDITED') return '（已审核）'
+  if (o.tradeInAuditStatus === 'CLOSED') return '（已关闭）'
+  return '（待完善，需人工审批）'
+})
 /**
  * 施工完成节点（施工记录/施工验收）处理页必须提示旧品入库；
  * 其余节点在业务状态到达 5 施工完成后同样提示，直到入库完成。
@@ -395,7 +430,7 @@ const isConstructionStage = computed(() => {
   if (['OPS_CONSTRUCTION_RECORD', 'OPS_ACCEPTANCE'].includes(actionType.value)) return true
   const o = order.value || {}
   const match = String(o.bizStatus == null ? '' : o.bizStatus).match(/\d+/)
-  if (match) return Number(match[0]) >= 5
+  if (match) return [5, 6].includes(Number(match[0]))
   return /施工完成|验收|完成/.test(String(o.bizStatusName || ''))
 })
 const showInboundReminder = computed(() => {
@@ -434,22 +469,16 @@ const actionTitle = computed(() => {
     OPS_FINANCE_CHECK: '财务核对',
     OPS_DISPATCH_OUTBOUND: '派工出库',
     OPS_CONSTRUCTION_RECORD: '施工记录',
-    OPS_ACCEPTANCE: '施工完成验收',
-    OPS_AFTER_SALES: '售后维护'
+    OPS_ACCEPTANCE: '完工验收'
   }[actionType.value] || '节点处理'
 })
 const showGenericReject = computed(() => !['OPS_FINANCE_CHECK', 'OPS_ACCEPTANCE'].includes(actionType.value))
 const dispatchProducts = computed(() => (order.value.products || [])
   .filter(p => !p.isReturnEntry && Number(p.saleQuantity || 1) > 0))
-const assigneeNames = computed(() => assignees.value.map(u => (u.name || '') + '（' + (u.phone || '') + '）'))
-const assigneeIndex = computed(() => {
-  const idx = assignees.value.findIndex(u => String(u.userId) === String(form.assigneeUserId))
-  return idx < 0 ? 0 : idx
-})
-const assigneeName = computed(() => {
-  const u = assignees.value.find(x => String(x.userId) === String(form.assigneeUserId))
-  return u ? (u.name || '') + '（' + (u.phone || '') + '）' : ''
-})
+function onWorkerSelected(worker) {
+  selectedWorker.value = worker || null
+  form.assignSource = worker?.createdOnSite ? 'CREATED_ON_SITE' : 'SELECTED'
+}
 
 onLoad((options) => {
   taskId.value = (options && options.taskId) || ''
@@ -490,14 +519,16 @@ async function loadData() {
       order.value = await api.materialWriteOffApprovalDetail(businessId, taskId.value)
       return
     }
-    order.value = await api.businessOrderDetail(businessId)
+    // 任务处理人可能是外部施工员/外部验收人，且不一定是订单经办人；
+    // 统一走按 taskId 鉴权的员工端接口，避免 /api/ops/admin 对外部用户 403。
+    order.value = await api.businessTaskOrderDetail(taskId.value)
+    restoreEvidenceDraft()
     const r = order.value || {}
     form.receiptNo = r.receiptNo || ''
     form.financeReceiptDate = normalizeDate(r.financeReceiptDate || r.receiptDate)
     form.fundDynamicRows = r.fundDynamicRows == null ? null : r.fundDynamicRows
     form.isReceived = r.isReceived || '是'
     if (actionType.value === 'OPS_DISPATCH_OUTBOUND') {
-      try { assignees.value = await api.businessFlowAssignees(order.value.orderId) || [] } catch (_) { assignees.value = [] }
       selectedKeys.value = dispatchProducts.value.map(p => p.productKey)
     }
     loadCategoryDict()
@@ -540,7 +571,10 @@ function sourceLabel(v) {
   }[v] || v || '-'
 }
 function approvalLabel(v) {
-  return { NONE: '无需审批', IN_APPROVAL: '审批中', APPROVED: '已通过', REJECTED: '已驳回' }[v] || v || '-'
+  return {
+    NONE: '无需审批', IN_APPROVAL: '审批中', APPROVED: '已通过',
+    AUTO_APPROVED: '自动审核', REJECTED: '已驳回'
+  }[v] || v || '-'
 }
 function fmtTime(v) {
   return v ? String(v).replace('T', ' ').slice(0, 19) : '-'
@@ -552,11 +586,6 @@ function money(v) {
 }
 
 function onDate(field, e) { form[field] = e.detail.value }
-function onAssignee(e) {
-  const idx = Number(e.detail.value)
-  const u = assignees.value[idx]
-  if (u) form.assigneeUserId = u.userId
-}
 function onProducts(e) { selectedKeys.value = e.detail.value || [] }
 function onExpectDate(e) {
   expectDate.value = e.detail.value
@@ -588,6 +617,13 @@ function buildFormData() {
         }))
       : []
   }
+  if (actionType.value === 'OPS_ACCEPTANCE') {
+    data.attachmentIds = (form.acceptanceEvidence || [])
+      .map(file => file.id).filter(Boolean)
+    data.acceptanceEvidenceUrls = (form.acceptanceEvidence || [])
+      .map(file => file.url).filter(Boolean)
+    delete data.acceptanceEvidence
+  }
   return data
 }
 
@@ -613,8 +649,11 @@ function validate() {
   }
   if (actionType.value === 'OPS_ACCEPTANCE') {
     if (!form.acceptanceConclusion) return '请选择验收结论'
-    if (form.acceptanceConclusion === 'REJECT' && String(form.acceptanceNote || '').trim().length < 5) {
-      return '验收不通过原因不少于5个字'
+    if (String(form.acceptanceNote || '').trim().length < 5) {
+      return '验收意见不少于5个字'
+    }
+    if (!(form.acceptanceEvidence || []).length) {
+      return '请至少上传 1 张图片或 1 段视频作为验收凭证'
     }
   }
   return ''
@@ -673,18 +712,23 @@ async function doSubmit() {
     if (actionType.value === 'OPS_ACCEPTANCE' && form.acceptanceConclusion === 'REJECT') {
       await api.workflowReject({
         taskId: Number(taskId.value),
-        opinion: String(form.acceptanceNote || '验收不通过退回施工中').trim(),
+        opinion: String(form.acceptanceNote || '验收不通过退回施工完成').trim(),
         formData
       })
-      toast('已退回施工中')
+      clearEvidenceDraft()
+      toast('已退回施工完成')
       goTodo()
       return
     }
     const result = await api.workflowApprove({
       taskId: Number(taskId.value),
-      opinion: opinion.value,
+      // 完工验收的验收意见就是本次处理意见，写入 wf_task/wf_log 供详情与审计回看
+      opinion: actionType.value === 'OPS_ACCEPTANCE'
+        ? String(form.acceptanceNote || '').trim()
+        : opinion.value,
       formData
     })
+    if (actionType.value === 'OPS_ACCEPTANCE') clearEvidenceDraft()
     // 派工出库带物料清单时，SCM 已同事务生成领用草稿：按派工记录（=当前 taskId）查回单号提示
     if (actionType.value === 'OPS_DISPATCH_OUTBOUND'
         && form.dispatchType === 'CONSTRUCTION' && dispatchMaterials.value.length) {
@@ -693,6 +737,11 @@ async function doSubmit() {
         showDispatchMaterialResult(pick)
         return
       }
+    }
+    if (actionType.value === 'OPS_DISPATCH_OUTBOUND'
+        && selectedWorker.value
+        && selectedWorker.value.wechatBound === false) {
+      toast('该施工员未绑定微信，可能无法接收任务通知')
     }
     showSubmitResult(result, '处理成功，流程已推进')
   } catch (e) {

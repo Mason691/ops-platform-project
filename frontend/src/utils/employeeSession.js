@@ -121,7 +121,7 @@ export function getEmployeeRoles() {
 
 /**
  * 零售底价可见角色：部长及以上。
- * 业务员/售后/施工员/派工员/验收员/供应链/财务等不可见。
+ * 业务员/施工员/派工员/供应链/财务等不可见。
  * 说明：价格接口沿用既有返回字段（后端制单计算使用），此处为 H5 展示层控制。
  */
 export const RETAIL_FLOOR_PRICE_ROLES = [

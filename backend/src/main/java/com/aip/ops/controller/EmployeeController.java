@@ -134,6 +134,19 @@ public class EmployeeController {
                 SecurityUtils.getCurrentCorpId(), employeeService.getCurrentAgentPhone(), orderId));
     }
 
+    /**
+     * 工作流待办处理人查看订单详情：按 taskId 校验任务归属，
+     * 供派工施工员（可能不是订单经办人）在 H5 施工节点查看订单/地址。
+     */
+    @GetMapping("/business-data/tasks/{taskId}/order")
+    public R<?> taskOrderDetail(@PathVariable Long taskId) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可查看业务订单");
+        }
+        return R.ok(businessDataService.employeeTaskOrderDetail(
+                SecurityUtils.getCurrentUserId(), taskId));
+    }
+
     /** 退回草稿：终止当前流程、状态回 0、允许编辑后沿用原订单编号重新提交。 */
     @OperationLog(module = "运营管理", action = "员工退回业务订单草稿",
             targetTable = "ops_business_order")

@@ -15,7 +15,8 @@ spring:
   servlet:
     multipart:
       max-file-size: 50MB
-      max-request-size: 50MB
+      # 验收短视频上限 50MB；multipart 边界/表单开销需额外预留
+      max-request-size: 60MB
   datasource:
     url: jdbc:mysql://104.238.165.57:3306/mall_db?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&sslMode=DISABLED
     username: root

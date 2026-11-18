@@ -61,6 +61,22 @@
       </view>
     </view>
 
+    <view v-if="result.hasTradeIn && result.tradeInPurchaseStatus === 'SUCCESS' && result.tradeInAutoApproved"
+          class="trade-ok" :class="{ warn: result.tradeInPurchaseSyncStatus === 'PUSH_FAILED' }">
+      <text class="trade-ok-text" :class="{ warn: result.tradeInPurchaseSyncStatus === 'PUSH_FAILED' }">
+        {{ autoApproveText }}
+      </text>
+    </view>
+
+    <view v-if="result.hasTradeIn && result.tradeInPurchaseStatus === 'SUCCESS' && !result.tradeInAutoApproved"
+          class="trade-warn">
+      <text class="trade-warn-title">采购单已生成，待人工完善</text>
+      <text class="trade-warn-text">
+        {{ result.tradeInAutoApproveReason || '未满足自动审核条件' }}
+      </text>
+      <text class="trade-warn-text">请到采购订单 PC 端完善供应商/仓库/单价后提交审批。</text>
+    </view>
+
     <view v-if="result.hasTradeIn && result.tradeInPurchaseStatus === 'FAILED'" class="trade-warn">
       <text class="trade-warn-title">旧品采购单未生成</text>
       <text class="trade-warn-text">
@@ -100,13 +116,24 @@ const agentCount = computed(() => Number(props.result && props.result.agentCount
 const purchaseStatusText = computed(() => {
   const result = props.result || {}
   if (result.tradeInPurchaseStatus === 'SUCCESS') {
-    return result.tradeInPurchaseBillNo
-      ? `${result.tradeInPurchaseBillNo}（未审核）`
-      : '已生成（单号待同步）'
+    if (!result.tradeInPurchaseBillNo) return '已生成（单号待同步）'
+    return result.tradeInAutoApproved
+      ? `${result.tradeInPurchaseBillNo}（已审核，可生成入库）`
+      : `${result.tradeInPurchaseBillNo}（待完善，需人工审批）`
   }
   if (result.tradeInPurchaseStatus === 'FAILED') return '生成失败，请到订单详情重试'
   return '生成中，请稍后在订单详情查看'
 })
+/** 自动审核结果：推送失败时明确提示，不能误报为“已推送金蝶”。 */
+const autoApproveText = computed(() => {
+  const result = props.result || {}
+  if (result.tradeInPurchaseSyncStatus === 'PUSH_FAILED') {
+    return '已自动审核，但推送金蝶失败：'
+      + (result.tradeInPurchasePushError || '请在采购订单列表点「重试推送」')
+  }
+  return result.tradeInAutoApproveReason || '系统已自动审核并推送金蝶，可直接生成入库'
+})
+
 /** 审批人展示：有姓名显示“已提交给 角色：姓名 审批”；否则显示明确兜底文案。 */
 const approverText = computed(() => {
   const result = props.result || {}
@@ -157,6 +184,14 @@ const approverText = computed(() => {
 }
 .trade-warn-title { font-size: 25rpx; font-weight: 700; color: #B26A00; }
 .trade-warn-text { font-size: 22rpx; color: #8C5A00; line-height: 1.5; word-break: break-all; }
+.trade-ok {
+  width: 100%; box-sizing: border-box; margin-top: 20rpx;
+  background: #EDFBF2; border: 2rpx solid #7BDFA8; border-radius: 16rpx;
+  padding: 18rpx 24rpx;
+}
+.trade-ok-text { font-size: 22rpx; color: #1A7F45; line-height: 1.5; word-break: break-all; }
+.trade-ok.warn { background: #FFF7E6; border-color: #FFB74D; }
+.trade-ok-text.warn { color: #8C5A00; }
 .approver { color: #07C160; font-weight: 600; }
 .approver.fallback { color: #FF7D00; font-weight: 400; line-height: 1.5; }
 .actions { display: flex; gap: 20rpx; width: 100%; margin-top: 48rpx; }

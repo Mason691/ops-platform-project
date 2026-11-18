@@ -86,7 +86,7 @@
           var jsApiList = [
             'updateAppMessageShareData','updateTimelineShareData',
             'onMenuShareTimeline','onMenuShareAppMessage',
-            'chooseImage','previewImage',
+            'chooseImage','previewImage','chooseMedia','chooseVideo',
             'startRecord','stopRecord','uploadVoice','downloadVoice','translateVoice'
           ];
           // 微信授权获取手机号（注册页使用）
@@ -106,6 +106,8 @@
 
           wx.ready(function() {
             console.log('[JSSDK] ✅ wx.ready');
+            // 验收录像等业务组件等待该标记后再调用 chooseMedia，避免 config 未完成
+            window.__wxReady = true;
             // 同步 document.title，确保微信原生标题栏显示正确标题
             document.title = '金地美家';
           });

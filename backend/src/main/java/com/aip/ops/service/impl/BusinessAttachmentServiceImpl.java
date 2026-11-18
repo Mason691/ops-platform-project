@@ -4,6 +4,7 @@ import com.aip.ops.entity.OpsBusinessAttachment;
 import com.aip.ops.mapper.OpsBusinessAttachmentMapper;
 import com.aip.ops.service.BusinessAttachmentService;
 import com.aip.ops.service.EmployeeService;
+import com.aip.ops.util.VideoDurationValidator;
 import com.aip.sdk.exception.BusinessException;
 import com.aip.sdk.security.LoginUser;
 import com.aip.sdk.security.SecurityUtils;
@@ -58,6 +59,10 @@ import java.util.UUID;
 public class BusinessAttachmentServiceImpl implements BusinessAttachmentService {
 
     private static final long MAX_FILE_BYTES = 10L * 1024 * 1024;
+    /** 验收短视频上限；nginx / spring multipart 均为 50MB。 */
+    private static final long MAX_VIDEO_BYTES = 50L * 1024 * 1024;
+    /** 验收短视频硬性时长上限（秒）。 */
+    private static final int MAX_VIDEO_SECONDS = 30;
     /** 收据需原图保存，手机原图可达十几 MB，单独放宽；nginx 上限 50MB。 */
     private static final long MAX_RECEIPT_BYTES = 20L * 1024 * 1024;
     private static final int MAX_IMAGE_DIMENSION = 2000;
@@ -69,19 +74,23 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
     private static final int MAX_UNBOUND_PER_DAY = 100;
     private static final float JPEG_QUALITY = 0.85f;
     private static final Set<String> IMAGE_EXTS = Set.of("jpg", "jpeg", "png");
+    private static final Set<String> VIDEO_EXTS = Set.of("mp4", "mov");
     private static final Set<String> ALLOWED_TYPES =
             Set.of(OpsBusinessAttachment.TYPE_RECEIPT,
                     OpsBusinessAttachment.TYPE_PAYMENT,
                     OpsBusinessAttachment.TYPE_CONTRACT,
-                    OpsBusinessAttachment.TYPE_REFUND);
+                    OpsBusinessAttachment.TYPE_REFUND,
+                    OpsBusinessAttachment.TYPE_ACCEPTANCE);
     private static final Map<String, Integer> MAX_COUNT = Map.of(
             OpsBusinessAttachment.TYPE_RECEIPT, 1,
             OpsBusinessAttachment.TYPE_PAYMENT, 3,
             OpsBusinessAttachment.TYPE_CONTRACT, 5,
-            OpsBusinessAttachment.TYPE_REFUND, 5);
+            OpsBusinessAttachment.TYPE_REFUND, 5,
+            OpsBusinessAttachment.TYPE_ACCEPTANCE, 10);
 
     private final OpsBusinessAttachmentMapper attachmentMapper;
     private final EmployeeService employeeService;
+    private final VideoDurationValidator videoDurationValidator;
 
     @Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
     private String uploadBaseDir;
@@ -89,7 +98,6 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
     @Override
     public OpsBusinessAttachment upload(MultipartFile file, String fileType) {
         assertEmployee();
-        String type = normalizeType(fileType);
         Long corpId = SecurityUtils.getCurrentCorpIdOrNull();
         if (corpId == null || corpId <= 0) {
             throw BusinessException.of("请先切换到具体组织后再上传附件");
@@ -98,29 +106,76 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
         if (user == null || user.getUserId() == null) {
             throw BusinessException.of("登录状态失效，请重新登录");
         }
-        // 配额：同一员工 24h 内未绑定附件最多 100 个，防止恶意占满共享上传卷
-        Long pending = attachmentMapper.selectCount(Wrappers.<OpsBusinessAttachment>lambdaQuery()
-                .eq(OpsBusinessAttachment::getCorpId, corpId)
-                .eq(OpsBusinessAttachment::getUploaderUserId, user.getUserId())
-                .isNull(OpsBusinessAttachment::getOrderId)
-                .ge(OpsBusinessAttachment::getUploadTime, LocalDateTime.now().minusDays(1)));
-        if (pending != null && pending >= MAX_UNBOUND_PER_DAY) {
-            throw BusinessException.of("上传过于频繁，请稍后重试");
+        return doUpload(file, fileType, corpId, user.getUserId(), user.getUsername());
+    }
+
+    @Override
+    public OpsBusinessAttachment uploadForUser(MultipartFile file, String fileType, Long corpId,
+                                               Long userId, String userName) {
+        if (corpId == null || corpId <= 0) {
+            throw BusinessException.of("请先切换到具体组织后再上传附件");
         }
-        if (file == null || file.isEmpty()) throw BusinessException.of("请选择要上传的文件");
-        long maxBytes = OpsBusinessAttachment.TYPE_RECEIPT.equals(type)
-                ? MAX_RECEIPT_BYTES : MAX_FILE_BYTES;
-        if (file.getSize() > maxBytes) {
-            throw BusinessException.of(OpsBusinessAttachment.TYPE_RECEIPT.equals(type)
-                    ? "收据图片不能超过20MB" : "单个文件不能超过10MB");
+        if (userId == null) {
+            throw BusinessException.of("登录状态失效，请重新登录");
+        }
+        return doUpload(file, fileType, corpId, userId, userName);
+    }
+
+    private OpsBusinessAttachment doUpload(MultipartFile file, String fileType, Long corpId,
+                                           Long userId, String userName) {
+        String type = normalizeType(fileType);
+        validateQuota(corpId, userId);
+        if (file == null || file.isEmpty()) {
+            throw BusinessException.of("请选择要上传的文件");
         }
         String original = sanitizeFileName(file.getOriginalFilename());
         String ext = extension(original);
         if (!allowedExtension(type, ext)) {
-            throw BusinessException.of(OpsBusinessAttachment.TYPE_CONTRACT.equals(type)
-                    ? "合同附件仅支持 JPG、PNG、PDF"
-                    : "仅支持 JPG、PNG 图片");
+            throw BusinessException.of(invalidFormatMessage(type));
         }
+        boolean video = OpsBusinessAttachment.TYPE_ACCEPTANCE.equals(type)
+                && VIDEO_EXTS.contains(ext);
+        validateSize(file, type, video);
+        return video
+                ? saveVideo(file, type, corpId, userId, userName, original, ext)
+                : saveImageOrPdf(file, type, corpId, userId, userName, original, ext);
+    }
+
+    private OpsBusinessAttachment saveVideo(MultipartFile file, String type, Long corpId,
+                                            Long userId, String userName, String original,
+                                            String ext) {
+        if (!isMp4Family(file)) {
+            throw BusinessException.of(invalidFormatMessage(type));
+        }
+        Destination dest = destination(corpId, type, ext);
+        try {
+            Files.createDirectories(dest.path().getParent());
+            file.transferTo(dest.path().toFile());
+        } catch (IOException | IllegalStateException e) {
+            log.error("验收视频保存失败 corpId={} name={}", corpId, original, e);
+            throw BusinessException.of("文件保存失败，请重试");
+        }
+        int duration;
+        try {
+            duration = videoDurationValidator.requireDurationSeconds(dest.path());
+        } catch (RuntimeException e) {
+            deleteQuietly(dest.path());
+            throw e;
+        }
+        if (duration > MAX_VIDEO_SECONDS) {
+            deleteQuietly(dest.path());
+            throw BusinessException.of("ACCEPTANCE_VIDEO_TOO_LONG：短视频时长不能超过 30 秒");
+        }
+        OpsBusinessAttachment record = buildRecord(corpId, type, original, dest.relative(),
+                file.getSize(), "mov".equals(ext) ? "video/quicktime" : "video/mp4",
+                userId, userName);
+        record.setDurationSeconds(duration);
+        return insertRecord(record, dest.path());
+    }
+
+    private OpsBusinessAttachment saveImageOrPdf(MultipartFile file, String type, Long corpId,
+                                                 Long userId, String userName, String original,
+                                                 String ext) {
         byte[] input;
         try {
             input = file.getBytes();
@@ -136,47 +191,114 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
         } else {
             stored = compressImage(input);
         }
-
-        String datePart = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-        String relative = "ops/business/" + corpId + "/" + type.toLowerCase(Locale.ROOT)
-                + "/" + datePart + "/" + UUID.randomUUID().toString().replace("-", "")
-                + "." + stored.ext();
-        Path dest = Paths.get(uploadBaseDir, relative).toAbsolutePath().normalize();
+        Destination dest = destination(corpId, type, stored.ext());
         try {
-            Files.createDirectories(dest.getParent());
-            Files.write(dest, stored.bytes());
+            Files.createDirectories(dest.path().getParent());
+            Files.write(dest.path(), stored.bytes());
         } catch (IOException e) {
             log.error("业务附件保存失败 corpId={} type={} name={}", corpId, type, original, e);
             throw BusinessException.of("文件保存失败，请重试");
         }
+        OpsBusinessAttachment record = buildRecord(corpId, type, original, dest.relative(),
+                (long) stored.bytes().length, stored.contentType(), userId, userName);
+        return insertRecord(record, dest.path());
+    }
 
+    private OpsBusinessAttachment buildRecord(Long corpId, String type, String original,
+                                              String relative, long size, String contentType,
+                                              Long userId, String userName) {
         OpsBusinessAttachment record = new OpsBusinessAttachment();
         record.setCorpId(corpId);
         record.setFileType(type);
         record.setFileName(original);
         record.setFileUrl("/uploads/" + relative);
-        record.setFileSize((long) stored.bytes().length);
-        record.setContentType(stored.contentType());
-        record.setUploaderUserId(user != null ? user.getUserId() : null);
-        record.setUploaderName(user != null ? user.getUsername() : "");
+        record.setFileSize(size);
+        record.setContentType(contentType);
+        record.setUploaderUserId(userId);
+        record.setUploaderName(userName == null ? "" : userName);
         record.setUploadTime(LocalDateTime.now());
         record.setDeleteFlag(0);
+        return record;
+    }
+
+    private OpsBusinessAttachment insertRecord(OpsBusinessAttachment record, Path dest) {
         try {
             if (attachmentMapper.insert(record) <= 0) {
                 throw BusinessException.of("附件保存失败，请重试");
             }
         } catch (RuntimeException e) {
             // 先落盘后写库：写库失败必须回删文件，否则清理任务只扫数据库行，永远清不到
-            try {
-                Files.deleteIfExists(dest);
-            } catch (IOException ignored) {
-                log.warn("删除孤儿附件文件失败 path={}", dest);
-            }
+            deleteQuietly(dest);
             throw e;
         }
-        log.info("业务附件上传成功 corpId={} type={} id={} name={} size={}", corpId, type,
-                record.getId(), original, stored.bytes().length);
+        log.info("业务附件上传成功 corpId={} type={} id={} name={} size={} duration={}",
+                record.getCorpId(), record.getFileType(), record.getId(), record.getFileName(),
+                record.getFileSize(), record.getDurationSeconds());
         return record;
+    }
+
+    private void validateQuota(Long corpId, Long userId) {
+        // 配额：同一员工 24h 内未绑定附件最多 100 个，防止恶意占满共享上传卷
+        Long pending = attachmentMapper.selectCount(Wrappers.<OpsBusinessAttachment>lambdaQuery()
+                .eq(OpsBusinessAttachment::getCorpId, corpId)
+                .eq(OpsBusinessAttachment::getUploaderUserId, userId)
+                .isNull(OpsBusinessAttachment::getOrderId)
+                .ge(OpsBusinessAttachment::getUploadTime, LocalDateTime.now().minusDays(1)));
+        if (pending != null && pending >= MAX_UNBOUND_PER_DAY) {
+            throw BusinessException.of("上传过于频繁，请稍后重试");
+        }
+    }
+
+    private void validateSize(MultipartFile file, String type, boolean video) {
+        if (video && file.getSize() > MAX_VIDEO_BYTES) {
+            throw BusinessException.of("ACCEPTANCE_FILE_TOO_LARGE：视频不能超过 50MB");
+        }
+        if (video) {
+            return;
+        }
+        long maxBytes = OpsBusinessAttachment.TYPE_RECEIPT.equals(type)
+                ? MAX_RECEIPT_BYTES : MAX_FILE_BYTES;
+        if (file.getSize() <= maxBytes) {
+            return;
+        }
+        if (OpsBusinessAttachment.TYPE_ACCEPTANCE.equals(type)) {
+            throw BusinessException.of("ACCEPTANCE_FILE_TOO_LARGE：图片不能超过 10MB");
+        }
+        throw BusinessException.of(OpsBusinessAttachment.TYPE_RECEIPT.equals(type)
+                ? "收据图片不能超过20MB" : "单个文件不能超过10MB");
+    }
+
+    private Destination destination(Long corpId, String type, String ext) {
+        String datePart = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        String relative = "ops/business/" + corpId + "/" + type.toLowerCase(Locale.ROOT)
+                + "/" + datePart + "/" + UUID.randomUUID().toString().replace("-", "")
+                + "." + ext;
+        Path path = Paths.get(uploadBaseDir, relative).toAbsolutePath().normalize();
+        return new Destination(path, relative);
+    }
+
+    private static boolean isMp4Family(MultipartFile file) {
+        try (java.io.InputStream input = file.getInputStream()) {
+            byte[] header = input.readNBytes(8);
+            if (header.length < 8) return false;
+            String boxType = new String(header, 4, 4, StandardCharsets.US_ASCII);
+            // MP4 通常以 ftyp 开头；部分 MOV 以 moov/mdat/wide/free 开头，
+            // 真实结构与时长由 VideoDurationValidator 继续校验。
+            return Set.of("ftyp", "moov", "mdat", "wide", "free").contains(boxType);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static void deleteQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException ignored) {
+            log.warn("删除孤儿附件文件失败 path={}", path);
+        }
+    }
+
+    private record Destination(Path path, String relative) {
     }
 
     @Override
@@ -187,6 +309,21 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
     @Override
     public List<OpsBusinessAttachment> requireOwnedList(List<Long> ids, String fileType, Long corpId,
                                                         Long allowOrderId) {
+        LoginUser current = SecurityUtils.getCurrentUser();
+        Long currentUserId = current != null ? current.getUserId() : null;
+        return requireOwnedListInternal(ids, fileType, corpId, allowOrderId, currentUserId);
+    }
+
+    @Override
+    public List<OpsBusinessAttachment> requireOwnedListForUploader(List<Long> ids, String fileType,
+                                                                   Long corpId, Long allowOrderId,
+                                                                   Long uploaderUserId) {
+        return requireOwnedListInternal(ids, fileType, corpId, allowOrderId, uploaderUserId);
+    }
+
+    private List<OpsBusinessAttachment> requireOwnedListInternal(List<Long> ids, String fileType,
+                                                                 Long corpId, Long allowOrderId,
+                                                                 Long uploaderUserId) {
         String type = normalizeType(fileType);
         LinkedHashSet<Long> distinct = new LinkedHashSet<>();
         if (ids != null) {
@@ -210,8 +347,6 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
         if (byId.size() != distinct.size()) {
             throw BusinessException.of("附件不存在或已失效，请重新上传");
         }
-        LoginUser current = SecurityUtils.getCurrentUser();
-        Long currentUserId = current != null ? current.getUserId() : null;
         List<OpsBusinessAttachment> ordered = new ArrayList<>();
         for (Long id : distinct) {
             OpsBusinessAttachment row = byId.get(id);
@@ -226,8 +361,8 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
             boolean boundToAllowedOrder = allowOrderId != null
                     && allowOrderId.equals(row.getOrderId());
             if (!boundToAllowedOrder
-                    && (row.getUploaderUserId() == null || currentUserId == null
-                    || !row.getUploaderUserId().equals(currentUserId))) {
+                    && (row.getUploaderUserId() == null || uploaderUserId == null
+                    || !row.getUploaderUserId().equals(uploaderUserId))) {
                 throw BusinessException.of("附件不属于当前员工，请重新上传");
             }
             // 编辑草稿时允许引用已绑定到当前订单的附件；其他订单的附件仍拒绝
@@ -332,10 +467,16 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
         if (current == null || current.getUserId() == null) {
             throw BusinessException.of("登录状态失效，请重新登录");
         }
+        deleteUnboundForUser(id, corpId, current.getUserId());
+    }
+
+    @Override
+    public void deleteUnboundForUser(Long id, Long corpId, Long userId) {
+        if (id == null || corpId == null || userId == null) return;
         OpsBusinessAttachment row = attachmentMapper.selectById(id);
         if (row == null || !corpId.equals(row.getCorpId())
                 || row.getOrderId() != null
-                || !Objects.equals(row.getUploaderUserId(), current.getUserId())) {
+                || !Objects.equals(row.getUploaderUserId(), userId)) {
             throw BusinessException.of("附件不存在或无权删除");
         }
         try {
@@ -384,6 +525,9 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
     }
 
     private static boolean allowedExtension(String type, String ext) {
+        if (OpsBusinessAttachment.TYPE_ACCEPTANCE.equals(type)) {
+            return IMAGE_EXTS.contains(ext) || VIDEO_EXTS.contains(ext);
+        }
         if (OpsBusinessAttachment.TYPE_CONTRACT.equals(type)
                 || OpsBusinessAttachment.TYPE_REFUND.equals(type)) {
             return IMAGE_EXTS.contains(ext) || "pdf".equals(ext);
@@ -391,11 +535,20 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
         return IMAGE_EXTS.contains(ext);
     }
 
+    private static String invalidFormatMessage(String type) {
+        return OpsBusinessAttachment.TYPE_ACCEPTANCE.equals(type)
+                ? "ACCEPTANCE_FILE_INVALID：附件格式不支持（仅支持 jpg/png/mp4/mov）"
+                : (OpsBusinessAttachment.TYPE_CONTRACT.equals(type)
+                ? "合同附件仅支持 JPG、PNG、PDF" : "仅支持 JPG、PNG 图片");
+    }
+
     private static String missingMessage(String type) {
         return switch (type) {
             case OpsBusinessAttachment.TYPE_PAYMENT -> "请上传支付凭证（银行或微信支付凭证）";
             case OpsBusinessAttachment.TYPE_CONTRACT -> "请上传合同附件";
             case OpsBusinessAttachment.TYPE_REFUND -> "请上传退款补充附件";
+            case OpsBusinessAttachment.TYPE_ACCEPTANCE ->
+                    "ACCEPTANCE_ATTACHMENT_REQUIRED：请至少上传 1 张图片或 1 段视频作为验收凭证";
             default -> "请上传收据图片";
         };
     }
@@ -405,6 +558,7 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
             case OpsBusinessAttachment.TYPE_PAYMENT -> "支付凭证";
             case OpsBusinessAttachment.TYPE_CONTRACT -> "合同附件";
             case OpsBusinessAttachment.TYPE_REFUND -> "退款补充附件";
+            case OpsBusinessAttachment.TYPE_ACCEPTANCE -> "验收凭证";
             default -> "收据图片";
         };
     }

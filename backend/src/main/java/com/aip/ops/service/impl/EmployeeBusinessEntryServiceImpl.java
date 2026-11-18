@@ -320,7 +320,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         if (result != null && Boolean.TRUE.equals(result.get("hasTradeIn"))
                 && result.get("orderId") instanceof Number orderId) {
             autoCreateTradeInPurchase(orderId.longValue(), ctx.corpId(),
-                    str(result.get("orderNo")), result);
+                    str(result.get("orderNo")), ctx.employeeUserId(), ctx.employeeName(), result);
         }
         // 事务提交后同步发起审批流程：成功页必须拿到下一审批人；
         // 发起失败不阻塞制单，返回 resolved=false + 兜底文案由前端展示。
@@ -459,7 +459,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         if (result != null && Boolean.TRUE.equals(result.get("hasTradeIn"))
                 && result.get("orderId") instanceof Number oid) {
             autoCreateTradeInPurchase(oid.longValue(), ctx.corpId(),
-                    str(result.get("orderNo")), result);
+                    str(result.get("orderNo")), ctx.employeeUserId(), ctx.employeeName(), result);
         }
         if (result != null) {
             try {
@@ -646,12 +646,17 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         try {
             ScmPurchaseOrderClient.TradeInPurchaseResult created =
                     scmPurchaseOrderClient.createTradeInPurchaseOrder(
-                            buildTradeInPurchaseRequest(ctx.corpId(), orderId, order.getOrderNo()));
+                            buildTradeInPurchaseRequest(ctx.corpId(), orderId, order.getOrderNo(),
+                                    ctx.employeeUserId(), ctx.employeeName()));
             orderService.updateTradeInPurchaseStatus(orderId, "SUCCESS", created.orderId(),
                     created.billNo(), null);
             result.put("status", "SUCCESS");
             result.put("purchaseOrderId", created.orderId());
             result.put("billNo", created.billNo());
+            result.put("auditStatus", created.auditStatus());
+            result.put("approvalStatus", created.approvalStatus());
+            result.put("supplierNumber", created.supplierNumber());
+            result.put("warehouseNumber", created.warehouseNumber());
         } catch (Exception e) {
             String error = truncate(e.getMessage(), 500);
             orderService.updateTradeInPurchaseStatus(orderId, "FAILED", null, null, error);
@@ -663,16 +668,23 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     /** 事务提交后自动创建以旧换新采购单；失败标记 FAILED 并随成功响应提示，不静默。 */
     private void autoCreateTradeInPurchase(Long orderId, Long corpId, String orderNo,
+                                           Long operatorUserId, String operatorName,
                                            Map<String, Object> result) {
         try {
             ScmPurchaseOrderClient.TradeInPurchaseResult created =
                     scmPurchaseOrderClient.createTradeInPurchaseOrder(
-                            buildTradeInPurchaseRequest(corpId, orderId, orderNo));
+                            buildTradeInPurchaseRequest(corpId, orderId, orderNo,
+                                    operatorUserId, operatorName));
             orderService.updateTradeInPurchaseStatus(orderId, "SUCCESS", created.orderId(),
                     created.billNo(), null);
             result.put("tradeInPurchaseStatus", "SUCCESS");
             result.put("tradeInPurchaseOrderId", created.orderId());
             result.put("tradeInPurchaseBillNo", created.billNo());
+            // 生成结果：DRAFT（默认供应商/默认仓库已补齐），待业务订单财务核对后自动审核
+            result.put("tradeInPurchaseAuditStatus", created.auditStatus());
+            result.put("tradeInPurchaseApprovalStatus", created.approvalStatus());
+            result.put("tradeInPurchaseSupplierNumber", created.supplierNumber());
+            result.put("tradeInPurchaseWarehouseNumber", created.warehouseNumber());
         } catch (Exception e) {
             String error = truncate(e.getMessage(), 500);
             orderService.updateTradeInPurchaseStatus(orderId, "FAILED", null, null, error);
@@ -683,7 +695,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     }
 
     private ScmPurchaseOrderClient.TradeInPurchaseRequest buildTradeInPurchaseRequest(
-            Long corpId, Long orderId, String orderNo) {
+            Long corpId, Long orderId, String orderNo,
+            Long operatorUserId, String operatorName) {
         List<OpsBusinessOrderTradeIn> rows = tradeInMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<OpsBusinessOrderTradeIn>()
                         .eq(OpsBusinessOrderTradeIn::getOrderId, orderId)
@@ -705,7 +718,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                     row.getQuantity(), taxPrice, row.getUnit(), row.getRemark(),
                     Integer.valueOf(1).equals(row.getIsManual())));
         }
-        return new ScmPurchaseOrderClient.TradeInPurchaseRequest(corpId, orderId, orderNo, items);
+        return new ScmPurchaseOrderClient.TradeInPurchaseRequest(corpId, orderId, orderNo,
+                operatorUserId, operatorName, items);
     }
 
     /**

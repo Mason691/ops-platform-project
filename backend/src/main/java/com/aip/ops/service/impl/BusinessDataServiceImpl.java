@@ -550,6 +550,53 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         return view;
     }
 
+    @Override
+    public void assertPendingDispatchTask(Long orderId, Long userId) {
+        if (orderId == null || userId == null) {
+            throw BusinessException.forbidden("缺少派工任务信息");
+        }
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM ai_platform.wf_task t "
+                        + "JOIN ai_platform.wf_instance i ON i.id = t.instance_id "
+                        + "JOIN ai_platform.wf_definition_node n ON n.id = t.node_id "
+                        + "WHERE t.approver_user_id = ? AND t.status = 'PENDING' "
+                        + "AND t.delete_flag = 0 AND i.status = 'RUNNING' "
+                        + "AND i.delete_flag = 0 AND n.delete_flag = 0 "
+                        + "AND i.business_type = 'OPS_BUSINESS_ORDER' AND i.business_id = ? "
+                        + "AND n.action_type = 'OPS_DISPATCH_OUTBOUND'",
+                Long.class, userId, String.valueOf(orderId));
+        if (count == null || count == 0) {
+            throw BusinessException.forbidden("仅当前派工任务处理人可新增外部施工员");
+        }
+    }
+
+    @Override
+    public Map<String, Object> employeeTaskOrderDetail(Long userId, Long taskId) {
+        if (userId == null || taskId == null) {
+            throw BusinessException.forbidden("缺少员工/任务信息，请重新登录");
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT i.business_id AS businessId "
+                        + "FROM ai_platform.wf_task t "
+                        + "JOIN ai_platform.wf_instance i ON i.id = t.instance_id "
+                        + "JOIN mall_db.ops_business_order o "
+                        + " ON o.id = CAST(i.business_id AS UNSIGNED) AND o.delete_flag = 0 "
+                        + "WHERE t.id = ? AND t.approver_user_id = ? AND t.status = 'PENDING' "
+                        + "AND t.delete_flag = 0 AND i.status = 'RUNNING' AND i.delete_flag = 0 "
+                        + "AND i.business_type IN ('OPS_BUSINESS_ORDER',"
+                        + "'OPS_BUSINESS_ORDER_VOID') LIMIT 1",
+                taskId, userId);
+        if (rows.isEmpty()) {
+            throw BusinessException.forbidden("您不是该任务的待办处理人");
+        }
+        // 任务归属已验证；订单组织可能属于当前组织的下级（父组织派工员/部长处理子组织订单），
+        // 也可能与外部施工员当前选择的组织不同，因此这里不再按当前组织数据范围拦截。
+        Object businessId = rows.get(0).get("businessId");
+        Long orderId = businessId instanceof Number num ? num.longValue()
+                : Long.valueOf(String.valueOf(businessId));
+        return buildOrderDetail(orderId, false);
+    }
+
     /**
      * 订单流程进度：当前/下一节点取自工作流实例，业务状态名统一走字典；
      * 未发起/底座不可达分别给出明确文案，不影响订单其它字段展示。
@@ -643,13 +690,24 @@ public class BusinessDataServiceImpl implements BusinessDataService {
 
     @Override
     public Map<String, Object> orderDetail(Long orderId) {
+        return buildOrderDetail(orderId, true);
+    }
+
+    /**
+     * @param checkScope true=按当前登录组织的数据范围校验；
+     *                   false 仅用于已校验待办任务归属的处理人（外部施工员可能
+     *                   在多个组织任职，当前选择的组织不一定是订单组织）。
+     */
+    private Map<String, Object> buildOrderDetail(Long orderId, boolean checkScope) {
         OpsBusinessOrder order = orderId == null ? null : orderMapper.selectById(orderId);
         if (order == null || Integer.valueOf(1).equals(order.getDeleteFlag())) {
             throw com.aip.sdk.exception.BusinessException.notFound("业务订单不存在");
         }
-        Set<Long> visible = dataScopeService.getVisibleCorpIds();
-        if (visible != null && (visible.isEmpty() || !visible.contains(order.getCorpId()))) {
-            throw com.aip.sdk.exception.BusinessException.forbidden("无权查看该业务订单");
+        if (checkScope) {
+            Set<Long> visible = dataScopeService.getVisibleCorpIds();
+            if (visible != null && (visible.isEmpty() || !visible.contains(order.getCorpId()))) {
+                throw com.aip.sdk.exception.BusinessException.forbidden("无权查看该业务订单");
+            }
         }
         List<OpsBusinessData> items = orderMapper.selectItems(orderId);
         Map<String, Object> view = items.isEmpty()
@@ -733,48 +791,109 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
-    public List<Map<String, Object>> flowAssignees(Long orderId) {
-        if (orderId != null) {
-            OpsBusinessOrder order = orderMapper.selectById(orderId);
-            if (order == null || Integer.valueOf(1).equals(order.getDeleteFlag())) {
-                throw com.aip.sdk.exception.BusinessException.notFound("业务订单不存在");
-            }
-            requireVisibleOrder(dataScopeService.getVisibleCorpIds(), order.getCorpId());
-            Long orderCorpId = order.getCorpId();
-            if (orderCorpId == null || orderCorpId <= 0) return List.of();
-            return queryFlowAssignees(Set.of(orderCorpId));
-        }
-        Set<Long> visible = dataScopeService.getVisibleCorpIds();
-        if (noVisibleCorp(visible)) {
-            return List.of();
-        }
-        return queryFlowAssignees(visible);
+    public List<Map<String, Object>> flowAssignees(Long orderId, String keyword, Integer limit) {
+        Set<Long> corpIds = resolveWorkerCorpIds(orderId);
+        if (noVisibleCorp(corpIds)) return List.of();
+        int safeLimit = limit == null ? 20 : Math.min(Math.max(limit, 1), 100);
+        return queryFlowAssignees(corpIds, keyword == null ? null : keyword.trim(), safeLimit);
     }
 
-    /** 可选员工 SQL：corpIds=null 表示超管全量；空集合已在调用方拦截。 */
-    private List<Map<String, Object>> queryFlowAssignees(Set<Long> corpIds) {
-        StringBuilder sql = new StringBuilder(
-                "SELECT u.id AS userId, COALESCE(u.real_name, u.username) AS name, "
-                        + "u.username AS phone, u.corp_id AS corpId "
-                        + "FROM ai_platform.sys_user u WHERE u.status = 1 AND u.delete_flag = 0");
-        List<Object> args = new ArrayList<>();
-        if (corpIds != null && !corpIds.isEmpty()) {
-            sql.append(" AND (u.corp_id IN (")
-                    .append(String.join(",", Collections.nCopies(corpIds.size(), "?")))
-                    .append(") OR EXISTS (SELECT 1 FROM ai_platform.sys_user_corp uc "
-                            + "WHERE uc.user_id = u.id AND uc.corp_id IN (")
-                    .append(String.join(",", Collections.nCopies(corpIds.size(), "?")))
-                    .append(") AND uc.status = 1 AND uc.delete_flag = 0))");
-            args.addAll(corpIds);
-            args.addAll(corpIds);
+    /** 派工可选员工范围：传订单时强制订单归属组织；否则取当前可见组织。 */
+    private Set<Long> resolveWorkerCorpIds(Long orderId) {
+        if (orderId == null) {
+            return dataScopeService.getVisibleCorpIds();
         }
-        sql.append(" ORDER BY u.corp_id, u.id LIMIT 500");
+        OpsBusinessOrder order = orderMapper.selectById(orderId);
+        if (order == null || Integer.valueOf(1).equals(order.getDeleteFlag())) {
+            throw com.aip.sdk.exception.BusinessException.notFound("业务订单不存在");
+        }
+        requireVisibleOrder(dataScopeService.getVisibleCorpIds(), order.getCorpId());
+        Long orderCorpId = order.getCorpId();
+        return orderCorpId == null || orderCorpId <= 0 ? Set.of() : Set.of(orderCorpId);
+    }
+
+    /**
+     * 可选员工 SQL：要求订单组织内的在职 sys_user_corp 任职，内部+外部都返回；
+     * 施工员角色优先，其次姓名。手机号在 Java 侧统一脱敏。
+     */
+    private List<Map<String, Object>> queryFlowAssignees(Set<Long> corpIds, String keyword,
+                                                         int limit) {
         try {
-            return jdbcTemplate.queryForList(sql.toString(), args.toArray());
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    buildAssigneeSql(corpIds, keyword),
+                    buildAssigneeArgs(corpIds, keyword, limit).toArray());
+            rows.forEach(BusinessDataServiceImpl::decorateAssigneeRow);
+            return rows;
         } catch (Exception e) {
             log.warn("加载工作流派工可选员工失败：{}", e.getMessage());
             return List.of();
         }
+    }
+
+    private static String buildAssigneeSql(Set<Long> corpIds, String keyword) {
+        StringBuilder sql = new StringBuilder(
+                "SELECT u.id AS userId, uc.id AS userOrgId, "
+                        + "COALESCE(NULLIF(u.real_name,''), NULLIF(u.nickname,''), u.username) AS name, "
+                        + "COALESCE(NULLIF(u.phone,''), u.username) AS phone, "
+                        + "u.user_type AS userType, uc.corp_id AS corpId, "
+                        + "GROUP_CONCAT(DISTINCT cr.role_name ORDER BY cr.id SEPARATOR '、') AS roleNames, "
+                        + "(SELECT COUNT(1) FROM ai_platform.sys_user_wechat w "
+                        + " WHERE w.user_id = u.id AND w.status = 1 AND w.delete_flag = 0) AS wechatBound "
+                        + "FROM ai_platform.sys_user u "
+                        + "JOIN ai_platform.sys_user_corp uc ON uc.user_id = u.id "
+                        + " AND uc.status = 1 AND uc.delete_flag = 0 "
+                        + "LEFT JOIN ai_platform.sys_user_corp_role ur ON ur.user_id = u.id "
+                        + "LEFT JOIN ai_platform.sys_corp_user_role cr ON cr.id = ur.corp_role_id "
+                        + " AND cr.corp_id = uc.corp_id AND cr.delete_flag = 0 "
+                        + "WHERE u.status = 1 AND u.delete_flag = 0 ");
+        if (corpIds != null && !corpIds.isEmpty()) {
+            sql.append(" AND uc.corp_id IN (")
+                    .append(String.join(",", Collections.nCopies(corpIds.size(), "?")))
+                    .append(")");
+        }
+        if (keyword != null && !keyword.isEmpty()) {
+            sql.append(" AND (u.phone LIKE ? OR u.username LIKE ? OR u.real_name LIKE ? "
+                    + "OR u.nickname LIKE ?)");
+        }
+        sql.append(" GROUP BY u.id, uc.id, u.real_name, u.nickname, u.username, u.phone, "
+                + "u.user_type, uc.corp_id "
+                + " ORDER BY CASE WHEN SUM(CASE WHEN cr.role_name = '施工员' THEN 1 ELSE 0 END) > 0 "
+                + " THEN 0 ELSE 1 END, name LIMIT ?");
+        return sql.toString();
+    }
+
+    private static List<Object> buildAssigneeArgs(Set<Long> corpIds, String keyword, int limit) {
+        List<Object> args = new ArrayList<>();
+        if (corpIds != null && !corpIds.isEmpty()) {
+            args.addAll(corpIds);
+        }
+        if (keyword != null && !keyword.isEmpty()) {
+            String like = "%" + keyword + "%";
+            args.addAll(List.of(like, like, like, like));
+        }
+        args.add(limit);
+        return args;
+    }
+
+    /** 手机号脱敏；roles/workerRole/wechatBound/userType 转成前端友好的类型。 */
+    private static void decorateAssigneeRow(Map<String, Object> row) {
+        String masked = com.aip.common.util.MaskUtil.maskPhone(strValue(row.get("phone")));
+        // phone 保留兼容旧客户端；新字段 phoneMasked 与 WorkerVO 契约一致
+        row.put("phone", masked);
+        row.put("phoneMasked", masked);
+        List<String> roles = splitRoles(row.get("roleNames"));
+        row.put("roles", roles);
+        row.put("workerRole", roles.contains("施工员"));
+        Object wechat = row.get("wechatBound");
+        row.put("wechatBound", wechat instanceof Number n && n.longValue() > 0);
+        row.put("userType", row.get("userType") == null ? 0
+                : ((Number) row.get("userType")).intValue());
+    }
+
+    private static List<String> splitRoles(Object raw) {
+        if (raw == null) return List.of();
+        return Arrays.stream(String.valueOf(raw).split("、"))
+                .map(String::trim).filter(text -> !text.isEmpty()).toList();
     }
 
     private static boolean hasText(String value) {
@@ -1081,6 +1200,12 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         });
         view.put("tradeInAuditStatus", status.auditStatus());
         view.put("tradeInApprovalStatus", status.approvalStatus());
+        view.put("tradeInAutoApprovedAt", status.autoApprovedAt());
+        view.put("tradeInAutoApproveTrigger", status.autoApproveTrigger());
+        view.put("tradeInAutoApproveError", status.autoApproveError());
+        view.put("tradeInPurchaseSyncStatus", status.syncStatus());
+        view.put("tradeInPurchasePushError", status.pushError());
+        view.put("tradeInPurchaseJdyBillno", status.jdyBillno());
     }
 
     private static String pick(String masterValue, List<OpsBusinessData> rows,

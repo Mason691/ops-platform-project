@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > - 架构、Controllers、认证/多租户、AI/MCP、子系统通信 → `docs/architecture.md`
 > - 前端架构、pages.json 路由、组件清单 → `docs/frontend.md`
 > - 增值业务数据（表结构/导入导出/手工新增/财务核对）→ `docs/business-data.md`
-> - 业务数据订单工作流 → `docs/workflow.md`
+> - 业务数据订单工作流 → `docs/workflow.md`（字典/节点/消息模板/回滚配置细节 → `docs/业务数据订单工作流配置说明.md`）
 > - **制单页 / 分步表单 UE 基线** → `~/.claude/harness/aip-form-ux/docs/business-order-create-ux.md`（技能 `/aip-form-ux`）
 > - **物资领用 / 物资核销（员工 H5）** → `docs/material-requisition.md`
 > - 作战地图/活动复盘/提成/燃气/燃具/直播等模块 → `docs/modules.md`
@@ -37,7 +37,7 @@ JAVA_HOME=/home/jason/jdk17 /home/jason/apache-maven-3.9.9/bin/mvn -f backend/po
 # 后端本地运行（需要 JDK 17 在 PATH）
 java -jar backend/target/ops-platform-1.0.0-SNAPSHOT.jar
 
-# 前端 H5 dev server（端口 3035，Vite proxy /api → localhost:8084；/api/auth → 底座 8080）
+# 前端 H5 dev server（端口 3035，Vite proxy /api → localhost:8084；/api/auth 与 /api/workbench → 底座 8080）
 cd frontend && npm run dev:h5
 
 # 前端 H5 生产构建（含 jweixin-1.6.0.js 复制 + static 路径替换）
@@ -56,7 +56,7 @@ cd frontend && npm run build:mp-weixin  # 输出 dist/build/mp-weixin/
 
 ## 项目定位
 
-运营平台，作为独立业务子系统运行，后端端口 8084。
+运营平台，作为独立业务子系统运行。后端本地端口 8084；生产容器 `SERVER_PORT=8082`（Dockerfile EXPOSE 8082，对外经 nginx 转发）。
 **核心定位**：聚合展示 · 引流 · 积分消耗。**不提供交易功能**，所有商品购买跳转第三方小程序。
 
 依赖 `ai-platform-sdk` 接入底座的安全、多租户、MCP、Agent 等能力。
@@ -65,21 +65,9 @@ cd frontend && npm run build:mp-weixin  # 输出 dist/build/mp-weixin/
 
 新功能先在 `Specs/` 创建中文规格文档（以 `Specs/增值业务-规格说明.md` 为参考模板，`specs/template.md` 尚不存在），包含：功能概述、用户故事、验收标准、API 设计、多租户/安全考虑。完成后在规格中标记 ✅。
 
-现有规格：
-- `Specs/增值业务-规格说明.md`
-- `Specs/活动管理-规格说明.md`
-- `Specs/员工手工新增业务-规格说明.md`
-- `Specs/财务管理-分类管理-规格说明.md`
-- `Specs/业务数据主子表拆分-规格说明.md`
-- `Specs/业务数据退货反写-规格说明.md`
-- `Specs/公众号消息模板组织共享-规格说明.md`
-- `Specs/员工微信授权登录-规格说明.md`
-- `Specs/员工制单凭证信息与收据OCR-规格说明.md`
-- `Specs/员工制单零售底价展示-规格说明.md`
-- `Specs/业务订单退回草稿与作废退款-规格说明.md`
-- `Specs/员工制单新建小区-规格说明.md`
-- `Specs/派工单与公众号消息提醒-规格说明.md`（**已下线**：派工单体系 2026-11-14 由底座工作流替代，仅存历史参考）
-- `specs/annual-plan-spec.md`（英文）
+现有规格：`Specs/` 下的中文规格文件，按功能命名（`ls Specs/` 查看全量，文件名即索引）。注意：
+- `Specs/派工单与公众号消息提醒-规格说明.md` **已下线**（派工单体系 2026-11-14 由底座工作流替代），仅存历史参考
+- 英文规格：`specs/annual-plan-spec.md`
 
 ---
 
@@ -150,13 +138,13 @@ ops-platform-project/
 │   ├── kafka/       # Kafka consumer/producer（条件加载）
 │   ├── agent/ tool/ # AI DomainAgent + MCP 工具
 │   ├── scheduler/   # 作战地图 ETL、业务数据对账
-│   └── security/    # JwtTokenInspector（拒绝 sso 会员令牌）
+│   └── security/    # JwtTokenInspector（拒绝 sso 会员令牌）、ExternalUserGuardFilter（外部用户边界）
 ├── frontend/
 │   ├── src/pages/       # uni-app 页面（路由注册见 docs/frontend.md）
 │   ├── src/components/  # 跨页面组件（BusinessStep* 向导、OrgSwitch*、PaymentQr 等）
 │   ├── src/hooks/       # useBusinessWizard / useOrgSwitch / useProductPrice
-│   ├── src/api/index.js # 集中 API 注册（约 171 方法）
-│   └── vite.config.js   # prod base /ops/；dev proxy /api→8084、/api/auth→8080
+│   ├── src/api/index.js # 集中 API 注册（统一 request 实例，按业务块分组）
+│   └── vite.config.js   # prod base /ops/；dev proxy /api→8084、/api/auth 与 /api/workbench→底座 8080
 ├── sql/                 # 迁移脚本 + 历史导入生成器/产物
 ├── Specs/ specs/        # 功能规格（中/英）
 ├── docs/                # 细节文档：architecture / frontend / business-data / workflow / modules / configuration / deployment / CHANGELOG / testing
@@ -170,6 +158,7 @@ ops-platform-project/
 ## 核心架构原则（强制）
 
 - **JWT 由底座签发**：子系统不自签；`PlatformAuthenticationFilter` 本地验签。会员 token（`ops_token`）与员工 token（`ops_employee_token`）严格隔离；员工敏感接口用 `JwtTokenInspector` 拒绝 `token_type=sso` 的会员令牌。子系统间内部调用一律 `X-Internal-Token`。
+- **外部用户边界**：员工令牌若为外部用户（`SecurityUtils.isExternalUser()`），`ExternalUserGuardFilter` 只放行 `/api/ops/employee/**`、`/api/ops/auth/employee/**`、`/api/ops/ai/employee/**`、`/api/ops/ai/config` 与公开只读接口（product/activity/home-data/coupon/live-rooms/public-account/uploads/actuator），其余一律 403。**新增非员工端接口必须同步维护 `security/ExternalUserGuardFilter.isAllowed()` 白名单**：漏加会误拦外部用户，错加会让外部用户直达 `/api/ops/admin/**`。
 - **多租户**：`corp_id` 只从 JWT 解析，不接受请求参数；含 `corp_id` 的表由 MyBatis-Plus `TenantLineHandler` 自动过滤。
 - **组织数据隔离**：超管 `corpId=0` 全量；运营商管理自身 + 下属城市合伙人；城市合伙人（`orgRoleId=5`）只读。数据 scope 由 `DataScopeService` 计算。
 - **空可见组织集合 ≠ 超管**：`getVisibleCorpIds()` 返回 `null`=超管全量、空集合=无任何权限；禁止把空集合当全量。写接口必须校验 `corp_id` 归属。
@@ -222,7 +211,8 @@ ops-platform-project/
 | **jweixin-1.6.0.js** | 必须用 `npm run build:h5`（= `uni build` + 复制 `static/jweixin-1.6.0.js` + 把产物里的 `"/static/` 重写为 `"/ops/static/`）。裸跑 `npx uni build` 会**漏掉静态路径重写**（`/ops/` 下静态资源 404），且 jweixin 版本不受控 |
 | **BaseEntity 字段命名** | SDK 使用 `modifyTime`（不是 `updateTime`） |
 | **增值业务物理删除** | `ops_business_data` 的 `batchDelete()` 用原始 JDBC 物理删除，不走 `@TableLogic`（无逻辑删除路径）；守卫：选中含已上报集团行即整体拒绝（BusinessException，计数按可见 corp 限定） |
-| **5 个实体未继承 BaseEntity** | `SysImportTask`、`SysExportTask`、`AiChatTask`、`OpsActivityReviewCost`、`OpsGridManagerCommunity` 自行声明审计字段；其余 37 个均继承。其中 `OpsActivityReviewCost` 无 `delete_flag`，`costMapper.delete()` 走物理删除 |
+| **5 个实体未继承 BaseEntity** | `SysImportTask`、`SysExportTask`、`AiChatTask`、`OpsActivityReviewCost`、`OpsGridManagerCommunity` 自行声明审计字段；其余实体均继承（当前 43/48）。其中 `OpsActivityReviewCost` 无 `delete_flag`，`costMapper.delete()` 走物理删除 |
+| **收款码在 jar 内 + 强制验签** | 收款码图片与签名打包在 jar 的 `secure/qr/`（**不是 static**），后台无上传入口；`QR_FAIL_FAST=true` 时启动验签失败拒绝启动，员工只能经 `/api/ops/employee/business-data/payment-qr` 取图。替换必须按 `tools/qr-signature/README.md` 用离线私钥签名后发布，禁止在服务器手改 jar 内文件 |
 | **数据库环境隔离** | 生产同实例并置 `mall_db`（业务）与 `ai_platform`（底座）两库，极易混淆。**部署时必须确认 `SPRING_DATASOURCE_URL` 指向 `mall_db`**（历史事故：误用测试库 17,745 条数据写错库） |
 | **首页配置 corpId** | `/api/ops/home-data` 公开接口（无 JWT），必须传 `?corpId=` 参数 |
 | **Kafka 条件加载** | Consumer 仅在 `spring.kafka.enabled=true` 时加载，无 Kafka 环境自动降级为同步调用 |
@@ -255,7 +245,7 @@ ops-platform-project/
 
 ---
 
-最后更新：2026-11-16（CLAUDE.md 拆分为核心规则 + docs/ 细节文档） | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
+最后更新：2026-11-18（核对代码现状：外部用户边界、Specs 索引、实体继承计数、收款码验签、端口差异） | 变更历史已迁移至 [docs/CHANGELOG.md](docs/CHANGELOG.md)，新变更请按时间倒序追加到该文件
 
 ## 自定义 Claude 命令
 

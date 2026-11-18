@@ -12,7 +12,12 @@
         <text class="inbound-title">⚠️ 本订单含以旧换新旧品，请及时办理旧品入库。</text>
         <text v-if="order.tradeInSummary" class="inbound-line">旧品：{{ order.tradeInSummary }}</text>
         <text v-if="order.tradeInPurchaseBillNo" class="inbound-line">
-          关联采购单：{{ order.tradeInPurchaseBillNo }}（未审核）
+          关联采购单：{{ order.tradeInPurchaseBillNo }}{{ purchaseAuditLabel }}
+        </text>
+        <text v-if="order.tradeInPurchaseStatus === 'SUCCESS' && !order.tradeInAutoApproved && order.tradeInAutoApproveReason"
+              class="inbound-line">{{ order.tradeInAutoApproveReason }}</text>
+        <text v-if="order.tradeInPurchaseSyncStatus === 'PUSH_FAILED'" class="inbound-line error">
+          关联采购单推送金蝶失败：{{ order.tradeInPurchasePushError || '请在供应链 PC 端重试推送' }}
         </text>
         <text class="inbound-line">入库状态：{{ order.tradeInInboundStatusName || '旧品未入库' }}</text>
         <text class="inbound-hint">请在供应链管理 PC 端打开该采购订单办理旧品入库</text>
@@ -157,6 +162,23 @@
         <text v-if="!(order.products || []).length" class="empty">暂无商品明细</text>
       </view>
 
+      <view v-if="attachments.length" class="card">
+        <text class="card-title">订单附件</text>
+        <view class="attach-list">
+          <view v-for="(file, i) in attachments" :key="file.id || file.fileUrl || i"
+                class="attach-item" @click="openAttachment(file)">
+            <image v-if="isImageFile(file)" class="attach-img" :src="assetUrl(file.fileUrl)"
+                   mode="aspectFill" />
+            <view v-else class="attach-file">
+              <text>{{ isVideoFile(file) ? '🎬' : '📎' }}</text>
+            </view>
+            <text class="attach-name">
+              {{ file.fileType === 'ACCEPTANCE' ? '验收凭证' : (file.fileName || ('附件' + (i + 1))) }}
+            </text>
+          </view>
+        </view>
+      </view>
+
       <view class="card">
         <BusinessFlowProgress :flow="order.flow || {}" :status-options="order.bizStatusOptions || []"
                               :biz-status="order.bizStatus" :biz-status-name="order.bizStatusName" />
@@ -180,6 +202,11 @@
 
       <BusinessRefundSheet v-model:visible="refundVisible" :order="order"
                            :order-id="orderId" @submitted="load" />
+
+      <view v-if="videoVisible" class="video-mask" @click="videoVisible = false">
+        <video class="video-player" :src="videoUrl" controls autoplay @click.stop />
+        <text class="video-close" @click.stop="videoVisible = false">×</text>
+      </view>
     </template>
   </view>
 </template>
@@ -201,6 +228,8 @@ const orderId = ref('')
 const loading = ref(true)
 const errorMsg = ref('')
 const order = ref(null)
+const videoVisible = ref(false)
+const videoUrl = ref('')
 const retrying = ref(false)
 const refundVisible = ref(false)
 
@@ -224,6 +253,57 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+const attachments = computed(() => {
+  const list = (order.value && order.value.attachments) || []
+  return list.filter(file => file && (file.fileUrl || file.url))
+})
+
+function isImageFile(file) {
+  return String(file.contentType || '').startsWith('image/')
+    || /\.(jpe?g|png)(\?|$)/i.test(file.fileUrl || file.url || '')
+}
+
+function isVideoFile(file) {
+  return String(file.contentType || '').startsWith('video/')
+    || /\.(mp4|mov)(\?|$)/i.test(file.fileUrl || file.url || '')
+}
+
+function openAttachment(file) {
+  const url = assetUrl(file.fileUrl || file.url)
+  if (!url) return
+  if (isImageFile(file)) {
+    const urls = attachments.value.filter(isImageFile)
+      .map(item => assetUrl(item.fileUrl || item.url))
+    uni.previewImage({ urls, current: url })
+    return
+  }
+  if (isVideoFile(file)) {
+    videoUrl.value = url
+    videoVisible.value = true
+    return
+  }
+  // #ifdef H5
+  window.open(url, '_blank')
+  // #endif
+  // #ifndef H5
+  uni.downloadFile({
+    url,
+    success: res => {
+      if (res.statusCode === 200 && res.tempFilePath) {
+        uni.openDocument({
+          filePath: res.tempFilePath,
+          showMenu: true,
+          fail: () => uni.showToast({ title: '附件打开失败', icon: 'none' })
+        })
+      } else {
+        uni.showToast({ title: '附件下载失败', icon: 'none' })
+      }
+    },
+    fail: () => uni.showToast({ title: '附件下载失败', icon: 'none' })
+  })
+  // #endif
 }
 
 const flowRecords = computed(() => {
@@ -332,18 +412,27 @@ const atConstructionStage = computed(() => {
   const o = order.value || {}
   if (!o.hasTradeIn) return false
   const match = String(o.bizStatus == null ? '' : o.bizStatus).match(/\d+/)
-  if (match) return Number(match[0]) >= 5
+  if (match) return [5, 6].includes(Number(match[0]))
   return /施工完成|验收|完成/.test(String(o.bizStatusName || ''))
 })
 const showInboundReminder = computed(() =>
   atConstructionStage.value && !tradeInInboundDone.value)
+
+/** 采购单审核状态文案：自动审核 / 人工已审核 / 待完善，避免误导为「未审核」。 */
+const purchaseAuditLabel = computed(() => {
+  const o = order.value || {}
+  if (o.tradeInAutoApproved) return '（已审核·系统自动）'
+  if (o.tradeInAuditStatus === 'AUDITED') return '（已审核）'
+  if (o.tradeInAuditStatus === 'CLOSED') return '（已关闭）'
+  return '（待完善，需人工审批）'
+})
 
 const purchaseOrderText = computed(() => {
   const o = order.value || {}
   const status = o.tradeInPurchaseStatus
   if (status === 'SUCCESS') {
     return o.tradeInPurchaseBillNo
-      ? `${o.tradeInPurchaseBillNo}（未审核 · ${o.tradeInInboundStatusName || '旧品未入库'}）`
+      ? `${o.tradeInPurchaseBillNo}${purchaseAuditLabel.value} · ${o.tradeInInboundStatusName || '旧品未入库'}`
       : '已生成（单号待同步）'
   }
   if (status === 'PENDING') return '生成中'
@@ -375,6 +464,8 @@ async function retryPurchase() {
       order.value.tradeInPurchaseBillNo = result.billNo
       order.value.tradeInPurchaseError = ''
       uni.showToast({ title: '采购订单已生成', icon: 'success' })
+      // 重新拉取详情：SCM 会实时补充审核状态/自动审核原因/推送状态
+      await load()
     } else {
       order.value.tradeInPurchaseStatus = 'FAILED'
       order.value.tradeInPurchaseError = (result && result.error) || '生成失败'
@@ -392,8 +483,8 @@ async function retryPurchase() {
 function actionLabel(type) {
   return {
     OPS_FINANCE_CHECK: '财务核对', OPS_DISPATCH_OUTBOUND: '派工出库',
-    OPS_CONSTRUCTION_RECORD: '施工记录', OPS_ACCEPTANCE: '施工验收',
-    OPS_AFTER_SALES: '售后维护'
+    OPS_CONSTRUCTION_RECORD: '施工记录', OPS_ACCEPTANCE: '完工验收',
+    OPS_AFTER_SALES: '售后维护（历史）', MIGRATE_STATUS: '历史状态迁移'
   }[type] || type || '处理'
 }
 
@@ -434,6 +525,7 @@ function formatTime(value) {
 }
 .inbound-title { font-size: 26rpx; font-weight: 700; color: #B26A00; line-height: 1.5; }
 .inbound-line { font-size: 23rpx; color: #8C5A00; line-height: 1.5; word-break: break-all; }
+.inbound-line.error { color: #D93025; }
 .inbound-hint { font-size: 21rpx; color: #A9812F; margin-top: 2rpx; }
 .inbound-done {
   background: #F0FBF4; border: 2rpx solid #BFE9CF; border-radius: 16rpx;
@@ -522,4 +614,17 @@ function formatTime(value) {
   display: inline-block; padding: 12rpx 36rpx; background: #FF6B35;
   color: #fff; border-radius: 28rpx; font-size: 24rpx;
 }
+.attach-list { display: flex; flex-wrap: wrap; gap: 16rpx; }
+.attach-item { width: 160rpx; display: flex; flex-direction: column; gap: 6rpx; }
+.attach-img { width: 160rpx; height: 160rpx; border-radius: 12rpx; background: #f2f3f5; }
+.attach-file {
+  width: 160rpx; height: 160rpx; border-radius: 12rpx; background: #f2f3f5;
+  display: flex; align-items: center; justify-content: center; font-size: 48rpx;
+}
+.attach-name { font-size: 20rpx; color: #86909C; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.video-mask { position: fixed; inset: 0; z-index: 999; background: rgba(0,0,0,.88);
+  display: flex; align-items: center; justify-content: center; }
+.video-player { width: 92vw; max-height: 70vh; }
+.video-close { position: absolute; top: 80rpx; right: 40rpx; color: #fff; font-size: 64rpx; }
 </style>

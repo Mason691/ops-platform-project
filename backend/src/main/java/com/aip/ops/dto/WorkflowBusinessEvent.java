@@ -11,6 +11,7 @@ import java.util.Map;
  * <p>event：
  * <ul>
  *   <li>NODE_ACTION：节点提交前的业务动作（同步执行，失败则不推进审批）；</li>
+ *   <li>RESOLVE_APPROVER：同步解析节点审批人（如订单主经办人）；</li>
  *   <li>NODE_ENTERED：进入节点，写入 bizStatus；</li>
  *   <li>INSTANCE_COMPLETED / INSTANCE_REJECTED / INSTANCE_TERMINATED：实例结束事件。</li>
  * </ul>

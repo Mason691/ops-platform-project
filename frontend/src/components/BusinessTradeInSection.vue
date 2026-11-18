@@ -25,6 +25,7 @@
       <text class="items-count">{{ totalQuantity }} 件</text>
     </view>
     <text class="hint">仅列出品牌为「旧品」的商品；未找到请选择“其他旧品”手工填写。</text>
+    <text class="hint">提交后系统将自动生成旧品采购单；满足条件时直接审核并推送金蝶，可直接办理入库。</text>
     <text v-if="errors.tradeInItems" class="ferr">{{ errors.tradeInItems }}</text>
 
     <view v-if="!items.length" class="empty-items">

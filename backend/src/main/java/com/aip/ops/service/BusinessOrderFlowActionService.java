@@ -1,16 +1,19 @@
 package com.aip.ops.service;
 
+import com.aip.ops.client.ScmPurchaseOrderClient;
 import com.aip.ops.client.ScmStockOutClient;
 import com.aip.ops.client.WorkflowPlatformClient;
 import com.aip.ops.dto.FinanceCheckRequest;
 import com.aip.ops.dto.ScmDispatchOutboundRequest;
 import com.aip.ops.dto.WorkflowBusinessEvent;
+import com.aip.ops.entity.OpsBusinessAttachment;
 import com.aip.ops.entity.OpsBusinessData;
 import com.aip.ops.entity.OpsBusinessFlowRecord;
 import com.aip.ops.entity.OpsBusinessOrder;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsBusinessFlowRecordMapper;
 import com.aip.ops.mapper.OpsBusinessOrderMapper;
+import com.aip.ops.util.VideoDurationValidator;
 import com.aip.sdk.exception.BusinessException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -19,6 +22,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -46,7 +51,11 @@ public class BusinessOrderFlowActionService {
     public static final String ACTION_DISPATCH = "OPS_DISPATCH_OUTBOUND";
     public static final String ACTION_CONSTRUCTION = "OPS_CONSTRUCTION_RECORD";
     public static final String ACTION_ACCEPTANCE = "OPS_ACCEPTANCE";
-    public static final String ACTION_AFTER_SALES = "OPS_AFTER_SALES";
+
+    /** 完工验收至少 1 个图片/视频，图片 ≤9 张、视频 ≤1 段。 */
+    private static final int MAX_ACCEPTANCE_IMAGES = 9;
+    private static final int MAX_ACCEPTANCE_VIDEOS = 1;
+    private static final int MAX_ACCEPTANCE_VIDEO_SECONDS = 30;
 
     private final OpsBusinessOrderMapper orderMapper;
     private final OpsBusinessDataMapper itemMapper;
@@ -54,7 +63,11 @@ public class BusinessOrderFlowActionService {
     private final BusinessDataFinanceService financeService;
     private final DispatchEligibilityService dispatchEligibilityService;
     private final ScmStockOutClient scmClient;
+    /** 以旧换新采购单：财务核对触发自动审核 / 撤销核对联动反审 */
+    private final ScmPurchaseOrderClient scmPurchaseOrderClient;
     private final BusinessOrderRefundService refundService;
+    private final BusinessAttachmentService attachmentService;
+    private final VideoDurationValidator videoDurationValidator;
     private final WorkflowPlatformClient workflowClient;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -74,6 +87,8 @@ public class BusinessOrderFlowActionService {
         }
         return switch (event.getEvent()) {
             case "NODE_ACTION" -> executeNodeAction(order, event);
+            // 完工验收节点动态解析为订单主经办人；解析失败由平台阻断推进并落异常中心
+            case "RESOLVE_APPROVER" -> resolveOrderHandler(order);
             case "NODE_ENTERED", "INSTANCE_COMPLETED", "INSTANCE_REJECTED",
                  "INSTANCE_TERMINATED" -> {
                 syncStatus(order, event);
@@ -111,8 +126,8 @@ public class BusinessOrderFlowActionService {
         Map<String, Object> result = switch (actionType) {
             case ACTION_FINANCE -> financeCheck(order, event);
             case ACTION_DISPATCH -> dispatchOutbound(order, event);
-            case ACTION_CONSTRUCTION, ACTION_ACCEPTANCE, ACTION_AFTER_SALES ->
-                    new LinkedHashMap<>(Map.of("recorded", true));
+            case ACTION_ACCEPTANCE -> acceptance(order, event);
+            case ACTION_CONSTRUCTION -> new LinkedHashMap<>(Map.of("recorded", true));
             default -> throw BusinessException.of("未知节点动作：" + actionType);
         };
         saveRecord(order, event, result);
@@ -141,7 +156,203 @@ public class BusinessOrderFlowActionService {
         request.setCheckRemark(str(form.get("checkRemark")));
         Map<String, Object> result = financeService.financeCheckByOrder(
                 order.getId(), request, event.getOperatorUserId(), event.getOperatorName());
+        // 财务核对完成 → 事务提交后触发 SCM 采购单自动审核（失败不阻塞财务核对）
+        triggerFinanceAutoApprove(order, event);
         return new LinkedHashMap<>(result);
+    }
+
+    /** 财务核对提交后触发 SCM：以旧换新采购单 DRAFT → AUDITED + 推送金蝶（SCM 幂等）。 */
+    private void triggerFinanceAutoApprove(OpsBusinessOrder order, WorkflowBusinessEvent event) {
+        if (!Integer.valueOf(1).equals(order.getHasTradeIn())
+                && order.getTradeInPurchaseOrderId() == null) {
+            return;
+        }
+        runAfterCommit(() -> {
+            try {
+                scmPurchaseOrderClient.financeVerified(order.getCorpId(), order.getId(),
+                        event.getOperatorUserId(), event.getOperatorName());
+            } catch (Exception e) {
+                log.warn("财务核对触发采购单自动审核失败 orderId={}: {}", order.getId(), e.getMessage());
+            }
+        });
+    }
+
+    /** 事务活跃则 afterCommit 执行；无事务（节点动作回调）则直接执行。 */
+    private void runAfterCommit(Runnable task) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
+    }
+
+    /**
+     * 订单经办人解析：主经办人 = agent_phones 中第一个非空手机号。
+     * 多经办人订单不猜测、不轮询，保证「完工验收审批人」唯一且可解释。
+     */
+    private Map<String, Object> resolveOrderHandler(OpsBusinessOrder order) {
+        String phone = primaryAgentPhone(order.getAgentPhones());
+        if (phone.isEmpty()) {
+            throw BusinessException.of("ORDER_HANDLER_NOT_SET：订单未指定经办人，请联系管理员");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("approverPhone", phone);
+        result.put("approverName", primaryAgentName(order.getAgentNames()));
+        result.put("handlerSource", "AGENT_PHONE");
+        log.info("完工验收经办人解析: orderId={}, orderNo={}, phone={}", order.getId(),
+                order.getOrderNo(), phone);
+        return result;
+    }
+
+    private static String primaryAgentPhone(String phones) {
+        String value = phones == null ? "" : phones;
+        for (String item : value.split("[、,，;；]")) {
+            String phone = item.trim();
+            if (!phone.isEmpty()) return phone;
+        }
+        return "";
+    }
+
+    private static String primaryAgentName(String names) {
+        String value = names == null ? "" : names;
+        for (String item : value.split("[、,，;；]")) {
+            String name = item.trim();
+            if (!name.isEmpty()) return name;
+        }
+        return "";
+    }
+
+    /**
+     * 完工验收节点动作：结论/意见/凭证强校验，任何一项不满足都不推进流程。
+     * 附件归属按任务处理人校验；绑定订单后订单详情与流程留痕均可回看。
+     */
+    private Map<String, Object> acceptance(OpsBusinessOrder order,
+                                           WorkflowBusinessEvent event) {
+        Map<String, Object> form = event.getFormData() == null ? Map.of() : event.getFormData();
+        String conclusion = str(form.get("acceptanceConclusion")).toUpperCase();
+        if (!"PASS".equals(conclusion) && !"REJECT".equals(conclusion)) {
+            throw BusinessException.of("请选择验收结论（通过/不通过）");
+        }
+        String note = str(form.get("acceptanceNote")).trim();
+        if (note.length() < 5) {
+            throw BusinessException.of("ACCEPTANCE_OPINION_REQUIRED：验收意见不少于5个字");
+        }
+        if (note.length() > 500) {
+            throw BusinessException.of("验收意见不能超过500字");
+        }
+        List<Long> ids = new ArrayList<>(parseIds(form.get("attachmentIds")));
+        if (ids.isEmpty()) {
+            throw BusinessException.of(
+                    "ACCEPTANCE_ATTACHMENT_REQUIRED：请至少上传 1 张图片或 1 段视频作为验收凭证");
+        }
+        List<OpsBusinessAttachment> files = attachmentService.requireOwnedListForUploader(
+                ids, OpsBusinessAttachment.TYPE_ACCEPTANCE, order.getCorpId(), order.getId(),
+                event.getOperatorUserId());
+        validateAcceptanceEvidence(files);
+        attachmentService.bindToOrder(ids, order.getId(), order.getCorpId());
+        Map<String, Object> result = acceptanceResult(conclusion, note, files);
+        log.info("完工验收提交: orderId={}, orderNo={}, result={}, attachments={}, "
+                        + "videoSeconds={}, operator={}",
+                order.getId(), order.getOrderNo(), conclusion, files.size(),
+                result.get("videoDurationSeconds"), event.getOperatorUserId());
+        return result;
+    }
+
+    private void validateAcceptanceEvidence(List<OpsBusinessAttachment> files) {
+        long images = files.stream().filter(BusinessOrderFlowActionService::isImage).count();
+        long videos = files.stream().filter(BusinessOrderFlowActionService::isVideo).count();
+        if (images + videos == 0) {
+            throw BusinessException.of(
+                    "ACCEPTANCE_ATTACHMENT_REQUIRED：请至少上传 1 张图片或 1 段视频作为验收凭证");
+        }
+        if (images > MAX_ACCEPTANCE_IMAGES) {
+            throw BusinessException.of("验收图片最多 " + MAX_ACCEPTANCE_IMAGES + " 张");
+        }
+        if (videos > MAX_ACCEPTANCE_VIDEOS) {
+            throw BusinessException.of("验收短视频最多 " + MAX_ACCEPTANCE_VIDEOS + " 段");
+        }
+        for (OpsBusinessAttachment file : files) {
+            checkEvidenceFile(file);
+            if (isVideo(file)) {
+                recheckVideoDuration(file);
+            }
+        }
+    }
+
+    /**
+     * 提交时再次读取落盘视频的 mvhd/ffprobe，防止上传后文件被替换或旧数据缺时长。
+     */
+    private void recheckVideoDuration(OpsBusinessAttachment file) {
+        int actual;
+        try {
+            actual = videoDurationValidator.requireDurationSeconds(
+                    attachmentService.resolveLocalPath(file));
+        } catch (RuntimeException e) {
+            throw BusinessException.of(
+                    "ACCEPTANCE_FILE_INVALID：视频文件不存在或无法校验，请重新上传");
+        }
+        if (actual > MAX_ACCEPTANCE_VIDEO_SECONDS) {
+            throw BusinessException.of("ACCEPTANCE_VIDEO_TOO_LONG：短视频时长不能超过 30 秒");
+        }
+    }
+
+    private static void checkEvidenceFile(OpsBusinessAttachment file) {
+        long size = file.getFileSize() == null ? 0L : file.getFileSize();
+        if (isImage(file)) {
+            if (size > 10L * 1024 * 1024) {
+                throw BusinessException.of("ACCEPTANCE_FILE_TOO_LARGE：图片不能超过 10MB");
+            }
+            return;
+        }
+        if (!isVideo(file)) {
+            throw BusinessException.of(
+                    "ACCEPTANCE_FILE_INVALID：附件格式不支持（仅支持 jpg/png/mp4/mov）");
+        }
+        if (size > 50L * 1024 * 1024) {
+            throw BusinessException.of("ACCEPTANCE_FILE_TOO_LARGE：视频不能超过 50MB");
+        }
+        Integer duration = file.getDurationSeconds();
+        if (duration == null || duration <= 0) {
+            throw BusinessException.of("ACCEPTANCE_FILE_INVALID：视频时长无法校验，请重新录制");
+        }
+        if (duration > MAX_ACCEPTANCE_VIDEO_SECONDS) {
+            throw BusinessException.of("ACCEPTANCE_VIDEO_TOO_LONG：短视频时长不能超过 30 秒");
+        }
+    }
+
+    private static Map<String, Object> acceptanceResult(String conclusion, String note,
+                                                        List<OpsBusinessAttachment> files) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("acceptanceConclusion", conclusion);
+        result.put("acceptanceNote", note);
+        result.put("attachmentCount", files.size());
+        result.put("attachmentIds", files.stream().map(OpsBusinessAttachment::getId).toList());
+        result.put("acceptanceEvidenceUrls",
+                files.stream().map(OpsBusinessAttachment::getFileUrl).toList());
+        result.put("videoDurationSeconds", files.stream()
+                .filter(BusinessOrderFlowActionService::isVideo)
+                .map(OpsBusinessAttachment::getDurationSeconds)
+                .filter(Objects::nonNull).findFirst().orElse(null));
+        return result;
+    }
+
+    private static boolean isImage(OpsBusinessAttachment file) {
+        String contentType = file.getContentType() == null ? "" : file.getContentType();
+        if (contentType.startsWith("image/")) return true;
+        String url = file.getFileUrl() == null ? "" : file.getFileUrl().toLowerCase();
+        return url.endsWith(".jpg") || url.endsWith(".jpeg") || url.endsWith(".png");
+    }
+
+    private static boolean isVideo(OpsBusinessAttachment file) {
+        String contentType = file.getContentType() == null ? "" : file.getContentType();
+        if (contentType.startsWith("video/")) return true;
+        String url = file.getFileUrl() == null ? "" : file.getFileUrl().toLowerCase();
+        return url.endsWith(".mp4") || url.endsWith(".mov");
     }
 
     /**
@@ -174,6 +385,12 @@ public class BusinessOrderFlowActionService {
         result.put("assigneeUserId", assigneeUserId);
         result.put("assigneeName", assignee.get("name"));
         result.put("assigneeCorpId", assignee.get("corpId"));
+        result.put("assigneeUserType", assignee.get("userType"));
+        Object wechat = assignee.get("wechatBound");
+        result.put("workerWechatBound", wechat instanceof Number n && n.longValue() > 0);
+        String assignSource = str(form.get("assignSource"));
+        result.put("assignSource",
+                "CREATED_ON_SITE".equals(assignSource) ? "CREATED_ON_SITE" : "SELECTED");
         result.put("expectTime", form.get("expectTime"));
         if ("VISIT".equalsIgnoreCase(dispatchType)) {
             if (str(form.get("visitNote")).isEmpty()) {
@@ -297,13 +514,17 @@ public class BusinessOrderFlowActionService {
     private Map<String, Object> loadAssignee(Long userId, Long corpId) {
         try {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                    "SELECT u.id, COALESCE(u.real_name, u.username) AS name, u.corp_id AS corpId "
-                            + "FROM ai_platform.sys_user u WHERE u.id = ? "
-                            + "AND u.status = 1 AND u.delete_flag = 0 "
-                            + "AND (u.corp_id = ? OR EXISTS (SELECT 1 FROM ai_platform.sys_user_corp uc "
-                            + "  WHERE uc.user_id = u.id AND uc.corp_id = ? "
-                            + "  AND uc.status = 1 AND uc.delete_flag = 0)) LIMIT 1",
-                    userId, corpId, corpId);
+                    "SELECT u.id, COALESCE(NULLIF(u.real_name,''), NULLIF(u.nickname,''), "
+                            + "u.username) AS name, "
+                            + "uc.corp_id AS corpId, u.user_type AS userType, "
+                            + "(SELECT COUNT(1) FROM ai_platform.sys_user_wechat w "
+                            + " WHERE w.user_id = u.id AND w.status = 1 AND w.delete_flag = 0) "
+                            + " AS wechatBound "
+                            + "FROM ai_platform.sys_user u "
+                            + "JOIN ai_platform.sys_user_corp uc ON uc.user_id = u.id "
+                            + " AND uc.corp_id = ? AND uc.status = 1 AND uc.delete_flag = 0 "
+                            + "WHERE u.id = ? AND u.status = 1 AND u.delete_flag = 0 LIMIT 1",
+                    corpId, userId);
             return rows.isEmpty() ? null : rows.get(0);
         } catch (Exception e) {
             log.warn("校验上门员工失败 userId={}: {}", userId, e.getMessage());
@@ -314,6 +535,8 @@ public class BusinessOrderFlowActionService {
     // ═══ 状态同步 ═══
 
     private void syncStatus(OpsBusinessOrder order, WorkflowBusinessEvent event) {
+        // 撤销财务核对检测：旧状态=2 且新状态≠2 时联动 SCM 采购单反审
+        String oldBizStatus = order.getBizStatus();
         // 终止/驳回事件可能晚于新实例（作废流程）到达：不能覆盖新的实例/节点字段
         boolean terminal = "INSTANCE_TERMINATED".equals(event.getEvent())
                 || "INSTANCE_REJECTED".equals(event.getEvent());
@@ -354,6 +577,15 @@ public class BusinessOrderFlowActionService {
         orderMapper.update(null, update);
         if (!skipStatus && event.getBizStatus() != null && !event.getBizStatus().isBlank()) {
             order.setBizStatus(event.getBizStatus().trim());
+        }
+        // 财务核对（biz_status=2）被撤销：未入库且未推送成功时由 SCM 自动反审采购单
+        if (!skipStatus && oldBizStatus != null && "2".equals(oldBizStatus.trim())
+                && event.getBizStatus() != null && !event.getBizStatus().isBlank()
+                && !"2".equals(event.getBizStatus().trim())
+                && (Integer.valueOf(1).equals(order.getHasTradeIn())
+                    || order.getTradeInPurchaseOrderId() != null)) {
+            runAfterCommit(() -> scmPurchaseOrderClient.financeReverted(
+                    order.getCorpId(), order.getId()));
         }
         log.info("订单 {} 业务状态同步：{} -> {} ({})", order.getId(),
                 event.getEvent(), event.getBizStatus(), event.getNodeName());

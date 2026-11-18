@@ -25,6 +25,8 @@ public class OpsBusinessAttachment extends BaseEntity {
     public static final String TYPE_PAYMENT = "PAYMENT";
     public static final String TYPE_CONTRACT = "CONTRACT";
     public static final String TYPE_REFUND = "REFUND";
+    /** 完工验收凭证：图片或短视频，验收节点强制至少 1 个。 */
+    public static final String TYPE_ACCEPTANCE = "ACCEPTANCE";
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -54,6 +56,10 @@ public class OpsBusinessAttachment extends BaseEntity {
 
     @TableField("content_type")
     private String contentType;
+
+    /** 视频时长（秒）；图片为空。用于验收短视频 ≤30 秒的服务端复核。 */
+    @TableField("duration_seconds")
+    private Integer durationSeconds;
 
     @TableField("uploader_user_id")
     private Long uploaderUserId;

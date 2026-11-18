@@ -32,8 +32,14 @@ public interface BusinessDataService {
     /** 派工资格批量查询（H5/PC 待办过滤与任务页提示共用）。 */
     List<Map<String, Object>> dispatchEligibility(List<Long> orderIds);
 
-    /** 工作流派工节点可选的上门员工（可见组织范围内的在职员工）。 */
-    java.util.List<Map<String, Object>> flowAssignees(Long orderId);
+    /** 派工施工员搜索：订单组织内内部+外部在职成员，施工员角色优先。 */
+    java.util.List<Map<String, Object>> flowAssignees(Long orderId, String keyword, Integer limit);
+
+    /** 工作流任务处理人查看订单详情：按 taskId 校验当前用户是待办审批人。 */
+    Map<String, Object> employeeTaskOrderDetail(Long userId, Long taskId);
+
+    /** 校验当前用户是该订单派工出库节点的待办处理人（现场新增施工员前置）。 */
+    void assertPendingDispatchTask(Long orderId, Long userId);
     List<String> getBatches();
     /** 导入阶段一（异步工作线程）：文件校验 + 品牌型号匹配解析，结果 JSON（fail/confirm/ready）写入任务 progressMsg */
     void runAsyncCheck(SysImportTask task);

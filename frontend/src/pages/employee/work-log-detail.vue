@@ -124,11 +124,12 @@ const formEntries = computed(() => {
   const form = detail.value && detail.value.detail && detail.value.detail.formData
   if (!form || typeof form !== 'object' || Array.isArray(form)) return []
   return Object.entries(form)
-    .filter(([, value]) => value !== null && value !== undefined && value !== ''
+    .filter(([name, value]) => name !== 'attachmentIds'
+      && value !== null && value !== undefined && value !== ''
       && !(Array.isArray(value) && value.length === 0))
     .map(([name, value]) => ({
       label: FORM_LABELS[name] || name,
-      value: Array.isArray(value) ? value.join('、') : String(value)
+      value: Array.isArray(value) ? value.join('、') : displayValue(name, value)
     }))
 })
 
@@ -139,7 +140,15 @@ const FORM_LABELS = {
   dispatchType: '工单类型', assigneeUserId: '上门员工', expectTime: '期望上门时间',
   visitNote: '随访说明', selectedItemIds: '施工商品', constructionNote: '施工记录',
   completionNote: '完工记录', photos: '现场照片', acceptanceConclusion: '验收结论',
-  acceptanceNote: '验收说明', serviceNote: '售后记录', visitResult: '随访结果'
+  acceptanceNote: '验收意见', acceptanceEvidenceUrls: '验收凭证',
+  serviceNote: '售后记录（历史）', visitResult: '随访结果（历史）'
+}
+
+function displayValue(name, value) {
+  if (name === 'acceptanceConclusion') {
+    return { PASS: '通过', REJECT: '不通过' }[value] || String(value)
+  }
+  return String(value)
 }
 
 const canOpenBusiness = computed(() => {
