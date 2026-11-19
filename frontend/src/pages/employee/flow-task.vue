@@ -256,7 +256,8 @@
             <text class="hint">不勾选表示订单全部正数商品</text>
           </view>
           <DispatchMaterialList v-if="form.dispatchType === 'CONSTRUCTION'"
-                                v-model="dispatchMaterials" />
+                                v-model="dispatchMaterials"
+                                v-model:stock-number="dispatchMaterialStockNumber" />
           <view v-if="form.dispatchType === 'VISIT'" class="field"><text class="label">随访任务说明 <text class="req">*</text></text>
             <textarea v-model="form.visitNote" class="textarea" maxlength="500" placeholder="请填写随访任务说明" />
           </view>
@@ -334,6 +335,7 @@ const selectedWorker = ref(null)
 const selectedKeys = ref([])
 /** 派工出库物料清单（需求预填；为空不生成领用单） */
 const dispatchMaterials = ref([])
+const dispatchMaterialStockNumber = ref(null)
 const expectDate = ref('')
 const expectPeriod = ref('')
 const opinion = ref('')
@@ -617,6 +619,9 @@ function buildFormData() {
           qty: Number(row.qty)
         }))
       : []
+    // 领用仓库随派工传入 SCM，草稿直接带入，避免员工二次选择
+    data.materialStockNumber = form.dispatchType === 'CONSTRUCTION'
+      ? (dispatchMaterialStockNumber.value || null) : null
   }
   if (actionType.value === 'OPS_ACCEPTANCE') {
     data.attachmentIds = (form.acceptanceEvidence || [])
@@ -643,9 +648,18 @@ function validate() {
     if (!form.expectTime) return '请选择期望上门日期和上午/下午'
     if (form.dispatchType === 'VISIT' && !String(form.visitNote || '').trim()) return '请填写随访任务说明'
     if (form.dispatchType === 'CONSTRUCTION') {
+      if (dispatchMaterials.value.length && !dispatchMaterialStockNumber.value) {
+        return '请选择物料领用仓库'
+      }
       const invalid = dispatchMaterials.value.find(row =>
         !row.materialNumber || !(Number(row.qty) > 0))
       if (invalid) return '请填写完整的物料清单（商品与数量）'
+      const over = dispatchMaterials.value.find(row =>
+        row.available !== null && row.available !== undefined
+        && Number(row.qty) > Number(row.available))
+      if (over) {
+        return `物料 ${over.name || over.materialNumber} 数量不能大于库存 ${over.available}`
+      }
     }
   }
   if (actionType.value === 'OPS_ACCEPTANCE') {

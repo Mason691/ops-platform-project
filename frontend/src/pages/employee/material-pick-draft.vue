@@ -70,9 +70,13 @@
               选择批次
             </text>
           </view>
+          <view class="item-meta">
+            <text class="stock-label">库存：{{ row.available === null ? '—' : qty(row.available) }}</text>
+          </view>
           <view class="item-bottom">
             <text class="qty-label">领取数量</text>
-            <input v-if="editable" v-model="row.pickQty" type="digit" class="qty-input" />
+            <input v-if="editable" v-model="row.pickQty" type="digit" class="qty-input"
+                   @blur="normalizeRowQty(row)" />
             <text v-else class="qty-value">{{ row.pickQty }}</text>
           </view>
         </view>
@@ -106,7 +110,7 @@
               <text class="item-name">{{ s.materialName || s.materialNumber }}</text>
               <text class="item-sub">{{ s.materialNumber }}<text v-if="s.batchNo"> · 批次 {{ s.batchNo }}</text></text>
             </view>
-            <text class="stock">{{ qty(s.validQty) }}</text>
+            <text class="stock">库存 {{ qty(s.validQty) }}</text>
           </view>
         </scroll-view>
       </view>
@@ -188,8 +192,10 @@ async function load() {
       batchNo: e.batchNo || '',
       pickQty: String(e.pickQty == null ? '' : e.pickQty),
       costPrice: e.costPrice,
-      sourceTaskEntryId: e.sourceTaskEntryId
+      sourceTaskEntryId: e.sourceTaskEntryId,
+      available: null
     }))
+    await refreshAllStock()
   } catch (e) {
     errorMsg.value = (e && e.msg) || '加载失败，请稍后重试'
   } finally {
@@ -202,7 +208,43 @@ function onWarehousePick(e) {
   if (!w) return
   form.value.stockNumber = w.number
   // 表头仓库为唯一口径：所有分录统一到该仓库，批次由员工逐行选择
-  rows.value.forEach(row => { row.stockNumber = w.number })
+  rows.value.forEach(row => {
+    row.stockNumber = w.number
+    row.batchNo = ''
+  })
+  refreshAllStock()
+}
+
+async function refreshAllStock() {
+  await Promise.all(rows.value.map(row => refreshRowStock(row)))
+}
+
+async function refreshRowStock(row) {
+  if (!form.value.stockNumber || !row.materialNumber) {
+    row.available = null
+    return
+  }
+  try {
+    row.available = await api.scmMaterialPickStock({
+      stockNumber: form.value.stockNumber,
+      materialNumber: row.materialNumber,
+      batchNo: row.batchNo || ''
+    })
+  } catch (e) {
+    row.available = null
+  }
+}
+
+function normalizeRowQty(row) {
+  const qty = Number(row.pickQty)
+  if (!Number.isFinite(qty) || qty <= 0) {
+    row.pickQty = '1'
+    return
+  }
+  if (row.available !== null && qty > Number(row.available)) {
+    row.pickQty = String(Number(row.available))
+    uni.showToast({ title: '数量不能大于库存 ' + qty(Number(row.available)), icon: 'none' })
+  }
 }
 
 function removeRow(index) {
@@ -252,6 +294,7 @@ function addStock(stock) {
     uni.showToast({ title: '该物料批次已在明细中', icon: 'none' })
     return
   }
+  const available = Number(stock.validQty) || 0
   rows.value.push({
     key: 'r' + (++rowKey),
     materialNumber: stock.materialNumber,
@@ -259,9 +302,10 @@ function addStock(stock) {
     spec: '',
     stockNumber: form.value.stockNumber,
     batchNo: stock.batchNo || '',
-    pickQty: '1',
+    pickQty: available >= 1 ? '1' : String(available || 1),
     costPrice: null,
-    sourceTaskEntryId: null
+    sourceTaskEntryId: null,
+    available
   })
   stockVisible.value = false
 }
@@ -283,9 +327,13 @@ async function chooseBatch(row) {
     }
     uni.showActionSheet({
       itemList: list.map(b => `${b.batch_no}（可用 ${qty(b.valid_qty)}）`),
-      success: (res) => {
+      success: async (res) => {
         const picked = list[res.tapIndex]
-        if (picked) row.batchNo = picked.batch_no
+        if (picked) {
+          row.batchNo = picked.batch_no
+          await refreshRowStock(row)
+          normalizeRowQty(row)
+        }
       }
     })
   } catch (e) {
@@ -315,6 +363,9 @@ function validateRows() {
   if (!rows.value.length) return '请至少添加一条物料'
   for (const row of rows.value) {
     if (!(Number(row.pickQty) > 0)) return '领取数量必须大于0：' + row.materialNumber
+    if (row.available !== null && Number(row.pickQty) > Number(row.available)) {
+      return `领取数量不能大于库存：${row.materialNumber}（库存 ${qty(Number(row.available))}）`
+    }
   }
   return ''
 }
@@ -458,6 +509,7 @@ function openTaskOrder(item) {
 .remove { font-size: 24rpx; color: #F53F3F; flex-shrink: 0; }
 .item-sub { display: block; margin-top: 6rpx; font-size: 22rpx; color: #86909C; }
 .item-meta { margin-top: 10rpx; font-size: 22rpx; color: #4E5969; }
+.stock-label { color: #1D2129; font-weight: 600; }
 .ok { color: #00B42A; }
 .warn { color: #FF7D00; }
 .batch-link { margin-left: 10rpx; color: #FF6B35; font-weight: 600; }

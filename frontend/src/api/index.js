@@ -295,6 +295,7 @@ export const api = {
 
   // 物料领取 / 核销（SCM 8084；H5 只制单与提交，不审批）
   scmWarehouseList: (params) => request({url:'/api/scm/warehouse/list', data:params}),
+  scmWarehouseDefault: () => request({url:'/api/scm/warehouse/default'}),
   scmInventoryQuery: (params) => request({url:'/api/scm/inventory/query', data:params}),
   scmMaterialPickTaskOrders: () => request({url:'/api/scm/material-pick/task-orders'}),
   scmMaterialPickCreate: (data) => request({url:'/api/scm/material-pick', method:'POST', data}),
@@ -305,6 +306,7 @@ export const api = {
   scmMaterialPickByDispatch: (dispatchId) => request({url:'/api/scm/material-pick/by-dispatch/' + dispatchId}),
   scmMaterialPickMaterialOptions: () => request({url:'/api/scm/material-pick/material-options'}),
   scmMaterialPickBatches: (params) => request({url:'/api/scm/material-pick/batches', data:params}),
+  scmMaterialPickStock: (params) => request({url:'/api/scm/material-pick/stock', data:params}),
   scmMaterialPickSave: (id, data) => request({
     url: '/api/scm/material-pick/save' + (id ? '?id=' + id : ''), method: 'POST', data
   }),
