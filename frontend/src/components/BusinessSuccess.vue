@@ -61,20 +61,8 @@
       </view>
     </view>
 
-    <view v-if="result.hasTradeIn && result.tradeInPurchaseStatus === 'SUCCESS' && result.tradeInAutoApproved"
-          class="trade-ok" :class="{ warn: result.tradeInPurchaseSyncStatus === 'PUSH_FAILED' }">
-      <text class="trade-ok-text" :class="{ warn: result.tradeInPurchaseSyncStatus === 'PUSH_FAILED' }">
-        {{ autoApproveText }}
-      </text>
-    </view>
-
-    <view v-if="result.hasTradeIn && result.tradeInPurchaseStatus === 'SUCCESS' && !result.tradeInAutoApproved"
-          class="trade-warn">
-      <text class="trade-warn-title">采购单已生成，待人工完善</text>
-      <text class="trade-warn-text">
-        {{ result.tradeInAutoApproveReason || '未满足自动审核条件' }}
-      </text>
-      <text class="trade-warn-text">请到采购订单 PC 端完善供应商/仓库/单价后提交审批。</text>
+    <view v-if="result.hasTradeIn && result.tradeInPurchaseStatus === 'SUCCESS'" class="trade-ok">
+      <text class="trade-ok-text">采购单已生成，待业务订单财务核对后自动审核并推送金蝶</text>
     </view>
 
     <view v-if="result.hasTradeIn && result.tradeInPurchaseStatus === 'FAILED'" class="trade-warn">
@@ -117,21 +105,11 @@ const purchaseStatusText = computed(() => {
   const result = props.result || {}
   if (result.tradeInPurchaseStatus === 'SUCCESS') {
     if (!result.tradeInPurchaseBillNo) return '已生成（单号待同步）'
-    return result.tradeInAutoApproved
-      ? `${result.tradeInPurchaseBillNo}（已审核，可生成入库）`
-      : `${result.tradeInPurchaseBillNo}（待完善，需人工审批）`
+    // 生成阶段恒为 DRAFT：审核由业务订单财务核对触发，不在此处误报已审核
+    return `${result.tradeInPurchaseBillNo}（待财务核对后自动审核）`
   }
   if (result.tradeInPurchaseStatus === 'FAILED') return '生成失败，请到订单详情重试'
   return '生成中，请稍后在订单详情查看'
-})
-/** 自动审核结果：推送失败时明确提示，不能误报为“已推送金蝶”。 */
-const autoApproveText = computed(() => {
-  const result = props.result || {}
-  if (result.tradeInPurchaseSyncStatus === 'PUSH_FAILED') {
-    return '已自动审核，但推送金蝶失败：'
-      + (result.tradeInPurchasePushError || '请在采购订单列表点「重试推送」')
-  }
-  return result.tradeInAutoApproveReason || '系统已自动审核并推送金蝶，可直接生成入库'
 })
 
 /** 审批人展示：有姓名显示“已提交给 角色：姓名 审批”；否则显示明确兜底文案。 */

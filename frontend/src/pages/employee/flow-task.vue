@@ -153,8 +153,9 @@
         <text v-if="order.tradeInPurchaseBillNo" class="inbound-line">
           关联采购单：{{ order.tradeInPurchaseBillNo }}{{ purchaseAuditLabel }}
         </text>
-        <text v-if="order.tradeInPurchaseStatus === 'SUCCESS' && !order.tradeInAutoApproved && order.tradeInAutoApproveReason"
-              class="inbound-line">{{ order.tradeInAutoApproveReason }}</text>
+        <text v-if="order.tradeInAutoApproveError" class="inbound-line error">
+          自动审核未通过：{{ order.tradeInAutoApproveError }}
+        </text>
         <text class="inbound-line">入库状态：{{ order.tradeInInboundStatusName || '旧品未入库' }}</text>
         <text v-if="order.tradeInPurchaseStatus === 'FAILED'" class="inbound-line error">
           关联采购单生成失败，请联系经办人在订单详情重试
@@ -417,10 +418,11 @@ const tradeInInboundDone = computed(() => {
 /** 采购单审核状态文案：自动审核 / 人工已审核 / 待完善。 */
 const purchaseAuditLabel = computed(() => {
   const o = order.value || {}
-  if (o.tradeInAutoApproved) return '（已审核·系统自动）'
+  if (o.tradeInAutoApproveTrigger) return '（已审核·财务核对自动）'
   if (o.tradeInAuditStatus === 'AUDITED') return '（已审核）'
   if (o.tradeInAuditStatus === 'CLOSED') return '（已关闭）'
-  return '（待完善，需人工审批）'
+  if (o.tradeInAutoApproveError) return '（自动审核未通过）'
+  return '（待财务核对后自动审核）'
 })
 /**
  * 施工完成节点（施工记录/施工验收）处理页必须提示旧品入库；
@@ -572,8 +574,7 @@ function sourceLabel(v) {
 }
 function approvalLabel(v) {
   return {
-    NONE: '无需审批', IN_APPROVAL: '审批中', APPROVED: '已通过',
-    AUTO_APPROVED: '自动审核', REJECTED: '已驳回'
+    NONE: '无需审批', IN_APPROVAL: '审批中', APPROVED: '已通过', REJECTED: '已驳回'
   }[v] || v || '-'
 }
 function fmtTime(v) {

@@ -14,8 +14,9 @@
         <text v-if="order.tradeInPurchaseBillNo" class="inbound-line">
           关联采购单：{{ order.tradeInPurchaseBillNo }}{{ purchaseAuditLabel }}
         </text>
-        <text v-if="order.tradeInPurchaseStatus === 'SUCCESS' && !order.tradeInAutoApproved && order.tradeInAutoApproveReason"
-              class="inbound-line">{{ order.tradeInAutoApproveReason }}</text>
+        <text v-if="order.tradeInAutoApproveError" class="inbound-line error">
+          自动审核未通过：{{ order.tradeInAutoApproveError }}
+        </text>
         <text v-if="order.tradeInPurchaseSyncStatus === 'PUSH_FAILED'" class="inbound-line error">
           关联采购单推送金蝶失败：{{ order.tradeInPurchasePushError || '请在供应链 PC 端重试推送' }}
         </text>
@@ -421,10 +422,11 @@ const showInboundReminder = computed(() =>
 /** 采购单审核状态文案：自动审核 / 人工已审核 / 待完善，避免误导为「未审核」。 */
 const purchaseAuditLabel = computed(() => {
   const o = order.value || {}
-  if (o.tradeInAutoApproved) return '（已审核·系统自动）'
+  if (o.tradeInAutoApproveTrigger) return '（已审核·财务核对自动）'
   if (o.tradeInAuditStatus === 'AUDITED') return '（已审核）'
   if (o.tradeInAuditStatus === 'CLOSED') return '（已关闭）'
-  return '（待完善，需人工审批）'
+  if (o.tradeInAutoApproveError) return '（自动审核未通过）'
+  return '（待财务核对后自动审核）'
 })
 
 const purchaseOrderText = computed(() => {
