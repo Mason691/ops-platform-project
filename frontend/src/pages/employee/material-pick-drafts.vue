@@ -22,13 +22,19 @@
       <view v-for="item in rows" :key="item.id" class="card" @click="openDraft(item)">
         <view class="card-head">
           <text class="card-no">{{ item.billNo || '草稿未编号' }}</text>
-          <text class="status" :class="statusClass(item.approvalStatus)">
-            {{ statusLabel(item.approvalStatus) }}
+          <text class="status" :class="materialPickStatusClass(item.approvalStatus)">
+            {{ materialPickStatusLabel(item.approvalStatus) }}
           </text>
         </view>
         <text class="card-meta">
           {{ reasonLabel(item.pickReason) }}
-          <text v-if="item.taskOrderNo"> · 工单 {{ item.taskOrderNo }}</text>
+          <text v-if="item.taskOrder" class="order-link" @click.stop="openTaskOrder(item)">
+            · 工单 {{ item.taskOrder.orderNo || item.taskOrderNo || '已删除' }}
+            <text v-if="item.taskOrder.customerName"> · {{ item.taskOrder.customerName }}</text>
+            <text v-if="item.taskOrder.deleted">（已删除/作废）</text>
+            <text v-else-if="item.taskOrder.readable === false">（无权查看）</text>
+          </text>
+          <text v-else-if="item.taskOrderNo"> · 工单 {{ item.taskOrderNo }}</text>
         </text>
         <text class="card-summary">
           {{ (item.entries || []).length }} 种 ·
@@ -60,6 +66,10 @@ import Pager from '@/components/Pager.vue'
 import { api } from '@/api/index'
 import { formatTime } from '@/utils/materialForm'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
+import {
+  materialPickStatusLabel,
+  materialPickStatusClass
+} from '@/utils/materialPickStatus'
 
 /** 我的物料领用单：默认 DRAFT（派工自动生成待补充），可切换审批中/已通过/已驳回。 */
 const statusOptions = [
@@ -120,6 +130,25 @@ function openDraft(item) {
   uni.navigateTo({ url: '/pages/employee/material-pick-draft?id=' + item.id })
 }
 
+function openTaskOrder(item) {
+  const info = item && item.taskOrder
+  if (!info || !info.id) {
+    uni.showToast({ title: '该工单已删除/作废', icon: 'none' })
+    return
+  }
+  if (info.deleted) {
+    uni.showToast({ title: '该工单已删除/作废', icon: 'none' })
+    return
+  }
+  if (info.readable === false) {
+    uni.showToast({ title: '无权查看该工单', icon: 'none' })
+    return
+  }
+  uni.navigateTo({
+    url: '/pages/employee/material-task-order?pickId=' + encodeURIComponent(item.id)
+  })
+}
+
 function createNew() {
   uni.navigateTo({ url: '/pages/employee/material-pick' })
 }
@@ -163,15 +192,6 @@ function deleteDraft(item) {
   })
 }
 
-function statusLabel(value) {
-  return { DRAFT: '待提交', IN_APPROVAL: '审批中', APPROVED: '已通过', REJECTED: '已驳回' }[value] || value || '—'
-}
-function statusClass(value) {
-  return {
-    DRAFT: 'st-draft', IN_APPROVAL: 'st-pending',
-    APPROVED: 'st-ok', REJECTED: 'st-reject'
-  }[value] || ''
-}
 function reasonLabel(value) {
   return { DISPATCH: '派工施工', ACTIVITY: '活动物料', OTHER: '其它事宜' }[value] || value || '—'
 }
@@ -200,6 +220,7 @@ function totalQty(item) {
 .st-ok { background: #E8F8E8; color: #00B42A; }
 .st-reject { background: #FFECE8; color: #F53F3F; }
 .card-meta { display: block; margin-top: 10rpx; font-size: 24rpx; color: #4E5969; }
+.order-link { color: #FF6B35; }
 .card-summary { display: block; margin-top: 6rpx; font-size: 24rpx; color: #86909C; }
 .warn { color: #FF7D00; }
 .card-foot { margin-top: 16rpx; display: flex; align-items: center; justify-content: space-between; }

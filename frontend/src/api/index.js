@@ -308,6 +308,8 @@ export const api = {
   scmMaterialPickSave: (id, data) => request({
     url: '/api/scm/material-pick/save' + (id ? '?id=' + id : ''), method: 'POST', data
   }),
+  scmMaterialPickApprovalPreview: (id) => request({url:'/api/scm/material-pick/' + id + '/approval-preview'}),
+  scmMaterialPickTaskOrder: (id) => request({url:'/api/scm/material-pick/' + id + '/task-order'}),
   scmMaterialPickSubmit: (id) => request({url:'/api/scm/material-pick/' + id + '/submit', method:'POST'}),
   scmMaterialPickDelete: (id) => request({url:'/api/scm/material-pick/' + id, method:'DELETE'}),
   scmMaterialWriteOffPickable: () => request({url:'/api/scm/material-write-off/pickable'}),

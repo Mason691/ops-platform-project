@@ -19,12 +19,9 @@
         <view class="kv"><text class="k">单据编号</text><text class="v">{{ detail.billNo || '草稿未编号' }}</text></view>
         <view class="kv"><text class="k">单据日期</text><text class="v">{{ detail.billDate || '—' }}</text></view>
         <view class="kv"><text class="k">领取事由</text><text class="v">{{ reasonLabel(detail.pickReason) }}</text></view>
-        <view v-if="detail.taskOrderNo" class="kv">
-          <text class="k">关联工单</text><text class="v">{{ detail.taskOrderNo }}</text>
-        </view>
         <view class="kv"><text class="k">领用人</text><text class="v">{{ detail.pickerName || '—' }}</text></view>
         <view class="kv"><text class="k">状态</text>
-          <text class="v" :class="statusClass(detail.approvalStatus)">{{ statusLabel(detail.approvalStatus) }}</text>
+          <text class="v" :class="materialPickStatusClass(detail.approvalStatus)">{{ materialPickStatusLabel(detail.approvalStatus) }}</text>
         </view>
         <view class="field">
           <text class="label">领取仓库</text>
@@ -33,6 +30,26 @@
           </picker>
           <text v-else class="picker">{{ warehouseName || detail.stockNumber || '—' }}</text>
         </view>
+      </view>
+
+      <view v-if="detail.taskOrder" class="card order-card">
+        <view class="order-head">
+          <text class="order-title">
+            关联工单 {{ detail.taskOrder.orderNo || detail.taskOrderNo || '已删除' }}
+          </text>
+          <text class="order-link" @click="openTaskOrder(detail)">查看工单</text>
+        </view>
+        <template v-if="detail.taskOrder.readable">
+          <view class="kv"><text class="k">客户</text><text class="v">{{ detail.taskOrder.customerName || '—' }}</text></view>
+          <view class="kv"><text class="k">客户手机</text><text class="v">{{ detail.taskOrder.customerPhoneMasked || '—' }}</text></view>
+          <view class="kv"><text class="k">订单类型</text><text class="v">{{ detail.taskOrder.orderType || '—' }}</text></view>
+          <view class="kv"><text class="k">订单状态</text><text class="v">{{ detail.taskOrder.statusLabel || '—' }}</text></view>
+          <view class="kv"><text class="k">派工员工</text><text class="v">{{ detail.taskOrder.assigneeName || '—' }}</text></view>
+          <view class="kv"><text class="k">派工时间</text><text class="v">{{ detail.taskOrder.dispatchTime || '—' }}</text></view>
+        </template>
+        <text v-else class="order-unavailable">
+          {{ detail.taskOrder.statusLabel || '无权查看该工单' }}
+        </text>
       </view>
 
       <view class="section">
@@ -103,6 +120,10 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
+import {
+  materialPickStatusLabel,
+  materialPickStatusClass
+} from '@/utils/materialPickStatus'
 
 /**
  * 物料领用草稿编辑：派工自动生成的草稿在此补充仓库/批次后提交。
@@ -329,6 +350,30 @@ async function submit() {
     uni.showToast({ title: error, icon: 'none' })
     return
   }
+  // 提交前预览审批人：预览失败不阻塞提交，只展示兜底文案
+  let confirmText = '提交后将进入财务审批流程，审批人信息提交后可在详情查看'
+  try {
+    const preview = await api.scmMaterialPickApprovalPreview(id.value)
+    if (preview && preview.displayName) {
+      confirmText = `您将把物料领用单 ${detail.value.billNo || ''} 提交给 ${preview.displayName} 审批，确认提交？`
+    } else if (preview && preview.fallbackMessage) {
+      confirmText = preview.fallbackMessage
+    }
+  } catch (e) {
+    // 预览接口不可用/超时：保持兜底文案
+  }
+  const confirmed = await new Promise(resolve => {
+    uni.showModal({
+      title: '提交审批',
+      content: confirmText,
+      confirmText: '确认提交',
+      cancelText: '取消',
+      success: res => resolve(!!res.confirm),
+      fail: () => resolve(false)
+    })
+  })
+  if (!confirmed) return
+
   submitting.value = true
   try {
     // 先保存草稿（提交接口只读库内分录），再提交审批
@@ -337,7 +382,8 @@ async function submit() {
     const display = result && result.currentApproverDisplay
     uni.showModal({
       title: '已提交审批',
-      content: '已提交给财务审批' + (display ? '\n' + display : ''),
+      content: display ? '已提交给 ' + display + ' 审批'
+        : '已提交审批，待分配审批人，请联系管理员',
       showCancel: false,
       success: () => uni.redirectTo({ url: '/pages/employee/material-pick-drafts' })
     })
@@ -353,17 +399,27 @@ function qty(value) {
   if (!Number.isFinite(n) || n === 0) return '0'
   return n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
 }
-function statusLabel(value) {
-  return { DRAFT: '待提交', IN_APPROVAL: '审批中', APPROVED: '已通过', REJECTED: '已驳回' }[value] || value || '—'
-}
-function statusClass(value) {
-  return {
-    DRAFT: 'st-draft', IN_APPROVAL: 'st-pending',
-    APPROVED: 'st-ok', REJECTED: 'st-reject'
-  }[value] || ''
-}
 function reasonLabel(value) {
   return { DISPATCH: '派工施工', ACTIVITY: '活动物料', OTHER: '其它事宜' }[value] || value || '—'
+}
+
+function openTaskOrder(item) {
+  const info = item && item.taskOrder
+  if (!info || !info.id) {
+    uni.showToast({ title: '该工单已删除/作废', icon: 'none' })
+    return
+  }
+  if (info.deleted) {
+    uni.showToast({ title: '该工单已删除/作废', icon: 'none' })
+    return
+  }
+  if (info.readable === false) {
+    uni.showToast({ title: '无权查看该工单', icon: 'none' })
+    return
+  }
+  uni.navigateTo({
+    url: '/pages/employee/material-task-order?pickId=' + encodeURIComponent(id.value)
+  })
 }
 </script>
 
@@ -377,6 +433,11 @@ function reasonLabel(value) {
 .state-err { color: #F53F3F; }
 .retry { margin-top: 20rpx; color: #FF6B35; font-size: 26rpx; }
 .card { background: #fff; border-radius: 16rpx; padding: 8rpx 24rpx; }
+.order-card { margin-top: 20rpx; padding-bottom: 16rpx; }
+.order-head { display: flex; align-items: center; justify-content: space-between; min-height: 76rpx; border-bottom: 1rpx solid #F2F3F5; }
+.order-title { font-size: 28rpx; font-weight: 600; color: #1D2129; }
+.order-link { color: #FF6B35; font-size: 24rpx; }
+.order-unavailable { display: block; padding: 20rpx 0; color: #86909C; font-size: 24rpx; }
 .kv { display: flex; align-items: center; min-height: 76rpx; border-bottom: 1rpx solid #F2F3F5; }
 .kv:last-child { border-bottom: none; }
 .k { width: 160rpx; font-size: 26rpx; color: #86909C; flex-shrink: 0; }
