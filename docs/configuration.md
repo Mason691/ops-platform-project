@@ -22,6 +22,7 @@
 | `mall-service.base-url` | mall 子系统地址 | `http://localhost:8083` |
 | `scm-service.base-url` | 供应链基础资料服务（员工手工新增的品牌/品类/型号下拉与保存校验） | `http://localhost:8084`（生产同 host 网络，可由 `SCM_SERVICE_BASE_URL` 覆盖） |
 | `app.upload.base-dir` | 上传根目录 | `/app/uploads`（Docker） |
+| `app.receipt-ocr.preferred-color` | 收据号 OCR 红蓝并存时的默认采用颜色（RED/BLUE） | `${RECEIPT_OCR_PREFERRED_COLOR:RED}` |
 | `security.qr.fail-fast` | 收款码启动验签失败是否拒绝启动（生产必须 true） | `${QR_FAIL_FAST:true}` |
 | `security.qr.patrol-cron` | 收款码每日巡检 cron（绕过缓存重新验签） | `0 0 3 * * *` |
 | `app.import.upload-dir` | 异步导入文件暂存目录 | `${user.home}/data/imports`（Docker 环境变量覆盖） |

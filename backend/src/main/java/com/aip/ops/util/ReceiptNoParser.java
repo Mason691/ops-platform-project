@@ -10,8 +10,8 @@ import java.util.regex.Pattern;
  * 收据号解析（纯函数，便于单测与复用）。
  *
  * <p>规则：定位「入账日期」后的 {@code NO.}，取紧随其后的 7 位数字。
- * 收据号优先由 {@link ReceiptRedDigitExtractor} 按红色数字识别；本解析器
- * 是红字未命中时的全图 OCR 回退。</p>
+ * 收据号优先由 {@link ReceiptColorDigitExtractor} 按红/蓝数字识别；本解析器
+ * 是彩色数字未命中时的全图 OCR 回退。</p>
  * OCR 可能把 NO 识别成 N0、在数字间插入空格，或把全角数字原样返回，
  * 这里统一 NFKC 归一化并允许数字间空白。位数不足/超出时仍返回候选，
  * 由调用方提示「识别结果可能不准确」。</p>

@@ -5,6 +5,7 @@ import com.aip.ops.dto.BalanceReceiveRequest;
 import com.aip.ops.dto.BusinessRefundApplyRequest;
 import com.aip.ops.dto.CommunityCreateRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
+import com.aip.ops.dto.ReceiptOcrFeedbackRequest;
 import com.aip.ops.security.JwtTokenInspector;
 import com.aip.ops.service.BusinessAttachmentService;
 import com.aip.ops.service.BusinessDataService;
@@ -412,6 +413,17 @@ public class EmployeeController {
         }
         Long attachmentId = body == null ? null : body.get("attachmentId");
         return R.ok(receiptOcrService.recognize(attachmentId));
+    }
+
+    /** 收据号 OCR 采用结果反馈：记录图片、红蓝候选、最终采用值与是否人工修改。 */
+    @PostMapping("/business-data/receipt-ocr/feedback")
+    public R<?> logReceiptOcrAdoption(
+            @RequestBody(required = false) ReceiptOcrFeedbackRequest body) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可记录收据识别结果");
+        }
+        receiptOcrService.logAdoption(body);
+        return R.ok(null);
     }
 
     /** 保存手工录入业务数据：组织/经办人由服务端从 JWT 派生。 */

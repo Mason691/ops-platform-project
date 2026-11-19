@@ -1,6 +1,7 @@
 # 员工制单「支付信息 / 凭证信息」拆分与收据号 OCR — 规格说明
 
 > 状态：✅ 已生产部署（2026-11-18 15:27；后端 sha256 `891d4746…` / H5 入口 `index-DHJ7IdWv.js`）；微信真机 E2E 待执行
+> 增补（2026-11-19）：收据号 OCR 支持红色/蓝色双色候选，默认色可配置；红蓝不一致时前端必须展示两组候选并由员工确认。实现已通过编译与样本验证，待发布。
 > 范围：ops 公众号 H5 员工制单向导 + ops 后端附件/OCR + mall_db 数据模型
 
 ## 一、功能概述
@@ -30,7 +31,10 @@
 |---|--------|------|
 | 1 | 步骤条为「基础信息 → 商品明细 → 支付信息 → 凭证信息 → 确认提交」 | 5 步 STEPS + 向导组件 |
 | 2 | 原收款信息中的收据号/收款凭证不在支付信息出现 | 已移入凭证信息 |
-| 3 | 上传收据图片自动识别红色数字（`NO.` 后 7 位）并回填；未命中红字时回退 `NO.` 规则 | 红色掩膜 + Tesseract（psm 7/11）+ `ReceiptRedDigitExtractor`；回退 `ReceiptNoParser` |
+| 3 | 上传收据图片自动识别红色/蓝色数字（`NO.` 后 7 位）并回填；红蓝不一致时确认后采用；未命中彩色数字时回退 `NO.` 规则 | 红/蓝掩膜 + Tesseract（psm 7/11）+ `ReceiptColorDigitExtractor` + `ReceiptOcrResultBuilder`；回退 `ReceiptNoParser` |
+| 11 | 红蓝并存且不一致时默认填入配置色，展示两组候选并可切换 | `needsConfirm=true` + `ReceiptOcrPanel` 标签 |
+| 12 | 用户手改/切换后识别结果不覆盖用户值 | `useReceiptOcr` 状态机（`userTouched`） |
+| 13 | 识别日志记录图片、候选、最终采用值、是否人工修改 | `RECEIPT_OCR_CANDIDATES` / `RECEIPT_OCR_ADOPTED` |
 | 4 | 人工修改后不被识别结果静默覆盖 | 收据号为空/仍为上次识别值才自动填；否则弹窗确认 |
 | 5 | 识别失败/超时提示手填，收据号仍必填 | OCR 失败返回 `receiptNo=null` + 提示；前端可重试 |
 | 6 | 支付凭证必填、1~3 张、可预览/删除 | 前端校验 + 后端 `requireOwnedList` |
@@ -43,13 +47,15 @@
 
 ### 4.1 收据号 OCR
 
-- **红字优先（业务口径）**：收据号是收据上红色印刷的数字（通常为右上角 `NO.` 后的 7 位）。服务端先按 `R≥100 且 R-max(G,B)≥30` 提取红字掩膜（红色像素为黑、其余为白），用 Tesseract `eng --psm 7 -c tessedit_char_whitelist=0123456789` 识别；未命中再以 `--psm 11` 稀疏文本兜底。
-- **候选过滤**：只接受 6~8 位纯数字（底部红章的 13 位流水号自动排除）；7 位优先；上部区域（`top+height ≤ 72%` 图高）优先，避免把红章流水号误当收据号；同区域多候选取置信度最高者。位置可疑、非 7 位或置信度低于 60 时返回 `exact=false`，提示「识别结果可能不准确」。
-- **全图回退**：红字未识别到候选（或红字识别异常/超时）时，回退原规则——定位「入账日期」后的 `NO.`（兼容 `N0`、全角、数字间空格），取其后 7 位数字；6/8 位提示「识别结果可能不准确」；多候选取入账日期后的第一个。
-- 后端：`POST /api/ops/employee/business-data/receipt-ocr`（员工 JWT），入参 `{attachmentId}`；红字 20s、全图 30s 超时（原图尺寸更大）；全图首次慢速失败（≥5s，通常是超时）不再重跑 `eng`，仅快速失败/空结果降级 `eng`；红字识别异常不阻塞，自动回退全图。OCR 并发上限 2，排队 5s 仍无槽位时返回「识别任务繁忙，请稍后重试」。
+- **红蓝双色（2026-11-19 增补）**：收据 `NO.` 附近可能同时存在红色与蓝色两组 7 位数字。服务端分别按 `R≥100 且 R-max(G,B)≥30`、`B≥80 且 B-max(R,G)≥25` 生成红/蓝掩膜（目标色为黑、其余为白），各跑一次 Tesseract `eng --psm 7 -c tessedit_char_whitelist=0123456789`，未命中再以 `--psm 11` 兜底。
+- **默认色**：`app.receipt-ocr.preferred-color`（`RED`/`BLUE`，环境变量 `RECEIPT_OCR_PREFERRED_COLOR` 覆盖，默认 `RED`）。只有一种颜色时直接采用；红蓝都存在且一致时采用该值；红蓝不一致时默认采用配置色并返回 `needsConfirm=true`，前端展示两组候选供一键切换，禁止静默选择。
+- **候选过滤**：只接受 6~8 位纯数字（底部红/蓝章的 13 位流水号自动排除）；7 位优先；上部区域（`top+height ≤ 72%` 图高）优先，避免把印章流水号误当收据号；同区域多候选取置信度最高者。位置可疑、非 7 位或置信度低于 60 时返回 `exact=false`，提示「识别结果可能不准确」；同色多组候选时提示「已填入第一组」。
+- **全图回退**：红/蓝均未识别到候选（或彩色识别异常/超时）时，回退原规则——定位「入账日期」后的 `NO.`（兼容 `N0`、全角、数字间空格），取其后 7 位数字；6/8 位提示「识别结果可能不准确」；多候选取入账日期后的第一个。未找到 `NO.` 或位数不符时返回手填提示。
+- 后端：`POST /api/ops/employee/business-data/receipt-ocr`（员工 JWT），入参 `{attachmentId}`；彩色识别 15s/色、全图 30s 超时；全图首次慢速失败（≥5s，通常是超时）不再重跑 `eng`，仅快速失败/空结果降级 `eng`；彩色识别异常不阻塞，自动回退全图。OCR 并发上限 2，排队 5s 仍无槽位时返回「识别任务繁忙，请稍后重试」。
 - 锚点（回退规则）：优先「入账日期」；若图片/OCR 文本中不存在该词，才退化为「入账/日期/DATE」的最早位置，避免把开票日期等其它日期后的 NO. 误当入账收据号。
-- 前端：上传成功自动触发；加载态「正在识别收据号…」；失败可「重新识别」；收据号可手改，修改后旧识别值失效。
-- 覆盖策略：收据号为空或等于上次自动识别值 → 自动填入；用户已手改 → 弹窗询问是否覆盖（默认保留）。
+- **采用日志**：`POST /api/ops/employee/business-data/receipt-ocr/feedback` 记录 `attachmentId/redReceiptNo/blueReceiptNo/adoptedReceiptNo/manual/action`；识别时记 `RECEIPT_OCR_CANDIDATES`，采用时记 `RECEIPT_OCR_ADOPTED`，用于追溯与规则优化。
+- 前端：上传成功自动触发；加载态「正在识别收据号…」；红蓝不一致时在收据号字段下方展示「红色 XXX / 蓝色 YYY」两个可点选标签，默认高亮配置色；用户手改/切换后保留候选提示但不再自动覆盖；失败可「重新识别」；无候选时提示手填，收据号仍必填。收据图片沿用 `BusinessAttachmentUploader` 的点击放大预览。
+- 覆盖策略：收据号为空或等于上次自动识别值 → 自动填入；用户已手改/切换 → 保留用户值，仅更新候选提示；草稿预填值首次识别时弹窗询问是否覆盖（默认保留）。
 
 ### 4.2 附件
 
@@ -84,7 +90,8 @@
 ### 5.2 接口
 
 - `POST /api/ops/employee/business-data/attachments` 上传附件，返回 `{id,fileUrl,fileName,fileSize,contentType,fileType}`。
-- `POST /api/ops/employee/business-data/receipt-ocr` 识别收据号，返回 `{receiptNo,exact,multiple,confidence,message,source}`（confidence=HIGH/MEDIUM/LOW；source=RED/FULL/NONE）。
+- `POST /api/ops/employee/business-data/receipt-ocr` 识别收据号，返回 `{receiptNo,redReceiptNo,blueReceiptNo,preferredColor,recommendation,needsConfirm,exact,multiple,confidence,message,source,candidates[]}`；`source=RED/BLUE/BOTH/FULL/NONE`，`candidates[]={color,value,position,confidence,selected}`（color=RED/BLUE/UNKNOWN）。
+- `POST /api/ops/employee/business-data/receipt-ocr/feedback` 记录最终采用值（`attachmentId/redReceiptNo/blueReceiptNo/adoptedReceiptNo/manual/action`），返回 `null`。
 - `POST /api/ops/employee/business-data/manual` 新增 `receiptImageId` / `paymentVoucherIds` / `contractAttachmentIds`；移除旧 `voucherUrls` 入参（旧客户端需同步升级）。
 - 订单详情增加 `receiptImageUrl` / `paymentVoucherUrls` / `contractAttachmentUrls` / `attachments`。
 
@@ -105,6 +112,7 @@
 ## 八、已知限制 / 部署注意
 
 - 需重建 ops 镜像安装 `tesseract-ocr` + `tesseract-ocr-chi-sim`（仅换 JAR 的 overlay 发布不会安装 OCR 组件）。
+- 红蓝默认色通过 `RECEIPT_OCR_PREFERRED_COLOR=RED|BLUE` 配置（默认 RED）；切换需重启 ops 后端（`@Value` 启动注入），无需改代码。
 - 迁移脚本必须先于新 JAR 执行；后端与 ops H5 需同一发布窗口切换（旧客户端不再传新附件 ID）。
 - 旧草稿中的 `voucherUrls` 不会自动迁移为附件 ID，恢复后需重新上传支付凭证/合同附件（收据号保留）。
 - 确认页已展示支付信息与凭证信息；付款方式/定金与特批/提成仍按现有商品行模型在商品明细维护。

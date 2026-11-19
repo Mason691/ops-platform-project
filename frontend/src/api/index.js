@@ -264,6 +264,11 @@ export const api = {
   employeeProductPrice: (params) => request({url:'/api/ops/employee/business-data/product-price', data:params}),
   employeeCheckReceiptNo: (params) => request({url:'/api/ops/employee/business-data/receipt-no/check', data:params}),
   employeeReceiptOcr: (data) => request({url:'/api/ops/employee/business-data/receipt-ocr', method:'POST', data}),
+  employeeReceiptOcrFeedback: (data) => request({
+    url: '/api/ops/employee/business-data/receipt-ocr/feedback',
+    method: 'POST',
+    data
+  }),
   employeeDeleteBusinessAttachment: (id) => request({url:'/api/ops/employee/business-data/attachments/' + id, method:'DELETE'}),
   employeeCreateBusiness: (data) => request({url:'/api/ops/employee/business-data/manual',method:'POST',data}),
   employeeOrderApprover: (orderId) => request({url:'/api/ops/employee/business-data/manual/' + orderId + '/approver'}),
