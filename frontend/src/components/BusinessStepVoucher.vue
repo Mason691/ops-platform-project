@@ -97,7 +97,11 @@ const props = defineProps({
 
 const show = key => !props.onlyErrors || !!props.errors[key]
 const ocr = useReceiptOcr(props.form)
-const preferredLabel = computed(() => (ocr.preferredColor.value === 'BLUE' ? '蓝色' : '红色'))
+const preferredLabel = computed(() => {
+  if (ocr.preferredColor.value === 'BLUE') return '蓝色'
+  if (ocr.preferredColor.value === 'RED') return '红色'
+  return '系统配置色'
+})
 const receiptImages = computed({
   get: () => (props.form.receiptImage ? [props.form.receiptImage] : []),
   set: list => {
