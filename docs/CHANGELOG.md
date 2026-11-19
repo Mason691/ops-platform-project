@@ -2,6 +2,14 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-19（收据号 OCR 红蓝双色候选，待发布）
+
+- **规则**：收据 `NO.` 附近可能同时存在红色/蓝色 7 位数字；服务端分别生成红/蓝掩膜并 OCR，红蓝均存在且不一致时默认采用配置色（`RED`/`BLUE`，环境变量 `RECEIPT_OCR_PREFERRED_COLOR`，默认 RED），返回两组候选并置 `needsConfirm=true`；前端在收据号下方展示可切换标签，禁止静默选择。
+- **后端**：`ReceiptRedDigitExtractor` 泛化为 `ReceiptColorDigitExtractor`；新增 `ReceiptOcrResultBuilder`/`ReceiptOcrResult`/`ReceiptOcrFeedbackRequest`；`ReceiptOcrServiceImpl` 双色识别 + 结构化日志 `RECEIPT_OCR_CANDIDATES/ADOPTED`；新增 `POST /api/ops/employee/business-data/receipt-ocr/feedback`。
+- **前端**：新增 `useReceiptOcr` + `ReceiptOcrPanel`；`BusinessStepVoucher` 接入候选标签/切换/手动输入保留/离开步骤上报；收据图片点击放大沿用上传组件。
+- **验证**：后端 `mvn -o compile` 通过；H5 `npm run build:h5` 通过；生产容器内 Tesseract 真实样本（红色 0002304）与红/蓝/双色/同值合成样本端到端通过；纯逻辑断言覆盖优先红/优先蓝/同值/回退/低置信度/颜色掩膜边界，全部 PASS。
+- **未执行**：真机微信 E2E、生产发布（Tesseract 已在镜像内，本次未改依赖）。
+
 ## 2026-11-19（员工收款码更换并重新签名，已发布并冒烟通过）
 
 - **变更**：公众号员工工作台「业务数据订单 → 支付方式=二维码」收款码更换为新版橙色收款码（金地美家/幸福生活）。`secure/qr/payment-qr.png` 由 459×486 / 270KB 变为 1440×1536 / 2.42MB；按 `tools/qr-signature/README.md` 用离线私钥重新生成 `payment-qr.png.sig`（ECDSA P-256/SHA-256）。

@@ -12,16 +12,6 @@
         :hint-text="`收据原图上传，不压缩；上传后自动识别收据号；最多1张，单个不超过${MAX_RECEIPT_SIZE_MB}MB`"
         :error="errors.receiptImage"
         @uploaded="onReceiptUploaded" />
-      <view v-if="ocrLoading" class="ocr-row">
-        <text class="ocr-spinner"></text>
-        <text class="ocr-hint">正在识别收据号…</text>
-      </view>
-      <view v-else-if="ocrMessage" class="ocr-row">
-        <text class="ocr-hint" :class="{ warn: ocrWarning }">{{ ocrMessage }}</text>
-        <text v-if="form.receiptImage && ocrWarning" class="ocr-retry" @click="runOcr()">
-          重新识别
-        </text>
-      </view>
     </view>
 
     <view v-if="show('receiptNo')" id="field-receiptNo" class="section">
@@ -31,8 +21,23 @@
              placeholder="必填，可手填或由收据图片识别"
              @input="onReceiptInput" @blur="onReceiptBlur"
              @focus="keepFieldVisible('field-receiptNo')" />
+      <ReceiptOcrPanel
+        :loading="ocr.loading"
+        :message="ocr.message"
+        :warning="ocr.warning"
+        :red="ocr.red"
+        :blue="ocr.blue"
+        :has-result="ocr.hasResult"
+        :has-candidates="ocr.hasCandidates"
+        :show-choices="ocr.showChoices"
+        :same-value="ocr.sameValue"
+        :current-choice="ocr.currentChoice"
+        :manual="ocr.manual"
+        :can-retry="ocr.canRetry"
+        @switch="ocr.switchTo"
+        @retry="ocr.runOcr()" />
       <text class="section-hint">
-        识别规则：优先识别收据右上角红色数字（通常为 NO. 后的 7 位）；未识别到红字时回退识别「入账日期」后 NO. 的数字。结果可人工修改，修改后不再自动覆盖。
+        识别规则：同时识别收据上红色/蓝色 7 位数字（通常位于 NO. 后）；红蓝不一致时默认使用{{ preferredLabel }}，可一键切换。结果可人工修改，修改后不再自动覆盖。
       </text>
       <text v-if="receiptChecking" class="hint">正在校验收据号...</text>
       <text v-if="receiptError" class="ferr">{{ receiptError }}</text>
@@ -68,6 +73,8 @@
 <script setup>
 import { computed, onBeforeUnmount, ref } from 'vue'
 import BusinessAttachmentUploader from '@/components/BusinessAttachmentUploader.vue'
+import ReceiptOcrPanel from '@/components/ReceiptOcrPanel.vue'
+import { useReceiptOcr } from '@/hooks/useReceiptOcr'
 import { api } from '@/api/index'
 import {
   MAX_CONTRACT_ATTACHMENTS, MAX_PAYMENT_VOUCHERS, MAX_RECEIPT_NO,
@@ -77,12 +84,9 @@ import { keepFieldVisible } from '@/utils/fieldFocus'
 
 /**
  * 第 4 步：凭证信息。
- * 收据图片（可选）→ OCR 识别收据号（优先红色数字，未命中回退 NO. 规则）；
- * 收据号必填；支付凭证 1~3 张必填；
- * 合同附件 1~5 份必填（图片/PDF）。
- *
- * OCR 覆盖策略：收据号为空或仍等于上次自动识别值时自动填入；用户已手工改动
- * 时弹窗询问是否覆盖，避免静默冲掉人工核对结果。
+ * 收据图片（可选）→ OCR 同时识别红/蓝数字；红蓝不一致时默认采用配置色，
+ * 并展示两组候选供一键切换；用户手改/切换后不再自动覆盖。
+ * 收据号必填；支付凭证 1~3 张必填；合同附件 1~5 份必填（图片/PDF）。
  */
 const props = defineProps({
   form: { type: Object, required: true },
@@ -92,28 +96,22 @@ const props = defineProps({
 })
 
 const show = key => !props.onlyErrors || !!props.errors[key]
+const ocr = useReceiptOcr(props.form)
+const preferredLabel = computed(() => (ocr.preferredColor.value === 'BLUE' ? '蓝色' : '红色'))
 const receiptImages = computed({
   get: () => (props.form.receiptImage ? [props.form.receiptImage] : []),
   set: list => {
     props.form.receiptImage = (list && list[0]) || null
-    if (!props.form.receiptImage) {
-      ocrMessage.value = ''
-      ocrWarning.value = false
-    }
+    if (!props.form.receiptImage) ocr.reset()
   }
 })
 
-const ocrLoading = ref(false)
-const ocrMessage = ref('')
-const ocrWarning = ref(false)
-const lastAutoReceiptNo = ref('')
 const receiptChecking = ref(false)
 let receiptCheckToken = 0
-let ocrToken = 0
 
 onBeforeUnmount(() => {
-  // 离开凭证步骤后使在途 OCR/查重响应失效，避免在确认页/成功页弹覆盖框或改号
-  ocrToken += 1
+  // 离开凭证步骤：记录最终采用值，并使在途 OCR/查重响应失效
+  ocr.dispose()
   receiptCheckToken += 1
 })
 
@@ -130,84 +128,22 @@ const receiptError = computed(() => {
 
 function onReceiptUploaded(record) {
   props.form.receiptImage = record || null
-  ocrMessage.value = ''
-  ocrWarning.value = false
-  if (record && record.id) runOcr(record.id)
-}
-
-async function runOcr(attachmentId) {
-  const id = attachmentId || (props.form.receiptImage && props.form.receiptImage.id)
-  if (!id) return
-  // 允许新图直接发起识别；用 token 丢弃被新请求取代的旧响应
-  const token = ++ocrToken
-  ocrLoading.value = true
-  ocrMessage.value = '正在识别收据号…'
-  ocrWarning.value = false
-  try {
-    const res = await api.employeeReceiptOcr({ attachmentId: id })
-    if (token !== ocrToken) return
-    // 识别期间可能已删除/更换图片：丢弃过期响应，避免把旧图结果写进新图
-    if (!props.form.receiptImage || String(props.form.receiptImage.id) !== String(id)) return
-    const recognized = String((res && res.receiptNo) || '').trim()
-    if (!recognized) {
-      ocrMessage.value = (res && res.message) || '未能识别收据号，请手动填写'
-      ocrWarning.value = true
-      return
-    }
-    const current = String(props.form.receiptNo || '').trim()
-    if (!current || current === lastAutoReceiptNo.value) {
-      applyRecognized(recognized, res)
-      return
-    }
-    if (current === recognized) {
-      ocrMessage.value = (res && res.message) || '已从收据图片自动识别，请核对'
-      ocrWarning.value = !!(res && res.exact === false)
-      return
-    }
-    uni.showModal({
-      title: '识别到收据号',
-      content: `识别结果 ${recognized}，当前收据号为 ${current}，是否用识别结果覆盖？`,
-      confirmText: '覆盖',
-      cancelText: '保留当前',
-      success: modal => {
-        if (modal.confirm) applyRecognized(recognized, res)
-        else ocrMessage.value = '已保留手工填写的收据号'
-      }
-    })
-  } catch (e) {
-    if (token !== ocrToken) return
-    ocrMessage.value = (e && e.msg) || '识别失败，请手动填写收据号'
-    ocrWarning.value = true
-  } finally {
-    if (token === ocrToken) ocrLoading.value = false
-  }
-}
-
-function applyRecognized(recognized, res) {
-  props.form.receiptNo = recognized
-  props.form.receiptNoCheck = null
-  lastAutoReceiptNo.value = recognized
-  ocrMessage.value = (res && res.message) || '已从收据图片自动识别，请核对'
-  ocrWarning.value = !!(res && res.exact === false)
+  ocr.reset()
+  if (record && record.id) ocr.runOcr(record.id)
 }
 
 function onReceiptInput(event) {
   const value = String(event.detail.value ?? '')
   props.form.receiptNo = value
   props.form.receiptNoCheck = null
-  if (String(value).trim() !== lastAutoReceiptNo.value) {
-    lastAutoReceiptNo.value = ''
-    // 用户已手工改动：旧的识别提示不再适用
-    if (!ocrLoading.value && ocrMessage.value) {
-      ocrMessage.value = ''
-      ocrWarning.value = false
-    }
-  }
+  // 手动输入后保留识别候选提示，但不再允许识别结果自动覆盖
+  ocr.onManualInput()
 }
 
 async function onReceiptBlur() {
   const value = String(props.form.receiptNo || '').trim()
   props.form.receiptNo = value
+  ocr.logFinal()
   const token = ++receiptCheckToken
   if (!value || value.length > MAX_RECEIPT_NO || !RECEIPT_NO_RE.test(value)) {
     props.form.receiptNoCheck = null
@@ -248,7 +184,7 @@ async function onReceiptBlur() {
 }
 .section-hint {
   display: block; font-size: 22rpx; color: #999;
-  line-height: 1.6; margin: -4rpx 0 14rpx;
+  line-height: 1.6; margin: 14rpx 0 0;
 }
 .input {
   width: 100%; height: 80rpx !important; min-height: 80rpx !important;
@@ -258,14 +194,4 @@ async function onReceiptBlur() {
 .control-error { border: 2rpx solid #e53935 !important; background: #FFF8F8 !important; }
 .hint { display: block; font-size: 22rpx; color: #999; margin-top: 8rpx; line-height: 1.5; }
 .ferr { display: block; font-size: 22rpx; color: #e53935; margin-top: 8rpx; }
-.ocr-row { display: flex; align-items: center; gap: 10rpx; margin-top: 12rpx; }
-.ocr-hint { flex: 1; font-size: 22rpx; color: #00B42A; line-height: 1.5; }
-.ocr-hint.warn { color: #C2410C; }
-.ocr-retry { font-size: 22rpx; color: #FF6B35; padding: 4rpx 8rpx; }
-.ocr-spinner {
-  width: 24rpx; height: 24rpx; border-radius: 50%;
-  border: 3rpx solid #FFD9C8; border-top-color: #FF6B35;
-  animation: spin .7s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
 </style>
