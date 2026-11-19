@@ -2,11 +2,12 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
-## 2026-11-19（员工收款码更换并重新签名，待发布）
+## 2026-11-19（员工收款码更换并重新签名，已发布并冒烟通过）
 
 - **变更**：公众号员工工作台「业务数据订单 → 支付方式=二维码」收款码更换为新版橙色收款码（金地美家/幸福生活）。`secure/qr/payment-qr.png` 由 459×486 / 270KB 变为 1440×1536 / 2.42MB；按 `tools/qr-signature/README.md` 用离线私钥重新生成 `payment-qr.png.sig`（ECDSA P-256/SHA-256）。
 - **校验**：私钥派生公钥与 `QrCodeIntegrityService.PUBLIC_KEY_BASE64` SHA-256 指纹一致；`openssl dgst -verify` 与 Java `QrCodeCrypto.verify` 双重验签通过；从打包后的 JAR 解出资源复核通过。图片 sha256 `3f5d9b4f…`，签名 sha256 `58987064…`。新图去除浅色背景射线后可由 jsQR 正常解码（version 11，内容为建设银行 `cloud.life.ccb.com` 账单支付链接，参数不落文档）。
-- **发布**：需重新打包 ops JAR 并重启容器（启动 `QrCodeStartupValidator` 会重新验签）；未压缩新图，保持付款码原始像素。
+- **发布（11:02）**：本地 JAR sha256 `e43f4310…`，与生产旧 JAR 除 QR 资源外清单完全一致（650 条目，manifest sha256 `544e1fa5…`）；旧镜像 retag `boss-platform/ops:rollback-qr-20261119_110122`（`01cf3535…`），旧 JAR 备份 `app.jar.bak-qr-20261119_110122`；overlay 镜像 `92b516cc251f`；容器 healthy，启动日志 `PAYMENT_QR_INTEGRITY_OK startup imageSha256=3f5d9b4f…`；容器内 JAR/图片/签名哈希与本地一致；API 无 token 返回 401，`/secure/qr/payment-qr.png` 返回 `text/html`（未静态暴露）。
+- **未执行**：真机微信扫码（需员工在公众号内实测）；未压缩新图，保持 2.42MB 原始像素。
 
 ## 2026-11-18（业务订单编号：运营商体系每日流水，已发布并冒烟通过）
 
