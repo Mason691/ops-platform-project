@@ -177,8 +177,12 @@ JOIN (
                     THEN u.id END) AS user_id
     FROM mall_db.ops_business_order o
     JOIN ai_platform.sys_user u
-      ON (u.username = SUBSTRING_INDEX(o.agent_phones, '、', 1)
-          OR u.phone = SUBSTRING_INDEX(o.agent_phones, '、', 1))
+      -- mall_db 与 ai_platform 历史排序规则不同（unicode_ci / 0900_ai_ci），
+      -- 列与列比较必须显式统一，否则 MySQL 8 报 Illegal mix of collations。
+      ON (u.username = CONVERT(SUBSTRING_INDEX(o.agent_phones, '、', 1) USING utf8mb4)
+                      COLLATE utf8mb4_0900_ai_ci
+          OR u.phone = CONVERT(SUBSTRING_INDEX(o.agent_phones, '、', 1) USING utf8mb4)
+                       COLLATE utf8mb4_0900_ai_ci)
     LEFT JOIN ai_platform.sys_user_corp uc
       ON uc.user_id = u.id AND uc.status = 1 AND uc.delete_flag = 0
     WHERE o.delete_flag = 0 AND o.agent_phones IS NOT NULL
