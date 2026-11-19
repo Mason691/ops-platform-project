@@ -11,6 +11,7 @@
 - **发布（14:30–14:32）**：后端 JAR sha256 `b8fb84ba…`；overlay 镜像 `fa0270b4f3f1`（FROM `92b516cc251f`，保留 Tesseract）；回滚镜像 `boss-platform/ops:rollback-ocr-20261119_143030`，JAR 备份 `app.jar.bak-ocr-20261119_143030`；容器 healthy，启动日志 `RECEIPT_OCR_CONFIG preferredColor=RED`；H5 入口 `index-CfMixPxs.js`、页面 chunk `pages-employee-business-data-new.qnDukbHP.js`，清 assets 后发布并 reload；H5 备份 `html-ops-pre-ocr-20261119_1432.tgz`。
 - **冒烟**：health 200；OCR/反馈接口无 token 401；公网入口/页面 chunk 200、旧入口 404、title=金地美家；部署 chunk 含红蓝候选文案；无 ERROR。
 - **默认色切换与提示修正（14:37–14:38）**：ops-backend compose 增加 `RECEIPT_OCR_PREFERRED_COLOR=BLUE` 并重建容器（compose 备份 `docker-compose.yml.bak-ocr-blue-20261119_143710`），启动日志 `preferredColor=BLUE`；H5 首次识别前提示改为“系统配置色”，首次 OCR 后按后端 `preferredColor` 显示；H5 入口 `index-B9Yoff1B.js`、页面 chunk `pages-employee-business-data-new.C619Jdzv.js`，备份 `html-ops-pre-ocr-hint-20261119_1442.tgz`；冒烟 title=金地美家、入口/页面 200、旧入口 404、health 200。
+- **修复（14:49）**：进入凭证信息步骤即显示“正在识别收据号…”——根因是 `useReceiptOcr` 返回嵌套 ref，`ocr.loading` 传给 Boolean prop 时被 Vue 视为 truthy 对象；已将返回值解构为顶层 ref 再绑定子组件。H5 入口 `index-aaTrXM8X.js`、页面 chunk `pages-employee-business-data-new.BkWgm-0D.js`，备份 `html-ops-pre-ocr-loading-20261119_144913.tgz`；发布后生产 OCR 请求数为 0，确认不再自动识别。
 - **未执行**：真机微信 E2E（需真实红蓝并存收据）；员工登录态 OCR 200 响应（无测试账号 token）。
 
 ## 2026-11-19（员工收款码更换并重新签名，已发布并冒烟通过）

@@ -22,20 +22,20 @@
              @input="onReceiptInput" @blur="onReceiptBlur"
              @focus="keepFieldVisible('field-receiptNo')" />
       <ReceiptOcrPanel
-        :loading="ocr.loading"
-        :message="ocr.message"
-        :warning="ocr.warning"
-        :red="ocr.red"
-        :blue="ocr.blue"
-        :has-result="ocr.hasResult"
-        :has-candidates="ocr.hasCandidates"
-        :show-choices="ocr.showChoices"
-        :same-value="ocr.sameValue"
-        :current-choice="ocr.currentChoice"
-        :manual="ocr.manual"
-        :can-retry="ocr.canRetry"
-        @switch="ocr.switchTo"
-        @retry="ocr.runOcr()" />
+        :loading="ocrLoading"
+        :message="ocrMessage"
+        :warning="ocrWarning"
+        :red="ocrRed"
+        :blue="ocrBlue"
+        :has-result="ocrHasResult"
+        :has-candidates="ocrHasCandidates"
+        :show-choices="ocrShowChoices"
+        :same-value="ocrSameValue"
+        :current-choice="ocrCurrentChoice"
+        :manual="ocrManual"
+        :can-retry="ocrCanRetry"
+        @switch="switchOcrCandidate"
+        @retry="runOcr()" />
       <text class="section-hint">
         识别规则：同时识别收据上红色/蓝色 7 位数字（通常位于 NO. 后）；红蓝不一致时默认使用{{ preferredLabel }}，可一键切换。结果可人工修改，修改后不再自动覆盖。
       </text>
@@ -96,17 +96,42 @@ const props = defineProps({
 })
 
 const show = key => !props.onlyErrors || !!props.errors[key]
-const ocr = useReceiptOcr(props.form)
+
+// hook 返回的是嵌套 ref；模板里直接写 ocr.loading 传给 Boolean prop 时，
+// Vue 不会对嵌套 ref 自动解包，会被当成 truthy 对象而永久显示“正在识别”。
+// 因此这里解构为顶层 ref，交由模板自动解包。
+const {
+  loading: ocrLoading,
+  message: ocrMessage,
+  warning: ocrWarning,
+  red: ocrRed,
+  blue: ocrBlue,
+  preferredColor: ocrPreferredColor,
+  hasResult: ocrHasResult,
+  hasCandidates: ocrHasCandidates,
+  showChoices: ocrShowChoices,
+  sameValue: ocrSameValue,
+  currentChoice: ocrCurrentChoice,
+  manual: ocrManual,
+  canRetry: ocrCanRetry,
+  reset: resetOcr,
+  runOcr,
+  onManualInput: onOcrManualInput,
+  switchTo: switchOcrCandidate,
+  logFinal: logOcrFinal,
+  dispose: disposeOcr
+} = useReceiptOcr(props.form)
+
 const preferredLabel = computed(() => {
-  if (ocr.preferredColor.value === 'BLUE') return '蓝色'
-  if (ocr.preferredColor.value === 'RED') return '红色'
+  if (ocrPreferredColor.value === 'BLUE') return '蓝色'
+  if (ocrPreferredColor.value === 'RED') return '红色'
   return '系统配置色'
 })
 const receiptImages = computed({
   get: () => (props.form.receiptImage ? [props.form.receiptImage] : []),
   set: list => {
     props.form.receiptImage = (list && list[0]) || null
-    if (!props.form.receiptImage) ocr.reset()
+    if (!props.form.receiptImage) resetOcr()
   }
 })
 
@@ -115,7 +140,7 @@ let receiptCheckToken = 0
 
 onBeforeUnmount(() => {
   // 离开凭证步骤：记录最终采用值，并使在途 OCR/查重响应失效
-  ocr.dispose()
+  disposeOcr()
   receiptCheckToken += 1
 })
 
@@ -132,8 +157,8 @@ const receiptError = computed(() => {
 
 function onReceiptUploaded(record) {
   props.form.receiptImage = record || null
-  ocr.reset()
-  if (record && record.id) ocr.runOcr(record.id)
+  resetOcr()
+  if (record && record.id) runOcr(record.id)
 }
 
 function onReceiptInput(event) {
@@ -141,13 +166,13 @@ function onReceiptInput(event) {
   props.form.receiptNo = value
   props.form.receiptNoCheck = null
   // 手动输入后保留识别候选提示，但不再允许识别结果自动覆盖
-  ocr.onManualInput()
+  onOcrManualInput()
 }
 
 async function onReceiptBlur() {
   const value = String(props.form.receiptNo || '').trim()
   props.form.receiptNo = value
-  ocr.logFinal()
+  logOcrFinal()
   const token = ++receiptCheckToken
   if (!value || value.length > MAX_RECEIPT_NO || !RECEIPT_NO_RE.test(value)) {
     props.form.receiptNoCheck = null
