@@ -5,12 +5,12 @@
         <text class="title">物料核销</text>
         <EmployeeHomeLink />
       </view>
-      <text class="sub">核销数量 = 领取数量（剩余可核销）− 退回数量，系统自动计算；提交后部长 → 总经办审批</text>
+      <text class="sub">核销数量 = 领用数量（剩余可核销）− 退回数量，系统自动计算；提交后部长 → 总经办审批</text>
     </view>
 
     <view class="card">
       <view class="field">
-        <text class="label">关联领取单</text>
+        <text class="label">关联领用单</text>
         <picker mode="selector" :range="pickLabels" @change="onPickChange">
           <view class="picker">{{ pickLabel }}</view>
         </picker>
@@ -24,7 +24,7 @@
     <view class="section">
       <text class="section-title">核销明细（{{ rows.length }}）</text>
       <view v-if="!rows.length" class="empty">
-        <text>请选择已审批且有未核销数量的领取单</text>
+        <text>请选择已审批且有未核销数量的领用单</text>
       </view>
       <view v-for="(row, idx) in rows" :key="row.pickEntryId" class="item">
         <view class="item-top">
@@ -75,7 +75,7 @@ const pickLabels = computed(() => pickable.value.map(p =>
   (p.billNo || ('#' + p.id)) + ' ' + (p.pickerName || '')))
 const pickLabel = computed(() => {
   const p = pickable.value.find(x => x.id === pickId.value)
-  return p ? (p.billNo || ('#' + p.id)) : '请选择领取单'
+  return p ? (p.billNo || ('#' + p.id)) : '请选择领用单'
 })
 const warehouseLabels = computed(() => warehouses.value.map(w => w.name || w.number))
 
@@ -127,7 +127,7 @@ function warehouseName(number) {
   return w ? (w.name || w.number) : (number || '请选择退回仓库')
 }
 
-/** 核销数量 = 领取数量（剩余可核销）− 退回数量；仅展示，服务端最终校验 */
+/** 核销数量 = 领用数量（剩余可核销）− 退回数量；仅展示，服务端最终校验 */
 function writeOffOf(row) {
   const value = (Number(row.pickQty) || 0) - (Number(row.returnedQty) || 0)
   return value < 0 ? 0 : Number(value.toFixed(4))
@@ -140,7 +140,7 @@ function qty(v) {
 
 async function submit() {
   if (submitting.value) return
-  if (!pickId.value) { uni.showToast({ title: '请选择领取单', icon: 'none' }); return }
+  if (!pickId.value) { uni.showToast({ title: '请选择领用单', icon: 'none' }); return }
   if (!rows.value.length) { uni.showToast({ title: '没有可核销明细', icon: 'none' }); return }
   for (const row of rows.value) {
     const returned = Number(row.returnedQty) || 0

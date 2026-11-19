@@ -33,7 +33,7 @@
     {"path":"pages/employee/work-log-detail","style":{"navigationBarTitleText":"日志详情","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/order-detail","style":{"navigationBarTitleText":"订单详情","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/verified-business","style":{"navigationBarTitleText":"已核对业务","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white","enablePullDownRefresh":true}},
-    {"path":"pages/employee/material-pick","style":{"navigationBarTitleText":"物料领取","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
+    {"path":"pages/employee/material-pick","style":{"navigationBarTitleText":"物料领用","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/material-pick-drafts","style":{"navigationBarTitleText":"物料领用单","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white","enablePullDownRefresh":true}},
     {"path":"pages/employee/material-pick-draft","style":{"navigationBarTitleText":"编辑领用单","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},
     {"path":"pages/employee/material-task-order","style":{"navigationBarTitleText":"关联工单","navigationBarBackgroundColor":"#FF6B35","navigationBarTextStyle":"white"}},

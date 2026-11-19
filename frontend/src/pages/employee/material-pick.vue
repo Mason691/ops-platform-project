@@ -2,7 +2,7 @@
   <view class="page">
     <view class="head">
       <view class="head-title-row">
-        <text class="title">物料领取</text>
+        <text class="title">物料领用</text>
         <EmployeeHomeLink />
       </view>
       <text class="sub">提交后由本组织部长审批，审批通过才扣减库存并生成可打印单据</text>
@@ -10,7 +10,7 @@
 
     <view class="card">
       <view class="field">
-        <text class="label">领取事由</text>
+        <text class="label">领用事由</text>
         <view class="chips">
           <view v-for="r in REASONS" :key="r.value" class="chip"
             :class="{ active: form.pickReason === r.value }" @click="form.pickReason = r.value">
@@ -25,7 +25,7 @@
         </picker>
       </view>
       <view class="field">
-        <text class="label">领取仓库</text>
+        <text class="label">领用仓库</text>
         <picker mode="selector" :range="warehouseLabels" @change="onWarehousePick">
           <view class="picker">{{ warehouseLabel }}</view>
         </picker>
@@ -37,7 +37,7 @@
     </view>
 
     <view class="section">
-      <text class="section-title">领取明细（{{ rows.length }}）</text>
+      <text class="section-title">领用明细（{{ rows.length }}）</text>
       <view v-if="!rows.length" class="empty">
         <text>请先选择仓库，再从可用库存中添加物料</text>
       </view>
@@ -50,7 +50,7 @@
         <view class="item-bottom">
           <text class="stock">可用 {{ qty(row.validQty) }}</text>
           <view class="qty-box">
-            <text class="qty-label">领取数量</text>
+            <text class="qty-label">领用数量</text>
             <view class="qty-btn" @click="decreaseQty(row)">－</view>
             <input v-model="row.pickQty" type="digit" class="qty-input"
                    @blur="normalizeQty(row)" />
@@ -168,7 +168,7 @@ function onTaskOrderPick(e) {
 
 async function openStockPicker() {
   if (!form.stockNumber) {
-    uni.showToast({ title: '请先选择领取仓库', icon: 'none' })
+    uni.showToast({ title: '请先选择领用仓库', icon: 'none' })
     return
   }
   stockVisible.value = true
@@ -248,16 +248,16 @@ function normalizeQty(row) {
 
 async function submit() {
   if (submitting.value) return
-  if (!form.stockNumber) { uni.showToast({ title: '请选择领取仓库', icon: 'none' }); return }
+  if (!form.stockNumber) { uni.showToast({ title: '请选择领用仓库', icon: 'none' }); return }
   if (form.pickReason === 'DISPATCH' && !form.taskOrderId) {
     uni.showToast({ title: '派工施工必须选择任务工单', icon: 'none' }); return
   }
   if (!rows.value.length) { uni.showToast({ title: '请添加物料分录', icon: 'none' }); return }
   for (const row of rows.value) {
     const picked = Number(row.pickQty)
-    if (!(picked > 0)) { uni.showToast({ title: '领取数量必须大于0', icon: 'none' }); return }
+    if (!(picked > 0)) { uni.showToast({ title: '领用数量必须大于0', icon: 'none' }); return }
     if (picked > row.validQty) {
-      uni.showToast({ title: '领取数量超过可用库存：' + row.materialNumber, icon: 'none' }); return
+      uni.showToast({ title: '领用数量超过可用库存：' + row.materialNumber, icon: 'none' }); return
     }
   }
   submitting.value = true

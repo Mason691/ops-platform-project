@@ -5,7 +5,7 @@
         <text class="title">物料领用单</text>
         <EmployeeHomeLink />
       </view>
-      <text class="sub">补充领取仓库与批次后提交本组织部长审批；提交前请确认数量</text>
+      <text class="sub">补充领用仓库与批次后提交本组织部长审批；提交前请确认数量</text>
     </view>
 
     <view v-if="loading" class="state"><text>加载中...</text></view>
@@ -18,13 +18,13 @@
       <view class="card">
         <view class="kv"><text class="k">单据编号</text><text class="v">{{ detail.billNo || '草稿未编号' }}</text></view>
         <view class="kv"><text class="k">单据日期</text><text class="v">{{ detail.billDate || '—' }}</text></view>
-        <view class="kv"><text class="k">领取事由</text><text class="v">{{ reasonLabel(detail.pickReason) }}</text></view>
+        <view class="kv"><text class="k">领用事由</text><text class="v">{{ reasonLabel(detail.pickReason) }}</text></view>
         <view class="kv"><text class="k">领用人</text><text class="v">{{ detail.pickerName || '—' }}</text></view>
         <view class="kv"><text class="k">状态</text>
           <text class="v" :class="materialPickStatusClass(detail.approvalStatus)">{{ materialPickStatusLabel(detail.approvalStatus) }}</text>
         </view>
         <view class="field">
-          <text class="label">领取仓库</text>
+          <text class="label">领用仓库</text>
           <picker v-if="editable" mode="selector" :range="warehouseLabels" @change="onWarehousePick">
             <view class="picker">{{ warehouseLabel }}</view>
           </picker>
@@ -74,7 +74,7 @@
             <text class="stock-label">库存：{{ row.available === null ? '—' : qty(row.available) }}</text>
           </view>
           <view class="item-bottom">
-            <text class="qty-label">领取数量</text>
+            <text class="qty-label">领用数量</text>
             <view v-if="editable" class="qty-control">
               <view class="qty-btn" @click="decreaseRowQty(row)">－</view>
               <input v-model="row.pickQty" type="digit" class="qty-input"
@@ -273,7 +273,7 @@ function removeRow(index) {
 
 function openStockPicker() {
   if (!form.value.stockNumber) {
-    uni.showToast({ title: '请先选择领取仓库', icon: 'none' })
+    uni.showToast({ title: '请先选择领用仓库', icon: 'none' })
     return
   }
   stockVisible.value = true
@@ -333,7 +333,7 @@ function addStock(stock) {
 async function chooseBatch(row) {
   const stockNumber = form.value.stockNumber || row.stockNumber
   if (!stockNumber) {
-    uni.showToast({ title: '请先选择领取仓库', icon: 'none' })
+    uni.showToast({ title: '请先选择领用仓库', icon: 'none' })
     return
   }
   try {
@@ -382,9 +382,9 @@ function buildPayload() {
 function validateRows() {
   if (!rows.value.length) return '请至少添加一条物料'
   for (const row of rows.value) {
-    if (!(Number(row.pickQty) > 0)) return '领取数量必须大于0：' + row.materialNumber
+    if (!(Number(row.pickQty) > 0)) return '领用数量必须大于0：' + row.materialNumber
     if (row.available !== null && Number(row.pickQty) > Number(row.available)) {
-      return `领取数量不能大于库存：${row.materialNumber}（库存 ${qty(Number(row.available))}）`
+      return `领用数量不能大于库存：${row.materialNumber}（库存 ${qty(Number(row.available))}）`
     }
   }
   return ''

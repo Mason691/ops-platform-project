@@ -21,7 +21,9 @@ export const BUSINESS_TYPE_LABELS = {
   OPS_BUSINESS_ORDER: '业务数据订单',
   PUR_ORDER: '采购订单',
   OPS_MATERIAL_REQUISITION: '物资领用',
-  OPS_MATERIAL_WRITE_OFF: '物资核销'
+  OPS_MATERIAL_WRITE_OFF: '物资核销',
+  MATERIAL_PICK: '物料领用',
+  MATERIAL_WRITE_OFF: '物料核销'
 }
 
 export function businessTypeLabel(code) {

@@ -93,6 +93,63 @@
         </view>
       </view>
 
+      <view v-if="isScmPick" class="card">
+        <view class="card-title">
+          <text>物料领用</text>
+          <text class="node">{{ detailNodeName }}</text>
+        </view>
+        <view class="info-row"><text class="k">领用单号</text><text class="v">{{ order.billNo || '-' }}</text></view>
+        <view class="info-row"><text class="k">领用事由</text><text class="v">{{ pickReasonLabel(order.pickReason) }}</text></view>
+        <view class="info-row"><text class="k">领用人</text><text class="v">{{ order.pickerName || '-' }}</text></view>
+        <view class="info-row"><text class="k">领用仓库</text><text class="v">{{ order.stockNumber || '未指定' }}</text></view>
+        <view v-if="order.taskOrderNo" class="info-row">
+          <text class="k">关联工单</text><text class="v">{{ order.taskOrderNo }}</text>
+        </view>
+        <view class="info-row"><text class="k">提交时间</text><text class="v">{{ fmtTime(order.approvalSubmittedAt) }}</text></view>
+      </view>
+
+      <view v-if="isScmPick && (order.entries || []).length" class="card">
+        <text class="card-title">领用明细</text>
+        <view v-for="(entry, index) in order.entries" :key="entry.id || index" class="product">
+          <view class="product-main">
+            <text class="product-name">{{ entry.materialName || entry.materialNumber }}</text>
+            <text class="product-meta">
+              {{ [entry.materialNumber, entry.spec,
+                  entry.batchNo ? '批次 ' + entry.batchNo : ''].filter(Boolean).join(' · ') }}
+            </text>
+          </view>
+          <text class="product-amount">{{ entry.pickQty }} {{ entry.unitName || '' }}</text>
+        </view>
+      </view>
+
+      <view v-if="isScmWriteOff" class="card">
+        <view class="card-title">
+          <text>物料核销</text>
+          <text class="node">{{ detailNodeName }}</text>
+        </view>
+        <view class="info-row"><text class="k">核销单号</text><text class="v">{{ order.billNo || '-' }}</text></view>
+        <view class="info-row"><text class="k">关联领用单</text><text class="v">{{ order.pickBillNo || '-' }}</text></view>
+        <view class="info-row"><text class="k">核销人</text><text class="v">{{ order.writeOffByName || '-' }}</text></view>
+        <view class="info-row"><text class="k">提交时间</text><text class="v">{{ fmtTime(order.approvalSubmittedAt) }}</text></view>
+      </view>
+
+      <view v-if="isScmWriteOff && (order.entries || []).length" class="card">
+        <text class="card-title">核销明细</text>
+        <view v-for="(entry, index) in order.entries" :key="entry.id || index" class="product">
+          <view class="product-main">
+            <text class="product-name">{{ entry.materialName || entry.materialNumber }}</text>
+            <text class="product-meta">
+              {{ [entry.materialNumber, entry.spec,
+                  entry.batchNo ? '批次 ' + entry.batchNo : ''].filter(Boolean).join(' · ') }}
+              领用 {{ entry.pickQty || 0 }}
+            </text>
+          </view>
+          <text class="product-amount">
+            核销 {{ entry.writeOffQty || 0 }} / 退回 {{ entry.returnedQty || 0 }} {{ entry.unitName || '' }}
+          </text>
+        </view>
+      </view>
+
       <view v-if="isBusinessOrder" class="card">
         <view class="card-title">
           <text>{{ order.bizStatusName || '业务订单' }}</text>
@@ -185,7 +242,12 @@
       <ApproverCard v-if="nextApprover" :info="nextApprover"
         @toggle="approverExpanded = !approverExpanded" />
 
-      <view class="card">
+      <view v-if="!taskPending" class="card">
+        <text class="card-title">任务状态</text>
+        <view class="no-action"><text>{{ taskStatusHint }}</text></view>
+      </view>
+
+      <view v-if="taskPending" class="card">
         <text class="card-title">{{ actionTitle }}</text>
 
         <template v-if="actionType === 'OPS_FINANCE_CHECK'">
@@ -296,7 +358,7 @@
         </view>
       </view>
 
-      <view class="actions">
+      <view v-if="taskPending" class="actions">
         <button v-if="showGenericReject" class="btn danger" :disabled="submitting" @click="rejectVisible = true">驳回</button>
         <button class="btn primary" :disabled="submitting || !!dispatchBlockedReason" @click="submit">{{ submitting ? '提交中...' : '提交处理' }}</button>
       </view>
@@ -408,8 +470,22 @@ const isPurchase = computed(() => businessType.value === 'PUR_ORDER')
 /** 物资领用/核销：底座待办只返回“当前用户是审批人”的任务，这里补详情展示 */
 const isMaterialRequisition = computed(() => businessType.value === 'OPS_MATERIAL_REQUISITION')
 const isMaterialWriteOff = computed(() => businessType.value === 'OPS_MATERIAL_WRITE_OFF')
+/** SCM 供应链物料领用/核销：详情走 SCM，审批动作仍代理底座工作流 */
+const isScmPick = computed(() => businessType.value === 'MATERIAL_PICK')
+const isScmWriteOff = computed(() => businessType.value === 'MATERIAL_WRITE_OFF')
 const isBusinessOrder = computed(() => !isPurchase.value
-  && !isMaterialRequisition.value && !isMaterialWriteOff.value)
+  && !isMaterialRequisition.value && !isMaterialWriteOff.value
+  && !isScmPick.value && !isScmWriteOff.value)
+/** 任务是否仍待处理：或签被他人处理后状态为 SKIPPED，不能再提交 */
+const taskPending = computed(() => {
+  const task = detail.value && detail.value.task
+  return !task || !task.status || task.status === 'PENDING'
+})
+const taskStatusHint = computed(() => ({
+  APPROVED: '该任务已审批通过，无需重复处理。',
+  REJECTED: '该任务已驳回，无需重复处理。',
+  SKIPPED: '该任务已由其他审批人处理，无需重复处理。'
+}[detail.value?.task?.status] || '该任务已处理，无需重复处理。'))
 /** 旧品入库完成（SCM inboundStatus=ALL）后提醒消失，改为已入库标识。 */
 const tradeInInboundDone = computed(() => {
   const o = order.value || {}
@@ -469,6 +545,8 @@ const nextApprover = computed(() => {
 const actionTitle = computed(() => {
   if (isMaterialRequisition.value) return '物资领用审批'
   if (isMaterialWriteOff.value) return '物资核销审批'
+  if (isScmPick.value) return '物料领用审批'
+  if (isScmWriteOff.value) return '物料核销审批'
   return {
     OPS_FINANCE_CHECK: '财务核对',
     OPS_DISPATCH_OUTBOUND: '派工出库',
@@ -512,6 +590,16 @@ async function loadData() {
     if (isPurchase.value) {
       // 采购审批：订单详情走 SCM，审批动作走 SCM 代理（回写审批人后由底座回调驱动）
       order.value = await api.scmPurOrderDetail(businessId)
+      return
+    }
+    if (isScmPick.value) {
+      // 任务归属已由底座 /api/wf/task/{taskId} 按 JWT 校验（发起人或审批人）；
+      // SCM 详情按单据组织可见性返回，运营商审批人可读下辖组织单据
+      order.value = await api.scmMaterialPickDetail(businessId)
+      return
+    }
+    if (isScmWriteOff.value) {
+      order.value = await api.scmMaterialWriteOffDetail(businessId)
       return
     }
     if (isMaterialRequisition.value) {
@@ -675,6 +763,7 @@ function validate() {
 }
 
 async function submit() {
+  if (!taskPending.value) return toast(taskStatusHint.value)
   const error = validate()
   if (error) return toast(error)
   // 暂缓/驳回不向下一节点流转，不需要展示下一审批人
@@ -771,7 +860,7 @@ async function doSubmit() {
 function showDispatchMaterialResult(pick) {
   uni.showModal({
     title: '派工出库成功',
-    content: `已生成物料领用单 ${pick.billNo}，请前往【常用功能 → 物料领取】补充仓库、批次并提交审批`,
+    content: `已生成物料领用单 ${pick.billNo}，请前往【常用功能 → 物料领用】补充仓库、批次并提交审批`,
     confirmText: '去处理',
     cancelText: '稍后',
     success: (res) => {
@@ -864,6 +953,10 @@ function statusText(status) {
     || '审批已结束'
 }
 
+function pickReasonLabel(value) {
+  return { DISPATCH: '派工施工', ACTIVITY: '活动物料', OTHER: '其它事宜' }[value] || value || '-'
+}
+
 function materialReqStatus(value) {
   return REQUISITION_STATUS[value] || value || '-'
 }
@@ -874,6 +967,10 @@ function materialWriteOffStatus(value) {
 
 async function confirmReject(opinionText) {
   if (submitting.value) return
+  if (!taskPending.value) {
+    rejectVisible.value = false
+    return toast(taskStatusHint.value)
+  }
   const text = String(opinionText || '').trim()
   if (text.length < 5) return toast('请填写驳回意见（不少于 5 个字）')
   submitting.value = true

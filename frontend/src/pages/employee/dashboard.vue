@@ -115,7 +115,7 @@ const FALLBACK_CARDS = [
   { code: 'balance-pending', name: '货款补录', desc: '定金订单收齐余款，解锁派工', icon: '💰', tone: 'mc-icon-pay', path: '/pages/employee/balance-pending' },
   { code: 'material-requisition', name: '物资领用', desc: '申请领用物料，部长审批', icon: '🧰', tone: 'mc-icon-data', path: '/pages/employee/material-requisition-records' },
   { code: 'material-write-off-records', name: '物资核销', desc: '核销使用与退回，回写领用余量', icon: '✅', tone: 'mc-icon-pending', path: '/pages/employee/material-write-off-records' },
-  { code: 'material-pick', name: '物料领取', desc: '派工施工领取物料，财务审批', icon: '📦', tone: 'mc-icon-dispatch', path: '/pages/employee/material-pick' },
+  { code: 'material-pick', name: '物料领用', desc: '派工施工领用物料，部长审批', icon: '📦', tone: 'mc-icon-dispatch', path: '/pages/employee/material-pick' },
   { code: 'material-write-off', name: '物料核销', desc: '剩余物料退回与消耗核销', icon: '♻️', tone: 'mc-icon-dispatch', path: '/pages/employee/material-write-off' },
   { code: 'work-log', name: '工作业务日志', desc: '查看我发起与处理的流程操作', icon: '📝', tone: 'mc-icon-data', path: '/pages/employee/work-log' },
   { code: 'ai-chat', name: 'AI 助手', desc: '智能问答，随时解答', icon: '🤖', tone: 'mc-icon-ai', path: '/pages/employee/ai-chat' },
@@ -250,7 +250,7 @@ async function onOrgChanged(data) {
 
 function openCard(card) {
   if (!card) return
-  // 物料领取统一进“我的领用单”（含派工自动生成的草稿），新建入口在列表页内
+  // 物料领用统一进“我的领用单”（含派工自动生成的草稿），新建入口在列表页内
   if (card.code === 'material-pick' || card.code === 'material-pick-drafts') {
     uni.navigateTo({ url: '/pages/employee/material-pick-drafts' })
     return

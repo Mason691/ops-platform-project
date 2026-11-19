@@ -293,7 +293,7 @@ export const api = {
   scmPurOrderApprove: (data) => request({url:'/api/scm/pur-order/h5/workflow/approve', method:'POST', data}),
   scmPurOrderReject: (data) => request({url:'/api/scm/pur-order/h5/workflow/reject', method:'POST', data}),
 
-  // 物料领取 / 核销（SCM 8084；H5 只制单与提交，不审批）
+  // 物料领用 / 核销（SCM 8084；H5 制单、提交与审批详情展示）
   scmWarehouseList: (params) => request({url:'/api/scm/warehouse/list', data:params}),
   scmWarehouseDefault: () => request({url:'/api/scm/warehouse/default'}),
   scmInventoryQuery: (params) => request({url:'/api/scm/inventory/query', data:params}),
@@ -317,6 +317,7 @@ export const api = {
   scmMaterialWriteOffPickable: () => request({url:'/api/scm/material-write-off/pickable'}),
   scmMaterialWriteOffFromPick: (pickId) => request({url:'/api/scm/material-write-off/from-pick/' + pickId}),
   scmMaterialWriteOffCreate: (data) => request({url:'/api/scm/material-write-off', method:'POST', data}),
+  scmMaterialWriteOffDetail: (id) => request({url:'/api/scm/material-write-off/' + id}),
   // 员工物资领用 / 物资核销（ops 员工端；物资=申请制，不经仓库）
   materialOptions: () => request({url:'/api/ops/employee/material/options'}),
   materialSearch: (params) => request({url:'/api/ops/employee/material/materials', data:params}),
