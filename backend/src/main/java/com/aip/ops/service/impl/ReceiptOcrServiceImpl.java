@@ -242,7 +242,7 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
             String best7 = bestSeven(psm7);
             boolean uncertain = best11 != null && best7 != null && !best11.equals(best7);
             String review = uncertain ? colorLabel(color) + "收据号识别不一致（"
-                    + best11 + " / " + best7 + "），请对照收据手工填写" : null;
+                    + best11 + " / " + best7 + "），请点击下方号码或对照收据手工填写" : null;
             return new ColorAnalysis(all, uncertain, review);
         } catch (Exception e) {
             // 彩色提取是增强能力：任何异常都降级到全图 OCR，不影响制单

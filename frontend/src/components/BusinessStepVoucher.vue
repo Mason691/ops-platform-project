@@ -34,7 +34,11 @@
         :current-choice="ocrCurrentChoice"
         :manual="ocrManual"
         :can-retry="ocrCanRetry"
+        :review="ocrReview"
+        :candidates="ocrReviewCandidates"
+        :selected-value="String(form.receiptNo || '')"
         @switch="switchOcrCandidate"
+        @select="selectOcrCandidate"
         @retry="runOcr()" />
       <text class="section-hint">
         识别规则：同时识别收据上红色/蓝色 7 位数字（通常位于 NO. 后）；红蓝不一致时默认使用{{ preferredLabel }}，可一键切换。结果可人工修改，修改后不再自动覆盖。
@@ -114,10 +118,13 @@ const {
   currentChoice: ocrCurrentChoice,
   manual: ocrManual,
   canRetry: ocrCanRetry,
+  review: ocrReview,
+  reviewCandidates: ocrReviewCandidates,
   reset: resetOcr,
   runOcr,
   onManualInput: onOcrManualInput,
   switchTo: switchOcrCandidate,
+  selectCandidate: selectOcrCandidate,
   logFinal: logOcrFinal,
   dispose: disposeOcr
 } = useReceiptOcr(props.form)
