@@ -2,12 +2,13 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
-## 2026-11-19（收据号 OCR 蓝票方向/阈值修复，待发布）
+## 2026-11-19（收据号 OCR 蓝票方向/阈值修复，已发布并冒烟通过）
 
 - **问题**：现场蓝票为竖拍、票面旋转 90°，且蓝色存根联偏浅；原 `psm 7 + dominance 25` 读不出或把 8 读成 2，生产日志 `RECEIPT_OCR_CANDIDATES` 显示红/蓝均为空。
 - **修复**：Tesseract OSD 检测方向（两张样本均 `Rotate:270`），旋转后再做红/蓝掩膜识别；OSD 失败/无候选按 0/90/270/180 回退，彩色扫描总预算 30s；彩色掩膜 psm 11 优先，蓝色 dominance 25→15；全图兜底使用旋转后图片。
-- **验证**：生产容器内原始蓝票 att50/att52 识别出 `2418523`/`2418522`（conf 94.8/96.6，source=BLUE）；红色样本 `0002304` 仍识别（source=RED）；`mvn -o compile` 通过。
-- **发布**：待发布。
+- **验证**：生产容器内原始蓝票 att50/att52 识别出 `2418523`/`2418522`（conf 94.8/96.6，source=BLUE）；红色样本 `0002304` 仍识别（source=RED）；`mvn -o compile` / `mvn clean package -DskipTests -o` 通过。
+- **发布（15:12）**：干净 OCR worktree 构建 JAR sha256 `e8ad1165…`（未包含工作区无关未提交改动）；overlay 镜像 `e14c7144ea02`（FROM `fa0270b4f3f1`，保留 Tesseract/osd）；回滚镜像 `boss-platform/ops:rollback-ocr-blue-20261119_151142`，JAR 备份 `app.jar.bak-ocr-blue-20261119_151142`；容器 healthy，启动日志 `RECEIPT_OCR_CONFIG preferredColor=BLUE`，`tesseract --list-langs` 含 osd，health 200，OCR 无 token 401，无 ERROR。
+- **未执行**：员工登录态真实蓝票 E2E（无测试账号 token）；发布后用现场蓝票复测，日志 `RECEIPT_OCR_CANDIDATES` 应出现 `blue=2418523/2418522`。
 
 ## 2026-11-19（收据号 OCR 红蓝双色候选，已发布并冒烟通过）
 
