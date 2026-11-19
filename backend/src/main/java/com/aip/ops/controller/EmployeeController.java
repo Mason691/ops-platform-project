@@ -302,7 +302,10 @@ public class EmployeeController {
         String oldPassword = body.get("oldPassword");
         String newPassword = body.get("newPassword");
         if (oldPassword == null || oldPassword.isBlank()) return R.fail("当前密码不能为空");
-        if (newPassword == null || newPassword.length() < 6) return R.fail("新密码至少6位");
+        if (newPassword == null || newPassword.length() < 8 || newPassword.length() > 20
+                || !newPassword.matches(".*[A-Za-z].*") || !newPassword.matches(".*\\d.*")) {
+            return R.fail("新密码需为 8~20 位，且包含字母和数字");
+        }
         employeeAuthService.changePassword(oldPassword, newPassword);
         return R.ok(null);
     }

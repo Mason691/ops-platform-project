@@ -26,7 +26,7 @@ import { api } from '@/api/index'
 import {
   saveEmployeeSession,
   isEmployeeLoggedIn,
-  consumeLoginRedirect
+  postLoginUrl
 } from '@/utils/employeeSession'
 
 const loading = ref(true)
@@ -71,9 +71,11 @@ async function handleCallback() {
     saveEmployeeSession(r, 'wechat')
     success.value = true
     successText.value = '登录成功'
-    message.value = '正在进入员工工作台...'
+    message.value = r.forcePasswordChange
+      ? '首次登录请先修改初始密码'
+      : '正在进入员工工作台...'
     setTimeout(() => {
-      uni.reLaunch({ url: consumeLoginRedirect() })
+      uni.reLaunch({ url: postLoginUrl() })
     }, 700)
   } catch (e) {
     finishFail(e.msg || '微信授权失败，请重新发起')

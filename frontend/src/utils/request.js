@@ -53,6 +53,16 @@ export function request(options) {
               }
             }
           }
+          // 初始密码未修改：服务端统一返回 4030，跳到强制改密页
+          if (d && d.code === 4030) {
+            uni.setStorageSync('ops_employee_force_pwd', '1')
+            const pages = getCurrentPages()
+            const route = pages.length ? pages[pages.length - 1].route : ''
+            if (!String(route).includes('force-change-password')
+                && !String(route).includes('pages/employee/login')) {
+              uni.reLaunch({ url: '/pages/employee/force-change-password' })
+            }
+          }
           reject({ code: (d && d.code) || 0, msg: (d && d.msg) || '请求失败' })
         }
       },

@@ -13,6 +13,7 @@ const SESSION_KEYS = [
   'ops_employee_no_permission',
   'ops_employee_login_mode',
   'ops_employee_user_type',
+  'ops_employee_force_pwd',
   'ops_wechat_oauth_code',
   'ops_wechat_oauth_state',
   'ops_wechat_oauth_mode',
@@ -45,6 +46,18 @@ export function isEmployeeLoggedIn() {
   return !!uni.getStorageSync('ops_employee_token')
 }
 
+/** 是否仍为初始密码，必须先完成改密。 */
+export function isForcePasswordChange() {
+  return uni.getStorageSync('ops_employee_force_pwd') === '1'
+}
+
+/** 登录成功后的目标页：初始密码优先，其次原回跳地址。 */
+export function postLoginUrl() {
+  return isForcePasswordChange()
+    ? '/pages/employee/force-change-password'
+    : consumeLoginRedirect()
+}
+
 /**
  * 保存员工登录结果。
  * @param {object} r 后端返回的员工会话
@@ -57,6 +70,8 @@ export function saveEmployeeSession(r, loginMode) {
   uni.setStorageSync('ops_employee_token', r.token)
   uni.setStorageSync('corp_id', String(r.corpId))
   uni.setStorageSync('ops_employee_user_type', String(r.userType ?? 0))
+  // 初始密码未修改：登录后必须先改密，业务页面统一拦截
+  uni.setStorageSync('ops_employee_force_pwd', r.forcePasswordChange ? '1' : '0')
   uni.setStorageSync('ops_employee_info', JSON.stringify({
     employeeId: r.employeeId,
     name: r.name,

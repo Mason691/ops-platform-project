@@ -188,7 +188,10 @@ public class EmployeeAuthServiceImpl implements EmployeeAuthService {
         String phone = user.getUsername();
 
         if (oldPassword == null || oldPassword.isBlank()) throw new IllegalArgumentException("当前密码不能为空");
-        if (newPassword == null || newPassword.length() < 6) throw new IllegalArgumentException("新密码至少6位");
+        if (newPassword == null || newPassword.length() < 8 || newPassword.length() > 20
+                || !newPassword.matches(".*[A-Za-z].*") || !newPassword.matches(".*\\d.*")) {
+            throw new IllegalArgumentException("新密码需为 8~20 位，且包含字母和数字");
+        }
 
         // ── 1. Verify old password via platform employee login ──
         Map<String, Object> verifyReq = new LinkedHashMap<>();
@@ -213,7 +216,16 @@ public class EmployeeAuthServiceImpl implements EmployeeAuthService {
             Map<String, Object> pwdReq = new LinkedHashMap<>();
             pwdReq.put("userId", userId);
             pwdReq.put("newPassword", newPassword);
-            platformInternalClient.post("/api/internal/user/reset-password", pwdReq, null);
+            Map<String, Object> resp = platformInternalClient.post(
+                    "/api/internal/user/reset-password", pwdReq, null);
+            Object code = resp.get("code");
+            if (!(code instanceof Number) || ((Number) code).intValue() != 200) {
+                Object msg = resp.get("msg");
+                throw new IllegalArgumentException(msg instanceof String text
+                        ? text : "密码修改失败，请稍后重试");
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (RuntimeException e) {
             log.error("员工修改密码失败 userId={}: {}", userId, e.getMessage());
             throw new IllegalArgumentException("密码修改失败，请稍后重试");

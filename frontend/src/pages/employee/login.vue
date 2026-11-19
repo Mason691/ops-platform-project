@@ -43,9 +43,10 @@ import EmployeePasswordLogin from '@/components/EmployeePasswordLogin.vue'
 import EmployeeWechatLogin from '@/components/EmployeeWechatLogin.vue'
 import {
   isEmployeeLoggedIn,
+  isForcePasswordChange,
   ensureActiveCompany,
   setLoginRedirect,
-  consumeLoginRedirect
+  postLoginUrl
 } from '@/utils/employeeSession'
 
 const activeTab = ref('wechat')
@@ -59,8 +60,12 @@ onLoad((options) => {
 
 onMounted(() => {
   if (isEmployeeLoggedIn()) {
+    if (isForcePasswordChange()) {
+      uni.redirectTo({ url: '/pages/employee/force-change-password' })
+      return
+    }
     ensureActiveCompany()
-    uni.redirectTo({ url: consumeLoginRedirect() })
+    uni.redirectTo({ url: postLoginUrl() })
     return
   }
   // 兜底：若微信 OAuth 回调直接落到登录页，转入回调页统一处理
@@ -70,7 +75,7 @@ onMounted(() => {
 })
 
 function goDashboard() {
-  uni.redirectTo({ url: consumeLoginRedirect() })
+  uni.redirectTo({ url: postLoginUrl() })
 }
 </script>
 
