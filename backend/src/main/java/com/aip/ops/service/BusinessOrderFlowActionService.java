@@ -414,6 +414,7 @@ public class BusinessOrderFlowActionService {
         // 为空表示本次派工不需要物料，不生成领用单。
         List<ScmDispatchOutboundRequest.MaterialItem> materialItems =
                 dispatchMaterialItems(form.get("materialList"));
+        String materialStockNumber = str(form.get("materialStockNumber"));
         String dispatchNo = dispatchNo(order, event.getTaskId(), event.getInstanceId());
         ScmDispatchOutboundRequest request = new ScmDispatchOutboundRequest(
                 order.getCorpId(), event.getTaskId(), dispatchNo,
@@ -421,7 +422,7 @@ public class BusinessOrderFlowActionService {
                 event.getOperatorUserId(), event.getOperatorName(),
                 order.getCustomer(), order.getCustomerPhone(), order.getPlatformMemberId(),
                 order.getCommunityName(), order.getDetailedAddress(), outboundItems,
-                materialItems);
+                materialStockNumber.isEmpty() ? null : materialStockNumber, materialItems);
         ScmStockOutClient.Result outbound = scmClient.createFromDispatch(request);
         result.put("stockOutId", outbound.id());
         result.put("stockOutNo", outbound.billNo());

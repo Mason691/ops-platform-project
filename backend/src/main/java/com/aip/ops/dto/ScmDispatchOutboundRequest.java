@@ -20,6 +20,8 @@ public record ScmDispatchOutboundRequest(
         String communityName,
         String detailedAddress,
         List<Item> items,
+        /** 派工物料领用仓库（可选）：物料清单非空时，SCM 草稿直接带入该仓库 */
+        String stockNumber,
         /** 派工物料清单（可选）：SCM 在同一事务内生成物料领用草稿；空则只出库不生成领用单 */
         List<MaterialItem> materialList
 ) {
