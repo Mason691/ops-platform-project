@@ -77,7 +77,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { api } from '@/api/index'
-import { saveEmployeeSession, isForcePasswordChange } from '@/utils/employeeSession'
+import { saveEmployeeSession } from '@/utils/employeeSession'
 
 const emit = defineEmits(['success'])
 
@@ -125,11 +125,6 @@ async function doLogin() {
       captchaCode: captchaCode.value
     })
     saveEmployeeSession(r, 'password')
-    if (isForcePasswordChange()) {
-      uni.showToast({ title: '请先修改初始密码', icon: 'none' })
-      uni.reLaunch({ url: '/pages/employee/force-change-password' })
-      return
-    }
     uni.showToast({ title: '登录成功', icon: 'success' })
     setTimeout(() => emit('success'), 500)
   } catch (e) {

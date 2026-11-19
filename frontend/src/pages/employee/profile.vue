@@ -75,7 +75,7 @@
       <view class="modal-box" @click.stop>
         <text class="modal-title">修改密码</text>
         <input class="modal-input" type="password" v-model="oldPwd" placeholder="当前密码"/>
-        <input class="modal-input" type="password" v-model="newPwd" placeholder="新密码（8~20位，字母+数字）"/>
+        <input class="modal-input" type="password" v-model="newPwd" placeholder="新密码（至少6位）"/>
         <input class="modal-input" type="password" v-model="confirmPwd" placeholder="确认新密码"/>
         <text class="modal-error" v-if="pwdError">{{ pwdError }}</text>
         <view class="modal-btns">
@@ -202,13 +202,7 @@ async function updateNickname() {
 async function changePassword() {
   pwdError.value = ''
   if (!oldPwd.value) { pwdError.value = '请输入当前密码'; return }
-  if (!newPwd.value || newPwd.value.length < 8 || newPwd.value.length > 20) {
-    pwdError.value = '新密码需为 8~20 位'; return
-  }
-  if (!/[A-Za-z]/.test(newPwd.value) || !/\d/.test(newPwd.value)) {
-    pwdError.value = '新密码需同时包含字母和数字'; return
-  }
-  if (newPwd.value === oldPwd.value) { pwdError.value = '新密码不能与原密码相同'; return }
+  if (!newPwd.value || newPwd.value.length < 6) { pwdError.value = '新密码至少6位'; return }
   if (newPwd.value !== confirmPwd.value) { pwdError.value = '两次密码不一致'; return }
 
   try {
@@ -216,11 +210,9 @@ async function changePassword() {
       oldPassword: oldPwd.value,
       newPassword: newPwd.value
     })
-    uni.showToast({ title: '密码修改成功，请重新登录', icon: 'none', duration: 1500 })
+    uni.showToast({ title: '密码修改成功', icon: 'success' })
     showPwdModal.value = false
     oldPwd.value = ''; newPwd.value = ''; confirmPwd.value = ''
-    clearEmployeeSession()
-    setTimeout(() => uni.reLaunch({ url: '/pages/employee/login' }), 900)
   } catch (e) {
     pwdError.value = e.msg || '修改失败，请重试'
   }

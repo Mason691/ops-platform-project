@@ -79,10 +79,7 @@ export default {
         if (from === 'employee') {
           const empToken = uni.getStorageSync('ops_employee_token')
           if (empToken) {
-            const url = uni.getStorageSync('ops_employee_force_pwd') === '1'
-              ? '/pages/employee/force-change-password'
-              : '/pages/employee/dashboard'
-            uni.redirectTo({ url })
+            uni.redirectTo({ url: '/pages/employee/dashboard' })
           } else {
             uni.redirectTo({ url: '/pages/employee/login' })
           }

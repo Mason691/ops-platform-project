@@ -1,7 +1,6 @@
 package com.aip.ops.config;
 
 import com.aip.ops.security.ExternalUserGuardFilter;
-import com.aip.ops.security.PasswordChangeRequiredGuardFilter;
 import com.aip.sdk.security.PlatformAuthenticationFilter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
@@ -24,7 +23,6 @@ import java.util.*;
 public class SecurityConfig {
 
     private final PlatformAuthenticationFilter platformAuthenticationFilter;
-    private final PasswordChangeRequiredGuardFilter passwordChangeRequiredGuardFilter;
     private final ExternalUserGuardFilter externalUserGuardFilter;
     private final ObjectMapper objectMapper;
 
@@ -55,10 +53,8 @@ public class SecurityConfig {
                     writeJson(res, 403, "无权限")))
             .addFilterBefore(platformAuthenticationFilter,
                     UsernamePasswordAuthenticationFilter.class)
-            .addFilterAfter(passwordChangeRequiredGuardFilter,
-                    PlatformAuthenticationFilter.class)
             .addFilterAfter(externalUserGuardFilter,
-                    PasswordChangeRequiredGuardFilter.class);
+                    UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
