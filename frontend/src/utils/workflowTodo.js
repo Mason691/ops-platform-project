@@ -1,21 +1,19 @@
 import { api } from '@/api'
-import { toTimestamp, urgencyLevel } from '@/utils/formatRemainTime'
+import { toTimestamp } from '@/utils/formatRemainTime'
 
 /**
  * 待办任务的共享口径：首页卡片与完整待办列表必须用同一套
  * 「过滤 + 排序」逻辑，否则会出现首页看到、列表页找不到的情况。
  *
- * 紧急度排序（超时 > 临期 > 普通，同级按到达时间倒序）目前在 H5 侧完成：
- * 底座 pageTodo 只按任务创建时间倒序，且未提供排序参数；跨仓库改平台后端
- * 不在本次范围。首页与列表页统一调用本文件，保证两处顺序一致。
+ * 排序口径：按任务创建时间倒序（最新到达的待办在最前），与底座
+ * pageTodo 的排序一致；紧急度只用于剩余时限文案与颜色，不参与排序。
+ * 首页与列表页统一调用本文件，保证两处顺序一致。
  */
 
 const HOUR_MS = 60 * 60 * 1000
 
 /** 首页与列表页统一拉取上限（列表页原有口径）。 */
 export const TODO_PAGE_SIZE = 50
-
-const URGENCY_RANK = { overdue: 0, urgent: 1, normal: 2, unknown: 3 }
 
 export const BUSINESS_TYPE_LABELS = {
   OPS_BUSINESS_ORDER: '业务数据订单',
@@ -48,19 +46,18 @@ export function decorateTodo(records, receivedAt) {
   })
 }
 
-function remainMsOf(item, nowMs) {
-  return item && Number.isFinite(item.__deadlineAt) ? item.__deadlineAt - nowMs : NaN
+/** 任务创建时间（缺省回退实例提交时间），与列表展示的到达时间口径一致。 */
+function createdAtOf(item) {
+  return toTimestamp(item && item.task && item.task.createTime)
+    || toTimestamp(item && item.submitTime)
 }
 
 /** 排序快照：只在加载时调用一次，运行中只刷新文案不重排，避免卡片跳动误触。 */
-export function sortTodoByPriority(records, nowMs) {
+export function sortTodoByCreateTime(records) {
   return [...(records || [])].sort((a, b) => {
-    const rankA = URGENCY_RANK[urgencyLevel(remainMsOf(a, nowMs))] ?? 3
-    const rankB = URGENCY_RANK[urgencyLevel(remainMsOf(b, nowMs))] ?? 3
-    if (rankA !== rankB) return rankA - rankB
-    const arriveA = toTimestamp(a && a.task && a.task.createTime) || toTimestamp(a && a.submitTime)
-    const arriveB = toTimestamp(b && b.task && b.task.createTime) || toTimestamp(b && b.submitTime)
-    if (arriveA !== arriveB) return arriveB - arriveA
+    const createdA = createdAtOf(a)
+    const createdB = createdAtOf(b)
+    if (createdA !== createdB) return createdB - createdA
     return (Number(b && b.task && b.task.id) || 0) - (Number(a && a.task && a.task.id) || 0)
   })
 }

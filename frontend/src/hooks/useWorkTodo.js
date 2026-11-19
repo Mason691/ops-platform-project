@@ -1,7 +1,7 @@
 import { computed, onUnmounted, ref } from 'vue'
 import { api } from '@/api'
 import {
-  TODO_PAGE_SIZE, decorateTodo, filterIneligibleDispatch, sortTodoByPriority
+  TODO_PAGE_SIZE, decorateTodo, filterIneligibleDispatch, sortTodoByCreateTime
 } from '@/utils/workflowTodo'
 
 /** 首页最多直接展示的待办条数；超出走「查看更多」。 */
@@ -53,7 +53,7 @@ export function useWorkTodo() {
       const filtered = await filterIneligibleDispatch(raw)
       if (seq !== requestSeq) return
       const receivedAt = Date.now()
-      items.value = sortTodoByPriority(decorateTodo(filtered, receivedAt), receivedAt)
+      items.value = sortTodoByCreateTime(decorateTodo(filtered, receivedAt))
       const apiTotal = Math.max(0, Number(data && data.total) || 0)
       // 已取回全部记录时以过滤后的真实条数为准，避免被隐藏的派工任务虚增 N。
       total.value = apiTotal <= raw.length ? filtered.length : apiTotal

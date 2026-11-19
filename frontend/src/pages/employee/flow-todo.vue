@@ -38,7 +38,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 import {
-  TODO_PAGE_SIZE, decorateTodo, filterIneligibleDispatch, sortTodoByPriority
+  TODO_PAGE_SIZE, decorateTodo, filterIneligibleDispatch, sortTodoByCreateTime
 } from '@/utils/workflowTodo'
 import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
 
@@ -63,9 +63,9 @@ async function loadData() {
     const data = await api.workflowTodo({ pageNum: 1, pageSize: TODO_PAGE_SIZE })
     const records = Array.isArray(data && data.records) ? data.records : []
     const filtered = await filterIneligibleDispatch(records)
-    // 与工作台首页共用同一套过滤/排序口径，保证两处顺序一致
+    // 与工作台首页共用同一套过滤/排序口径（任务创建时间倒序），保证两处顺序一致
     const receivedAt = Date.now()
-    list.value = sortTodoByPriority(decorateTodo(filtered, receivedAt), receivedAt)
+    list.value = sortTodoByCreateTime(decorateTodo(filtered, receivedAt))
   } catch (e) {
     errorMsg.value = e && e.msg ? e.msg : '加载待办失败，请稍后重试'
   } finally {
