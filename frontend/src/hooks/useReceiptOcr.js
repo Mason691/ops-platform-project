@@ -18,7 +18,8 @@ export function useReceiptOcr(form) {
   const warning = ref(false)
   const red = ref('')
   const blue = ref('')
-  const preferredColor = ref('RED')
+  // 首屏尚未拿到后端配置，留空由提示文案显示“系统配置色”；OCR 响应后覆盖
+  const preferredColor = ref('')
   const needsConfirm = ref(false)
   const recommendation = ref('')
   const manual = ref(false)
@@ -51,7 +52,7 @@ export function useReceiptOcr(form) {
     warning.value = false
     red.value = ''
     blue.value = ''
-    preferredColor.value = 'RED'
+    preferredColor.value = ''
     needsConfirm.value = false
     recommendation.value = ''
     manual.value = false
