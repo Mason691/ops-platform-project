@@ -37,10 +37,6 @@ public final class EmployeeLoginResultMapper {
         result.put("roles", data.getOrDefault("roles", result.get("roleNames")));
         result.put("avatar", data.getOrDefault("avatar", ""));               // sys_user 头像
         result.put("userType", data.getOrDefault("userType", 0));             // 0内部 1外部
-        // 初始密码未修改：工作台据此跳转强制改密页
-        result.put("forcePasswordChange",
-                data.getOrDefault("forcePasswordChange", false));
-        result.put("pwdInitial", data.getOrDefault("pwdInitial", false));
         return result;
     }
 
