@@ -5,7 +5,7 @@
         <text class="title">物料领用单</text>
         <EmployeeHomeLink />
       </view>
-      <text class="sub">补充领取仓库与批次后提交财务审批；提交前请确认数量</text>
+      <text class="sub">补充领取仓库与批次后提交本组织部长审批；提交前请确认数量</text>
     </view>
 
     <view v-if="loading" class="state"><text>加载中...</text></view>
@@ -75,8 +75,12 @@
           </view>
           <view class="item-bottom">
             <text class="qty-label">领取数量</text>
-            <input v-if="editable" v-model="row.pickQty" type="digit" class="qty-input"
-                   @blur="normalizeRowQty(row)" />
+            <view v-if="editable" class="qty-control">
+              <view class="qty-btn" @click="decreaseRowQty(row)">－</view>
+              <input v-model="row.pickQty" type="digit" class="qty-input"
+                     @blur="normalizeRowQty(row)" />
+              <view class="qty-btn plus" @click="increaseRowQty(row)">＋</view>
+            </view>
             <text v-else class="qty-value">{{ row.pickQty }}</text>
           </view>
         </view>
@@ -247,6 +251,20 @@ function normalizeRowQty(row) {
   }
 }
 
+function increaseRowQty(row) {
+  const next = Number(row.pickQty || 0) + 1
+  if (row.available !== null && next > Number(row.available)) {
+    uni.showToast({ title: '数量不能大于库存 ' + qty(Number(row.available)), icon: 'none' })
+    return
+  }
+  row.pickQty = String(next)
+}
+
+function decreaseRowQty(row) {
+  const next = Number(row.pickQty || 0) - 1
+  row.pickQty = String(next > 0 ? next : 0.0001)
+}
+
 function removeRow(index) {
   rows.value.splice(index, 1)
 }
@@ -402,7 +420,7 @@ async function submit() {
     return
   }
   // 提交前预览审批人：预览失败不阻塞提交，只展示兜底文案
-  let confirmText = '提交后将进入财务审批流程，审批人信息提交后可在详情查看'
+  let confirmText = '提交后将进入本组织部长审批流程，审批人信息提交后可在详情查看'
   try {
     const preview = await api.scmMaterialPickApprovalPreview(id.value)
     if (preview && preview.displayName) {
@@ -515,7 +533,14 @@ function openTaskOrder(item) {
 .batch-link { margin-left: 10rpx; color: #FF6B35; font-weight: 600; }
 .item-bottom { margin-top: 16rpx; display: flex; justify-content: space-between; align-items: center; }
 .qty-label { font-size: 24rpx; color: #4E5969; }
-.qty-input { width: 160rpx; height: 60rpx; text-align: right; border: 1rpx solid #E5E6EB; border-radius: 8rpx; padding: 0 12rpx; font-size: 26rpx; }
+.qty-input { width: 120rpx; height: 60rpx; text-align: center; border: 1rpx solid #E5E6EB; border-radius: 8rpx; padding: 0 8rpx; font-size: 26rpx; }
+.qty-control { display: flex; align-items: center; gap: 8rpx; }
+.qty-btn {
+  width: 56rpx; height: 56rpx; line-height: 56rpx; text-align: center;
+  border: 1rpx solid #FFB99A; border-radius: 8rpx;
+  color: #FF6B35; background: #FFF7F3; font-size: 30rpx;
+}
+.qty-btn.plus { background: #FF6B35; color: #fff; border-color: #FF6B35; }
 .qty-value { font-size: 28rpx; color: #1D2129; font-weight: 600; }
 .btn { height: 88rpx; border-radius: 12rpx; display: flex; align-items: center; justify-content: center; font-size: 28rpx; }
 .btn.ghost { margin-top: 16rpx; background: #fff; color: #FF6B35; border: 1rpx dashed #FFB99A; }

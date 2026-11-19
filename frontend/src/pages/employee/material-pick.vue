@@ -5,7 +5,7 @@
         <text class="title">物料领取</text>
         <EmployeeHomeLink />
       </view>
-      <text class="sub">提交后由财务审批，审批通过才扣减库存并生成可打印单据</text>
+      <text class="sub">提交后由本组织部长审批，审批通过才扣减库存并生成可打印单据</text>
     </view>
 
     <view class="card">
@@ -51,7 +51,10 @@
           <text class="stock">可用 {{ qty(row.validQty) }}</text>
           <view class="qty-box">
             <text class="qty-label">领取数量</text>
-            <input v-model="row.pickQty" type="digit" class="qty-input" />
+            <view class="qty-btn" @click="decreaseQty(row)">－</view>
+            <input v-model="row.pickQty" type="digit" class="qty-input"
+                   @blur="normalizeQty(row)" />
+            <view class="qty-btn plus" @click="increaseQty(row)">＋</view>
           </view>
         </view>
       </view>
@@ -214,6 +217,32 @@ function qty(v) {
   return n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
 }
 
+function increaseQty(row) {
+  const next = Number(row.pickQty || 0) + 1
+  if (next > Number(row.validQty)) {
+    uni.showToast({ title: '数量不能大于库存 ' + qty(row.validQty), icon: 'none' })
+    return
+  }
+  row.pickQty = String(next)
+}
+
+function decreaseQty(row) {
+  const next = Number(row.pickQty || 0) - 1
+  row.pickQty = String(next > 0 ? next : 0.0001)
+}
+
+function normalizeQty(row) {
+  const value = Number(row.pickQty)
+  if (!Number.isFinite(value) || value <= 0) {
+    row.pickQty = '1'
+    return
+  }
+  if (value > Number(row.validQty)) {
+    row.pickQty = String(Number(row.validQty))
+    uni.showToast({ title: '数量不能大于库存 ' + qty(row.validQty), icon: 'none' })
+  }
+}
+
 async function submit() {
   if (submitting.value) return
   if (!form.stockNumber) { uni.showToast({ title: '请选择领取仓库', icon: 'none' }); return }
@@ -243,7 +272,8 @@ async function submit() {
     const display = result && result.currentApproverDisplay
     uni.showModal({
       title: '已提交审批',
-      content: '已提交给财务审批' + (display ? '\n' + display : ''),
+      content: display ? '已提交给 ' + display + ' 审批'
+        : '已提交审批，待分配审批人，请联系管理员',
       showCancel: false,
       success: () => uni.navigateBack()
     })
@@ -282,7 +312,13 @@ async function submit() {
 .stock { font-size: 24rpx; color: #00B42A; }
 .qty-box { display: flex; align-items: center; gap: 12rpx; }
 .qty-label { font-size: 24rpx; color: #4E5969; }
-.qty-input { width: 140rpx; height: 60rpx; text-align: right; border: 1rpx solid #E5E6EB; border-radius: 8rpx; padding: 0 12rpx; font-size: 26rpx; }
+.qty-input { width: 110rpx; height: 60rpx; text-align: center; border: 1rpx solid #E5E6EB; border-radius: 8rpx; padding: 0 8rpx; font-size: 26rpx; }
+.qty-btn {
+  width: 56rpx; height: 56rpx; line-height: 56rpx; text-align: center;
+  border: 1rpx solid #FFB99A; border-radius: 8rpx;
+  color: #FF6B35; background: #FFF7F3; font-size: 30rpx;
+}
+.qty-btn.plus { background: #FF6B35; color: #fff; border-color: #FF6B35; }
 .btn { margin-top: 16rpx; height: 88rpx; border-radius: 12rpx; display: flex; align-items: center; justify-content: center; font-size: 28rpx; }
 .btn.ghost { background: #fff; color: #FF6B35; border: 1rpx dashed #FFB99A; }
 .btn.primary { background: linear-gradient(135deg, #FF8C5A, #FF6B35); color: #fff; font-weight: 600; }

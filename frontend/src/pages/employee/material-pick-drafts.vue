@@ -153,10 +153,22 @@ function createNew() {
   uni.navigateTo({ url: '/pages/employee/material-pick' })
 }
 
-function submitDraft(item) {
+async function submitDraft(item) {
+  // 提交前预览本组织部长；预览失败不阻塞提交
+  let content = `确认提交领用单 ${item.billNo || ''} 给本组织部长审批？提交后不可修改。`
+  try {
+    const preview = await api.scmMaterialPickApprovalPreview(item.id)
+    if (preview && preview.displayName) {
+      content = `您将把物料领用单 ${item.billNo || ''} 提交给 ${preview.displayName} 审批，确认提交？`
+    } else if (preview && preview.fallbackMessage) {
+      content = preview.fallbackMessage
+    }
+  } catch (e) {
+    // 预览失败使用兜底文案
+  }
   uni.showModal({
     title: '提交审批',
-    content: `确认提交领用单 ${item.billNo || ''} 给财务审批？提交后不可修改。`,
+    content,
     success: async (res) => {
       if (!res.confirm) return
       try {
@@ -164,7 +176,7 @@ function submitDraft(item) {
         const display = result && result.currentApproverDisplay
         uni.showModal({
           title: '已提交审批',
-          content: '已提交给财务审批' + (display ? '\n' + display : ''),
+          content: display ? '已提交给 ' + display + ' 审批' : '已提交审批，待分配审批人，请联系管理员',
           showCancel: false
         })
         load()
