@@ -24,7 +24,21 @@ export function useReceiptOcr(form) {
   const recommendation = ref('')
   const manual = ref(false)
   const candidates = ref([])
+  const review = ref(false)
 
+  /** REVIEW/同色多候选：按值去重后供收据号下方点击选择。 */
+  const reviewCandidates = computed(() => {
+    const seen = new Set()
+    return candidates.value
+      .filter(item => item && String(item.value || '').trim())
+      .filter(item => {
+        const value = String(item.value).trim()
+        if (seen.has(value)) return false
+        seen.add(value)
+        return true
+      })
+      .slice(0, 6)
+  })
   const hasCandidates = computed(() => !!(red.value || blue.value))
   const hasResult = computed(() => hasCandidates.value || candidates.value.length > 0)
   const showChoices = computed(() => !!(red.value && blue.value && red.value !== blue.value))
@@ -57,6 +71,7 @@ export function useReceiptOcr(form) {
     recommendation.value = ''
     manual.value = false
     candidates.value = []
+    review.value = false
     autoValue = ''
     userTouched = false
     lastLogged = ''
@@ -92,6 +107,7 @@ export function useReceiptOcr(form) {
     needsConfirm.value = !!res.needsConfirm
     recommendation.value = String(res.recommendation || '')
     candidates.value = Array.isArray(res.candidates) ? res.candidates : []
+    review.value = res.source === 'REVIEW'
     const recognized = String(res.receiptNo || '').trim()
     if (!recognized) {
       message.value = res.message || '未能识别收据号，请手动填写'
@@ -102,10 +118,11 @@ export function useReceiptOcr(form) {
     // 用户已手改/切换/清空：只更新候选提示，绝不覆盖用户值
     if (userTouched) {
       if (!current) {
-        message.value = hasCandidates.value
-          ? `识别候选：${candidateSummary()}，点击可填入；当前收据号为空`
+        const summary = candidateSummary()
+        message.value = summary !== '无'
+          ? `识别候选：${summary}，点击可填入；当前收据号为空`
           : (res.message || '请手动填写收据号')
-        warning.value = !hasCandidates.value
+        warning.value = summary === '无'
         return
       }
       message.value = keepMessage(res, current, recognized)
@@ -170,6 +187,9 @@ export function useReceiptOcr(form) {
     const parts = []
     if (red.value) parts.push(`红色 ${red.value}`)
     if (blue.value) parts.push(`蓝色 ${blue.value}`)
+    if (!parts.length && review.value) {
+      return reviewCandidates.value.map(item => item.value).join(' / ') || '无'
+    }
     return parts.length ? parts.join(' / ') : '无'
   }
 
@@ -178,13 +198,27 @@ export function useReceiptOcr(form) {
     userTouched = true
     manual.value = true
     autoValue = ''
-    if (hasCandidates.value) {
-      message.value = `已手动填写，识别候选保留：${candidateSummary()}，可点击切换`
+    if (hasCandidates.value || review.value) {
+      message.value = `已手动填写，识别候选保留：${candidateSummary()}，可点击填入`
       warning.value = false
     } else if (hasResult.value) {
       message.value = '已手动填写；本次未识别到红/蓝候选，请核对'
       warning.value = false
     }
+  }
+
+  /** 点击候选号直接录入；REVIEW 与同色多候选都走这里。 */
+  function selectCandidate(value) {
+    const picked = String(value || '').trim()
+    if (!picked) return
+    form.receiptNo = picked
+    form.receiptNoCheck = null
+    autoValue = picked
+    manual.value = false
+    userTouched = true
+    message.value = `已录入识别候选 ${picked}，请核对`
+    warning.value = false
+    logAdoption('SWITCH', picked, false)
   }
 
   function switchTo(color) {
@@ -233,7 +267,9 @@ export function useReceiptOcr(form) {
 
   return {
     loading, message, warning, red, blue, preferredColor, needsConfirm,
-    recommendation, manual, hasCandidates, hasResult, showChoices, sameValue,
-    currentChoice, canRetry, reset, runOcr, onManualInput, switchTo, logFinal, dispose
+    recommendation, manual, candidates, review, reviewCandidates,
+    hasCandidates, hasResult, showChoices, sameValue, currentChoice,
+    canRetry, reset, runOcr, onManualInput, switchTo, selectCandidate,
+    logFinal, dispose
   }
 }
