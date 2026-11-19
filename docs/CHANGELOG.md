@@ -2,13 +2,15 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
-## 2026-11-19（收据号 OCR 红蓝双色候选，待发布）
+## 2026-11-19（收据号 OCR 红蓝双色候选，已发布并冒烟通过）
 
 - **规则**：收据 `NO.` 附近可能同时存在红色/蓝色 7 位数字；服务端分别生成红/蓝掩膜并 OCR，红蓝均存在且不一致时默认采用配置色（`RED`/`BLUE`，环境变量 `RECEIPT_OCR_PREFERRED_COLOR`，默认 RED），返回两组候选并置 `needsConfirm=true`；前端在收据号下方展示可切换标签，禁止静默选择。
 - **后端**：`ReceiptRedDigitExtractor` 泛化为 `ReceiptColorDigitExtractor`；新增 `ReceiptOcrResultBuilder`/`ReceiptOcrResult`/`ReceiptOcrFeedbackRequest`；`ReceiptOcrServiceImpl` 双色识别 + 结构化日志 `RECEIPT_OCR_CANDIDATES/ADOPTED`；新增 `POST /api/ops/employee/business-data/receipt-ocr/feedback`。
 - **前端**：新增 `useReceiptOcr` + `ReceiptOcrPanel`；`BusinessStepVoucher` 接入候选标签/切换/手动输入保留/离开步骤上报；收据图片点击放大沿用上传组件。
 - **验证**：后端 `mvn -o compile` 通过；H5 `npm run build:h5` 通过；生产容器内 Tesseract 真实样本（红色 0002304）与红/蓝/双色/同值合成样本端到端通过；纯逻辑断言覆盖优先红/优先蓝/同值/回退/低置信度/颜色掩膜边界，全部 PASS。
-- **未执行**：真机微信 E2E、生产发布（Tesseract 已在镜像内，本次未改依赖）。
+- **发布（14:30–14:32）**：后端 JAR sha256 `b8fb84ba…`；overlay 镜像 `fa0270b4f3f1`（FROM `92b516cc251f`，保留 Tesseract）；回滚镜像 `boss-platform/ops:rollback-ocr-20261119_143030`，JAR 备份 `app.jar.bak-ocr-20261119_143030`；容器 healthy，启动日志 `RECEIPT_OCR_CONFIG preferredColor=RED`；H5 入口 `index-CfMixPxs.js`、页面 chunk `pages-employee-business-data-new.qnDukbHP.js`，清 assets 后发布并 reload；H5 备份 `html-ops-pre-ocr-20261119_1432.tgz`。
+- **冒烟**：health 200；OCR/反馈接口无 token 401；公网入口/页面 chunk 200、旧入口 404、title=金地美家；部署 chunk 含红蓝候选文案；无 ERROR。
+- **未执行**：真机微信 E2E（需真实红蓝并存收据）；员工登录态 OCR 200 响应（无测试账号 token）。
 
 ## 2026-11-19（员工收款码更换并重新签名，已发布并冒烟通过）
 
