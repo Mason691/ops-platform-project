@@ -2,12 +2,13 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
-## 2026-11-19（收据号多候选点击录入，待发布）
+## 2026-11-19（收据号多候选点击录入，已发布并冒烟通过）
 
 - **背景**：4/6 混淆时 REVIEW 结果只显示 `0002306 / 0002304` 提示，员工需手工输入；多候选同色时也只展示最佳值。
 - **变更**：REVIEW 或同色多候选时，在收据号字段下方展示可点击号码标签（颜色点 + 7 位值）；点击直接写入收据号并高亮，采用日志记 `SWITCH`。未点击时保持空值，收据号必填校验生效。后端 REVIEW 消息改为「请点击下方号码或对照收据手工填写」。
-- **验证**：H5 `npm run build:h5`；生产红票 REVIEW 候选 `0002306/0002304` 可点击；旧红票/蓝票正常。
-- **发布**：待发布。
+- **验证**：`mvn -o compile` / 干净 worktree `package` 通过；H5 `npm run build:h5` 通过；部署 chunk 含「点击号码可直接填入收据号」「已录入识别候选」；红票 REVIEW 候选 `0002306/0002304`、旧红票/蓝票逻辑不受影响。
+- **发布（15:42）**：后端 JAR sha256 `9e2c213f…`；overlay 镜像 `66ff578b892e`（FROM `41321aff9666`，仅覆盖 app.jar，保留 Tesseract/osd）；回滚镜像 `boss-platform/ops:rollback-ocr-click-20261119_154147`，JAR 备份 `app.jar.bak-ocr-click-20261119_154147`；H5 入口 `index-BV907GEZ.js`、页面 chunk `pages-employee-business-data-new.BYFxpDwq.js`，清 assets 后发布并 reload；H5 备份 `html-ops-pre-ocr-click-20261119_154221.tgz`；容器 healthy，`RECEIPT_OCR_CONFIG preferredColor=BLUE`，health 200，旧入口 404，无 ERROR。
+- **未执行**：员工登录态点击候选 E2E（无测试账号 token）；请用现场红票复测：REVIEW 时点击 `0002306` 或 `0002304`，收据号应立即填入并高亮。
 
 ## 2026-11-19（红票收据号 4/6 混淆拦截，已发布并冒烟通过）
 
