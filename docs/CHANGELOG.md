@@ -2,6 +2,14 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-19（红票收据号 4/6 混淆拦截，已发布并冒烟通过）
+
+- **问题**：现场红票 `0002304` 在 psm 11 下识别为 `0002306`（conf 92.66），psm 6/7 为 `0002304`（conf 75/72.5）；原逻辑 psm 11 命中后跳过 psm 7，错误值被 `action=ACCEPT` 自动采用。
+- **修复**：红/蓝掩膜同时跑 psm 11 与 psm 7，分别取最佳 7 位；不一致时返回 `source=REVIEW`、`receiptNo=null`，消息列出两组值并提示手工填写，前端不自动填入；一致时取高置信值。`MIN_CONFIDENCE` 60→80，低置信度提示「请对照收据手工复核」。
+- **验证**：生产红票 → REVIEW（0002306 / 0002304）；旧红票 → 0002304（conf 85.24，source=RED）；蓝票 → 2418523/2418522（source=BLUE）；`mvn -o compile` / `package` 通过。
+- **发布（15:25）**：干净 worktree JAR sha256 `0d34c8c6…`（密码类已确认不在 JAR）；overlay 镜像 `41321aff9666`（FROM `6997c1c20e31`，仅覆盖 app.jar，保留 Tesseract/osd）；回滚镜像 `boss-platform/ops:rollback-ocr-cross-20261119_152448`，JAR 备份 `app.jar.bak-ocr-cross-20261119_152448`；容器 healthy，启动日志 `RECEIPT_OCR_CONFIG preferredColor=BLUE`，osd 可用，health 200，OCR 无 token 401，无 ERROR。
+- **未执行**：员工登录态真实红票 E2E（无测试账号 token）；请用现场红票复测，识别不一致时日志应为 `RECEIPT_OCR_CANDIDATES ... source=REVIEW`，前端收据号留空并提示手工填写。
+
 ## 2026-11-19（收据号 OCR 蓝票方向/阈值修复，已发布并冒烟通过）
 
 - **问题**：现场蓝票为竖拍、票面旋转 90°，且蓝色存根联偏浅；原 `psm 7 + dominance 25` 读不出或把 8 读成 2，生产日志 `RECEIPT_OCR_CANDIDATES` 显示红/蓝均为空。

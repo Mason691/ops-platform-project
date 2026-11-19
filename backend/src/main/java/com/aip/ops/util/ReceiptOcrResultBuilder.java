@@ -17,7 +17,7 @@ import java.util.Set;
 public final class ReceiptOcrResultBuilder {
 
     /** 低于该置信度视为可疑：仍回填，但提示人工核对（OCR 偶发 4/6 混淆）。 */
-    public static final double MIN_CONFIDENCE = 60;
+    public static final double MIN_CONFIDENCE = 80;
 
     private ReceiptOcrResultBuilder() {
     }
@@ -118,7 +118,7 @@ public final class ReceiptOcrResultBuilder {
             sb.append("；同色存在多组数字，已填入第一组");
         }
         if (!exact) {
-            sb.append("；识别结果可能不准确，请核对");
+            sb.append("；识别结果可能不准确，请对照收据手工复核");
         }
         return sb.toString();
     }

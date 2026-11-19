@@ -118,15 +118,26 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
         // 手机竖拍/横拍会导致票面旋转：先由 Tesseract OSD 检测纠正角度，
         // OSD 失败或无候选时再按 0/90/270/180 回退尝试。
         Scan scan = scanRotations(source, detectRotation(path));
+        ColorScan colors = scan.colors();
+        // psm 11 与 psm 7 对同一 7 位数字给出不同结果时，绝不自动采用
+        if (colors.uncertain()) {
+            ReceiptOcrResult result = reviewResult(colors);
+            logCandidates(attachmentId, corpId,
+                    colors.redCandidates(), colors.blueCandidates(), result);
+            return result;
+        }
         Path rotatedFile = null;
         try {
             // 只有红/蓝都没候选、需要全图 OCR 时才落盘旋转图，避免每张图都写大 PNG
-            if (scan.red().isEmpty() && scan.blue().isEmpty() && scan.rotation() != 0) {
+            if (colors.redCandidates().isEmpty() && colors.blueCandidates().isEmpty()
+                    && scan.rotation() != 0) {
                 rotatedFile = writeTemp(scan.image(), "receipt-rot-");
             }
             Path fullPath = rotatedFile != null ? rotatedFile : path;
-            ReceiptOcrResult result = buildResult(fullPath, scan.red(), scan.blue());
-            logCandidates(attachmentId, corpId, scan.red(), scan.blue(), result);
+            ReceiptOcrResult result = buildResult(fullPath,
+                    colors.redCandidates(), colors.blueCandidates());
+            logCandidates(attachmentId, corpId,
+                    colors.redCandidates(), colors.blueCandidates(), result);
             return result;
         } finally {
             deleteTemp(rotatedFile);
@@ -163,14 +174,14 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
             BufferedImage image = rotate(source, angle);
             ColorScan scan = scanColors(image);
             if (scan.hasConfident()) {
-                return new Scan(scan.red(), scan.blue(), image, angle);
+                return new Scan(scan, image, angle);
             }
             if (firstWeak == null && scan.hasAny()) {
-                firstWeak = new Scan(scan.red(), scan.blue(), image, angle);
+                firstWeak = new Scan(scan, image, angle);
             }
         }
         return firstWeak != null ? firstWeak
-                : new Scan(List.of(), List.of(), rotate(source, initial), initial);
+                : new Scan(ColorScan.empty(), rotate(source, initial), initial);
     }
 
     private static int[] rotationOrder(int initial) {
@@ -205,42 +216,98 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
     }
 
     /**
-     * 单一颜色：彩色掩膜 → Tesseract TSV。
-     * psm 11（稀疏文本）优先：蓝票旋转后数字与手写混排，psm 7 常整段漏识；
-     * 未找到高置信 7 位候选时再补 psm 7（单行）候选一起参与排序。
+     * 单一颜色：彩色掩膜 → psm 11（稀疏文本）+ psm 7（单行）双模式。
+     * 两种模式都命中的最佳 7 位数字不一致时返回 uncertain，由上层清空自动填入
+     * 并提示手工核对（现场红票 0002304 曾被 psm 11 读成 0002306）。
      */
-    private List<ReceiptColorDigitExtractor.Candidate> recognizeColor(
+    private ColorAnalysis recognizeColor(
             BufferedImage source, ReceiptColorDigitExtractor.Color color) {
         Path maskFile = null;
         try {
             BufferedImage mask = ReceiptColorDigitExtractor.buildMask(source, color);
             if (mask == null) {
-                return List.of();
+                return ColorAnalysis.empty();
             }
             maskFile = Files.createTempFile("receipt-" + color.name().toLowerCase(Locale.ROOT) + "-", ".png");
             if (!ImageIO.write(mask, "png", maskFile.toFile())) {
-                return List.of();
+                return ColorAnalysis.empty();
             }
-            List<ReceiptColorDigitExtractor.Candidate> candidates =
-                    new ArrayList<>(recognizeMask(maskFile, source.getHeight(), "11"));
-            if (!hasConfidentSeven(candidates)) {
-                candidates.addAll(recognizeMask(maskFile, source.getHeight(), "7"));
-            }
-            return candidates;
+            List<ReceiptColorDigitExtractor.Candidate> psm11 =
+                    recognizeMask(maskFile, source.getHeight(), "11");
+            List<ReceiptColorDigitExtractor.Candidate> psm7 =
+                    recognizeMask(maskFile, source.getHeight(), "7");
+            List<ReceiptColorDigitExtractor.Candidate> all = new ArrayList<>(psm11);
+            all.addAll(psm7);
+            String best11 = bestSeven(psm11);
+            String best7 = bestSeven(psm7);
+            boolean uncertain = best11 != null && best7 != null && !best11.equals(best7);
+            String review = uncertain ? colorLabel(color) + "收据号识别不一致（"
+                    + best11 + " / " + best7 + "），请对照收据手工填写" : null;
+            return new ColorAnalysis(all, uncertain, review);
         } catch (Exception e) {
             // 彩色提取是增强能力：任何异常都降级到全图 OCR，不影响制单
-            log.warn("收据{}数字识别失败，回退全图 OCR：{}",
-                    color == ReceiptColorDigitExtractor.Color.RED ? "红色" : "蓝色", e.getMessage());
-            return List.of();
+            log.warn("收据{}数字识别失败，回退全图 OCR：{}", colorLabel(color), e.getMessage());
+            return ColorAnalysis.empty();
         } finally {
             deleteTemp(maskFile);
         }
+    }
+
+    private static String bestSeven(List<ReceiptColorDigitExtractor.Candidate> candidates) {
+        ReceiptColorDigitExtractor.Candidate best = ReceiptColorDigitExtractor.choose(candidates);
+        return best != null && best.digits().length() == 7 ? best.digits() : null;
+    }
+
+    private static String colorLabel(ReceiptColorDigitExtractor.Color color) {
+        return color == ReceiptColorDigitExtractor.Color.RED ? "红色" : "蓝色";
     }
 
     private static boolean hasConfidentSeven(
             List<ReceiptColorDigitExtractor.Candidate> candidates) {
         return candidates.stream().anyMatch(c -> c.digits().length() == 7 && c.upper()
                 && c.confidence() >= ReceiptOcrResultBuilder.MIN_CONFIDENCE);
+    }
+
+    /** 双模式不一致：返回空 receiptNo，前端保留候选提示并强制手工填写。 */
+    private ReceiptOcrResult reviewResult(ColorScan colors) {
+        return new ReceiptOcrResult(null, null, null, preferredColor(),
+                "识别结果不一致，请手工核对", false, false, true, "LOW", "REVIEW",
+                reviewMessage(colors), reviewCandidates(colors));
+    }
+
+    private static String reviewMessage(ColorScan colors) {
+        List<String> parts = new ArrayList<>();
+        if (colors.red().reviewMessage() != null) {
+            parts.add(colors.red().reviewMessage());
+        }
+        if (colors.blue().reviewMessage() != null) {
+            parts.add(colors.blue().reviewMessage());
+        }
+        return String.join("；", parts);
+    }
+
+    private static List<ReceiptOcrResult.Candidate> reviewCandidates(ColorScan colors) {
+        List<ReceiptOcrResult.Candidate> result = new ArrayList<>();
+        appendReview(result, colors.redCandidates(), "RED");
+        appendReview(result, colors.blueCandidates(), "BLUE");
+        return result;
+    }
+
+    private static void appendReview(List<ReceiptOcrResult.Candidate> result,
+                                     List<ReceiptColorDigitExtractor.Candidate> candidates,
+                                     String color) {
+        Set<String> seen = new HashSet<>();
+        for (ReceiptColorDigitExtractor.Candidate candidate
+                : ReceiptColorDigitExtractor.ranked(candidates)) {
+            if (!seen.add(candidate.digits())) {
+                continue;
+            }
+            if (seen.size() > 3) {
+                break;
+            }
+            result.add(new ReceiptOcrResult.Candidate(color, candidate.digits(),
+                    "识别模式不一致", candidate.confidence(), false));
+        }
     }
 
     /** 顺时针旋转；90/270 交换宽高，白底填充。 */
@@ -465,19 +532,43 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
         return drain;
     }
 
-    private record ColorScan(List<ReceiptColorDigitExtractor.Candidate> red,
-                             List<ReceiptColorDigitExtractor.Candidate> blue) {
-        boolean hasAny() {
-            return !red.isEmpty() || !blue.isEmpty();
-        }
-
-        boolean hasConfident() {
-            return hasConfidentSeven(red) || hasConfidentSeven(blue);
+    private record ColorAnalysis(List<ReceiptColorDigitExtractor.Candidate> candidates,
+                                 boolean uncertain, String reviewMessage) {
+        static ColorAnalysis empty() {
+            return new ColorAnalysis(List.of(), false, null);
         }
     }
 
-    private record Scan(List<ReceiptColorDigitExtractor.Candidate> red,
-                        List<ReceiptColorDigitExtractor.Candidate> blue,
-                        BufferedImage image, int rotation) {
+    private record ColorScan(ColorAnalysis red, ColorAnalysis blue) {
+        static ColorScan empty() {
+            return new ColorScan(ColorAnalysis.empty(), ColorAnalysis.empty());
+        }
+
+        List<ReceiptColorDigitExtractor.Candidate> redCandidates() {
+            return red.candidates();
+        }
+
+        List<ReceiptColorDigitExtractor.Candidate> blueCandidates() {
+            return blue.candidates();
+        }
+
+        boolean hasAny() {
+            return !redCandidates().isEmpty() || !blueCandidates().isEmpty();
+        }
+
+        boolean uncertain() {
+            return red.uncertain() || blue.uncertain();
+        }
+
+        boolean hasConfident() {
+            return !uncertain() && (confident(red) || confident(blue));
+        }
+
+        private static boolean confident(ColorAnalysis analysis) {
+            return !analysis.uncertain() && hasConfidentSeven(analysis.candidates());
+        }
+    }
+
+    private record Scan(ColorScan colors, BufferedImage image, int rotation) {
     }
 }
