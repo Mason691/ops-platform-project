@@ -180,19 +180,21 @@ async function load() {
   loading.value = true
   errorMsg.value = ''
   try {
-    const [d, wh] = await Promise.all([
+    const [d, wh, def] = await Promise.all([
       api.scmMaterialPickDetail(id.value),
-      api.scmWarehouseList({ pageNum: 1, pageSize: 200 }).catch(() => ({ records: [] }))
+      api.scmWarehouseList({ pageNum: 1, pageSize: 200 }).catch(() => ({ records: [] })),
+      api.scmWarehouseDefault().catch(() => null)
     ])
     detail.value = d
     warehouses.value = (wh && wh.records) || []
-    form.value.stockNumber = d.stockNumber || null
+    // 派工旧草稿/历史草稿可能没有仓库：优先原仓库，其次组织默认仓库
+    form.value.stockNumber = d.stockNumber || (def && def.number) || null
     rows.value = (d.entries || []).map(e => ({
       key: 'r' + (++rowKey),
       materialNumber: e.materialNumber,
       materialName: e.materialName,
       spec: e.spec,
-      stockNumber: e.stockNumber || d.stockNumber || '',
+      stockNumber: e.stockNumber || form.value.stockNumber || '',
       batchNo: e.batchNo || '',
       pickQty: String(e.pickQty == null ? '' : e.pickQty),
       costPrice: e.costPrice,

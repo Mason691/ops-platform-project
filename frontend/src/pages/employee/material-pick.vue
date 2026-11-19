@@ -138,14 +138,17 @@ onShow(() => {
 
 async function loadBase() {
   try {
-    const [wh, tasks] = await Promise.all([
+    const [wh, tasks, def] = await Promise.all([
       api.scmWarehouseList({ pageNum: 1, pageSize: 200 }),
-      api.scmMaterialPickTaskOrders().catch(() => [])
+      api.scmMaterialPickTaskOrders().catch(() => []),
+      api.scmWarehouseDefault().catch(() => null)
     ])
     warehouses.value = (wh && wh.records) || []
     taskOrders.value = tasks || []
-    if (!form.stockNumber && warehouses.value.length === 1) {
-      form.stockNumber = warehouses.value[0].number
+    // 制单默认选中组织默认仓库；无默认时仅一个仓库则自动选中
+    if (!form.stockNumber) {
+      form.stockNumber = (def && def.number)
+        || (warehouses.value.length === 1 ? warehouses.value[0].number : null)
     }
   } catch (e) {
     uni.showToast({ title: (e && e.msg) || '基础数据加载失败', icon: 'none' })
