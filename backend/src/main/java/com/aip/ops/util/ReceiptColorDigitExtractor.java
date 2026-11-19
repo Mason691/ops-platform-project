@@ -14,8 +14,9 @@ import java.util.List;
  * 做数字白名单识别，由上层决定默认采用哪一组。</p>
  *
  * <p>阈值来自生产收据实测：红字核心 RGB 约 (232,76,61)，抗锯齿边缘
- * R 仍明显高于 G/B；蓝字核心 B 分量显著高于 R/G。R≥100 且
- * R-max(G,B)≥30 可保留完整红字笔画；B≥80 且 B-max(R,G)≥25 可保留蓝字，
+ * R 仍明显高于 G/B；蓝字核心 RGB 约 (141,158,193)。R≥100 且
+ * R-max(G,B)≥30 可保留完整红字笔画；B≥80 且 B-max(R,G)≥15 可保留蓝字
+ * （蓝票存根联为浅蓝印刷，dominance 25 会把 8 的笔画切碎），
  * 同时避开黑字（B 低）、灰底（三通道接近）和木纹桌面等偏色背景。</p>
  */
 public final class ReceiptColorDigitExtractor {
@@ -29,8 +30,8 @@ public final class ReceiptColorDigitExtractor {
     static final int RED_DOMINANCE = 30;
     /** 红色判定：R 分量下限，过滤暗红背景噪点。 */
     static final int RED_MIN = 100;
-    /** 蓝色判定：B 分量明显高于 R/G 的最小差值。 */
-    static final int BLUE_DOMINANCE = 25;
+    /** 蓝色判定：B 分量明显高于 R/G 的最小差值（浅蓝存根联实测 15 最稳）。 */
+    static final int BLUE_DOMINANCE = 15;
     /** 蓝色判定：B 分量下限，过滤黑字与暗色背景。 */
     static final int BLUE_MIN = 80;
     /** 收据号通常位于图片上部；低于该比例视为位置可疑（如底部红章流水号）。 */

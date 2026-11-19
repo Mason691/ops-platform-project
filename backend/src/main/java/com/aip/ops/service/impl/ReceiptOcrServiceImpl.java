@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -25,10 +26,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -49,8 +54,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ReceiptOcrServiceImpl implements ReceiptOcrService {
 
+    private static final long OSD_TIMEOUT_SECONDS = 5;
     private static final long COLOR_TIMEOUT_SECONDS = 15;
     private static final long FULL_TIMEOUT_SECONDS = 30;
+    /** 多方向彩色扫描总预算，避免模糊图片在 4 个方向上来回超时。 */
+    private static final long COLOR_SCAN_BUDGET_SECONDS = 30;
+    /** 方向检测失败/无候选时的兜底旋转顺序（先 OSD 角度，再依次尝试）。 */
+    private static final int[] FALLBACK_ROTATIONS = {0, 90, 270, 180};
 
     private final BusinessAttachmentService attachmentService;
 
@@ -105,13 +115,75 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
         if (source == null) {
             return ReceiptOcrResultBuilder.none(preferredColor(), "图片无法识别，请手动填写收据号");
         }
-        List<ReceiptColorDigitExtractor.Candidate> red =
-                recognizeColor(path, source, ReceiptColorDigitExtractor.Color.RED);
-        List<ReceiptColorDigitExtractor.Candidate> blue =
-                recognizeColor(path, source, ReceiptColorDigitExtractor.Color.BLUE);
-        ReceiptOcrResult result = buildResult(path, red, blue);
-        logCandidates(attachmentId, corpId, red, blue, result);
-        return result;
+        // 手机竖拍/横拍会导致票面旋转：先由 Tesseract OSD 检测纠正角度，
+        // OSD 失败或无候选时再按 0/90/270/180 回退尝试。
+        Scan scan = scanRotations(source, detectRotation(path));
+        Path rotatedFile = null;
+        try {
+            // 只有红/蓝都没候选、需要全图 OCR 时才落盘旋转图，避免每张图都写大 PNG
+            if (scan.red().isEmpty() && scan.blue().isEmpty() && scan.rotation() != 0) {
+                rotatedFile = writeTemp(scan.image(), "receipt-rot-");
+            }
+            Path fullPath = rotatedFile != null ? rotatedFile : path;
+            ReceiptOcrResult result = buildResult(fullPath, scan.red(), scan.blue());
+            logCandidates(attachmentId, corpId, scan.red(), scan.blue(), result);
+            return result;
+        } finally {
+            deleteTemp(rotatedFile);
+        }
+    }
+
+    /** 方向检测：Tesseract OSD 输出 Rotate: 0/90/180/270；失败返回 0。 */
+    private int detectRotation(Path path) {
+        String text = runTesseract(path, "osd", OSD_TIMEOUT_SECONDS, "--psm", "0");
+        if (text == null) {
+            return 0;
+        }
+        Matcher matcher = Pattern.compile("Rotate:\\s*(\\d+)").matcher(text);
+        if (!matcher.find()) {
+            return 0;
+        }
+        int degrees = Integer.parseInt(matcher.group(1));
+        return switch (degrees) {
+            case 0, 90, 180, 270 -> degrees;
+            default -> 0;
+        };
+    }
+
+    /** 优先 OSD 角度；该角度无高置信 7 位候选时依次尝试其它方向。 */
+    private Scan scanRotations(BufferedImage source, int initial) {
+        Scan firstWeak = null;
+        Set<Integer> tried = new HashSet<>();
+        int[] order = rotationOrder(initial);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(COLOR_SCAN_BUDGET_SECONDS);
+        for (int angle : order) {
+            if (System.nanoTime() > deadline || !tried.add(angle)) {
+                continue;
+            }
+            BufferedImage image = rotate(source, angle);
+            ColorScan scan = scanColors(image);
+            if (scan.hasConfident()) {
+                return new Scan(scan.red(), scan.blue(), image, angle);
+            }
+            if (firstWeak == null && scan.hasAny()) {
+                firstWeak = new Scan(scan.red(), scan.blue(), image, angle);
+            }
+        }
+        return firstWeak != null ? firstWeak
+                : new Scan(List.of(), List.of(), rotate(source, initial), initial);
+    }
+
+    private static int[] rotationOrder(int initial) {
+        int[] order = new int[FALLBACK_ROTATIONS.length + 1];
+        order[0] = initial;
+        System.arraycopy(FALLBACK_ROTATIONS, 0, order, 1, FALLBACK_ROTATIONS.length);
+        return order;
+    }
+
+    private ColorScan scanColors(BufferedImage source) {
+        return new ColorScan(
+                recognizeColor(source, ReceiptColorDigitExtractor.Color.RED),
+                recognizeColor(source, ReceiptColorDigitExtractor.Color.BLUE));
     }
 
     private ReceiptOcrResult buildResult(Path path,
@@ -132,9 +204,13 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
         return ReceiptOcrResultBuilder.fallback(parsed, preferredColor());
     }
 
-    /** 单一颜色：彩色掩膜 → Tesseract TSV；psm 7 未命中再回退 psm 11。 */
+    /**
+     * 单一颜色：彩色掩膜 → Tesseract TSV。
+     * psm 11（稀疏文本）优先：蓝票旋转后数字与手写混排，psm 7 常整段漏识；
+     * 未找到高置信 7 位候选时再补 psm 7（单行）候选一起参与排序。
+     */
     private List<ReceiptColorDigitExtractor.Candidate> recognizeColor(
-            Path path, BufferedImage source, ReceiptColorDigitExtractor.Color color) {
+            BufferedImage source, ReceiptColorDigitExtractor.Color color) {
         Path maskFile = null;
         try {
             BufferedImage mask = ReceiptColorDigitExtractor.buildMask(source, color);
@@ -146,9 +222,11 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
                 return List.of();
             }
             List<ReceiptColorDigitExtractor.Candidate> candidates =
-                    recognizeMask(maskFile, source.getHeight(), "7");
-            return candidates.isEmpty()
-                    ? recognizeMask(maskFile, source.getHeight(), "11") : candidates;
+                    new ArrayList<>(recognizeMask(maskFile, source.getHeight(), "11"));
+            if (!hasConfidentSeven(candidates)) {
+                candidates.addAll(recognizeMask(maskFile, source.getHeight(), "7"));
+            }
+            return candidates;
         } catch (Exception e) {
             // 彩色提取是增强能力：任何异常都降级到全图 OCR，不影响制单
             log.warn("收据{}数字识别失败，回退全图 OCR：{}",
@@ -157,6 +235,46 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
         } finally {
             deleteTemp(maskFile);
         }
+    }
+
+    private static boolean hasConfidentSeven(
+            List<ReceiptColorDigitExtractor.Candidate> candidates) {
+        return candidates.stream().anyMatch(c -> c.digits().length() == 7 && c.upper()
+                && c.confidence() >= ReceiptOcrResultBuilder.MIN_CONFIDENCE);
+    }
+
+    /** 顺时针旋转；90/270 交换宽高，白底填充。 */
+    private static BufferedImage rotate(BufferedImage source, int degrees) {
+        int normalized = ((degrees % 360) + 360) % 360;
+        if (normalized == 0) {
+            return source;
+        }
+        boolean swap = normalized % 180 != 0;
+        int width = swap ? source.getHeight() : source.getWidth();
+        int height = swap ? source.getWidth() : source.getHeight();
+        BufferedImage out = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = out.createGraphics();
+        g.setColor(java.awt.Color.WHITE);
+        g.fillRect(0, 0, width, height);
+        g.translate(width / 2.0, height / 2.0);
+        g.rotate(Math.toRadians(normalized));
+        g.translate(-source.getWidth() / 2.0, -source.getHeight() / 2.0);
+        g.drawImage(source, 0, 0, null);
+        g.dispose();
+        return out;
+    }
+
+    private static Path writeTemp(BufferedImage image, String prefix) {
+        try {
+            Path file = Files.createTempFile(prefix, ".png");
+            if (ImageIO.write(image, "png", file.toFile())) {
+                return file;
+            }
+            Files.deleteIfExists(file);
+        } catch (IOException e) {
+            log.warn("收据旋转临时文件写入失败：{}", e.getMessage());
+        }
+        return null;
     }
 
     private List<ReceiptColorDigitExtractor.Candidate> recognizeMask(
@@ -345,5 +463,21 @@ public class ReceiptOcrServiceImpl implements ReceiptOcrService {
         drain.setDaemon(true);
         drain.start();
         return drain;
+    }
+
+    private record ColorScan(List<ReceiptColorDigitExtractor.Candidate> red,
+                             List<ReceiptColorDigitExtractor.Candidate> blue) {
+        boolean hasAny() {
+            return !red.isEmpty() || !blue.isEmpty();
+        }
+
+        boolean hasConfident() {
+            return hasConfidentSeven(red) || hasConfidentSeven(blue);
+        }
+    }
+
+    private record Scan(List<ReceiptColorDigitExtractor.Candidate> red,
+                        List<ReceiptColorDigitExtractor.Candidate> blue,
+                        BufferedImage image, int rotation) {
     }
 }
