@@ -2,7 +2,7 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
-## 2026-11-22（派工出库：施工工单上门员工限“施工员”角色，未发布）
+## 2026-11-22（派工出库：施工工单上门员工限“施工员”角色，已发布并冒烟通过）
 
 - **问题**：公众号员工工作台处理业务订单 22002（订单组织=临洮子公司，corp_id=9）派工出库，工单类型=施工 时，“上门员工”下拉列出该组织全部员工；该组织“施工员”角色实际仅 3 人。
 - **根因**：11-19 18:35 完成的角色过滤改动**从未构建发布**——生产 ops JAR（16:59）与 H5 静态资源（17:00）均早于源码修改时间，线上仍走旧逻辑（订单组织内全部在职人员，无角色过滤）。
@@ -10,8 +10,10 @@
   - ops `GET /api/ops/admin/business-data/flow/assignees` 新增可选参数 `roleName`、`offset`（向后兼容）；SQL 以 `HAVING SUM(CASE WHEN cr.role_name = ? THEN 1 ELSE 0 END) > 0` 按订单归属组织精确过滤企业角色，内部/外部不限；`ORDER BY userName, u.id, uc.id` + `LIMIT ? OFFSET ?` 保证分页稳定、不重不漏。
   - 派工提交 `BusinessOrderFlowActionService` 增加服务端最终防线：施工工单上门员工必须在订单组织具备“施工员”角色，绕过前端也无法提交；随访不受限。
   - H5 `DispatchWorkerPicker` / `useDispatchWorker` 与平台主站 `WorkerSelect` / `useWorkerSelect` 透传 `roleName`、滚动分页、失败态可重试；切换工单类型清除不合规已选人员，选择器同步清空内部选中态；随访场景标题/空态/未绑微信提示不再写死“施工员”。
-- **验证**：生产库实跑角色过滤 SQL，corp_id=9 返回施工员 3 人（孙莉娟、外部施工员、22）；ops `mvn package`、ops H5 `npm run build:h5`、平台前端 `npm run build` 均通过。
-- **未发布**：需同时发布 ops JAR + ops H5（PC 主站改动在 ai-native-platform 仓库）；只发前端或只发 JAR 都不生效。
+- **验证**：生产库实跑角色过滤 SQL（完整 SQL 原文），corp_id=9 返回施工员 3 人（孙莉娟、外部施工员、22）；ops `mvn package`、ops H5 `npm run build:h5`、平台前端 `npm run build` 均通过。
+- **发布（16:33–16:35）**：ops overlay 镜像 `boss-platform/ops:latest`=`cc044e2e1f61`（回滚 `boss-platform/ops:rollback-20261122_163333`=`2ace9c98fdeb`，FROM 该镜像 COPY 新 JAR，保留 Python/openpyxl）；JAR sha256 `fe380e8c1ab73cd4…`；`docker compose up -d ops-backend` 重建，8082 health UP（8s）。备份 `/data2/boss-platform/backups/ops-app-current-20261122_163333.jar`、`ops-h5-current-20261122_163333.tgz`、`platform-fe-current-20261122_163333.tgz`。静态资源先清空再解包：ops 入口 `index-CbEk6rqy.js`、派工 chunk `pages-employee-flow-task.CPvv4jdO.js`；平台入口 `index-CX13ZPYw.js`、`BusinessDataFlowTask-BhReYeg5.js`；三个 nginx（edge/ops/platform）`nginx -t` + reload 通过。冒烟：`/` 与 `/ops/` 200、新 chunk 200、未登录 `flow/assignees` 401、部署 JAR 类含 `HAVING SUM(CASE WHEN cr.role_name`/`LIMIT ? OFFSET ?`/`roleName`。本次同时发布 11-19 的候选分页/滚动加载改动（含平台 PC 端）。
+- **未执行**：真实登录后的接口与派工提交 E2E—— `deploy-prod.sh` 内置 admin 冒烟凭据已失效（500 用户名或密码错误），且无员工测试账号；数据正确性已由生产库 SQL 原文实跑覆盖。
+- **注意**：微信端入口 chunk 已从 `index-JqinIHdo.js` 变为 `index-CbEk6rqy.js`，若仍看到旧列表需清理微信缓存/重新进入。
 
 ## 2026-11-19（派工施工员候选列表补齐分页/滚动加载，未发布）
 
