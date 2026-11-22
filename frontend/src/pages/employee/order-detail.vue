@@ -63,6 +63,10 @@
         <view class="kv"><text class="k">提成合计</text><text class="v commission">¥{{ money(order.totalCommission) }}</text></view>
       </view>
 
+      <view v-if="unavailableReason" class="card action-card">
+        <text class="action-hint">{{ unavailableReason }}</text>
+      </view>
+
       <view v-if="showActions" class="card action-card">
         <text class="card-title">订单操作</text>
         <view class="action-row">
@@ -317,6 +321,24 @@ const showActions = computed(() => {
   return !!(o.canEdit || o.canReturnDraft || o.canApplyRefund || o.canRestartFlow)
 })
 
+/**
+ * 需求六.1：操作不可用时需说明原因。操作卡只在可操作时展示，
+ * 已到派工出库及之后、作废、审批中的订单在这里给出只读原因。
+ */
+const unavailableReason = computed(() => {
+  const o = order.value || {}
+  if (o.refund && o.refund.status === 'PENDING') {
+    return '作废退款审批中，暂不可退回草稿或重复发起退款'
+  }
+  if (String(o.bizStatus) === '-1') return '订单已作废退款，不可再操作'
+  if (o.draftFlag) return '' // 草稿态可由 canEdit 展示操作卡
+  const status = Number(o.bizStatus)
+  if (Number.isFinite(status) && status >= 3) {
+    return '业务状态已到派工出库及之后，不可退回草稿或发起退款'
+  }
+  return ''
+})
+
 const refundApproverText = computed(() => {
   const list = (order.value && order.value.refund && order.value.refund.flow
     && order.value.refund.flow.currentApprovers) || []
@@ -568,7 +590,7 @@ function formatTime(value) {
 .action-btn.primary { background: #FF6B35; color: #fff; }
 .action-btn.ghost { background: #fff; color: #FF6B35; border: 2rpx solid #FF6B35; }
 .action-btn.danger { background: #FFF1F0; color: #C62828; border: 2rpx solid #FFC9C4; }
-.action-hint { font-size: 21rpx; color: #999; line-height: 1.5; }
+.action-hint { font-size: 22rpx; color: #86909C; line-height: 1.5; }
 .refund-head { display: flex; align-items: center; justify-content: space-between; }
 .refund-status {
   font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 6rpx;
