@@ -175,6 +175,10 @@
         <view class="info-row"><text class="k">计算状态</text><text class="v">{{ order.calcStatus || '未计算' }}</text></view>
       </view>
 
+      <ConstructFlowActions v-if="isBusinessOrder && actionType === 'OPS_CONSTRUCTION_RECORD'"
+                            :order-id="order.orderId" :construct="order.construct"
+                            @changed="onConstructChanged" />
+
       <view v-if="isBusinessOrder && order.refund" class="card">
         <view class="card-title">
           <text>作废退款申请</text>
@@ -327,6 +331,9 @@
         </template>
 
         <template v-else-if="actionType === 'OPS_CONSTRUCTION_RECORD'">
+          <view v-if="constructionBlockedReason" class="block-alert">
+            <text>{{ constructionBlockedReason }}</text>
+          </view>
           <view class="field"><text class="label">施工说明</text>
             <textarea v-model="form.constructionNote" class="textarea" maxlength="1000" placeholder="现场施工情况" />
           </view>
@@ -361,7 +368,9 @@
 
       <view v-if="taskPending" class="actions">
         <button v-if="showGenericReject" class="btn danger" :disabled="submitting" @click="rejectVisible = true">驳回</button>
-        <button class="btn primary" :disabled="submitting || !!dispatchBlockedReason" @click="submit">{{ submitting ? '提交中...' : '提交处理' }}</button>
+        <button class="btn primary"
+                :disabled="submitting || !!dispatchBlockedReason || !!constructionBlockedReason"
+                @click="submit">{{ submitting ? '提交中...' : '提交处理' }}</button>
       </view>
     </template>
 
@@ -385,6 +394,7 @@ import RejectPopup from '@/components/RejectPopup.vue'
 import DispatchMaterialList from '@/components/DispatchMaterialList.vue'
 import AcceptanceEvidence from '@/components/AcceptanceEvidence.vue'
 import DispatchWorkerPicker from '@/components/DispatchWorkerPicker.vue'
+import ConstructFlowActions from '@/components/ConstructFlowActions.vue'
 
 const loading = ref(true)
 const submitting = ref(false)
@@ -555,7 +565,16 @@ const actionTitle = computed(() => {
     OPS_ACCEPTANCE: '完工验收'
   }[actionType.value] || '节点处理'
 })
-const showGenericReject = computed(() => !['OPS_FINANCE_CHECK', 'OPS_ACCEPTANCE'].includes(actionType.value))
+/** 施工记录节点的接收/打卡/签字/开工由业务状态链承担，不再提供工作流驳回入口 */
+const showGenericReject = computed(() => !['OPS_FINANCE_CHECK', 'OPS_ACCEPTANCE',
+  'OPS_CONSTRUCTION_RECORD'].includes(actionType.value))
+/** 施工记录必须在确认开工后提交（施工中=4，验收退回返工=5） */
+const constructionBlockedReason = computed(() => {
+  if (actionType.value !== 'OPS_CONSTRUCTION_RECORD') return ''
+  const status = String((order.value && order.value.bizStatus) || '')
+  if (['4', '5'].includes(status)) return ''
+  return '请先在【施工流程】完成确认接收、上门打卡、客户签字与确认开工'
+})
 const dispatchProducts = computed(() => (order.value.products || [])
   .filter(p => !p.isReturnEntry && Number(p.saleQuantity || 1) > 0))
 function onWorkerSelected(worker) {
@@ -648,6 +667,21 @@ async function loadData() {
   }
 }
 
+/** 施工链操作成功后刷新订单/待办：状态、按钮、施工记录提交权限同步更新 */
+async function onConstructChanged(meta) {
+  // 拒绝接单后工作流已退回派工，当前任务不再是待办，详情接口会 403
+  if (meta && meta.rejected) {
+    uni.showModal({
+      title: '已拒绝接单',
+      content: '订单已退回派工，请等待派工人重新指派',
+      showCancel: false,
+      success: goTodo
+    })
+    return
+  }
+  await loadData()
+}
+
 async function loadCategoryDict() {
   try {
     const data = await api.getDictData('PRODUCT_CATEGORY')
@@ -733,6 +767,7 @@ function buildFormData() {
 
 function validate() {
   if (dispatchBlockedReason.value) return dispatchBlockedReason.value
+  if (constructionBlockedReason.value) return constructionBlockedReason.value
   if (actionType.value === 'OPS_FINANCE_CHECK') {
     if (!String(form.receiptNo || '').trim()) return '请填写收据号'
     if (!form.financeReceiptDate) return '请选择财务收款日期'

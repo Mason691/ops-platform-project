@@ -185,6 +185,24 @@
                               :biz-status="order.bizStatus" :biz-status-name="order.bizStatusName" />
       </view>
 
+      <view v-if="construct && (construct.logs || []).length" class="card">
+        <text class="card-title">施工流转记录</text>
+        <ConstructTimeline :logs="construct.logs" />
+        <view v-if="construct.notice" class="notice-block">
+          <text class="notice-title">
+            用户告知书 · V{{ construct.notice.version }}
+            <text class="notice-time">{{ construct.notice.signTime }}</text>
+          </text>
+          <text class="notice-content">{{ construct.notice.content }}</text>
+          <image v-if="construct.notice.signImageUrl" :src="assetUrl(construct.notice.signImageUrl)"
+                 class="notice-sign" mode="aspectFit" @click="previewNotice" />
+          <view class="notice-foot">
+            <text class="notice-hint">点击签字图片可放大查看（SHA-256 已归档）</text>
+            <text class="notice-verify" @click="verifyNotice">校验凭证</text>
+          </view>
+        </view>
+      </view>
+
       <view v-if="flowRecords.length" class="card">
         <text class="card-title">流程处理记录</text>
         <view v-for="(record, i) in flowRecords" :key="record.id || i" class="record">
@@ -219,6 +237,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/api'
 import BusinessFlowProgress from '@/components/BusinessFlowProgress.vue'
 import BusinessRefundSheet from '@/components/BusinessRefundSheet.vue'
+import ConstructTimeline from '@/components/ConstructTimeline.vue'
 import { assetUrl } from '@/utils/image'
 
 /**
@@ -256,10 +275,33 @@ async function load() {
   }
 }
 
+const construct = computed(() => (order.value && order.value.construct) || null)
+
 const attachments = computed(() => {
   const list = (order.value && order.value.attachments) || []
   return list.filter(file => file && (file.fileUrl || file.url))
 })
+
+function previewNotice() {
+  const url = construct.value && construct.value.notice
+    ? construct.value.notice.signImageUrl : ''
+  if (url) uni.previewImage({ urls: [url] })
+}
+
+async function verifyNotice() {
+  try {
+    const result = await api.constructVerifyNotice(orderId.value)
+    uni.showModal({
+      title: result && result.consistent ? '凭证校验通过' : '凭证校验不一致',
+      content: result && result.consistent
+        ? `告知书 V${result.version} 签字图片与归档哈希一致，未被篡改。`
+        : '签字图片哈希与归档记录不一致，请联系管理员核查。',
+      showCancel: false
+    })
+  } catch (e) {
+    uni.showToast({ title: (e && e.msg) || '校验失败，请稍后重试', icon: 'none' })
+  }
+}
 
 function isImageFile(file) {
   return String(file.contentType || '').startsWith('image/')
@@ -629,4 +671,21 @@ function formatTime(value) {
   display: flex; align-items: center; justify-content: center; }
 .video-player { width: 92vw; max-height: 70vh; }
 .video-close { position: absolute; top: 80rpx; right: 40rpx; color: #fff; font-size: 64rpx; }
+.notice-block {
+  margin-top: 8rpx; padding: 20rpx; background: #FAFAFA;
+  border: 1rpx solid #EEEFF2; border-radius: 12rpx;
+}
+.notice-title { display: block; font-size: 26rpx; font-weight: 700; color: #1D2129; }
+.notice-time { font-size: 20rpx; color: #A9AEB8; font-weight: 400; margin-left: 8rpx; }
+.notice-content {
+  display: block; margin-top: 12rpx; white-space: pre-wrap;
+  font-size: 22rpx; line-height: 1.8; color: #4E5969; word-break: break-all;
+}
+.notice-sign {
+  margin-top: 14rpx; width: 100%; height: 220rpx; background: #fff;
+  border: 1rpx solid #EEEFF2; border-radius: 10rpx;
+}
+.notice-foot { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; margin-top: 6rpx; }
+.notice-hint { font-size: 19rpx; color: #A9AEB8; }
+.notice-verify { flex-shrink: 0; font-size: 21rpx; color: #2F6FEB; padding: 4rpx 0; }
 </style>

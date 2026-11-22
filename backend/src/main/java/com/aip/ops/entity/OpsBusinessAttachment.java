@@ -28,6 +28,9 @@ public class OpsBusinessAttachment extends BaseEntity {
     /** 完工验收凭证：图片或短视频，验收节点强制至少 1 个。 */
     public static final String TYPE_ACCEPTANCE = "ACCEPTANCE";
 
+    /** 施工上门打卡现场照片（派工→施工中状态链的到场凭证）。 */
+    public static final String TYPE_CONSTRUCT = "CONSTRUCT";
+
     @TableId(type = IdType.AUTO)
     private Long id;
 

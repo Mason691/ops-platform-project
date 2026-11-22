@@ -109,6 +109,10 @@ function openDetail(order) {
 function statusClass(order) {
   if (String(order.bizStatus) === '-1') return 'void'
   if (order.draftFlag) return 'draft'
+  const bizStatus = String(order.bizStatus || '')
+  if (bizStatus === 'WAIT_ACCEPT') return 'waiting'
+  if (bizStatus === 'CUSTOMER_REFUSED') return 'stopped'
+  if (['ACCEPTED', 'ARRIVED', 'CUSTOMER_CONFIRMED'].includes(bizStatus)) return 'running'
   const status = order.flow && order.flow.status
   if (status === 'COMPLETED') return 'done'
   if (status === 'REJECTED' || status === 'TERMINATED') return 'stopped'
@@ -150,6 +154,7 @@ function formatDate(value) {
 .status-tag.void { background: #FFF1F0; color: #C62828; font-weight: 700; }
 .status-tag.draft { background: #F2F3F5; color: #86909C; }
 .status-tag.refunding { background: #FFF7E6; color: #B26A00; }
+.status-tag.waiting { background: #FFF7E6; color: #B26A00; }
 .trade-tag {
   flex-shrink: 0; font-size: 19rpx; padding: 2rpx 10rpx; border-radius: 6rpx;
   background: #FFF0E8; color: #C2410C;

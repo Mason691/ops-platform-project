@@ -147,6 +147,15 @@ security:
     # 每日巡检（绕过缓存重新验签），失败记 PAYMENT_QR_INTEGRITY_PATROL_FAILED
     patrol-cron: "${QR_PATROL_CRON:0 0 3 * * *}"
 
+# 施工状态链（派工 → 待接收 → 已接收 → 已上门 → 客户已确认 → 施工中）
+construct:
+  # 用户告知书模板；留空使用服务端内置模板。
+  # 变量：{workerName} {noticeTime} {orderNo} {community} {address} {products} {date}
+  notice-template: ${CONSTRUCT_NOTICE_TEMPLATE:}
+  notify:
+    # 施工进度公众号通知；未配置 CONSTRUCT_PROGRESS 模板时静默跳过，不影响业务
+    enabled: ${CONSTRUCT_NOTIFY_ENABLED:true}
+
 management:
   endpoints:
     web:
