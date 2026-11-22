@@ -64,15 +64,12 @@ const hasFlow = computed(() => props.flow && props.flow.status
   && props.flow.status !== 'NOT_STARTED' && props.flow.status !== 'UNKNOWN')
 
 const steps = computed(() => {
+  // 字典接口已按 item_order 返回；不能再对混合 key（数字 + 新状态字符串）排序，
+  // 否则 '4' 会排在 WAIT_ACCEPT 之前导致步骤条错位。
   const options = (props.statusOptions || [])
-    .filter(item => item && item.itemKey != null)
+    // 作废退款是终态分支，不属于线性流程，避免出现在步骤条第一格
+    .filter(item => item && item.itemKey != null && String(item.itemKey) !== '-1')
     .map(item => ({ key: String(item.itemKey), label: item.itemValue || item.itemKey }))
-    .sort((a, b) => {
-      const na = Number(a.key)
-      const nb = Number(b.key)
-      if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb
-      return a.key.localeCompare(b.key)
-    })
   if (!options.length) return []
   const currentKey = String(props.flow.currentBizStatus != null
     ? props.flow.currentBizStatus : props.bizStatus)

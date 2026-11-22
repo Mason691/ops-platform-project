@@ -38,7 +38,8 @@ import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 import {
-  TODO_PAGE_SIZE, decorateTodo, filterIneligibleDispatch, sortTodoByCreateTime
+  TODO_PAGE_SIZE, decorateTodo, filterIneligibleConstruct, filterIneligibleDispatch,
+  sortTodoByCreateTime
 } from '@/utils/workflowTodo'
 import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
 
@@ -62,7 +63,8 @@ async function loadData() {
   try {
     const data = await api.workflowTodo({ pageNum: 1, pageSize: TODO_PAGE_SIZE })
     const records = Array.isArray(data && data.records) ? data.records : []
-    const filtered = await filterIneligibleDispatch(records)
+    const filtered = await filterIneligibleConstruct(
+      await filterIneligibleDispatch(records))
     // 与工作台首页共用同一套过滤/排序口径（任务创建时间倒序），保证两处顺序一致
     const receivedAt = Date.now()
     list.value = sortTodoByCreateTime(decorateTodo(filtered, receivedAt))

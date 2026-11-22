@@ -183,6 +183,37 @@ public class OpsBusinessOrder extends BaseEntity {
     @TableField("draft_flag")
     private Integer draftFlag;
 
+    /** 指派施工员 sys_user.id（派工出库时写入；拒绝接单/退回派工后清空）。 */
+    @TableField("worker_id")
+    private Long workerId;
+
+    @TableField("worker_name")
+    private String workerName;
+
+    /** 施工员类型：0=内部 1=外部。 */
+    @TableField("worker_user_type")
+    private Integer workerUserType;
+
+    /** 最近一次派工任务ID：同一任务重试时 SCM 按 dispatchId 幂等复用出库单。 */
+    @TableField("dispatch_task_id")
+    private Long dispatchTaskId;
+
+    @TableField("accept_time")
+    private LocalDateTime acceptTime;
+
+    @TableField("arrive_time")
+    private LocalDateTime arriveTime;
+
+    @TableField("customer_confirm_time")
+    private LocalDateTime customerConfirmTime;
+
+    @TableField("start_time")
+    private LocalDateTime startTime;
+
+    /** 乐观锁版本：施工流转每次状态变更 +1，与 biz_status 一起做 CAS。 */
+    @TableField("version")
+    private Integer version;
+
     /** 当前工作流实例 ID（wf_instance.id，平台工作流组件）。 */
     @TableField("wf_instance_id")
     private Long wfInstanceId;

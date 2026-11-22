@@ -1,6 +1,7 @@
 package com.aip.ops.service;
 
 import com.aip.ops.entity.OpsBusinessOrder;
+import com.aip.ops.service.construct.OrderConstructStatus;
 import com.aip.sdk.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -55,7 +56,13 @@ public class DispatchEligibilityService {
 
     /** 财务核对已完成：状态 2（财务核对）或 3+（已进入派工/后续节点），或已落核对时间/结论。 */
     private boolean financeChecked(OpsBusinessOrder order) {
-        int status = parseInt(order.getBizStatus(), -1);
+        String raw = order.getBizStatus() == null ? "" : order.getBizStatus().trim();
+        // 新施工状态链是字符串 key，不能用 parseInt 判断；它们都在财务核对之后
+        if (OrderConstructStatus.isPreStart(raw) || OrderConstructStatus.isConstructing(raw)
+                || "6".equals(raw) || "7".equals(raw)) {
+            return true;
+        }
+        int status = parseInt(raw, -1);
         if (status >= 2) return true;
         if (order.getFinanceCheckTime() != null) return true;
         return "PASS".equalsIgnoreCase(order.getFinanceCheckConclusion());

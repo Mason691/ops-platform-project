@@ -137,6 +137,84 @@ public class WorkflowPlatformClient {
     }
 
     /**
+     * 施工员拒绝接单：以内部身份驳回「施工执行」待办，工作流按 PREVIOUS 退回派工节点。
+     *
+     * <p>ops 侧已校验任务归属与订单状态；平台侧 {@code requireTaskOwner} 会再次
+     * 校验 operatorUserId 是否为任务处理人。formData 为空，避免触发派工节点动作。</p>
+     */
+    public void rejectConstructTask(Long taskId, String opinion, Long operatorUserId,
+                                    String operatorName) {
+        if (taskId == null) {
+            throw BusinessException.of("缺少施工任务信息，请刷新待办后重试");
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Internal-Token", internalToken);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("taskId", taskId);
+        body.put("opinion", opinion);
+        body.put("operatorUserId", operatorUserId);
+        body.put("operatorName", operatorName);
+        try {
+            Map<?, ?> resp = restTemplate.postForObject(
+                    baseUrl + "/api/internal/wf/task/reject",
+                    new HttpEntity<>(body, headers), Map.class);
+            if (resp == null) {
+                throw BusinessException.of("工作流服务无响应");
+            }
+            Object code = resp.get("code");
+            if (code instanceof Number n && n.intValue() != 200) {
+                Object msg = resp.get("msg");
+                throw BusinessException.of("退回派工失败："
+                        + (msg instanceof String s && !s.isBlank() ? s : "未知错误"));
+            }
+        } catch (RestClientResponseException e) {
+            log.warn("施工员拒绝接单失败 status={}, body={}",
+                    e.getStatusCode().value(), e.getResponseBodyAsString());
+            throw BusinessException.of("工作流服务不可用，请稍后重试");
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("施工员拒绝接单异常 taskId={}: {}", taskId, e.getMessage());
+            throw BusinessException.of("工作流服务不可用，请稍后重试");
+        }
+    }
+
+    /**
+     * 施工进度公众号通知（尽力而为）：模板未配置/发送失败只记日志，不影响业务状态。
+     */
+    public void notifyConstructProgress(Long instanceId, Long receiverUserId, String orderNo,
+                                        String actionName, String operatorName, String remark,
+                                        String dedupKey) {
+        if (instanceId == null || receiverUserId == null) return;
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Internal-Token", internalToken);
+        Map<String, Object> vars = new LinkedHashMap<>();
+        vars.put("orderNo", orderNo == null ? "" : orderNo);
+        vars.put("constructAction", actionName == null ? "" : actionName);
+        vars.put("operatorName", operatorName == null ? "" : operatorName);
+        vars.put("remark", remark == null ? "" : remark);
+        vars.put("taskTypeLabel", "施工进度");
+        vars.put("orgTaskTypeFull", "施工进度");
+        vars.put("submitTime", java.time.LocalDateTime.now().format(
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("instanceId", instanceId);
+        body.put("receiverUserId", receiverUserId);
+        body.put("sceneCode", "CONSTRUCT_PROGRESS");
+        body.put("dedupKey", dedupKey);
+        body.put("vars", vars);
+        try {
+            restTemplate.postForObject(baseUrl + "/api/internal/wf/notify",
+                    new HttpEntity<>(body, headers), Map.class);
+        } catch (Exception e) {
+            log.warn("施工进度通知失败 instanceId={}, receiver={}: {}",
+                    instanceId, receiverUserId, e.getMessage());
+        }
+    }
+
+    /**
      * 按实例查询当前审批人（用于结果页轮询/详情页兜底）。
      *
      * <p>底座实例详情接口需要用户 JWT；从当前请求透传员工 Bearer Token。

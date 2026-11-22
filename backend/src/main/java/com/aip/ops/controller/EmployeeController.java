@@ -16,6 +16,7 @@ import com.aip.ops.service.EmployeeBusinessEntryService;
 import com.aip.ops.service.EmployeeService;
 import com.aip.ops.service.ProductPriceService;
 import com.aip.ops.service.ReceiptOcrService;
+import com.aip.ops.service.construct.OrderConstructService;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.LoginUser;
@@ -63,6 +64,7 @@ public class EmployeeController {
     private final BusinessOrderRefundService businessOrderRefundService;
     private final JwtTokenInspector jwtTokenInspector;
     private final PlatformInternalClient platformInternalClient;
+    private final OrderConstructService orderConstructService;
 
     @Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
     private String uploadBaseDir;
@@ -131,8 +133,10 @@ public class EmployeeController {
         if ("sso".equals(jwtTokenInspector.currentTokenType())) {
             return R.fail(403, "仅员工可查看业务订单");
         }
-        return R.ok(businessDataService.employeeOrderDetail(
-                SecurityUtils.getCurrentCorpId(), employeeService.getCurrentAgentPhone(), orderId));
+        Map<String, Object> detail = businessDataService.employeeOrderDetail(
+                SecurityUtils.getCurrentCorpId(), employeeService.getCurrentAgentPhone(), orderId);
+        attachConstruct(detail, orderId);
+        return R.ok(detail);
     }
 
     /**
@@ -144,8 +148,22 @@ public class EmployeeController {
         if ("sso".equals(jwtTokenInspector.currentTokenType())) {
             return R.fail(403, "仅员工可查看业务订单");
         }
-        return R.ok(businessDataService.employeeTaskOrderDetail(
-                SecurityUtils.getCurrentUserId(), taskId));
+        Map<String, Object> detail = businessDataService.employeeTaskOrderDetail(
+                SecurityUtils.getCurrentUserId(), taskId);
+        Object orderId = detail.get("orderId");
+        if (orderId instanceof Number number) {
+            attachConstruct(detail, number.longValue());
+        }
+        return R.ok(detail);
+    }
+
+    /** 施工状态链随详情返回；加载失败不阻断主详情。 */
+    private void attachConstruct(Map<String, Object> detail, Long orderId) {
+        try {
+            detail.put("construct", orderConstructService.view(orderId));
+        } catch (Exception e) {
+            log.warn("加载施工流转失败 orderId={}: {}", orderId, e.getMessage());
+        }
     }
 
     /** 退回草稿：终止当前流程、状态回 0、允许编辑后沿用原订单编号重新提交。 */

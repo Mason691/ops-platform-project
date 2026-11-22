@@ -67,6 +67,27 @@ export function sortTodoByCreateTime(records) {
  * H5 按订单派工资格过滤；任务页与后端节点动作仍会二次拦截。
  * 资格查询失败时 fail-open，由任务页/后端的最终校验兜底。
  */
+/**
+ * 施工任务按当前组织过滤：施工员在多个组织任职时，切换组织后
+ * 首页/待办只展示当前组织的施工任务。
+ *
+ * <p>任务接口已返回业务单据归属组织（corpId），无需逐单查询施工视图；
+ * 写操作仍由后端强校验「当前组织 = 订单组织」。</p>
+ */
+export function filterIneligibleConstruct(records) {
+  const currentCorpId = String(uni.getStorageSync('corp_id') || '')
+  if (!currentCorpId) return records || []
+  return (records || []).filter(item => !(isConstructTask(item)
+    && item.corpId != null && String(item.corpId) !== currentCorpId))
+}
+
+function isConstructTask(item) {
+  if (!item || item.businessType !== 'OPS_BUSINESS_ORDER') return false
+  const nodeName = String((item.task && item.task.nodeName)
+    || item.currentNodeName || '')
+  return nodeName.includes('施工')
+}
+
 export async function filterIneligibleDispatch(records) {
   const dispatch = (records || []).filter(item => item.businessType === 'OPS_BUSINESS_ORDER'
     && String((item.task && item.task.nodeName) || item.currentNodeName || '').includes('派工'))
