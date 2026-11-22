@@ -32,8 +32,14 @@ public interface BusinessDataService {
     /** 派工资格批量查询（H5/PC 待办过滤与任务页提示共用）。 */
     List<Map<String, Object>> dispatchEligibility(List<Long> orderIds);
 
-    /** 派工施工员搜索：订单组织内内部+外部在职成员，施工员角色优先。 */
-    java.util.List<Map<String, Object>> flowAssignees(Long orderId, String keyword, Integer limit);
+    /**
+     * 派工可选员工搜索：订单组织内内部+外部在职成员，施工员角色优先。
+     *
+     * @param roleName 非空时只返回具备该企业角色的人员（施工工单传“施工员”）
+     * @param offset   分页偏移，null/负数按 0 处理（前端滚动加载传已加载条数）
+     */
+    java.util.List<Map<String, Object>> flowAssignees(Long orderId, String keyword, Integer limit,
+                                                      String roleName, Integer offset);
 
     /** 工作流任务处理人查看订单详情：按 taskId 校验当前用户是待办审批人。 */
     Map<String, Object> employeeTaskOrderDetail(Long userId, Long taskId);

@@ -292,6 +292,7 @@
               v-model="form.assigneeUserId"
               :order-id="order.orderId"
               :corp-name="order.company || order.corpName"
+              :role-name="form.dispatchType === 'CONSTRUCTION' ? '施工员' : ''"
               @selected="onWorkerSelected"
             />
           </view>
@@ -562,6 +563,15 @@ function onWorkerSelected(worker) {
   form.assignSource = worker?.createdOnSite ? 'CREATED_ON_SITE' : 'SELECTED'
 }
 
+/** 施工工单只允许施工员：切换工单类型时清掉不符合角色的已选人员 */
+watch(() => form.dispatchType, type => {
+  if (type !== 'CONSTRUCTION' || !selectedWorker.value) return
+  if (selectedWorker.value.workerRole === false) {
+    selectedWorker.value = null
+    form.assigneeUserId = null
+  }
+})
+
 onLoad((options) => {
   taskId.value = (options && options.taskId) || ''
   instanceId.value = (options && options.instanceId) || ''
@@ -733,6 +743,10 @@ function validate() {
   }
   if (actionType.value === 'OPS_DISPATCH_OUTBOUND') {
     if (!form.assigneeUserId) return '请选择上门员工'
+    if (form.dispatchType === 'CONSTRUCTION'
+        && selectedWorker.value && selectedWorker.value.workerRole === false) {
+      return '上门员工必须是施工员角色'
+    }
     if (!form.expectTime) return '请选择期望上门日期和上午/下午'
     if (form.dispatchType === 'VISIT' && !String(form.visitNote || '').trim()) return '请填写随访任务说明'
     if (form.dispatchType === 'CONSTRUCTION') {

@@ -257,12 +257,17 @@ public class BusinessDataController {
         return R.ok(bizStatusService.options());
     }
 
-    /** 工作流派工节点可选员工：传 orderId 时按订单归属组织取人；不传沿用当前可见组织范围。 */
+    /**
+     * 工作流派工节点可选员工：传 orderId 时按订单归属组织取人；不传沿用当前可见组织范围。
+     * roleName 非空时按企业角色过滤（施工工单只允许施工员）；offset 支持滚动加载分页。
+     */
     @GetMapping("/flow/assignees")
     public R<?> flowAssignees(@RequestParam(value = "orderId", required = false) Long orderId,
                               @RequestParam(value = "keyword", required = false) String keyword,
-                              @RequestParam(value = "limit", required = false) Integer limit) {
-        return R.ok(service.flowAssignees(orderId, keyword, limit));
+                              @RequestParam(value = "limit", required = false) Integer limit,
+                              @RequestParam(value = "roleName", required = false) String roleName,
+                              @RequestParam(value = "offset", required = false) Integer offset) {
+        return R.ok(service.flowAssignees(orderId, keyword, limit, roleName, offset));
     }
 
     /**

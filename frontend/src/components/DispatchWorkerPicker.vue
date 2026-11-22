@@ -2,27 +2,27 @@
   <view class="worker-picker">
     <view class="trigger" @click="open">
       <text v-if="selected" class="selected">
-        {{ selected.userName }}（{{ selected.userType === 1 ? '外部' : '内部' }} · {{ selected.phoneMasked }}）
+        {{ selectedName }}（{{ selected.userType === 1 ? '外部' : '内部' }} · {{ selected.phoneMasked }}）
       </text>
       <text v-else class="placeholder">请选择上门员工</text>
       <text class="arrow">›</text>
     </view>
     <text v-if="selected && selected.wechatBound === false" class="warn">
-      该施工员未绑定微信，可能无法接收任务通知
+      该员工未绑定微信，可能无法接收任务通知
     </text>
 
     <view v-if="visible" class="mask" @click.self="visible = false">
       <view class="sheet">
         <view class="head">
-          <text class="title">选择施工员</text>
+          <text class="title">{{ sheetTitle }}</text>
           <text class="close" @click="visible = false">×</text>
         </view>
         <input v-model="keyword" class="search" placeholder="搜索姓名 / 手机号"
                confirm-type="search" @input="onInput" />
-        <scroll-view scroll-y class="list">
+        <scroll-view scroll-y class="list" lower-threshold="60" @scrolltolower="loadMore">
           <view v-for="worker in workers" :key="worker.userId" class="row" @click="choose(worker)">
             <view class="row-main">
-              <text class="name">{{ worker.userName }}</text>
+              <text class="name">{{ worker.userName || worker.name || '未命名' }}</text>
               <text class="tag" :class="{ external: worker.userType === 1 }">
                 {{ worker.userType === 1 ? '外部' : '内部' }}
               </text>
@@ -33,11 +33,18 @@
             </view>
             <view class="row-sub">
               <text>{{ worker.phoneMasked || worker.phone || '—' }}</text>
+              <text v-if="worker.corpName">组织：{{ worker.corpName }}</text>
               <text v-if="(worker.roles || []).length">角色：{{ (worker.roles || []).join('、') }}</text>
             </view>
           </view>
           <view v-if="loading" class="empty">加载中…</view>
-          <view v-else-if="!workers.length" class="empty">未找到施工员</view>
+          <view v-else-if="error" class="empty error" @click="search(keyword)">
+            {{ error }}，点击重试
+          </view>
+          <view v-else-if="!workers.length" class="empty">
+            {{ emptyText }}
+          </view>
+          <view v-else-if="hasMore" class="empty">上拉加载更多</view>
         </scroll-view>
         <view class="add" @click="createVisible = true">未找到？新增外部施工员</view>
       </view>
@@ -54,25 +61,41 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useDispatchWorker } from '@/hooks/useDispatchWorker'
 import DispatchExternalWorkerDialog from './DispatchExternalWorkerDialog.vue'
 
 const props = defineProps({
   modelValue: { type: [Number, String], default: null },
   orderId: { type: [Number, String], default: null },
-  corpName: { type: String, default: '' }
+  corpName: { type: String, default: '' },
+  /** 非空时只返回该企业角色的人员（施工工单传“施工员”，随访留空） */
+  roleName: { type: String, default: '' }
 })
 const emit = defineEmits(['update:modelValue', 'selected'])
 
 const visible = ref(false)
 const createVisible = ref(false)
 const selected = ref(null)
-const { workers, loading, keyword, search, onKeywordInput, destroy } =
-  useDispatchWorker(() => props.orderId)
+const { workers, loading, keyword, error, hasMore, search, loadMore, onKeywordInput, destroy } =
+  useDispatchWorker(() => props.orderId, () => props.roleName)
+const selectedName = computed(() =>
+  selected.value?.userName || selected.value?.name || '未命名')
+// 随访不限角色，只有施工工单按“施工员”过滤；文案随之切换，避免随访时提示“未找到施工员”
+const sheetTitle = computed(() => props.roleName ? `选择${props.roleName}` : '选择上门员工')
+const emptyText = computed(() => props.roleName
+  ? `该组织下未找到${props.roleName}，请检查角色绑定`
+  : '该组织下未找到员工')
+
+// 父组件切换工单类型会清空 v-model（已选人员不符合角色），内部选中态必须同步清掉，
+// 否则触发框仍显示已被清除的姓名，提交时却提示“请选择上门员工”。
+watch(() => props.modelValue, value => {
+  if (value == null || value === '') selected.value = null
+})
 
 async function open() {
   visible.value = true
+  keyword.value = ''
   await search('')
   if (props.modelValue) {
     const found = workers.value.find(w => String(w.userId) === String(props.modelValue))
@@ -98,6 +121,7 @@ function onCreated(result) {
     userName: result.userName,
     phoneMasked: result.phoneMasked,
     userType: 1,
+    corpName: props.corpName,
     roles: ['施工员'],
     workerRole: true,
     wechatBound: result.wechatBound,
@@ -138,7 +162,8 @@ onBeforeUnmount(destroy)
 .tag.external { background: #FFF3E8; color: #D25F00; }
 .tag.worker { background: #E8F8E8; color: #0B7A42; }
 .tag.unbound { background: #FFF1F0; color: #CB2634; }
-.row-sub { display: flex; gap: 16rpx; margin-top: 6rpx; font-size: 22rpx; color: #86909C; }
-.empty { padding: 40rpx 0; text-align: center; color: #A9AEB8; font-size: 24rpx; }
+.row-sub { display: flex; flex-wrap: wrap; gap: 16rpx; margin-top: 6rpx; font-size: 22rpx; color: #86909C; }
+.empty { padding: 40rpx 0; text-align: center; color: #86909C; font-size: 24rpx; }
+.empty.error { color: #CB2634; }
 .add { margin-top: 12rpx; padding: 20rpx 0; text-align: center; color: #FF6B35; font-size: 26rpx; }
 </style>

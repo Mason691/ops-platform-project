@@ -377,6 +377,13 @@ public class BusinessOrderFlowActionService {
         if (assignee == null) {
             throw BusinessException.of("上门员工不存在、已停用或不属于订单组织");
         }
+        boolean visit = "VISIT".equalsIgnoreCase(dispatchType);
+        Object workerRole = assignee.get("workerRole");
+        // 施工工单强制施工员角色（内部/外部均可）；随访不受限。
+        // 前端候选列表已按角色过滤，这里作为绕过前端的服务端最终防线。
+        if (!visit && (!(workerRole instanceof Number roleCount) || roleCount.longValue() <= 0)) {
+            throw BusinessException.of("上门员工必须是施工员角色");
+        }
         if (str(form.get("expectTime")).isEmpty()) {
             throw BusinessException.of("请选择期望上门时间");
         }
@@ -392,7 +399,7 @@ public class BusinessOrderFlowActionService {
         result.put("assignSource",
                 "CREATED_ON_SITE".equals(assignSource) ? "CREATED_ON_SITE" : "SELECTED");
         result.put("expectTime", form.get("expectTime"));
-        if ("VISIT".equalsIgnoreCase(dispatchType)) {
+        if (visit) {
             if (str(form.get("visitNote")).isEmpty()) {
                 throw BusinessException.of("入户随访必须填写任务说明");
             }
@@ -517,13 +524,22 @@ public class BusinessOrderFlowActionService {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                     "SELECT u.id, COALESCE(NULLIF(u.real_name,''), NULLIF(u.nickname,''), "
                             + "u.username) AS name, "
-                            + "uc.corp_id AS corpId, u.user_type AS userType, "
+                            + "uc.corp_id AS corpId, c.name AS corpName, "
+                            // TINYINT(1) 会被 Connector/J 映射为 Boolean，显式 CAST 保证 0/1
+                            + "CAST(u.user_type AS SIGNED) AS userType, "
                             + "(SELECT COUNT(1) FROM ai_platform.sys_user_wechat w "
                             + " WHERE w.user_id = u.id AND w.status = 1 AND w.delete_flag = 0) "
-                            + " AS wechatBound "
+                            + " AS wechatBound, "
+                            // 施工工单只允许派给施工员；角色按订单组织核算，内部/外部不限
+                            + "(SELECT COUNT(1) FROM ai_platform.sys_user_corp_role ur "
+                            + " JOIN ai_platform.sys_corp_user_role cr ON cr.id = ur.corp_role_id "
+                            + "  AND cr.corp_id = uc.corp_id AND cr.delete_flag = 0 "
+                            + " WHERE ur.user_id = u.id AND cr.role_name = '施工员') AS workerRole "
                             + "FROM ai_platform.sys_user u "
                             + "JOIN ai_platform.sys_user_corp uc ON uc.user_id = u.id "
                             + " AND uc.corp_id = ? AND uc.status = 1 AND uc.delete_flag = 0 "
+                            + "LEFT JOIN ai_platform.sys_corp c "
+                            + " ON c.id = uc.corp_id AND c.delete_flag = 0 "
                             + "WHERE u.id = ? AND u.status = 1 AND u.delete_flag = 0 LIMIT 1",
                     corpId, userId);
             return rows.isEmpty() ? null : rows.get(0);

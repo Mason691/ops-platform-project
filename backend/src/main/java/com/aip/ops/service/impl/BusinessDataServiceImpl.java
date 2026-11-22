@@ -791,11 +791,14 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     }
 
     @Override
-    public List<Map<String, Object>> flowAssignees(Long orderId, String keyword, Integer limit) {
+    public List<Map<String, Object>> flowAssignees(Long orderId, String keyword, Integer limit,
+                                                   String roleName, Integer offset) {
         Set<Long> corpIds = resolveWorkerCorpIds(orderId);
         if (noVisibleCorp(corpIds)) return List.of();
         int safeLimit = limit == null ? 20 : Math.min(Math.max(limit, 1), 100);
-        return queryFlowAssignees(corpIds, keyword == null ? null : keyword.trim(), safeLimit);
+        int safeOffset = offset == null ? 0 : Math.max(offset, 0);
+        return queryFlowAssignees(corpIds, keyword == null ? null : keyword.trim(), safeLimit,
+                roleName == null ? null : roleName.trim(), safeOffset);
     }
 
     /** 派工可选员工范围：传订单时强制订单归属组织；否则取当前可见组织。 */
@@ -817,31 +820,37 @@ public class BusinessDataServiceImpl implements BusinessDataService {
      * 施工员角色优先，其次姓名。手机号在 Java 侧统一脱敏。
      */
     private List<Map<String, Object>> queryFlowAssignees(Set<Long> corpIds, String keyword,
-                                                         int limit) {
+                                                         int limit, String roleName, int offset) {
         try {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                    buildAssigneeSql(corpIds, keyword),
-                    buildAssigneeArgs(corpIds, keyword, limit).toArray());
+                    buildAssigneeSql(corpIds, keyword, roleName),
+                    buildAssigneeArgs(corpIds, keyword, roleName, limit, offset).toArray());
             rows.forEach(BusinessDataServiceImpl::decorateAssigneeRow);
             return rows;
         } catch (Exception e) {
-            log.warn("加载工作流派工可选员工失败：{}", e.getMessage());
-            return List.of();
+            // 吞异常返回空列表会伪装成“该组织没有施工员”，派工员只会看到空白且无法排查；
+            // 保留完整堆栈并 fail-closed，让前端展示可重试的错误提示。
+            // 不记录 keyword：可能是手机号，避免 PII 落日志
+            log.error("加载工作流派工可选员工失败 corpIds={}", corpIds, e);
+            throw BusinessException.of("加载派工可选员工失败，请稍后重试；如持续失败请联系管理员");
         }
     }
 
-    private static String buildAssigneeSql(Set<Long> corpIds, String keyword) {
+    private static String buildAssigneeSql(Set<Long> corpIds, String keyword, String roleName) {
         StringBuilder sql = new StringBuilder(
                 "SELECT u.id AS userId, uc.id AS userOrgId, "
-                        + "COALESCE(NULLIF(u.real_name,''), NULLIF(u.nickname,''), u.username) AS name, "
+                        + "COALESCE(NULLIF(u.real_name,''), NULLIF(u.nickname,''), u.username) AS userName, "
                         + "COALESCE(NULLIF(u.phone,''), u.username) AS phone, "
-                        + "u.user_type AS userType, uc.corp_id AS corpId, "
+                        // TINYINT(1) 会被 Connector/J 映射为 Boolean，显式 CAST 保证 0/1 契约
+                        + "CAST(u.user_type AS SIGNED) AS userType, uc.corp_id AS corpId, "
+                        + "c.name AS corpName, "
                         + "GROUP_CONCAT(DISTINCT cr.role_name ORDER BY cr.id SEPARATOR '、') AS roleNames, "
                         + "(SELECT COUNT(1) FROM ai_platform.sys_user_wechat w "
                         + " WHERE w.user_id = u.id AND w.status = 1 AND w.delete_flag = 0) AS wechatBound "
                         + "FROM ai_platform.sys_user u "
                         + "JOIN ai_platform.sys_user_corp uc ON uc.user_id = u.id "
                         + " AND uc.status = 1 AND uc.delete_flag = 0 "
+                        + "LEFT JOIN ai_platform.sys_corp c ON c.id = uc.corp_id AND c.delete_flag = 0 "
                         + "LEFT JOIN ai_platform.sys_user_corp_role ur ON ur.user_id = u.id "
                         + "LEFT JOIN ai_platform.sys_corp_user_role cr ON cr.id = ur.corp_role_id "
                         + " AND cr.corp_id = uc.corp_id AND cr.delete_flag = 0 "
@@ -856,13 +865,19 @@ public class BusinessDataServiceImpl implements BusinessDataService {
                     + "OR u.nickname LIKE ?)");
         }
         sql.append(" GROUP BY u.id, uc.id, u.real_name, u.nickname, u.username, u.phone, "
-                + "u.user_type, uc.corp_id "
-                + " ORDER BY CASE WHEN SUM(CASE WHEN cr.role_name = '施工员' THEN 1 ELSE 0 END) > 0 "
-                + " THEN 0 ELSE 1 END, name LIMIT ?");
+                + "u.user_type, uc.corp_id, c.name");
+        if (roleName != null && !roleName.isEmpty()) {
+            // 施工工单只允许选施工员；内部/外部不限，按企业角色精确过滤
+            sql.append(" HAVING SUM(CASE WHEN cr.role_name = ? THEN 1 ELSE 0 END) > 0");
+        }
+        // userName 可能重名，必须再按 u.id/uc.id 排序，否则 OFFSET 分页会跨页重复或漏人
+        sql.append(" ORDER BY CASE WHEN SUM(CASE WHEN cr.role_name = '施工员' THEN 1 ELSE 0 END) > 0 "
+                + " THEN 0 ELSE 1 END, userName, u.id, uc.id LIMIT ? OFFSET ?");
         return sql.toString();
     }
 
-    private static List<Object> buildAssigneeArgs(Set<Long> corpIds, String keyword, int limit) {
+    private static List<Object> buildAssigneeArgs(Set<Long> corpIds, String keyword,
+                                                  String roleName, int limit, int offset) {
         List<Object> args = new ArrayList<>();
         if (corpIds != null && !corpIds.isEmpty()) {
             args.addAll(corpIds);
@@ -871,7 +886,11 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             String like = "%" + keyword + "%";
             args.addAll(List.of(like, like, like, like));
         }
+        if (roleName != null && !roleName.isEmpty()) {
+            args.add(roleName);
+        }
         args.add(limit);
+        args.add(offset);
         return args;
     }
 
@@ -881,13 +900,30 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         // phone 保留兼容旧客户端；新字段 phoneMasked 与 WorkerVO 契约一致
         row.put("phone", masked);
         row.put("phoneMasked", masked);
+        // 前端统一读取 userName；name 保留给历史调用方，避免升级期人员姓名空白
+        Object userName = row.get("userName");
+        row.put("name", userName);
         List<String> roles = splitRoles(row.get("roleNames"));
         row.put("roles", roles);
         row.put("workerRole", roles.contains("施工员"));
-        Object wechat = row.get("wechatBound");
-        row.put("wechatBound", wechat instanceof Number n && n.longValue() > 0);
-        row.put("userType", row.get("userType") == null ? 0
-                : ((Number) row.get("userType")).intValue());
+        row.put("wechatBound", intValue(row.get("wechatBound")) > 0);
+        row.put("userType", intValue(row.get("userType")));
+        row.put("corpName", strValue(row.get("corpName")));
+    }
+
+    /**
+     * MySQL TINYINT(1) 经 Connector/J 会映射为 Boolean，直接强转 Number 会抛
+     * ClassCastException（历史上导致派工候选列表整体为空）；这里统一收敛为 int。
+     */
+    private static int intValue(Object value) {
+        if (value instanceof Number number) return number.intValue();
+        if (value instanceof Boolean bool) return bool ? 1 : 0;
+        if (value == null) return 0;
+        try {
+            return Integer.parseInt(String.valueOf(value).trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private static List<String> splitRoles(Object raw) {
