@@ -56,6 +56,8 @@ public class BusinessDataController {
     private final BusinessDataFinanceService financeService;
     private final BusinessAttachmentService attachmentService;
     private final com.aip.ops.service.WorkflowFinancePermissionService workflowFinancePermissionService;
+    /** 施工状态链只读视图：派工人/运营在订单详情页查看时间线与告知书。 */
+    private final com.aip.ops.service.construct.OrderConstructService orderConstructService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ExecutorService importExecutor;
 
@@ -132,6 +134,7 @@ public class BusinessDataController {
                                   BusinessDataFinanceService financeService,
                                   BusinessAttachmentService attachmentService,
                                   com.aip.ops.service.WorkflowFinancePermissionService workflowFinancePermissionService,
+                                  com.aip.ops.service.construct.OrderConstructService orderConstructService,
                                   @Qualifier("importExecutor") ExecutorService importExecutor) {
         this.service = service;
         this.taskService = taskService;
@@ -144,6 +147,7 @@ public class BusinessDataController {
         this.financeService = financeService;
         this.attachmentService = attachmentService;
         this.workflowFinancePermissionService = workflowFinancePermissionService;
+        this.orderConstructService = orderConstructService;
         this.importExecutor = importExecutor;
     }
 
@@ -184,10 +188,20 @@ public class BusinessDataController {
                 receiptDateStart, receiptDateEnd, bizStatus));
     }
 
+    /** 施工链读取失败不阻断订单详情（例如旧订单无流程实例）。 */
+    private void attachConstruct(Map<String, Object> detail, Long orderId) {
+        try {
+            detail.put("construct", orderConstructService.view(orderId));
+        } catch (Exception e) {
+            log.warn("加载施工流转失败 orderId={}: {}", orderId, e.getMessage());
+        }
+    }
+
     /** 业务订单详情：工作流节点处理页读取订单、商品明细与流程留痕。 */
     @GetMapping("/orders/{orderId}")
     public R<?> orderDetail(@PathVariable Long orderId) {
         Map<String, Object> detail = service.orderDetail(orderId);
+        attachConstruct(detail, orderId);
         // 详情页审批人兜底：有实例时按员工/管理员 JWT 查询当前待办人
         Object instanceId = detail.get("wfInstanceId");
         if (instanceId != null && !String.valueOf(instanceId).isBlank()) {

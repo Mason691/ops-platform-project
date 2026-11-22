@@ -1,7 +1,8 @@
 import { computed, onUnmounted, ref } from 'vue'
 import { api } from '@/api'
 import {
-  TODO_PAGE_SIZE, decorateTodo, filterIneligibleDispatch, sortTodoByCreateTime
+  TODO_PAGE_SIZE, decorateTodo, filterIneligibleConstruct, filterIneligibleDispatch,
+  sortTodoByCreateTime
 } from '@/utils/workflowTodo'
 
 /** 首页最多直接展示的待办条数；超出走「查看更多」。 */
@@ -50,7 +51,8 @@ export function useWorkTodo() {
       const data = await api.workflowTodo({ pageNum: 1, pageSize: TODO_PAGE_SIZE })
       if (seq !== requestSeq) return
       const raw = Array.isArray(data && data.records) ? data.records : []
-      const filtered = await filterIneligibleDispatch(raw)
+      const filtered = await filterIneligibleConstruct(
+        await filterIneligibleDispatch(raw))
       if (seq !== requestSeq) return
       const receivedAt = Date.now()
       items.value = sortTodoByCreateTime(decorateTodo(filtered, receivedAt))

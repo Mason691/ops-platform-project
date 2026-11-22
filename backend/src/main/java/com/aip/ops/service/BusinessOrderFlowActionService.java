@@ -13,6 +13,8 @@ import com.aip.ops.entity.OpsBusinessOrder;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsBusinessFlowRecordMapper;
 import com.aip.ops.mapper.OpsBusinessOrderMapper;
+import com.aip.ops.service.construct.OrderConstructService;
+import com.aip.ops.service.construct.OrderConstructStatus;
 import com.aip.ops.util.VideoDurationValidator;
 import com.aip.sdk.exception.BusinessException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -62,6 +64,8 @@ public class BusinessOrderFlowActionService {
     private final OpsBusinessFlowRecordMapper flowRecordMapper;
     private final BusinessDataFinanceService financeService;
     private final DispatchEligibilityService dispatchEligibilityService;
+    /** 派工成功回写施工员/待接收，并校验施工记录只允许在已开工后提交。 */
+    private final OrderConstructService orderConstructService;
     private final ScmStockOutClient scmClient;
     /** 以旧换新采购单：财务核对触发自动审核 / 撤销核对联动反审 */
     private final ScmPurchaseOrderClient scmPurchaseOrderClient;
@@ -127,7 +131,7 @@ public class BusinessOrderFlowActionService {
             case ACTION_FINANCE -> financeCheck(order, event);
             case ACTION_DISPATCH -> dispatchOutbound(order, event);
             case ACTION_ACCEPTANCE -> acceptance(order, event);
-            case ACTION_CONSTRUCTION -> new LinkedHashMap<>(Map.of("recorded", true));
+            case ACTION_CONSTRUCTION -> constructionRecord(order);
             default -> throw BusinessException.of("未知节点动作：" + actionType);
         };
         saveRecord(order, event, result);
@@ -405,18 +409,39 @@ public class BusinessOrderFlowActionService {
             }
             result.put("visitNote", form.get("visitNote"));
             result.put("productCount", 0);
+            // 随访保持旧口径：派工后直接进入施工中；施工派工则进入待接收
+            markDispatched(order, assignee, assigneeUserId, dispatchType, form, event);
             return result;
         }
         List<OpsBusinessData> items = positiveItems(order.getId(), form.get("selectedItemIds"));
         if (items.isEmpty()) {
             throw BusinessException.of("订单没有可施工的正数商品分录");
         }
-        // 同一订单仅允许一张有效出库单；SCM 不可达时 fail-closed
+        List<ScmDispatchOutboundRequest.Item> outboundItems = groupItems(items);
+        // SCM 不可达时 fail-closed。已存在出库单时区分两种可恢复场景：
+        //   1) 同一派工任务重试（SCM 已建单但状态回写失败）：SCM 按 dispatchId 幂等复用；
+        //   2) 拒绝接单后重新指派：货物已出库，复用原出库单，不再重复出库。
         Set<Long> outbounds = scmClient.outboundOrderIds(List.of(order.getId()));
-        if (outbounds.contains(order.getId())) {
+        boolean outboundExists = outbounds.contains(order.getId());
+        boolean reDispatch = outboundExists
+                && orderConstructService.isRedispatchAfterReject(order.getId());
+        boolean sameTaskRetry = outboundExists && !reDispatch
+                && event.getTaskId() != null
+                && event.getTaskId().equals(order.getDispatchTaskId());
+        if (outboundExists && !reDispatch && !sameTaskRetry) {
             throw BusinessException.of("该订单已产生销售出库单，不可重复派工");
         }
-        List<ScmDispatchOutboundRequest.Item> outboundItems = groupItems(items);
+        if (!reDispatch) {
+            // 先落本次派工任务ID（独立事务）：SCM 建单成功但回写失败时可按同一任务重试
+            orderConstructService.markDispatchAttempt(order.getId(), event.getTaskId());
+        }
+        if (reDispatch) {
+            result.put("reusedOutbound", true);
+            result.put("stockOutId", outbounds.iterator().next());
+            result.put("productCount", outboundItems.size());
+            markDispatched(order, assignee, assigneeUserId, dispatchType, form, event);
+            return result;
+        }
         // 派工物料清单是“需求预填”：随派工一起传给 SCM，由 SCM 同事务生成物料领用草稿；
         // 为空表示本次派工不需要物料，不生成领用单。
         List<ScmDispatchOutboundRequest.MaterialItem> materialItems =
@@ -439,6 +464,35 @@ public class BusinessOrderFlowActionService {
             result.put("materialPickBillNo", outbound.materialPickBillNo());
             result.put("materialPickCount", materialItems.size());
         }
+        markDispatched(order, assignee, assigneeUserId, dispatchType, form, event);
+        return result;
+    }
+
+    /** 派工成功后把施工员与「待接收」写回订单；SCM 出库失败时不会走到这里。 */
+    private void markDispatched(OpsBusinessOrder order, Map<String, Object> assignee,
+                                Long assigneeUserId, String dispatchType,
+                                Map<String, Object> form, WorkflowBusinessEvent event) {
+        Integer userType = assignee.get("userType") instanceof Number n ? n.intValue() : null;
+        String expectTime = str(form.get("expectTime"));
+        orderConstructService.markDispatched(order, assigneeUserId,
+                str(assignee.get("name")), userType, dispatchType,
+                event.getOperatorUserId(), event.getOperatorName(),
+                expectTime.isEmpty() ? null : "期望上门：" + expectTime);
+    }
+
+    /**
+     * 施工记录（施工完成）节点动作：只有已确认开工（或验收退回返工）才允许提交，
+     * 防止绕过确认接收/打卡/客户签字直接推进流程。
+     */
+    private Map<String, Object> constructionRecord(OpsBusinessOrder order) {
+        String status = order.getBizStatus();
+        if (!OrderConstructStatus.isConstructing(status)) {
+            throw BusinessException.of(
+                    "CONSTRUCTION_NOT_STARTED：请先完成确认接收、上门打卡、客户签字与确认开工");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("recorded", true);
+        result.put("bizStatus", status);
         return result;
     }
 
@@ -574,13 +628,25 @@ public class BusinessOrderFlowActionService {
         }
         boolean skipWf = terminal || voidOwned || staleInstance;
         boolean skipStatus = voidOwned || staleInstance;
+        String incomingStatus = event.getBizStatus() == null
+                ? "" : event.getBizStatus().trim();
+        // 新状态链订单的迟到「派工出库」回调：只有工作流确实退回派工节点（node_order=4）
+        // 才接受回退；否则忽略，避免把待接收/已开工的订单冲回派工状态。
+        boolean dispatchRegression = isDispatchRegression(incomingStatus, oldBizStatus);
+        // 迟到回调的 wf 节点字段同样过期（会把「施工执行」显示回「派工出库」），一并忽略
+        skipWf = skipWf || dispatchRegression;
+        boolean applyStatus = !skipStatus && !incomingStatus.isEmpty() && !dispatchRegression;
         LambdaUpdateWrapper<OpsBusinessOrder> update = new LambdaUpdateWrapper<>();
         update.eq(OpsBusinessOrder::getId, order.getId())
                 // 并发退回草稿时（回调读到的是退回前状态）不得把 biz_status 冲回去
                 .ne(OpsBusinessOrder::getDraftFlag, 1)
                 .set(OpsBusinessOrder::getModifyTime, LocalDateTime.now());
-        if (!skipStatus && event.getBizStatus() != null && !event.getBizStatus().isBlank()) {
-            update.set(OpsBusinessOrder::getBizStatus, event.getBizStatus().trim());
+        if (applyStatus) {
+            update.set(OpsBusinessOrder::getBizStatus, incomingStatus);
+        }
+        if (applyStatus && OrderConstructStatus.DISPATCH.equals(incomingStatus)) {
+            // 退回派工：清空施工员与各节点时间，等待派工人重新指派
+            clearWorkerFields(update);
         }
         if (event.getInstanceId() != null && !skipWf) {
             update.set(OpsBusinessOrder::getWfInstanceId, event.getInstanceId());
@@ -592,13 +658,15 @@ public class BusinessOrderFlowActionService {
             update.set(OpsBusinessOrder::getWfNodeName, event.getNodeName());
         }
         orderMapper.update(null, update);
-        if (!skipStatus && event.getBizStatus() != null && !event.getBizStatus().isBlank()) {
-            order.setBizStatus(event.getBizStatus().trim());
+        if (applyStatus) {
+            order.setBizStatus(incomingStatus);
+            if (OrderConstructStatus.DISPATCH.equals(incomingStatus)) {
+                clearWorkerFields(order);
+            }
         }
         // 财务核对（biz_status=2）被撤销：未入库且未推送成功时由 SCM 自动反审采购单
-        if (!skipStatus && oldBizStatus != null && "2".equals(oldBizStatus.trim())
-                && event.getBizStatus() != null && !event.getBizStatus().isBlank()
-                && !"2".equals(event.getBizStatus().trim())
+        if (applyStatus && oldBizStatus != null && "2".equals(oldBizStatus.trim())
+                && !"2".equals(incomingStatus)
                 && (Integer.valueOf(1).equals(order.getHasTradeIn())
                     || order.getTradeInPurchaseOrderId() != null)) {
             runAfterCommit(() -> scmPurchaseOrderClient.financeReverted(
@@ -606,6 +674,47 @@ public class BusinessOrderFlowActionService {
         }
         log.info("订单 {} 业务状态同步：{} -> {} ({})", order.getId(),
                 event.getEvent(), event.getBizStatus(), event.getNodeName());
+    }
+
+    /**
+     * 新状态链订单的迟到「派工出库」回调一律忽略。
+     *
+     * <p>合法退回派工只有一条路径：施工员在工作台点「拒绝接单」——业务接口已在
+     * 同一事务内把状态写回 3 并清空施工员，状态回调无需再写。若回调把
+     * WAIT_ACCEPT/ACCEPTED 覆盖回 3，反而会造成「有施工任务但订单无施工员」的卡单。</p>
+     */
+    private boolean isDispatchRegression(String incomingStatus, String oldStatus) {
+        return OrderConstructStatus.DISPATCH.equals(incomingStatus)
+                && isAfterDispatch(oldStatus);
+    }
+
+    private static void clearWorkerFields(LambdaUpdateWrapper<OpsBusinessOrder> update) {
+        update.set(OpsBusinessOrder::getWorkerId, null)
+                .set(OpsBusinessOrder::getWorkerName, null)
+                .set(OpsBusinessOrder::getWorkerUserType, null)
+                .set(OpsBusinessOrder::getAcceptTime, null)
+                .set(OpsBusinessOrder::getArriveTime, null)
+                .set(OpsBusinessOrder::getCustomerConfirmTime, null)
+                .set(OpsBusinessOrder::getStartTime, null);
+    }
+
+    private static void clearWorkerFields(OpsBusinessOrder order) {
+        order.setWorkerId(null);
+        order.setWorkerName(null);
+        order.setWorkerUserType(null);
+        order.setAcceptTime(null);
+        order.setArriveTime(null);
+        order.setCustomerConfirmTime(null);
+        order.setStartTime(null);
+    }
+
+    /** 业务状态已在派工之后（新状态链/施工中/完成/验收/归档）。 */
+    private static boolean isAfterDispatch(String status) {
+        if (status == null) return false;
+        String value = status.trim();
+        return OrderConstructStatus.isPreStart(value)
+                || OrderConstructStatus.isConstructing(value)
+                || "6".equals(value) || "7".equals(value);
     }
 
     // ═══ 留痕 ═══
