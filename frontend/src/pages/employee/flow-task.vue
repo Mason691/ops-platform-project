@@ -888,7 +888,7 @@ async function doSubmit() {
         && form.dispatchType === 'CONSTRUCTION' && dispatchMaterials.value.length) {
       const pick = await api.scmMaterialPickByDispatch(Number(taskId.value)).catch(() => null)
       if (pick && pick.billNo) {
-        showDispatchMaterialResult(pick)
+        showDispatchMaterialResult(pick, result)
         return
       }
     }
@@ -896,6 +896,10 @@ async function doSubmit() {
         && selectedWorker.value
         && selectedWorker.value.wechatBound === false) {
       toast('该施工员未绑定微信，可能无法接收任务通知')
+    }
+    if (actionType.value === 'OPS_DISPATCH_OUTBOUND') {
+      showDispatchResult(result)
+      return
     }
     showSubmitResult(result, '处理成功，流程已推进')
   } catch (e) {
@@ -907,10 +911,16 @@ async function doSubmit() {
 
 /** 提交结果：显示实际下一审批人；取不到时展示兜底文案，不静默 */
 /** 派工成功 + 已生成物料领用草稿：引导员工补充仓库/批次并提交。 */
-function showDispatchMaterialResult(pick) {
+function showDispatchMaterialResult(pick, result) {
+  const info = normalizeResult(result)
+  const name = (selectedWorker.value
+    && (selectedWorker.value.name || selectedWorker.value.userName)) || ''
+  const assigned = name ? `已指派施工员：${name}；` : ''
+  const current = info.displayText ? `当前处理人：${info.displayText}；` : ''
   uni.showModal({
     title: '派工出库成功',
-    content: `已生成物料领用单 ${pick.billNo}，请前往【常用功能 → 物料领用】补充仓库、批次并提交审批`,
+    content: `${assigned}${current}已生成物料领用单 ${pick.billNo}，`
+      + '请前往【常用功能 → 物料领用】补充仓库、批次并提交审批',
     confirmText: '去处理',
     cancelText: '稍后',
     success: (res) => {
@@ -975,6 +985,24 @@ function showActiveResult(info, fallback) {
   uni.showModal({
     title: waiting ? '已提交，等待会签' : (fallback || '处理成功'),
     content: waiting ? info.displayText : `已同意，当前审批：${info.displayText}`,
+    showCancel: false,
+    success: goTodo
+  })
+}
+
+/** 派工是业务指派动作：先表达“已指派施工员”，再附工作流当前处理人。 */
+function showDispatchResult(result) {
+  const info = normalizeResult(result)
+  const name = (selectedWorker.value
+    && (selectedWorker.value.name || selectedWorker.value.userName)) || ''
+  const roleLabel = form.dispatchType === 'CONSTRUCTION' ? '施工员' : '上门员工'
+  const assigned = name
+    ? `处理成功，已指派${roleLabel}：${name}`
+    : `处理成功，已指派${roleLabel}`
+  const current = info.displayText ? `；当前处理人：${info.displayText}` : ''
+  uni.showModal({
+    title: '派工成功',
+    content: assigned + current,
     showCancel: false,
     success: goTodo
   })
