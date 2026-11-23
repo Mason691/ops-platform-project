@@ -28,6 +28,8 @@ export function useSignaturePad() {
   let width = 0
   let height = 0
   let dpr = 1
+  /** 画布是否被外层 CSS 顺时针旋转 90°（竖屏强制横屏签字）。 */
+  let rotation = 0
 
   /** 笔画列表：points 使用归一化坐标 {nx, ny}，尺寸变化时按新宽高重绘。 */
   let strokes = []
@@ -76,6 +78,7 @@ export function useSignaturePad() {
     const nextDpr = Math.min(
       typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1,
       3)
+    rotation = Number(size.rotation) === 90 ? 90 : 0
     if (nextWidth === width && nextHeight === height && nextDpr === dpr && ctx) return
     if (drawing) finish()
     width = nextWidth
@@ -331,6 +334,17 @@ export function useSignaturePad() {
 
   function toLocal(clientX, clientY) {
     const rect = canvas.getBoundingClientRect()
+    if (rotation === 90) {
+      // 画布随外层顺时针旋转 90°：以画布中心为支点做逆变换。
+      const centerX = rect.left + rect.width / 2
+      const centerY = rect.top + rect.height / 2
+      const dx = clientX - centerX
+      const dy = clientY - centerY
+      return {
+        x: clamp(width / 2 + dy, 0, width),
+        y: clamp(height / 2 - dx, 0, height)
+      }
+    }
     const scaleX = rect.width > 0 ? width / rect.width : 1
     const scaleY = rect.height > 0 ? height / rect.height : 1
     return {

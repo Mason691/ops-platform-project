@@ -32,6 +32,10 @@ import { useSignaturePad } from '@/hooks/useSignaturePad'
  * 命令式 canvas 节点互相覆盖。</p>
  */
 
+const props = defineProps({
+  /** 画布随外层 CSS 顺时针旋转的角度（0 / 90），用于触摸坐标逆变换。 */
+  rotation: { type: Number, default: 0 }
+})
 const emit = defineEmits(['change'])
 const wrapRef = ref(null)
 const stageRef = ref(null)
@@ -58,6 +62,9 @@ let retryCount = 0
 watch([hasInk, canUndo], () => {
   emit('change', { hasInk: hasInk.value, canUndo: canUndo.value })
 }, { immediate: true })
+
+/** 横屏/竖屏切换只改变触摸映射方向，画布尺寸不变时也要同步给绘制层。 */
+watch(() => props.rotation, () => layout())
 
 onMounted(() => {
   nextTick(() => {
@@ -113,15 +120,16 @@ function scheduleLayout() {
 function layout() {
   const wrap = domOf(wrapRef.value)
   if (!wrap) return retryLayout()
-  const isLandscape = typeof window !== 'undefined'
-    && window.innerWidth > window.innerHeight
-  landscape.value = isLandscape
-  const rect = wrap.getBoundingClientRect()
+  // 用 clientWidth/Height 读取未变换的布局尺寸：外层 rotate(90deg) 时
+  // getBoundingClientRect 会交换宽高，导致画布被错误缩放。
   const padding = 6
-  const availableWidth = Math.max(0, rect.width - padding * 2)
-  const availableHeight = Math.max(0, rect.height - padding * 2)
+  const availableWidth = Math.max(0, wrap.clientWidth - padding * 2)
+  const availableHeight = Math.max(0, wrap.clientHeight - padding * 2)
   if (availableWidth < 40 || availableHeight < 40) return retryLayout()
   retryCount = 0
+  // 逻辑横屏：真实横屏或页面自身已旋转成横屏布局
+  const isLandscape = availableWidth > availableHeight
+  landscape.value = isLandscape
 
   let height = availableHeight
   let top = padding
@@ -136,7 +144,11 @@ function layout() {
     width: availableWidth + 'px',
     height: height + 'px'
   }
-  nextTick(() => configure({ width: availableWidth, height }))
+  nextTick(() => configure({
+    width: availableWidth,
+    height,
+    rotation: props.rotation
+  }))
 }
 
 /** 容器刚插入时可能量到 0 高度；短间隔重试几次，等 flex 布局结算。 */

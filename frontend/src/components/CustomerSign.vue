@@ -1,8 +1,9 @@
 <template>
   <!-- #ifdef H5 -->
-  <view v-if="visible" ref="overlayRef" class="cs-overlay">
-    <view class="cs-sheet">
-      <view class="cs-head">
+  <view v-if="visible" class="cs-overlay">
+    <view class="cs-rotate-wrap" :style="rotateWrapStyle">
+      <view class="cs-sheet">
+        <view class="cs-head">
         <text class="cs-title">
           {{ mode === 'notice' ? (resign ? '重新签署告知书' : '客户签字确认') : '客户签字' }}
         </text>
@@ -31,19 +32,20 @@
       <template v-else>
         <view v-if="showGate" class="cs-gate">
           <text class="cs-gate-icon">↻</text>
-          <text class="cs-gate-title">请将手机横过来</text>
-          <text class="cs-gate-text">横屏后签字区域更大，笔画更清晰</text>
+          <text class="cs-gate-title">建议横屏签字</text>
+          <text class="cs-gate-text">横屏后签字区域更大、笔画更清晰；点下方按钮立即切换</text>
           <button class="cs-btn primary cs-gate-btn" :disabled="submitting"
-                  @click="retryLandscape">尝试全屏横屏</button>
-          <text class="cs-gate-fallback" @click="startPortrait">无法横屏？竖屏继续</text>
+                  @click="chooseLandscape">横屏签字</button>
+          <text class="cs-gate-fallback" @click="choosePortrait">竖屏签字</text>
         </view>
 
         <template v-else>
           <view class="cs-sign-bar">
             <text class="cs-link" @click="showNotice = true">查看告知书</text>
-            <text class="cs-sign-hint">{{ landscape ? '横屏签字' : '竖屏签字（建议横屏）' }}</text>
+            <text class="cs-sign-hint">{{ signHint }}</text>
           </view>
-          <SignaturePad ref="padRef" class="cs-pad" @change="onPadChange" />
+          <SignaturePad ref="padRef" class="cs-pad" :rotation="rotatePanel ? 90 : 0"
+                        @change="onPadChange" />
           <view class="cs-foot">
             <button class="cs-btn ghost" :disabled="submitting" @click="close">取消</button>
             <button class="cs-btn primary" :disabled="submitting || !padHasInk"
@@ -64,6 +66,7 @@
           </view>
         </view>
       </template>
+      </view>
     </view>
   </view>
   <!-- #endif -->
@@ -101,12 +104,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import CustomerNoticeContent from '@/components/CustomerNoticeContent.vue'
 // #ifdef H5
 import SignaturePad from '@/components/SignaturePad.vue'
-import {
-  exitLandscape,
-  isLandscapeViewport,
-  onViewportChange,
-  requestLandscape
-} from '@/utils/screenOrientation'
+import { getViewportSize, isLandscapeViewport, onViewportChange } from '@/utils/viewport'
 // #endif
 // #ifndef H5
 import { useUniSignature } from '@/hooks/useUniSignature'
@@ -115,9 +113,9 @@ import { useUniSignature } from '@/hooks/useUniSignature'
 /**
  * 客户签字确认。
  *
- * H5：先阅读告知书，再进入全屏签字。优先请求全屏 + 横屏锁定；iOS/微信
- * 不支持时提示用户手动横过来，仍可竖屏降级。签字使用原生 Canvas 高清绘制，
- * 支持撤销/重写。
+ * H5：先阅读告知书，再进入签字。竖屏时点「横屏签字」立即把整个签字面板
+ * CSS 旋转 90°，不依赖微信/iOS 支持不稳定的 Fullscreen / Orientation Lock；
+ * 设备真正横屏后自动取消 CSS 旋转。签字使用原生 Canvas 高清绘制，支持撤销/重写。
  * 小程序：保留 uni-app canvas 兜底（接口与 H5 对齐）。
  */
 const props = defineProps({
@@ -133,15 +131,33 @@ const emit = defineEmits(['update:visible', 'submit'])
 const contentReady = computed(() => String(props.content || '').trim().length > 0)
 
 // #ifdef H5
-const overlayRef = ref(null)
 const padRef = ref(null)
 const mode = ref('notice')
 const showNotice = ref(false)
 const showGate = ref(false)
-const portraitFallback = ref(false)
-const landscape = ref(false)
+const forceLandscape = ref(false)
+const viewport = ref(getViewportSize())
+const landscape = ref(isLandscapeViewport())
 const padHasInk = ref(false)
 let removeViewportListener = null
+
+/** 竖屏时页面自身旋转成横屏（设备无法旋转/微信锁竖屏时仍然可用）。 */
+const rotatePanel = computed(() => forceLandscape.value && !landscape.value)
+const rotateWrapStyle = computed(() => {
+  if (!rotatePanel.value) return {}
+  return {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    width: Math.max(1, viewport.value.height) + 'px',
+    height: Math.max(1, viewport.value.width) + 'px',
+    transform: 'translate(-50%, -50%) rotate(90deg)'
+  }
+})
+const signHint = computed(() => {
+  if (rotatePanel.value) return '横屏签字（手机顶部朝右横持）'
+  return landscape.value ? '横屏签字' : '竖屏签字（建议横屏）'
+})
 // #endif
 
 // #ifndef H5
@@ -167,8 +183,9 @@ function resetState() {
   mode.value = 'notice'
   showNotice.value = false
   showGate.value = false
-  portraitFallback.value = false
+  forceLandscape.value = false
   padHasInk.value = false
+  viewport.value = getViewportSize()
   landscape.value = isLandscapeViewport()
   stopViewportListener()
   // #endif
@@ -178,7 +195,6 @@ function cleanup() {
   // #ifdef H5
   stopViewportListener()
   showNotice.value = false
-  exitLandscape()
   // #endif
   // #ifndef H5
   uniSign.detach()
@@ -201,48 +217,37 @@ function submit() {
 }
 
 // #ifdef H5
-function overlayElement() {
-  const value = overlayRef.value
-  return value ? (value.$el || value) : null
-}
-
 function startSign() {
   if (!contentReady.value) return toast('告知书内容加载中，请稍候')
   mode.value = 'sign'
+  viewport.value = getViewportSize()
   landscape.value = isLandscapeViewport()
+  forceLandscape.value = landscape.value
   showGate.value = !landscape.value
   startViewportListener()
-  if (!landscape.value) {
-    requestLandscape(overlayElement()).then(ok => {
-      if (ok) {
-        landscape.value = true
-        showGate.value = false
-      }
-    })
-  }
 }
 
-function retryLandscape() {
-  requestLandscape(overlayElement()).then(ok => {
-    if (ok) {
-      landscape.value = true
-      showGate.value = false
-      return
-    }
-    toast('请手动将手机横过来，或点击下方「竖屏继续」')
-  })
+/** 立即切换为横屏布局（不等待系统 API），再提示用户横持手机。 */
+function chooseLandscape() {
+  forceLandscape.value = true
+  showGate.value = false
+  toast('已切换横屏，请将手机顶部朝右横过来签字')
 }
 
-function startPortrait() {
-  portraitFallback.value = true
+function choosePortrait() {
+  forceLandscape.value = false
   showGate.value = false
 }
 
 function startViewportListener() {
   stopViewportListener()
   removeViewportListener = onViewportChange(() => {
+    viewport.value = getViewportSize()
     landscape.value = isLandscapeViewport()
-    if (landscape.value && showGate.value) showGate.value = false
+    if (showGate.value && landscape.value) {
+      showGate.value = false
+      forceLandscape.value = true
+    }
   })
 }
 

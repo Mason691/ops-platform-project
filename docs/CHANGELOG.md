@@ -2,6 +2,29 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-23（客户签字「横屏签字」按钮无响应/旋转不生效修复，已发布）
+
+- **问题**：生产反馈点击「尝试全屏横屏」很难有反应；手机横过来后页面基本不进入横屏，客户无法按预期横屏签字。
+- **根因**：
+  1. 原实现依赖 `element.requestFullscreen()` + `screen.orientation.lock('landscape')`；微信 WebView / iOS 对元素全屏与方向锁支持不稳定，调用可能挂起或静默失败，按钮点击后没有即时可见反馈。
+  2. 部分微信 WebView 锁定竖屏，设备旋转不改变 `window.innerWidth/innerHeight`，页面无法感知横屏。
+- **修复**：
+  - **不再依赖 Fullscreen / Orientation Lock**。删除 `utils/screenOrientation.js`，新增 `utils/viewport.js`（仅做尺寸/横竖屏判断与 resize/orientationchange/screen.orientation.change 监听）。
+  - 竖屏点击「横屏签字」后**立即**把整个签字面板 CSS 旋转 90°（`rotate(90deg)`，宽高按视口交换），按钮点击同步生效，并 toast 提示「手机顶部朝右横过来签字」。
+  - `useSignaturePad` 增加旋转坐标逆变换：画布外层 rotate(90deg) 时用画布中心反算本地坐标；`SignaturePad` 改用 `clientWidth/Height` 读取未变换布局尺寸，并随 rotation 变化更新映射。
+  - 设备真正旋转到横屏后自动取消 CSS 旋转（`rotatePanel = forceLandscape && !landscape`），笔迹按归一化坐标保留；转回竖屏会重新应用旋转。
+  - 门页按钮改为「横屏签字」/「竖屏签字」，按钮高度 48px、宽 80%，增加 `:active` 反馈；告知书弹层高度改为百分比，适配旋转后的面板。
+- **验证（2026-11-23）**：锁定 uni-app 5.21 下 `npm run build:h5`、`npm run build:mp-weixin` 通过；临时测试页已删除。
+  - Puppeteer 实测：门页点击「横屏签字」后约 60ms 面板已带 `rotate(90deg)`，签字区布局 732×212（视觉 bbox 198×718），绘制后提交按钮启用，提交 base64 91,322。
+  - 竖屏降级：348×271 签字区，提交 base64 59,798。
+  - CSS 横屏绘制后模拟设备旋转到 844×390：CSS 旋转自动取消，笔迹保留、提交仍可用，提交 base64 87,846。
+  - 原生横屏进入：732×212 签字区，提交 base64 81,570。
+  - 临时测试页验收后已删除；无头环境缺少中文字体，截图为方框，不影响布局/坐标/提交。
+- **发布（2026-11-23 11:23）**：仅更新 ops H5。备份 `/data2/boss-platform/backups/customer-sign-rotate-20261123_112258/ops-h5-current.tgz`（入口 `index-D7E8wZB2.js`）；新入口 `index-B_A6BKwj.js`、施工页 chunk `pages-employee-flow-task.BN_Y9Kxy.js`；清 `assets/*` 后解包，ops nginx `-t` + reload 通过。冒烟：`/ops/` 与新入口/新 chunk 200、旧入口 404、title「金地美家」、ops health 200。
+- **未执行**：微信 iOS/Android 真机触摸与真实设备旋转（无头环境为模拟视口）。
+- **回滚**：上传 `ops-h5-current.tgz`（入口 `index-D7E8wZB2.js`）并清 `assets/*` 后解包、reload ops nginx。
+- **状态**：已发布；提交见本次修复提交。
+
 ## 2026-11-23（客户签字组件升级：全屏横屏 + 高清平滑手写，已发布）
 
 - **问题**：施工状态链的客户签字沿用 340rpx（约 170px）小框 + uni-app canvas，画布未按 devicePixelRatio 放大，书写发虚、笔画生硬；手机上字写不开，客户体验差。
