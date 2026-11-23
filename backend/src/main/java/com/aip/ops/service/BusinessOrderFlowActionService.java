@@ -394,6 +394,11 @@ public class BusinessOrderFlowActionService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("dispatchType", dispatchType);
         result.put("assigneeUserId", assigneeUserId);
+        // 施工派工的语义角色是“施工员”；平台据此生成“施工员（姓名）”，
+        // 不能回退到员工在其他组织的财务/总经办等角色。
+        if (!visit) {
+            result.put("assigneeRoleName", "施工员");
+        }
         result.put("assigneeName", assignee.get("name"));
         result.put("assigneeCorpId", assignee.get("corpId"));
         result.put("assigneeUserType", assignee.get("userType"));
