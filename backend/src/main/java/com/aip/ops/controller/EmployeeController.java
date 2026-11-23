@@ -492,6 +492,12 @@ public class EmployeeController {
         return R.ok(employeeBusinessEntryService.listDepositPending());
     }
 
+    /** 货款补录待办数量（工作台卡片角标；口径与列表一致）。 */
+    @GetMapping("/business-data/balance-pending/count")
+    public R<?> balancePendingCount() {
+        return R.ok(java.util.Map.of("count", employeeBusinessEntryService.countDepositPending()));
+    }
+
     /** 货款补录详情（只读；校验订单属于当前经办人）。 */
     @GetMapping("/business-data/balance-pending/{orderId}")
     public R<?> balancePendingDetail(@PathVariable Long orderId) {

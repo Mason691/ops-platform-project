@@ -10,10 +10,12 @@ import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.dto.ProductPriceDtos;
 import com.aip.ops.entity.OpsBusinessAttachment;
 import com.aip.ops.entity.OpsBusinessData;
+import com.aip.ops.entity.OpsBusinessFlowRecord;
 import com.aip.ops.entity.OpsBusinessOrder;
 import com.aip.ops.entity.OpsBusinessOrderTradeIn;
 import com.aip.ops.entity.OpsBusinessSpecialFile;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
+import com.aip.ops.mapper.OpsBusinessFlowRecordMapper;
 import com.aip.ops.mapper.OpsBusinessOrderTradeInMapper;
 import com.aip.ops.security.JwtTokenInspector;
 import com.aip.ops.service.BusinessAttachmentService;
@@ -29,6 +31,7 @@ import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.exception.BusinessException;
 import com.aip.sdk.security.SecurityUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -88,10 +91,22 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     /** 收据号允许字符集：字母/数字/短横线/下划线/斜杠（不含空格，便于财务核对与导出）。 */
     private static final Pattern RECEIPT_NO_PATTERN = Pattern.compile("^[A-Za-z0-9_/-]+$");
 
+    /** 货款补录列表/角标共用查询：当前组织 + 当前经办人 + 定金未结清。 */
+    private static final String DEPOSIT_PENDING_SQL =
+            "SELECT id, order_no, customer, customer_phone, total_amount, payable_amount, "
+                    + "deposit_amount, balance_amount, receipt_date, create_time, agent_names, "
+                    + "balance_remind_time, biz_status FROM ops_business_order "
+                    + "WHERE corp_id = ? AND delete_flag = 0 "
+                    + "AND payment_type = 'DEPOSIT' AND is_full_payment = 0 "
+                    + "AND (create_user = ? OR FIND_IN_SET(?, "
+                    + "  REPLACE(COALESCE(agent_phones, ''), '、', ',')) > 0)";
+
     private final JdbcTemplate jdbcTemplate;
     private final PlatformInternalClient platformInternalClient;
     private final OpsBusinessDataMapper businessDataMapper;
     private final OpsBusinessOrderTradeInMapper tradeInMapper;
+    private final OpsBusinessFlowRecordMapper flowRecordMapper;
+    private final ObjectMapper objectMapper;
     private final ScmPurchaseOrderClient scmPurchaseOrderClient;
     private final GasMemberMatcher memberMatcher;
     private final ScmBaseDataClient scmClient;
@@ -808,13 +823,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     public List<Map<String, Object>> listDepositPending() {
         EmployeeContext ctx = resolveEmployeeContext();
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT id, order_no, customer, total_amount, deposit_amount, balance_amount, "
-                        + "create_time, agent_names FROM ops_business_order "
-                        + "WHERE corp_id = ? AND delete_flag = 0 "
-                        + "AND payment_type = 'DEPOSIT' AND is_full_payment = 0 "
-                        + "AND (create_user = ? OR FIND_IN_SET(?, "
-                        + "  REPLACE(COALESCE(agent_phones, ''), '、', ',')) > 0) "
-                        + "ORDER BY create_time DESC, id DESC LIMIT 200",
+                DEPOSIT_PENDING_SQL + " ORDER BY create_time DESC, id DESC LIMIT 200",
                 ctx.corpId(), ctx.employeeUserId(), ctx.employeePhone());
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> row : rows) {
@@ -822,14 +831,35 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
             item.put("orderId", longVal(row.get("id")));
             item.put("orderNo", str(row.get("order_no")));
             item.put("customer", str(row.get("customer")));
+            item.put("customerPhone", str(row.get("customer_phone")));
             item.put("totalAmount", money(row.get("total_amount")));
+            item.put("payableAmount", money(row.get("payable_amount") == null
+                    || money(row.get("payable_amount")).signum() <= 0
+                    ? row.get("total_amount") : row.get("payable_amount")));
             item.put("depositAmount", money(row.get("deposit_amount")));
-            item.put("balanceAmount", money(row.get("balance_amount")));
+            item.put("balanceAmount", balanceAmountOf(row));
+            // 定金收款时间优先取制单收款日期，兼容历史数据无该值时回退制单时间
+            item.put("depositReceiptDate", str(row.get("receipt_date")).isEmpty()
+                    ? row.get("create_time") : str(row.get("receipt_date")));
+            item.put("balanceStatus", "未结清");
+            // 定时提醒任务未跑过时，首次提醒时间回退制单时间，保证列表有可解释的时间
+            Object remind = row.get("balance_remind_time");
+            item.put("lastRemindTime", remind == null ? row.get("create_time") : remind);
             item.put("createTime", row.get("create_time"));
             item.put("agentNames", str(row.get("agent_names")));
+            item.put("bizStatus", str(row.get("biz_status")));
             result.add(item);
         }
         return result;
+    }
+
+    @Override
+    public long countDepositPending() {
+        EmployeeContext ctx = resolveEmployeeContext();
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM (" + DEPOSIT_PENDING_SQL + ") pending",
+                Long.class, ctx.corpId(), ctx.employeeUserId(), ctx.employeePhone());
+        return count == null ? 0L : count;
     }
 
     @Override
@@ -872,13 +902,20 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         if (remark.length() > MAX_REMARK_LENGTH) {
             throw BusinessException.of("收款备注不能超过" + MAX_REMARK_LENGTH + "个字");
         }
+        PaymentMethod method = PaymentMethod.normalize(request.getPaymentMethod());
+        String receiptDate = com.aip.ops.util.BalanceReceiptRules
+                .normalizeDate(request.getReceiptDate());
+        String receiptNo = com.aip.ops.util.BalanceReceiptRules
+                .normalizeOptionalReceiptNo(request.getReceiptNo());
         return transactionTemplate.execute(status -> doReceiveBalance(
-                ctx, orderId, amount, voucher, remark));
+                ctx, orderId, amount, method, receiptDate, receiptNo, voucher, remark));
     }
 
     /** 事务内：行锁订单 → 重新校验经办人/付款方式/金额 → 原子置全款。 */
     private Map<String, Object> doReceiveBalance(EmployeeContext ctx, Long orderId,
-                                                 BigDecimal received, String voucher, String remark) {
+                                                 BigDecimal received, PaymentMethod method,
+                                                 String receiptDate, String receiptNo,
+                                                 String voucher, String remark) {
         jdbcTemplate.queryForList(
                 "SELECT id FROM ops_business_order WHERE id=? AND delete_flag=0 FOR UPDATE",
                 Long.class, orderId);
@@ -897,12 +934,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
             throw BusinessException.of("实收余款必须等于应补余款 ¥"
                     + due.toPlainString());
         }
-        int updated = jdbcTemplate.update(
-                "UPDATE ops_business_order SET is_full_payment=1, balance_received_amount=?, "
-                        + "balance_paid_at=NOW(), balance_voucher_url=?, balance_remark=?, "
-                        + "modify_time=NOW(), modify_user=?, modify_user_name=? "
-                        + "WHERE id=? AND is_full_payment=0 AND delete_flag=0",
-                received, voucher, remark, ctx.employeeUserId(), ctx.employeeName(), orderId);
+        int updated = markBalanceReceived(ctx, orderId, received, method, receiptDate,
+                receiptNo, voucher, remark);
         if (updated != 1) {
             OpsBusinessOrder latest = orderService.getById(orderId);
             if (latest != null && Integer.valueOf(1).equals(latest.getIsFullPayment())) {
@@ -912,12 +945,29 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         }
         OpsBusinessOrder latest = orderService.getById(orderId);
         if (latest == null) throw BusinessException.of("订单状态已变化，请刷新后重试");
-        log.info("货款补录成功 orderId={} userId={} received={} voucher={}",
-                orderId, ctx.employeeUserId(), received, voucher);
+        // 仅更新收款状态与派工准入；销售金额/提成仍按下单商品金额统计，不因收款时点回算
+        saveBalanceReceiveRecord(ctx, latest, received, method, receiptDate, receiptNo,
+                voucher, remark);
+        log.info("货款补录成功 orderId={} userId={} received={} method={} voucher={}",
+                orderId, ctx.employeeUserId(), received, method.name(), voucher);
         Map<String, Object> result = balanceOrderView(latest);
         result.put("alreadyReceived", false);
         result.put("message", "货款补录成功，订单已标记为全款");
         return result;
+    }
+
+    /** 原子置全款并写入尾款明细；返回受影响行数，0 表示已被并发处理。 */
+    private int markBalanceReceived(EmployeeContext ctx, Long orderId, BigDecimal received,
+                                    PaymentMethod method, String receiptDate, String receiptNo,
+                                    String voucher, String remark) {
+        return jdbcTemplate.update(
+                "UPDATE ops_business_order SET is_full_payment=1, balance_received_amount=?, "
+                        + "balance_paid_at=NOW(), balance_voucher_url=?, balance_remark=?, "
+                        + "balance_payment_method=?, balance_receipt_date=?, balance_receipt_no=?, "
+                        + "modify_time=NOW(), modify_user=?, modify_user_name=? "
+                        + "WHERE id=? AND is_full_payment=0 AND delete_flag=0",
+                received, voucher, remark, method.name(), receiptDate, receiptNo,
+                ctx.employeeUserId(), ctx.employeeName(), orderId);
     }
 
     /** 幂等响应：已补录订单再次提交时返回同一结构，避免重复收款。 */
@@ -926,6 +976,47 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         result.put("alreadyReceived", true);
         result.put("message", "该订单已完成货款补录");
         return result;
+    }
+
+    /** 货款补录业务留痕：订单详情 flowRecords 可追溯收款人、时间、金额、方式与凭证。 */
+    private void saveBalanceReceiveRecord(EmployeeContext ctx, OpsBusinessOrder order,
+                                          BigDecimal received, PaymentMethod method,
+                                          String receiptDate, String receiptNo,
+                                          String voucher, String remark) {
+        OpsBusinessFlowRecord record = new OpsBusinessFlowRecord();
+        record.setCorpId(order.getCorpId());
+        record.setOrderId(order.getId());
+        record.setInstanceId(order.getWfInstanceId());
+        record.setNodeName("货款补录");
+        record.setActionType("OPS_BALANCE_RECEIVE");
+        record.setBizStatus(order.getBizStatus());
+        record.setOperatorUserId(ctx.employeeUserId());
+        record.setOperatorName(ctx.employeeName());
+        record.setOpinion("尾款结清");
+        Map<String, Object> form = new LinkedHashMap<>();
+        form.put("receivedAmount", received);
+        form.put("paymentMethod", method.name());
+        form.put("paymentMethodName", method.label());
+        form.put("receiptDate", receiptDate);
+        form.put("receiptNo", receiptNo);
+        form.put("voucherUrl", voucher);
+        form.put("remark", remark);
+        record.setFormJson(toJson(form));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("isFullPayment", 1);
+        result.put("balancePaidAt", order.getBalancePaidAt());
+        record.setResultJson(toJson(result));
+        record.setDeleteFlag(0);
+        flowRecordMapper.insert(record);
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            log.warn("货款补录留痕序列化失败: {}", e.getMessage());
+            return null;
+        }
     }
 
     /** 经办人可见性：本组织 + 当前员工手机号在 agent_phones 中（或 create_user 为本人）。 */
@@ -957,14 +1048,30 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         view.put("customerPhone", order.getCustomerPhone());
         view.put("agentNames", order.getAgentNames());
         view.put("totalAmount", money(order.getTotalAmount()));
+        view.put("payableAmount", order.getPayableAmount() == null
+                || order.getPayableAmount().signum() <= 0
+                ? money(order.getTotalAmount()) : money(order.getPayableAmount()));
         view.put("depositAmount", money(order.getDepositAmount()));
         view.put("balanceAmount", balanceOf(order));
         view.put("paymentType", order.getPaymentType());
+        view.put("paymentMethod", order.getPaymentMethod());
+        view.put("paymentMethodName", PaymentMethod.labelOf(order.getPaymentMethod()));
         view.put("isFullPayment", order.getIsFullPayment());
+        view.put("balanceStatus", Integer.valueOf(1).equals(order.getIsFullPayment())
+                ? "已结清" : "未结清");
         view.put("balanceReceivedAmount", order.getBalanceReceivedAmount());
         view.put("balancePaidAt", order.getBalancePaidAt());
         view.put("balanceVoucherUrl", order.getBalanceVoucherUrl());
         view.put("balanceRemark", order.getBalanceRemark());
+        view.put("balancePaymentMethod", order.getBalancePaymentMethod());
+        view.put("balancePaymentMethodName",
+                PaymentMethod.labelOf(order.getBalancePaymentMethod()));
+        view.put("balanceReceiptDate", order.getBalanceReceiptDate());
+        view.put("balanceReceiptNo", order.getBalanceReceiptNo());
+        view.put("depositReceiptDate", str(order.getReceiptDate()).isEmpty()
+                ? order.getCreateTime() : order.getReceiptDate());
+        view.put("lastRemindTime", order.getBalanceRemindTime() == null
+                ? order.getCreateTime() : order.getBalanceRemindTime());
         view.put("createTime", order.getCreateTime());
         view.put("alreadyReceived", Integer.valueOf(1).equals(order.getIsFullPayment()));
         return view;
@@ -986,6 +1093,14 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     private static Long longVal(Object value) {
         return value instanceof Number n ? n.longValue() : null;
+    }
+
+    /** 列表展示的待补金额：优先落库 balance_amount，历史数据回退 total - deposit。 */
+    private static BigDecimal balanceAmountOf(Map<String, Object> row) {
+        BigDecimal balance = money(row.get("balance_amount"));
+        if (balance.signum() > 0) return balance;
+        return money(row.get("total_amount")).subtract(money(row.get("deposit_amount")))
+                .max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
     }
 
     @Override
