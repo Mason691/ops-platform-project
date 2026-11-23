@@ -42,3 +42,14 @@
 
 ---
 
+## 施工状态链（派工 → 施工中，2026-11-22，2026-11-23 已发布生产）
+
+- **变更**：派工指派施工员后不再直接进入「施工中」，新增 `WAIT_ACCEPT / ACCEPTED / ARRIVED / CUSTOMER_CONFIRMED / CUSTOMER_REFUSED` 业务状态；施工员确认接收、上门打卡、客户手写签字确认并「确认开工」后才写 `biz_status=4`。
+- **节点解耦**：工作流「施工中」节点更名为「施工执行」，`biz_status` 置空（进入节点不再写状态）；施工记录节点动作强校验订单已开工（`4/5`），防止绕过。
+- **新表**：`ops_order_construct_log`（施工流转留痕）+ `ops_customer_notice`（客户告知书，版本化 + SHA-256）。
+- **接口**：`/api/ops/employee/business-data/orders/{orderId}/construct/**`（accept / reject / arrive / customer-confirm / customer-refuse / start）。
+- **通知**：`CONSTRUCT_PROGRESS` 公众号场景 + 内部接口 `POST /api/internal/wf/notify`（模板未配置时静默跳过）。
+- **派工幂等**：`dispatch_task_id` 先落库，同一任务重试按 SCM `dispatchId` 幂等复用出库单；拒绝接单后重新派工复用原出库单/物料领用草稿，不再重复出库。
+- **节点退回**：节点 5 强制 `return_mode=PREVIOUS`、`return_biz_status=3`，拒绝接单退回派工节点重建待办（不终止实例）。
+- **存量**：不回退，存量 `4` 订单继续原流程。
+- **完整规格**：`Specs/施工状态流转-规格说明.md`；迁移 `sql/migration_business_order_construct_flow.sql`。

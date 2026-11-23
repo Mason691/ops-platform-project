@@ -80,13 +80,15 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
                     OpsBusinessAttachment.TYPE_PAYMENT,
                     OpsBusinessAttachment.TYPE_CONTRACT,
                     OpsBusinessAttachment.TYPE_REFUND,
-                    OpsBusinessAttachment.TYPE_ACCEPTANCE);
+                    OpsBusinessAttachment.TYPE_ACCEPTANCE,
+                    OpsBusinessAttachment.TYPE_CONSTRUCT);
     private static final Map<String, Integer> MAX_COUNT = Map.of(
             OpsBusinessAttachment.TYPE_RECEIPT, 1,
             OpsBusinessAttachment.TYPE_PAYMENT, 3,
             OpsBusinessAttachment.TYPE_CONTRACT, 5,
             OpsBusinessAttachment.TYPE_REFUND, 5,
-            OpsBusinessAttachment.TYPE_ACCEPTANCE, 10);
+            OpsBusinessAttachment.TYPE_ACCEPTANCE, 10,
+            OpsBusinessAttachment.TYPE_CONSTRUCT, 3);
 
     private final OpsBusinessAttachmentMapper attachmentMapper;
     private final EmployeeService employeeService;
@@ -549,6 +551,8 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
             case OpsBusinessAttachment.TYPE_REFUND -> "请上传退款补充附件";
             case OpsBusinessAttachment.TYPE_ACCEPTANCE ->
                     "ACCEPTANCE_ATTACHMENT_REQUIRED：请至少上传 1 张图片或 1 段视频作为验收凭证";
+            case OpsBusinessAttachment.TYPE_CONSTRUCT ->
+                    "CONSTRUCT_PHOTO_REQUIRED：请至少上传 1 张现场照片";
             default -> "请上传收据图片";
         };
     }
@@ -559,6 +563,7 @@ public class BusinessAttachmentServiceImpl implements BusinessAttachmentService 
             case OpsBusinessAttachment.TYPE_CONTRACT -> "合同附件";
             case OpsBusinessAttachment.TYPE_REFUND -> "退款补充附件";
             case OpsBusinessAttachment.TYPE_ACCEPTANCE -> "验收凭证";
+            case OpsBusinessAttachment.TYPE_CONSTRUCT -> "现场照片";
             default -> "收据图片";
         };
     }

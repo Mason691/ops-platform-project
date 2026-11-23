@@ -2,6 +2,47 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-23（客户签字组件升级：全屏横屏 + 高清平滑手写，已发布）
+
+- **问题**：施工状态链的客户签字沿用 340rpx（约 170px）小框 + uni-app canvas，画布未按 devicePixelRatio 放大，书写发虚、笔画生硬；手机上字写不开，客户体验差。
+- **变更（仅 ops H5 前端，后端零改动）**：
+  - 新增 `components/SignaturePad.vue` + `hooks/useSignaturePad.js`：H5 原生 Canvas，按 DPR（上限 3）高清绘制；中点二次贝塞尔平滑；笔画用归一化坐标保存，横竖屏/全屏切换后按比例重绘；支持撤销/重写；导出 PNG 为高分辨率横向图片。
+  - `components/CustomerSign.vue` 改为两步：先阅读告知书 → 进入全屏签字。竖屏进入时优先请求 Fullscreen + `screen.orientation.lock('landscape')`；iOS/微信不支持时展示「请将手机横过来」，用户手动旋转后自动进入横屏；仍无法横屏可点「竖屏继续」降级为大尺寸横向签字区。
+  - 签字页使用 px 固定尺寸（标题/按钮/工具栏），避免横屏下 rpx 按屏宽放大把签字区挤成 0 高；横屏 844×390 视口下实际画布约 718×200 CSS px。
+  - 新增 `components/CustomerNoticeContent.vue`（告知书正文 + 重签旧版预览复用）、`utils/screenOrientation.js`（全屏/方向锁，失败静默降级）、`hooks/useUniSignature.js`（小程序端 uni canvas 兜底，接口与 H5 对齐）；删除旧 `hooks/useSignature.js`。
+  - `ConstructFlowActions` 的调用方式（props/events）不变，不需要改动业务状态链。
+- **验证（2026-11-23）**：
+  - 锁定依赖（uni-app 5.21）下 `npm run build:h5`、`npm run build:mp-weixin` 均通过；临时测试页已删除，正式产物无测试 chunk。
+  - Puppeteer 无头实测（Chrome 157 + 本地解包依赖库；临时测试页验收后删除）：竖屏进入出现「请将手机横过来」；旋转到 844×390 后出现 718×200 画布；鼠标绘制后「客户确认签字」由禁用变可用；撤销/重写后重新禁用；横屏提交 base64 83,934 字符；竖屏降级绘制提交 62,082 字符。截图检查了告知书页、横屏提示、横屏空/有笔迹、竖屏降级、结果预览。
+  - 无头环境缺少中文字体，截图中文显示为方框；布局、画布尺寸、笔画与提交逻辑不受影响，真机字体正常。
+- **发布（2026-11-23 11:07）**：仅更新 ops H5（后端/数据库零变更）。备份当前 H5 至 `/data2/boss-platform/backups/customer-sign-20261123_110706/ops-h5-current.tgz`；先 `rm -rf assets/*` 再解包，入口由 `index-sQK83QxP.js` 变为 `index-D7E8wZB2.js`，施工页 chunk 为 `pages-employee-flow-task.DCcmuneF.js`；`boss-ops-nginx nginx -t` + reload 通过。冒烟：`/ops/` 200、新入口/新 chunk 200、旧入口 404、title「金地美家」、ops health 200。
+- **未执行**：微信/iOS 真机触摸与真实 `orientation.lock`/Fullscreen 路径（无头环境已显式置为不支持以验证降级）。
+- **回滚**：上传备份 `ops-h5-current.tgz`（入口 `index-sQK83QxP.js`）并清 `assets/*` 后解包、reload ops nginx。
+- **状态**：已发布；代码提交见本次发布提交。
+
+## 2026-11-23（业务订单施工状态链：已发布生产并只读冒烟通过）
+
+- **背景**：原「派工出库」审批通过后工作流直接进入「施工中」并写 `biz_status=4`，施工员未接单/未到场/客户不知情，进度失真且无到场凭证。本次在派工与施工中之间新增业务状态链：`3 派工出库 → WAIT_ACCEPT → ACCEPTED → ARRIVED → CUSTOMER_CONFIRMED → 4 施工中`，异常分支 `CUSTOMER_REFUSED`；施工中仍沿用历史 key `4`，存量数据零迁移。
+- **ops 后端**：
+  - 新增 `service/construct/OrderConstructServiceImpl`：订单行锁 + `biz_status/version` CAS 串行化；接收/拒绝/打卡/客户签字/客户拒绝/开工全部服务端强校验施工员身份、当前组织、工作流运行中。
+  - 客户签字落盘 PNG（魔数校验、≤2MB、UUID 路径、SHA-256 入库），告知书内容快照 + 版本化（重签旧版本 `status=0` 保留）；新增 `ops_order_construct_log` / `ops_customer_notice`。
+  - 派工幂等：`dispatch_task_id` 在 SCM 建单前独立事务落库；SCM 已建单的同任务重试按 `dispatchId` 复用；拒绝接单后重新派工复用原出库单/物料领用草稿，不再重复出库。
+  - 迟到「派工出库」回调防冲回：新状态链订单仅在 `3` 时接受回调，避免把待接收/已开工订单覆盖回派工状态并清空施工员。
+  - 施工记录节点动作强校验 `biz_status ∈ {4,5}`；`CONSTRUCT_PROGRESS` 通知派工人/经办人（事务提交后异步，模板未配置静默跳过）。
+  - 新接口：`/api/ops/employee/business-data/orders/{orderId}/construct/**`（view/logs/notice/accept/reject/arrive/customer-confirm/customer-refuse/start/notice-verify）。
+- **platform**：内部接口 `POST /api/internal/wf/task/reject`（任务所有者二次校验）、`POST /api/internal/wf/notify`；`CONSTRUCT_PROGRESS` 消息场景（含占位模板 SQL `doc/migration_workflow_construct_notify.sql`）；待办 `TodoView` 增加 `corpId` 供 H5 按当前组织过滤施工任务。
+- **前端**：ops H5 新增施工流程卡片/上门打卡/客户手写签字/流转时间线/原因弹窗；待办按当前组织过滤施工任务；订单详情展示施工时间线与告知书签字图片并可复算 SHA-256。platform PC 状态标签颜色、订单详情施工流转面板、施工记录未开工禁用提交。
+- **构建验证（2026-11-23）**：ops `mvn clean package -DskipTests -o`、platform `mvn clean package -pl web -am -DskipTests -o`、ops `npm run build:h5`、platform `npm run build` 全部通过；JAR/前端产物已核对包含新类与关键字符串（ops JAR sha256 `e2f24185…`，platform JAR sha256 `c5785441…`；ops 入口 `index-sQK83QxP.js`，platform 入口 `index-Bv_D2VFv.js`）。
+- **发布（2026-11-23 10:21–10:24）**：
+  - 备份 `/data2/boss-platform/backups/construct-20261123_102059/`：`mall_db_tables.sql`（订单/流程留痕/退款/附件）、`ai_platform_tables.sql`（字典/流程定义/节点/审批人/消息模板）、两个当前 JAR、两套前端 tgz、compose。
+  - 迁移：`ai_platform.wf_message_template.scene_code` 扩展 `CONSTRUCT_PROGRESS` + 占位模板 id=5（status=0，需管理员填公众号模板 ID 后启用）；`mall_db.ops_business_order.biz_status` 扩到 32、新增 9 个施工字段；新建 `ops_order_construct_log` / `ops_customer_notice`；`business_order_status` 新增 5 个中间状态并重排；节点 5 更名「施工执行」、`biz_status=NULL`、`return_mode=PREVIOUS`、`return_biz_status=3`。
+  - 镜像：`boss-platform/backend:latest`=`17bf3d1da864`（新，construct tag `20261123_102059`；回滚 `boss-platform/backend:rollback-construct-20261123_102059`=`8a1930fab228`）；`boss-platform/ops:latest`=`135c40f86408`（新；回滚 `boss-platform/ops:rollback-construct-20261123_102059`=`cc044e2e1f61`）。两镜像内 `app.jar` sha256 与本地构建一致。
+  - 前端：ops H5 先 `rm -rf assets/*` 再解包，入口 `index-sQK83QxP.js`、施工页 `pages-employee-flow-task.ictRnOaU.js`、详情页 `pages-employee-order-detail.9lz4GTyX.js`；平台主站入口 `index-Bv_D2VFv.js`、业务数据 `BusinessData-BJ5IHaFY.js`、施工节点 `BusinessDataFlowTask-CJgU6wUy.js`；三个 nginx `nginx -t` + reload 通过。
+- **只读冒烟**：platform/ops health 200；`/` 与 `/ops/` 200 且标题分别为「协同平台」「金地美家」；新 chunk 200；未登录 `GET /construct` 401；会员 SSO 令牌读写均 403；内部 `/task/reject` 无 token 返回 code 403；带内部 token 的 `/wf/notify` 返回 200 且平台日志「模板未配置，跳过」（占位模板 status=0）；管理员 token 查询订单 8811 施工视图返回 `bizStatus=4 施工中`、权限全 false、告知书预览正常；施工员账号 577（corp 9，订单 8811 节点 5 待办处理人）查询同一订单 `isWorker=true`、权限全 false（存量状态 4）、`operateBlockedReason` 为空；admin 订单详情已带 `construct`；字典接口按序返回 `3 → WAIT_ACCEPT → ACCEPTED → ARRIVED → CUSTOMER_CONFIRMED → CUSTOMER_REFUSED → 4 → 5 → 6 → 7`；施工员待办接口已返回 `corpId=9`，H5 可按当前组织过滤施工任务；`ops_order_construct_log`/`ops_customer_notice` 均为 0 行，订单状态分布未变化。
+- **注意**：ops H5 入口 chunk 从 `index-CbEk6rqy.js` 变为 `index-sQK83QxP.js`，平台主站入口变为 `index-Bv_D2VFv.js`；微信/浏览器若仍见旧页面，需清理缓存或重新进入。
+- **未执行**：真实施工员登录 E2E（无测试账号）——需现场用施工员微信走「派工 → 确认接收 → 上门打卡 → 客户签字 → 确认开工 → 施工记录 → 完工验收」。公众号 `CONSTRUCT_PROGRESS` 模板目前为停用占位，需管理员配置模板 ID 后启用。
+- **回滚**：`docker tag boss-platform/ops:rollback-construct-20261123_102059 boss-platform/ops:latest` + `docker compose up -d --no-build ops-backend`（platform 同理）；数据库回滚脚本 `sql/migration_business_order_construct_flow_rollback.sql`（默认只停用字典项/恢复节点，新表与凭证保留）。
+
 ## 2026-11-22（业务订单退回草稿/作废退款：核查已上线 + 不可用原因提示，未发布）
 
 - **核查结论**：该功能已于 2026-11-18 实现并发布（ops `846d508`、平台 `dac08c2`）。生产库 `ops_business_order.draft_flag`、`ops_business_refund`、字典项 `business_order_status/-1`、`wf_definition.biz_order_void_flow`（作废申请→部长→财务→总经办 4 节点）均在位；生产 H5 `pages-employee-order-detail` 产物包含「退回草稿」。

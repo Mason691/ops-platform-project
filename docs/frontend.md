@@ -42,6 +42,7 @@
 | `OrgSwitcher` / `OrgSwitchSheet` | `components/OrgSwitch*.vue` | 员工多组织切换入口与底部弹层（复用底座 orgs/switch-org） |
 | `EmployeePasswordLogin` / `EmployeeWechatLogin` / `EmployeeWechatBindCard` | `components/Employee*Login*.vue` 等 | 员工登录页三块：密码登录、微信授权登录、微信绑定卡片 |
 | `PaymentQr` | `components/PaymentQr.vue` | 鉴权收款码展示（员工制单收款步骤，取图后逐次 SHA-256 校验） |
+| `ConstructFlowActions` / `ArriveCheckIn` / `CustomerSign` / `SignaturePad` / `CustomerNoticeContent` / `ConstructTimeline` / `ConstructReasonDialog` | `components/Construct*.vue` 等 | 施工状态链操作区、上门打卡、全屏横屏客户签字（H5 原生 Canvas：DPR 高清/贝塞尔平滑/撤销重写；竖屏可降级）、告知书正文与重签预览、流转时间线、原因弹窗 |
 | `ImageCropperModal` | `components/ImageCropperModal.vue` | 图片裁剪上传弹窗，uni-app `<image>` 的 `mode` 裁剪封装 |
 | `LiveStatusCard` | `components/LiveStatusCard.vue` | 直播状态卡片（预告/直播中/结束 + 开播倒计时） |
 | `Pager` | `components/Pager.vue` | 通用分页器，配合列表页使用 |
