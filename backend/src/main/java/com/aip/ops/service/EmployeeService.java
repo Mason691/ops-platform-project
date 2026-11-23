@@ -12,7 +12,7 @@ public interface EmployeeService {
 
     /**
      * Check if the current member is also an employee (exists in platform sys_user).
-     * Returns {isEmployee, companies: [{corpId, corpName, roleType, roleName}]}.
+     * Returns {isEmployee, companies: [{corpId, corpName, roleNames, roleType, roleName}]}.
      */
     Map<String, Object> checkIdentity();
 

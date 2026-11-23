@@ -26,7 +26,7 @@
       </view>
       <view class="card">
         <text class="card-label">组织角色</text>
-        <text class="card-value">{{ activeCompany.roleName || activeCompany.roleType || '-' }}</text>
+        <text class="card-value">{{ companyRoleText }}</text>
       </view>
       <view class="card">
         <text class="card-label">登录方式</text>
@@ -105,10 +105,12 @@ import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
 import EmployeeWechatBindCard from '@/components/EmployeeWechatBindCard.vue'
 import OrgSwitchSheet from '@/components/OrgSwitchSheet.vue'
 import { useOrgSwitch } from '@/hooks/useOrgSwitch'
-import { clearEmployeeSession } from '@/utils/employeeSession'
+import { clearEmployeeSession, getCompanyRoleText } from '@/utils/employeeSession'
 
 const info = ref({})
 const activeCompany = ref({})
+// 展示当前组织全部角色，避免只显示第一个角色
+const companyRoleText = computed(() => getCompanyRoleText(activeCompany.value))
 const loginMode = ref('')
 const showPwdModal = ref(false)
 const showNickModal = ref(false)
@@ -246,8 +248,8 @@ function doLogout() {
 .cards { margin: 24rpx; background: #fff; border-radius: 16rpx; padding: 8rpx 0; }
 .card { display: flex; justify-content: space-between; align-items: center; padding: 28rpx 32rpx; border-bottom: 1rpx solid #f0f0f0; }
 .card:last-child { border-bottom: none; }
-.card-label { font-size: 28rpx; color: #666; }
-.card-value { font-size: 28rpx; color: #333; font-weight: 500; }
+.card-label { font-size: 28rpx; color: #666; flex: 0 0 auto; }
+.card-value { font-size: 28rpx; color: #333; font-weight: 500; flex: 1; min-width: 0; text-align: right; word-break: break-all; }
 .section { margin: 24rpx; }
 .section-title { font-size: 26rpx; color: #999; padding: 0 0 16rpx 8rpx; }
 .menu-item { display: flex; justify-content: space-between; align-items: center; background: #fff; border-radius: 16rpx; padding: 32rpx; margin-bottom: 16rpx; }
