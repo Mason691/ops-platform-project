@@ -2,7 +2,10 @@
   <view class="page">
     <view class="head">
       <view class="head-title-row">
-        <text class="title">货款补录</text>
+        <view class="title-wrap">
+          <text class="title">货款补录</text>
+          <text v-if="list.length" class="count-tag">{{ list.length > 99 ? '99+' : list.length }}</text>
+        </view>
         <EmployeeHomeLink />
       </view>
       <text class="sub">定金支付订单收齐余款后标记为全款，方可派工出库</text>
@@ -20,16 +23,24 @@
     <view v-else class="list">
       <view v-for="item in list" :key="item.orderId" class="card" @click="openReceive(item)">
         <view class="card-top">
-          <text class="order-no">{{ item.orderNo || '—' }}</text>
-          <text class="balance">应补 ¥{{ money(item.balanceAmount) }}</text>
+          <view class="order-title">
+            <text class="order-no">{{ item.orderNo || '—' }}</text>
+            <text class="pending-tag">待补录尾款</text>
+          </view>
+          <text class="balance">待补 ¥{{ money(item.balanceAmount) }}</text>
         </view>
         <text class="customer">{{ item.customer || '—' }} {{ item.customerPhone || '' }}</text>
-        <view class="meta">
-          <text>销售价 ¥{{ money(item.totalAmount) }}</text>
+        <view class="amounts">
+          <text>应付 ¥{{ money(item.payableAmount) }}</text>
           <text>定金 ¥{{ money(item.depositAmount) }}</text>
         </view>
+        <view class="meta-grid">
+          <text>定金收款：{{ formatTime(item.depositReceiptDate) }}</text>
+          <text>尾款状态：{{ item.balanceStatus || '未结清' }}</text>
+          <text>最近提醒：{{ formatTime(item.lastRemindTime) }}</text>
+        </view>
         <view class="card-bottom">
-          <text class="time">{{ formatTime(item.createTime) }}</text>
+          <text class="time">制单 {{ formatTime(item.createTime) }}</text>
           <text class="go">收款补录 ›</text>
         </view>
       </view>
@@ -92,16 +103,28 @@ function openReceive(item) {
 .page { min-height: 100vh; background: #F5F6FA; padding: 24rpx 24rpx 40rpx; box-sizing: border-box; }
 .head { padding: 8rpx 4rpx 20rpx; display: flex; flex-direction: column; gap: 6rpx; }
 .head-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; }
+.title-wrap { display: flex; align-items: center; gap: 12rpx; }
 .title { font-size: 36rpx; font-weight: 700; color: #1D2129; }
+.count-tag {
+  min-width: 36rpx; height: 36rpx; padding: 0 10rpx; border-radius: 18rpx;
+  background: #F53F3F; color: #fff; font-size: 22rpx; line-height: 36rpx;
+  text-align: center; box-sizing: border-box;
+}
 .sub { font-size: 23rpx; color: #86909C; line-height: 1.5; }
 .list { display: flex; flex-direction: column; gap: 14rpx; }
 .card { background: #fff; border-radius: 16rpx; padding: 24rpx; }
 .card:active { background: #FFF8F4; }
-.card-top { display: flex; align-items: center; justify-content: space-between; }
+.card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12rpx; }
+.order-title { display: flex; align-items: center; flex-wrap: wrap; gap: 10rpx; min-width: 0; }
 .order-no { font-size: 29rpx; font-weight: 700; color: #1D2129; }
-.balance { font-size: 25rpx; color: #F53F3F; font-weight: 700; }
+.pending-tag {
+  font-size: 20rpx; color: #F53F3F; background: #FFF1F0;
+  border: 1rpx solid #FFCCC7; border-radius: 8rpx; padding: 2rpx 10rpx;
+}
+.balance { font-size: 25rpx; color: #F53F3F; font-weight: 700; flex-shrink: 0; }
 .customer { display: block; margin-top: 10rpx; font-size: 26rpx; color: #4E5969; }
-.meta { display: flex; gap: 24rpx; margin-top: 8rpx; font-size: 23rpx; color: #86909C; }
+.amounts { display: flex; flex-wrap: wrap; gap: 24rpx; margin-top: 10rpx; font-size: 23rpx; color: #86909C; }
+.meta-grid { display: flex; flex-direction: column; gap: 4rpx; margin-top: 10rpx; font-size: 22rpx; color: #86909C; }
 .card-bottom { display: flex; justify-content: space-between; align-items: center; margin-top: 14rpx; }
 .time { font-size: 21rpx; color: #C9CDD4; }
 .go { font-size: 25rpx; color: #FF6B35; font-weight: 600; }

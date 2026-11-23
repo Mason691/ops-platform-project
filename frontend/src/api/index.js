@@ -274,6 +274,7 @@ export const api = {
   employeeOrderApprover: (orderId) => request({url:'/api/ops/employee/business-data/manual/' + orderId + '/approver'}),
   // 货款补录（定金支付 → 收齐余款）
   depositPending: () => request({url:'/api/ops/employee/business-data/balance-pending'}),
+  depositPendingCount: () => request({url:'/api/ops/employee/business-data/balance-pending/count'}),
   depositPendingDetail: (orderId) => request({url:'/api/ops/employee/business-data/balance-pending/' + orderId}),
   receiveBalance: (orderId, data) => request({url:'/api/ops/employee/business-data/' + orderId + '/balance-receive', method:'POST', data}),
   // 派工资格批量查询（H5 待办过滤/任务页提示）

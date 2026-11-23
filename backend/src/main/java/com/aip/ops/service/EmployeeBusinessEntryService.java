@@ -42,6 +42,9 @@ public interface EmployeeBusinessEntryService {
      */
     List<Map<String, Object>> listDepositPending();
 
+    /** 货款补录待办数量（工作台卡片角标；口径与列表一致）。 */
+    long countDepositPending();
+
     /** 货款补录详情（校验订单属于当前经办人）。 */
     Map<String, Object> depositPendingDetail(Long orderId);
 

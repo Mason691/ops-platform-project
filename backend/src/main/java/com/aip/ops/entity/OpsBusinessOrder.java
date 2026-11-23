@@ -173,6 +173,22 @@ public class OpsBusinessOrder extends BaseEntity {
     @TableField("balance_remark")
     private String balanceRemark;
 
+    /** 尾款收款方式（补录时填写）：二维码/现金/转账。 */
+    @TableField("balance_payment_method")
+    private String balancePaymentMethod;
+
+    /** 尾款收款日期（补录时填写，yyyy-MM-dd）。 */
+    @TableField("balance_receipt_date")
+    private String balanceReceiptDate;
+
+    /** 尾款收据号（补录时选填）。 */
+    @TableField("balance_receipt_no")
+    private String balanceReceiptNo;
+
+    /** 最近一次尾款补录提醒时间（定时任务写入，用于列表展示）。 */
+    @TableField("balance_remind_time")
+    private LocalDateTime balanceRemindTime;
+
     // 订单备注使用 BaseEntity.remark（ops_business_order.remark 列已存在），不重复声明
 
     /** 业务状态（工作流驱动，字典 business_order_status：-1~6）。 */

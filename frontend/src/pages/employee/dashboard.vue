@@ -212,6 +212,20 @@ async function loadCards() {
     cards.value = FALLBACK_CARDS
   }
   await loadPickBadge()
+  await loadBalanceBadge()
+}
+
+/** 货款补录角标：定金支付且尾款未结清数量；结清后接口返回 0，角标自动消失。 */
+async function loadBalanceBadge() {
+  try {
+    const result = await api.depositPendingCount()
+    const count = Number(result && result.count) || 0
+    const card = (cards.value || []).find(item => item.code === 'balance-pending'
+      || String(item.path || '').includes('balance-pending'))
+    if (card) card.badge = count
+  } catch (_) {
+    // 角标失败不影响常用功能展示
+  }
 }
 
 /**

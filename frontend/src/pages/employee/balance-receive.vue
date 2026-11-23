@@ -28,6 +28,9 @@
         <text class="done-icon">✓</text>
         <text class="done-title">该订单已完成货款补录</text>
         <text class="done-sub">订单已标记为全款，无需重复补录</text>
+        <text class="done-sub">实收 ¥{{ money(detail.balanceReceivedAmount) }}
+          · {{ detail.balancePaymentMethodName || '—' }}
+          · {{ detail.balanceReceiptDate || '—' }}</text>
         <view class="done-btn" @click="back"><text>返回列表</text></view>
       </view>
 
@@ -44,6 +47,15 @@
             <text class="hint">实收余款必须等于应补余款 ¥{{ money(detail.balanceAmount) }}</text>
             <text v-if="amountError" class="ferr">{{ amountError }}</text>
           </view>
+          <BalanceReceiptFields
+            v-model:paymentMethod="form.paymentMethod"
+            v-model:receiptDate="form.receiptDate"
+            v-model:receiptNo="form.receiptNo"
+            :today="today"
+            :pay-error="payError"
+            :date-error="dateError"
+            :receipt-no-error="receiptNoError"
+          />
           <view class="field">
             <text class="label">收款凭证 <text class="req">*</text></text>
             <BusinessSpecialFileUploader v-model="form.voucher" label="收款凭证"
@@ -76,6 +88,7 @@ import EmployeePageHead from '@/components/EmployeePageHead.vue'
 import { reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import BusinessSpecialFileUploader from '@/components/BusinessSpecialFileUploader.vue'
+import BalanceReceiptFields from '@/components/BalanceReceiptFields.vue'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 
@@ -86,10 +99,24 @@ const loading = ref(true)
 const errorMsg = ref('')
 const submitting = ref(false)
 const amountError = ref('')
+const payError = ref('')
+const dateError = ref('')
+const receiptNoError = ref('')
 const voucherError = ref('')
 const remarkError = ref('')
 
-const form = reactive({ receivedAmount: '', voucher: null, remark: '' })
+// 本地日期（不能用 toISOString：UTC 时区在凌晨会落到前一天）
+function localToday() {
+  const d = new Date()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${month}-${day}`
+}
+const today = localToday()
+const form = reactive({
+  receivedAmount: '', paymentMethod: 'QR', receiptDate: today,
+  receiptNo: '', voucher: null, remark: ''
+})
 
 onLoad((options) => {
   if (!isEmployeeLoggedIn()) {
@@ -111,6 +138,8 @@ async function load() {
     detail.value = await api.depositPendingDetail(orderId.value)
     if (!detail.value.alreadyReceived) {
       form.receivedAmount = money(detail.value.balanceAmount)
+      form.paymentMethod = detail.value.paymentMethod || 'QR'
+      form.receiptDate = today
     }
   } catch (e) {
     errorMsg.value = (e && e.msg) || '加载失败'
@@ -125,6 +154,9 @@ function money(value) {
 
 function validate() {
   amountError.value = ''
+  payError.value = ''
+  dateError.value = ''
+  receiptNoError.value = ''
   voucherError.value = ''
   remarkError.value = ''
   const raw = String(form.receivedAmount || '').trim()
@@ -136,6 +168,23 @@ function validate() {
   }
   if (Math.round(received * 100) !== Math.round(due * 100)) {
     amountError.value = `实收余款必须等于应补余款 ¥${money(due)}`
+    return false
+  }
+  if (!['QR', 'CASH', 'TRANSFER'].includes(form.paymentMethod)) {
+    payError.value = '请选择收款方式'
+    return false
+  }
+  if (!form.receiptDate) {
+    dateError.value = '请选择收款日期'
+    return false
+  }
+  if (form.receiptDate > today) {
+    dateError.value = '收款日期不能晚于今天'
+    return false
+  }
+  const receiptNo = String(form.receiptNo || '').trim()
+  if (receiptNo && !/^[A-Za-z0-9_/-]+$/.test(receiptNo)) {
+    receiptNoError.value = '收据号只能包含字母、数字、短横线、下划线和斜杠'
     return false
   }
   if (!form.voucher || !form.voucher.url) {
@@ -156,6 +205,9 @@ async function submit() {
   try {
     const result = await api.receiveBalance(orderId.value, {
       receivedAmount: Number(form.receivedAmount),
+      paymentMethod: form.paymentMethod,
+      receiptDate: form.receiptDate,
+      receiptNo: String(form.receiptNo || '').trim() || null,
       voucherUrl: form.voucher.url,
       remark: String(form.remark || '').trim()
     })
@@ -177,6 +229,9 @@ async function submit() {
   } catch (e) {
     if (e && e.msg) {
       if (String(e.msg).includes('实收余款')) amountError.value = e.msg
+      else if (String(e.msg).includes('收款方式')) payError.value = e.msg
+      else if (String(e.msg).includes('收款日期')) dateError.value = e.msg
+      else if (String(e.msg).includes('收据号')) receiptNoError.value = e.msg
       else if (String(e.msg).includes('凭证')) voucherError.value = e.msg
       else if (String(e.msg).includes('备注')) remarkError.value = e.msg
     }

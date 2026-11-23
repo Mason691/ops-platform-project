@@ -1065,6 +1065,12 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         order.put("balancePaidAt", master != null ? master.getBalancePaidAt() : null);
         order.put("balanceVoucherUrl", master != null ? master.getBalanceVoucherUrl() : null);
         order.put("balanceRemark", master != null ? master.getBalanceRemark() : null);
+        order.put("balancePaymentMethod", master != null ? master.getBalancePaymentMethod() : null);
+        order.put("balancePaymentMethodName", master == null ? null
+                : com.aip.ops.util.PaymentMethod.labelOf(master.getBalancePaymentMethod()));
+        order.put("balanceReceiptDate", master != null ? master.getBalanceReceiptDate() : null);
+        order.put("balanceReceiptNo", master != null ? master.getBalanceReceiptNo() : null);
+        order.put("depositReceiptDate", master != null ? master.getReceiptDate() : null);
         order.put("voucherUrl", pick(master != null ? master.getVoucherUrl() : null,
                 rows, OpsBusinessData::getVoucherUrl));
         order.put("receiptImageUrl", master != null ? master.getReceiptImageUrl() : null);
