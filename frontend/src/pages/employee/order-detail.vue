@@ -106,7 +106,8 @@
           <text class="refund-flow-line">
             当前节点：{{ order.refund.flow.currentNodeName || order.refund.currentNodeName || '—' }}
           </text>
-          <text v-if="refundApproverText" class="refund-flow-line">
+          <text v-if="refundApproverText && order.refund.status === 'PENDING'"
+                class="refund-flow-line">
             处理人：{{ refundApproverText }}
           </text>
         </view>
@@ -386,12 +387,21 @@ const unavailableReason = computed(() => {
 })
 
 const refundApproverText = computed(() => {
-  const list = (order.value && order.value.refund && order.value.refund.flow
-    && order.value.refund.flow.currentApprovers) || []
-  return list
-    .map(item => item.userName || item.approverName || item.roleName)
-    .filter(Boolean)
-    .join('、')
+  const flow = (order.value && order.value.refund && order.value.refund.flow) || {}
+  const approval = flow.currentApproval
+  const display = approval && (approval.groups || []).length && approval.displayText
+  if (display) return display
+  const list = flow.currentApprovers || []
+  // 旧响应兜底：仅当前节点，按角色分组
+  const groups = new Map()
+  list.forEach(item => {
+    const name = item.userName || item.approverName
+    if (!name) return
+    const role = item.roleName || '审批人'
+    if (!groups.has(role)) groups.set(role, [])
+    groups.get(role).push(name)
+  })
+  return [...groups.entries()].map(([role, names]) => `${role}（${names.join('、')}）`).join('、')
 })
 
 function editDraft() {

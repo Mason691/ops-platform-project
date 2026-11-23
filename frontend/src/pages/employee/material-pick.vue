@@ -275,8 +275,8 @@ async function submit() {
     const display = result && result.currentApproverDisplay
     uni.showModal({
       title: '已提交审批',
-      content: display ? '已提交给 ' + display + ' 审批'
-        : '已提交审批，待分配审批人，请联系管理员',
+      content: display ? '已提交成功，当前审批：' + display
+        : '已提交成功，待分配审批人，请联系管理员',
       showCancel: false,
       success: () => uni.navigateBack()
     })

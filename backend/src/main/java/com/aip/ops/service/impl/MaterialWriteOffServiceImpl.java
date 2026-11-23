@@ -431,6 +431,8 @@ public class MaterialWriteOffServiceImpl implements MaterialWriteOffService {
                 header.getApproveTime(), header.getWfNodeName(),
                 approver == null ? null : approver.approverName(),
                 approver == null ? null : approver.approverRole(),
+                approver == null || !approver.resolved()
+                        ? null : approver.displayText(),
                 approver != null ? approver.resolved()
                         : (PENDING.equals(header.getStatus()) ? Boolean.FALSE : null),
                 approver != null ? approver.message()

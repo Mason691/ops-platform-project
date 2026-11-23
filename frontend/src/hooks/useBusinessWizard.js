@@ -372,6 +372,8 @@ export function useBusinessWizard() {
             ...success.value,
             currentApproverName: info.approverName || '',
             currentApproverRole: info.approverRole || '',
+            currentApprovalDisplay: info.displayText || '',
+            currentApprovalNodeName: info.nodeName || '',
             approverResolved: true,
             approverMessage: ''
           }

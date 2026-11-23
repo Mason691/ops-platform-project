@@ -210,6 +210,10 @@ public class BusinessDataController {
                         Long.valueOf(String.valueOf(instanceId)));
                 detail.put("currentApproverName", approver.approverName());
                 detail.put("currentApproverRole", approver.approverRole());
+                detail.put("currentApprovalDisplay",
+                        approver.resolved() ? approver.displayText() : null);
+                detail.put("currentApprovalNodeName", approver.nodeName());
+                detail.put("currentApprovalMode", approver.approverMode());
                 detail.put("currentApproverResolved", approver.resolved());
                 detail.put("currentApproverMessage", approver.message());
             } catch (Exception e) {

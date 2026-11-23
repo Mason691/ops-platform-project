@@ -204,6 +204,7 @@ export function useMaterialWriteOffWizard() {
             ...success.value,
             currentApproverName: detail.currentApproverName || '',
             currentApproverRole: detail.currentApproverRole || '',
+            currentApprovalDisplay: detail.currentApprovalDisplay || '',
             approverResolved: true,
             approverMessage: ''
           }

@@ -24,6 +24,8 @@ public record MaterialWriteOffView(
         String wfNodeName,
         String currentApproverName,
         String currentApproverRole,
+        /** 底座统一生成：当前审批角色 + 姓名（如“部长（张三）”）。 */
+        String currentApprovalDisplay,
         Boolean approverResolved,
         String approverMessage,
         List<EntryView> entries,

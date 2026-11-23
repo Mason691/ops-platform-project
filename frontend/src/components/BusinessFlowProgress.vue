@@ -34,7 +34,7 @@
       <view v-if="flow.nextNodeName" class="flow-kv">
         <text class="k">下一节点</text><text class="v">{{ flow.nextNodeName }}</text>
       </view>
-      <view class="flow-kv">
+      <view v-if="!finished" class="flow-kv">
         <text class="k">{{ approverLabel }}</text>
         <text class="v" :class="{ muted: approverMuted }">{{ approverText }}</text>
       </view>
@@ -62,6 +62,9 @@ const props = defineProps({
 
 const hasFlow = computed(() => props.flow && props.flow.status
   && props.flow.status !== 'NOT_STARTED' && props.flow.status !== 'UNKNOWN')
+
+const finished = computed(() =>
+  ['COMPLETED', 'REJECTED', 'TERMINATED'].includes(props.flow && props.flow.status))
 
 const steps = computed(() => {
   // 字典接口已按 item_order 返回；不能再对混合 key（数字 + 新状态字符串）排序，
@@ -120,6 +123,14 @@ const approverLabel = computed(() => {
 })
 
 const approverText = computed(() => {
+  const current = pending(props.flow.currentApprovers)
+  const approval = current.length
+    ? props.flow.currentApproval
+    : (props.flow.nextApproval || props.flow.currentApproval)
+  if (approval && (approval.groups || []).length && approval.displayText) {
+    return approval.displayText
+  }
+  // 旧响应兜底：只展示当前/下一节点，不再跨节点拼接
   const list = chosenApprovers.value
   if (!list.length) return props.flow.resolveMessage || '待分配'
   const names = [...new Set(list.map(item => item.userName || item.approverName).filter(Boolean))]

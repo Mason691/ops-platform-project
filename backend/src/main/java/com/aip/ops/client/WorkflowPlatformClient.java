@@ -309,7 +309,9 @@ public class WorkflowPlatformClient {
                         str(row.get("resolveStatus")),
                         str(row.get("resolveMessage")),
                         str(row.get("startedTime")),
-                        str(row.get("finishedTime"))));
+                        str(row.get("finishedTime")),
+                        mapOf(row.get("currentApproval")),
+                        mapOf(row.get("nextApproval"))));
             }
             return result;
         } catch (Exception e) {
@@ -410,10 +412,71 @@ public class WorkflowPlatformClient {
         }
         boolean resolved = !names.isEmpty();
         String message = resolved ? null : fallbackMessage(data);
+        // 底座新版统一返回 currentApproval（角色 + 姓名 + 分组），直接透传；
+        // 旧版/SCM 兼容响应才回退到本地分组拼接。
+        Map<String, Object> approval = mapOf(data.get("currentApproval"));
+        if (approval.isEmpty()) {
+            approval = mapOf(mapOf(data.get("nextNodePreview")).get("approval"));
+        }
+        String displayText = str(approval.get("displayText"));
+        if (isBlank(displayText)) {
+            displayText = displayTextOf(approvers);
+        }
+        String nodeName = firstNonBlank(str(approval.get("nodeName")),
+                str(data.get("nextNodeName")), str(data.get("currentNodeName")));
+        String approverMode = firstNonBlank(str(approval.get("approverMode")),
+                str(data.get("approverMode")));
         return new StartResult(instanceId,
                 resolved ? String.join("、", names) : null,
                 roles.isEmpty() ? null : String.join("、", roles),
-                resolved, message);
+                displayText, nodeName, approverMode, resolved, message);
+    }
+
+    /** 旧响应兜底：按角色分组拼接“角色（姓名、姓名）”，不跨节点。 */
+    private String displayTextOf(List<Map<String, Object>> approvers) {
+        Map<String, List<String>> groups = new LinkedHashMap<>();
+        for (Map<String, Object> row : approvers) {
+            String name = isBlank(str(row.get("userName")))
+                    ? str(row.get("approverName")) : str(row.get("userName"));
+            if (isBlank(name)) {
+                continue;
+            }
+            String role = str(row.get("roleName"));
+            String key = isBlank(role) ? "审批人" : role.trim();
+            groups.computeIfAbsent(key, ignored -> new ArrayList<>()).add(name.trim());
+        }
+        return groups.entrySet().stream()
+                .map(entry -> entry.getKey() + "（" + String.join("、", entry.getValue())
+                        + modeSuffix(approvers, entry.getKey()) + "）")
+                .collect(java.util.stream.Collectors.joining("、"));
+    }
+
+    private String modeSuffix(List<Map<String, Object>> approvers, String role) {
+        long count = approvers.stream()
+                .filter(row -> role.equals(isBlank(str(row.get("roleName")))
+                        ? "审批人" : str(row.get("roleName")).trim()))
+                .count();
+        if (count < 2) {
+            return "";
+        }
+        String mode = null;
+        for (Map<String, Object> row : approvers) {
+            String rowRole = str(row.get("roleName"));
+            if (role.equals(isBlank(rowRole) ? "审批人" : rowRole.trim())) {
+                mode = str(row.get("mode"));
+                break;
+            }
+        }
+        if ("ALL".equalsIgnoreCase(mode)) return "，会签";
+        if ("ANY".equalsIgnoreCase(mode)) return "，或签";
+        return "";
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (!isBlank(value)) return value;
+        }
+        return null;
     }
 
     private String fallbackMessage(Map<String, Object> data) {
@@ -456,6 +519,11 @@ public class WorkflowPlatformClient {
         return result;
     }
 
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapOf(Object value) {
+        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+    }
+
     private String str(Object value) {
         return value == null ? null : String.valueOf(value);
     }
@@ -483,17 +551,20 @@ public class WorkflowPlatformClient {
                                    List<Map<String, Object>> currentApprovers,
                                    List<Map<String, Object>> nextApprovers,
                                    String resolveStatus, String resolveMessage,
-                                   String startedTime, String finishedTime) {
+                                   String startedTime, String finishedTime,
+                                   Map<String, Object> currentApproval,
+                                   Map<String, Object> nextApproval) {
     }
 
     /**
-     * 发起/查询结果：实例 ID + 审批人姓名/角色 + 是否解析成功 + 兜底文案。
+     * 发起/查询结果：实例 ID + 审批人姓名/角色 + 统一展示文案 + 是否解析成功 + 兜底文案。
      * resolved=false 时前端不得静默为空，必须展示 message。
      */
     public record StartResult(Long instanceId, String approverName, String approverRole,
+                              String displayText, String nodeName, String approverMode,
                               boolean resolved, String message) {
         public static StartResult unresolved(Long instanceId, String message) {
-            return new StartResult(instanceId, null, null, false, message);
+            return new StartResult(instanceId, null, null, null, null, null, false, message);
         }
     }
 }

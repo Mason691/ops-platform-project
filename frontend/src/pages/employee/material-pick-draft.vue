@@ -425,8 +425,8 @@ async function submit() {
   let confirmText = '提交后将进入本组织部长审批流程，审批人信息提交后可在详情查看'
   try {
     const preview = await api.scmMaterialPickApprovalPreview(id.value)
-    if (preview && preview.displayName) {
-      confirmText = `您将把物料领用单 ${detail.value.billNo || ''} 提交给 ${preview.displayName} 审批，确认提交？`
+    if (preview && preview.displayText) {
+      confirmText = `您将把物料领用单 ${detail.value.billNo || ''} 提交给 ${preview.displayText} 审批，确认提交？`
     } else if (preview && preview.fallbackMessage) {
       confirmText = preview.fallbackMessage
     }
@@ -453,8 +453,8 @@ async function submit() {
     const display = result && result.currentApproverDisplay
     uni.showModal({
       title: '已提交审批',
-      content: display ? '已提交给 ' + display + ' 审批'
-        : '已提交审批，待分配审批人，请联系管理员',
+      content: display ? '已提交成功，当前审批：' + display
+        : '已提交成功，待分配审批人，请联系管理员',
       showCancel: false,
       success: () => uni.redirectTo({ url: '/pages/employee/material-pick-drafts' })
     })
