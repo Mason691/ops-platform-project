@@ -25,7 +25,7 @@
           <view class="pc-meta">
             <text class="pc-company">{{ company.corpName || '—' }}</text>
             <text class="pc-dot">·</text>
-            <text class="pc-role">{{ roleName }}</text>
+            <text class="pc-role">{{ roleText }}</text>
           </view>
         </view>
       </view>
@@ -96,12 +96,13 @@ import WorkTodoCard from '@/components/WorkTodoCard.vue'
 import AddBusinessButton from '@/components/AddBusinessButton.vue'
 import { useOrgSwitch } from '@/hooks/useOrgSwitch'
 import {
-  getActiveCompany, getEmployeeInfo
+  getActiveCompany, getCompanyRoleText, getEmployeeInfo
 } from '@/utils/employeeSession'
 
 const company      = ref({})
 const employeeName = ref('')
-const roleName     = ref('员工')
+// 展示当前组织全部角色，避免只显示第一个角色
+const roleText     = computed(() => getCompanyRoleText(company.value))
 const noPermissionTip = ref(uni.getStorageSync('ops_employee_no_permission') === '1')
 // 常用功能卡片由底座按 userType + 权限下发；前端不硬编码“已核对业务”等敏感卡片
 const cards = ref([])
@@ -156,7 +157,6 @@ function refreshCompany() {
   employeeName.value = info.name || ''
   if (active.corpId) {
     company.value = active
-    roleName.value = active.roleName || info.role || '员工'
     return
   }
   // 兜底：active_company 丢失时用员工信息恢复
@@ -165,7 +165,6 @@ function refreshCompany() {
       corpId: info.corpId, corpName: '', roleName: info.role || '员工'
     }
     uni.setStorageSync('ops_employee_active_company', JSON.stringify(company.value))
-    roleName.value = company.value.roleName
   }
 }
 
@@ -291,16 +290,16 @@ function onTabSwitch(key) {
   display: flex; align-items: center; justify-content: space-between;
   box-shadow: 0 2rpx 16rpx rgba(0,0,0,.04);
 }
-.pc-left { display: flex; align-items: center; gap: 20rpx; }
+.pc-left { display: flex; align-items: center; gap: 20rpx; flex: 1; min-width: 0; }
 .pc-avatar {
   width: 88rpx; height: 88rpx; border-radius: 50%;
   background: linear-gradient(135deg, #FF8C5A, #FF6B35);
   display: flex; align-items: center; justify-content: center;
 }
 .pc-avatar-text { font-size: 36rpx; color: #fff; font-weight: 600; }
-.pc-info { display: flex; flex-direction: column; gap: 6rpx; }
+.pc-info { display: flex; flex-direction: column; gap: 6rpx; flex: 1; min-width: 0; }
 .pc-name { font-size: 32rpx; font-weight: 700; color: #1D2129; }
-.pc-meta { display: flex; align-items: center; gap: 8rpx; }
+.pc-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8rpx; }
 .pc-company { font-size: 24rpx; color: #4E5969; }
 .pc-dot { color: #C9CDD4; font-size: 24rpx; }
 .pc-role { font-size: 24rpx; color: #FF6B35; font-weight: 500; }

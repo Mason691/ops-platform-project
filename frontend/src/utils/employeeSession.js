@@ -71,12 +71,14 @@ export function saveEmployeeSession(r, loginMode) {
   uni.setStorageSync('ops_employee_active_company', JSON.stringify({
     corpId: r.corpId,
     corpName: r.corpName || '',
-    roleName: role
+    roleName: role,
+    roleNames
   }))
-  const companies = (Array.isArray(r.companies) ? r.companies : []).map(c => ({
-    ...c,
-    roleName: c.roleName || (c.roleNames || [])[0] || '员工'
-  }))
+  const companies = (Array.isArray(r.companies) ? r.companies : []).map(c => {
+    const names = Array.isArray(c.roleNames) && c.roleNames.length
+      ? c.roleNames : (c.roleName ? [c.roleName] : [])
+    return { ...c, roleName: c.roleName || names[0] || '员工', roleNames: names }
+  })
   uni.setStorageSync('ops_employee_companies', JSON.stringify(companies))
   const permissions = r.permissions || []
   uni.setStorageSync('ops_employee_permissions', JSON.stringify(permissions))
@@ -117,6 +119,20 @@ export function getEmployeePermissions() {
 /** 当前员工角色名列表（登录/切换组织下发；多角色并集）。 */
 export function getEmployeeRoles() {
   return readJson('ops_employee_roles', [])
+}
+
+/**
+ * 组织角色展示文本：列出该组织全部角色（去重）。
+ * 旧会话 active_company 只有单个 roleName，回退到登录/切换时下发的角色列表。
+ */
+export function getCompanyRoleText(company) {
+  const names = Array.isArray(company && company.roleNames) && company.roleNames.length
+    ? company.roleNames
+    : (getEmployeeRoles().length ? getEmployeeRoles() : [company && (company.roleName || company.roleType)])
+  const roles = Array.from(new Set(
+    (names || []).filter(Boolean).map(name => String(name).trim()).filter(Boolean)
+  ))
+  return roles.length ? roles.join('、') : '员工'
 }
 
 /**
@@ -182,13 +198,19 @@ export function applyOrgSwitch(data) {
   uni.setStorageSync('ops_employee_active_company', JSON.stringify({
     corpId: data.corpId,
     corpName: data.corpName || '',
-    roleName: role
+    roleName: role,
+    roleNames
   }))
-  const companies = (data.orgs || data.companies || []).map(c => ({
-    corpId: c.corpId,
-    corpName: c.corpName || '',
-    roleName: (c.roleNames || [])[0] || c.roleName || '员工'
-  }))
+  const companies = (data.orgs || data.companies || []).map(c => {
+    const names = Array.isArray(c.roleNames) && c.roleNames.length
+      ? c.roleNames : (c.roleName ? [c.roleName] : [])
+    return {
+      corpId: c.corpId,
+      corpName: c.corpName || '',
+      roleName: c.roleName || names[0] || '员工',
+      roleNames: names
+    }
+  })
   if (companies.length) {
     uni.setStorageSync('ops_employee_companies', JSON.stringify(companies))
   }
