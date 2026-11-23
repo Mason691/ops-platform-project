@@ -44,12 +44,21 @@
 
       <view class="sheet-safe" />
     </view>
+
+    <!-- 自定义确认层：z-index 高于面板遮罩，避免 H5 uni.showModal(999) 被盖住 -->
+    <OrgSwitchConfirm
+      :visible="!!pendingOrg"
+      :corp-name="pendingOrg ? pendingOrg.corpName : ''"
+      @confirm="approveConfirm"
+      @cancel="cancelConfirm"
+    />
   </view>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { formatLastLogin } from '@/utils/orgSwitch'
+import OrgSwitchConfirm from '@/components/OrgSwitchConfirm.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -59,6 +68,14 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:visible', 'select'])
+
+/** 待确认的目标组织；非空时展示置顶确认框。 */
+const pendingOrg = ref(null)
+
+// 面板被父级关闭时清理待确认状态，避免下次打开残留确认框
+watch(() => props.visible, (visible) => {
+  if (!visible) pendingOrg.value = null
+})
 
 /** 最近登录组织：用于列表展示，不参与默认选中逻辑。 */
 const recentCorpId = computed(() => {
@@ -75,7 +92,20 @@ const recentCorpId = computed(() => {
 })
 
 function close() {
-  if (!props.loading) emit('update:visible', false)
+  if (props.loading) return
+  pendingOrg.value = null
+  emit('update:visible', false)
+}
+
+function cancelConfirm() {
+  pendingOrg.value = null
+}
+
+function approveConfirm() {
+  const org = pendingOrg.value
+  if (!org || props.loading) return
+  pendingOrg.value = null
+  emit('select', org)
 }
 
 function onMask() {
@@ -88,14 +118,7 @@ function isCurrent(org) {
 
 function choose(org) {
   if (props.loading || !org || isCurrent(org)) return
-  uni.showModal({
-    title: '切换组织',
-    content: `确认切换至【${org.corpName}】？切换后菜单、权限与数据范围将刷新。`,
-    confirmText: '确认切换',
-    success(res) {
-      if (res.confirm) emit('select', org)
-    }
-  })
+  pendingOrg.value = org
 }
 </script>
 

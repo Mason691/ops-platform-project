@@ -96,4 +96,7 @@ page{background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'PingFang S
    注意：uni-textarea 被 height:auto!important 覆盖后，页面必须给文本域显式
    height/min-height !important，否则内层绝对定位 textarea 高度为 0（无法聚焦录入）。 */
 uni-input,uni-textarea{height:auto!important;min-height:auto!important;overflow:visible!important}
+/* uni.showModal 默认 z-index:999，会被自定义浮层（组织切换面板 1000、签名页等）盖住。
+   统一抬到 2000，保证确认框/错误提示始终浮在最前。 */
+uni-modal,.uni-modal{z-index:2000!important}
 </style>
