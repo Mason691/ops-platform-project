@@ -331,6 +331,10 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 result.put("wfInstanceId", started.instanceId());
                 result.put("currentApproverName", started.approverName());
                 result.put("currentApproverRole", started.approverRole());
+                result.put("currentApprovalDisplay",
+                        started.resolved() ? started.displayText() : null);
+                result.put("currentApprovalNodeName", started.nodeName());
+                result.put("currentApprovalMode", started.approverMode());
                 result.put("approverResolved", started.resolved());
                 result.put("approverMessage", started.message());
             } catch (Exception e) {
@@ -468,6 +472,10 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 result.put("wfInstanceId", started.instanceId());
                 result.put("currentApproverName", started.approverName());
                 result.put("currentApproverRole", started.approverRole());
+                result.put("currentApprovalDisplay",
+                        started.resolved() ? started.displayText() : null);
+                result.put("currentApprovalNodeName", started.nodeName());
+                result.put("currentApprovalMode", started.approverMode());
                 result.put("approverResolved", started.resolved());
                 result.put("approverMessage", started.message());
             } catch (Exception e) {
@@ -786,6 +794,9 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         result.put("instanceId", started.instanceId());
         result.put("approverName", started.approverName());
         result.put("approverRole", started.approverRole());
+        result.put("displayText", started.resolved() ? started.displayText() : null);
+        result.put("nodeName", started.nodeName());
+        result.put("approverMode", started.approverMode());
         result.put("resolved", started.resolved());
         result.put("message", started.message());
         return result;

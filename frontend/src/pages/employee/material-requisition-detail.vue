@@ -78,9 +78,12 @@ const loading = ref(true)
 const errorMsg = ref('')
 
 const approverText = computed(() => {
+  if (detail.value.currentApprovalDisplay) {
+    return `待 ${detail.value.currentApprovalDisplay} 审批`
+  }
   if (detail.value.currentApproverName) {
     const who = detail.value.currentApproverRole
-      ? `${detail.value.currentApproverRole}：${detail.value.currentApproverName}`
+      ? `${detail.value.currentApproverRole}（${detail.value.currentApproverName}）`
       : detail.value.currentApproverName
     return `待 ${who} 审批`
   }

@@ -4,9 +4,7 @@
       <view class="success-icon"><text>✓</text></view>
     </view>
     <text class="title">{{ editMode ? '重新提交成功' : '制单成功' }}</text>
-    <text class="subtitle">
-      {{ editMode ? '草稿修改已提交，重新进入审批流程' : '业务订单已提交，等待后续审批流转' }}
-    </text>
+    <text class="subtitle">{{ subtitle }}</text>
 
     <view class="result-card">
       <view class="result-row">
@@ -14,8 +12,9 @@
         <text class="v order-no">{{ result.orderNo || '—' }}</text>
       </view>
       <view class="result-row">
-        <text class="k">下一审批人</text>
-        <text class="v approver" :class="{ fallback: !result.currentApproverName }">{{ approverText }}</text>
+        <text class="k">当前审批人</text>
+        <text class="v approver"
+          :class="{ fallback: !result.currentApprovalDisplay && !result.currentApproverName }">{{ approverText }}</text>
       </view>
       <view class="result-row">
         <text class="k">批次</text>
@@ -112,14 +111,27 @@ const purchaseStatusText = computed(() => {
   return '生成中，请稍后在订单详情查看'
 })
 
-/** 审批人展示：有姓名显示“已提交给 角色：姓名 审批”；否则显示明确兜底文案。 */
+/** 成功页副标题：提交结果 + 当前审批（角色 + 姓名），不含后续节点角色。 */
+const subtitle = computed(() => {
+  const result = props.result || {}
+  const display = result.currentApprovalDisplay
+    || (result.currentApproverName
+      ? (result.currentApproverRole
+        ? `${result.currentApproverRole}（${result.currentApproverName}）`
+        : result.currentApproverName)
+      : '')
+  if (display) return `已提交成功，当前审批：${display}`
+  return props.editMode ? '草稿修改已提交，重新进入审批流程' : '业务订单已提交，等待审批流转'
+})
+
+/** 审批人展示：优先使用后端统一 displayText（只含当前节点角色 + 姓名）。 */
 const approverText = computed(() => {
   const result = props.result || {}
+  if (result.currentApprovalDisplay) return result.currentApprovalDisplay
   if (result.currentApproverName) {
-    const who = result.currentApproverRole
-      ? `${result.currentApproverRole}：${result.currentApproverName}`
+    return result.currentApproverRole
+      ? `${result.currentApproverRole}（${result.currentApproverName}）`
       : result.currentApproverName
-    return `已提交给 ${who} 审批`
   }
   return result.approverMessage || '审批人信息加载中，请稍后查看'
 })
@@ -141,7 +153,10 @@ const approverText = computed(() => {
   animation: popIn .32s cubic-bezier(.22, 1.2, .36, 1);
 }
 .title { font-size: 40rpx; font-weight: 700; color: #222; }
-.subtitle { font-size: 24rpx; color: #999; margin-top: 10rpx; }
+.subtitle {
+  font-size: 24rpx; color: #999; margin-top: 10rpx;
+  padding: 0 16rpx; text-align: center; line-height: 1.5; word-break: break-all;
+}
 .result-card {
   width: 100%; background: #fff; border-radius: 18rpx;
   padding: 28rpx 26rpx; margin-top: 36rpx; box-sizing: border-box;
@@ -150,7 +165,7 @@ const approverText = computed(() => {
 .result-row { display: flex; align-items: flex-start; padding: 14rpx 0; }
 .result-row + .result-row { border-top: 1rpx solid #f7f7f7; }
 .k { width: 150rpx; flex-shrink: 0; font-size: 25rpx; color: #999; }
-.v { flex: 1; font-size: 27rpx; color: #333; line-height: 1.5; }
+.v { flex: 1; font-size: 27rpx; color: #333; line-height: 1.5; word-break: break-all; }
 .order-no { font-weight: 700; color: #FF6B35; letter-spacing: 1rpx; }
 .amount { font-size: 32rpx; font-weight: 700; color: #FF6B35; }
 .deduction { color: #C62828; font-weight: 700; }

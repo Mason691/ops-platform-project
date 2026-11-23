@@ -637,7 +637,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         flow.put("nextBizStatus", p.nextBizStatus());
         flow.put("nextStatusName", employeeNextStatusName(status, p.nextBizStatus(), p.nextNodeName()));
         flow.put("currentApprovers", p.currentApprovers());
+        flow.put("currentApproval", p.currentApproval());
         flow.put("nextApprovers", p.nextApprovers());
+        flow.put("nextApproval", p.nextApproval());
         flow.put("resolveStatus", p.resolveStatus());
         flow.put("resolveMessage", p.resolveMessage());
         flow.put("startedTime", p.startedTime());

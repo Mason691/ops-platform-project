@@ -214,6 +214,10 @@ public class BusinessOrderRefundServiceImpl implements BusinessOrderRefundServic
         result.put("wfInstanceId", started.instanceId());
         result.put("approverName", started.approverName());
         result.put("approverRole", started.approverRole());
+        result.put("currentApprovalDisplay",
+                started.resolved() ? started.displayText() : null);
+        result.put("currentApprovalNodeName", started.nodeName());
+        result.put("currentApprovalMode", started.approverMode());
         result.put("approverResolved", started.resolved());
         result.put("approverMessage", started.message());
         return result;
@@ -262,6 +266,10 @@ public class BusinessOrderRefundServiceImpl implements BusinessOrderRefundServic
         result.put("wfInstanceId", started.instanceId());
         result.put("approverName", started.approverName());
         result.put("approverRole", started.approverRole());
+        result.put("currentApprovalDisplay",
+                started.resolved() ? started.displayText() : null);
+        result.put("currentApprovalNodeName", started.nodeName());
+        result.put("currentApprovalMode", started.approverMode());
         result.put("approverResolved", started.resolved());
         result.put("approverMessage", started.message());
         return result;
@@ -602,8 +610,10 @@ public class BusinessOrderRefundServiceImpl implements BusinessOrderRefundServic
         flow.put("currentNodeName", p.currentNodeName() == null
                 ? refund.getWfNodeName() : p.currentNodeName());
         flow.put("currentApprovers", p.currentApprovers());
+        flow.put("currentApproval", p.currentApproval());
         flow.put("nextNodeName", p.nextNodeName());
         flow.put("nextApprovers", p.nextApprovers());
+        flow.put("nextApproval", p.nextApproval());
         flow.put("startedTime", p.startedTime());
         flow.put("finishedTime", p.finishedTime());
         flow.put("resolveMessage", p.resolveMessage());

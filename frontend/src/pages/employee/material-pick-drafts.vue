@@ -158,8 +158,8 @@ async function submitDraft(item) {
   let content = `确认提交领用单 ${item.billNo || ''} 给本组织部长审批？提交后不可修改。`
   try {
     const preview = await api.scmMaterialPickApprovalPreview(item.id)
-    if (preview && preview.displayName) {
-      content = `您将把物料领用单 ${item.billNo || ''} 提交给 ${preview.displayName} 审批，确认提交？`
+    if (preview && preview.displayText) {
+      content = `您将把物料领用单 ${item.billNo || ''} 提交给 ${preview.displayText} 审批，确认提交？`
     } else if (preview && preview.fallbackMessage) {
       content = preview.fallbackMessage
     }
@@ -176,7 +176,7 @@ async function submitDraft(item) {
         const display = result && result.currentApproverDisplay
         uni.showModal({
           title: '已提交审批',
-          content: display ? '已提交给 ' + display + ' 审批' : '已提交审批，待分配审批人，请联系管理员',
+          content: display ? '已提交成功，当前审批：' + display : '已提交成功，待分配审批人，请联系管理员',
           showCancel: false
         })
         load()

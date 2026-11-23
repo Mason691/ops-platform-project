@@ -29,7 +29,10 @@ defineEmits(['toggle'])
 .approver-card { background: linear-gradient(135deg, #fff8f4, #fff); border: 1rpx solid #ffe2d6; }
 .card-title { display: flex; justify-content: space-between; align-items: center; font-size: 30rpx; font-weight: 600; color: #1D2129; margin-bottom: 18rpx; }
 .node { font-size: 24rpx; color: #FF6B35; font-weight: 500; }
-.approver-main { display: block; font-size: 30rpx; font-weight: 700; color: #1D2129; line-height: 1.6; }
+.approver-main {
+  display: block; font-size: 30rpx; font-weight: 700; color: #1D2129;
+  line-height: 1.6; word-break: break-all;
+}
 .approver-main.tappable { color: #FF6B35; }
 .approver-sub { display: block; margin-top: 6rpx; font-size: 23rpx; color: #86909C; }
 .approver-hint { display: block; margin-top: 8rpx; font-size: 23rpx; color: #FF7D00; line-height: 1.5; }

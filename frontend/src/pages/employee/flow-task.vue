@@ -542,8 +542,11 @@ const nextApprover = computed(() => {
   if (preview) {
     const names = (preview.approvers || []).map(a => a.userName).filter(Boolean)
     const roles = [...new Set((preview.approvers || []).map(a => a.roleName).filter(Boolean))]
+    // 优先使用底座统一生成的“角色 + 姓名”，前端不再拼接后续节点角色
+    const displayText = preview.approval && preview.approval.displayText
+      && (preview.approval.groups || []).length ? preview.approval.displayText : ''
     return buildApprover(preview.nodeName, names, roles, preview.approveMode,
-      names.length ? '' : (preview.resolveMessage || '待分配审批人，请联系管理员'))
+      names.length ? '' : (preview.resolveMessage || '待分配审批人，请联系管理员'), displayText)
   }
   if (detail.value?.node?.lastNode) {
     return buildApprover('', [], [], '', '当前为最后一个审批节点，提交后流程完成')
@@ -853,24 +856,22 @@ async function doSubmit() {
       return
     }
     if (actionType.value === 'OPS_FINANCE_CHECK' && form.checkConclusion === 'REJECT') {
-      await api.workflowReject({
+      const result = await api.workflowReject({
         taskId: Number(taskId.value),
         opinion: String(form.checkRemark || '财务核对不通过').trim(),
         formData
       })
-      toast('已退回经办人')
-      goTodo()
+      showSubmitResult(result, '已退回经办人')
       return
     }
     if (actionType.value === 'OPS_ACCEPTANCE' && form.acceptanceConclusion === 'REJECT') {
-      await api.workflowReject({
+      const result = await api.workflowReject({
         taskId: Number(taskId.value),
         opinion: String(form.acceptanceNote || '验收不通过退回施工完成').trim(),
         formData
       })
       clearEvidenceDraft()
-      toast('已退回施工完成')
-      goTodo()
+      showSubmitResult(result, '已退回施工完成')
       return
     }
     const result = await api.workflowApprove({
@@ -924,15 +925,9 @@ function showDispatchMaterialResult(pick) {
 
 function showSubmitResult(result, fallback) {
   const info = normalizeResult(result)
-  if (info.names.length) {
-    const names = info.names.join('、')
-    const who = info.roles.length ? `${info.roles.join('、')}：${names}` : names
-    uni.showModal({
-      title: '已提交',
-      content: `已提交给 ${who}${info.nodeName ? '（' + info.nodeName + '）' : ''} 审批`,
-      showCancel: false,
-      success: goTodo
-    })
+  if (showTerminalResult(info)) return
+  if (info.displayText) {
+    showActiveResult(info, fallback)
     return
   }
   if (info.message) {
@@ -943,44 +938,171 @@ function showSubmitResult(result, fallback) {
   goTodo()
 }
 
-/** 兼容 SCM NextApproverInfo 与底座 FlowResult 两种返回结构 */
-function normalizeResult(result) {
-  if (!result) return { names: [], roles: [], nodeName: '', message: '' }
-  if (Array.isArray(result.nodes)) {
-    const names = []
-    const roles = []
-    result.nodes.forEach(node => (node.approvers || []).forEach(a => {
-      if (a.userName && !names.includes(a.userName)) names.push(a.userName)
-      if (a.roleName && !roles.includes(a.roleName)) roles.push(a.roleName)
-    }))
-    const node = result.nodes.find(n => (n.approvers || []).length)
-    return {
-      names, roles, nodeName: node ? node.nodeName : '',
-      message: result.fallbackMessage || ''
-    }
+function showTerminalResult(info) {
+  if (info.status === 'COMPLETED') {
+    const cc = info.ccNames.length ? `；抄送：${info.ccNames.join('、')}` : ''
+    uni.showModal({
+      title: '流程已完成',
+      content: `流程已完成${cc}`,
+      showCancel: false,
+      success: goTodo
+    })
+    return true
   }
-  // 会签未完成时 pendingApprovers 是当前节点剩余待办人，优先于下一节点
+  if (info.status === 'REJECTED') {
+    uni.showModal({
+      title: '已驳回',
+      content: `退回至：${info.displayText || info.message || '已退回'}`,
+      showCancel: false,
+      success: goTodo
+    })
+    return true
+  }
+  if (info.status === 'TERMINATED') {
+    uni.showModal({
+      title: '流程已终止',
+      content: '流程已终止，无需继续审批',
+      showCancel: false,
+      success: goTodo
+    })
+    return true
+  }
+  return false
+}
+
+function showActiveResult(info, fallback) {
+  const waiting = info.status === 'WAITING_SIBLINGS'
+  uni.showModal({
+    title: waiting ? '已提交，等待会签' : (fallback || '处理成功'),
+    content: waiting ? info.displayText : `已同意，当前审批：${info.displayText}`,
+    showCancel: false,
+    success: goTodo
+  })
+}
+
+/**
+ * 兼容底座 FlowResult、SCM NextApproverInfo 两种返回结构。
+ * 优先使用后端 displayText；旧响应才按“当前/下一节点”的审批人分组兜底，
+ * 绝不遍历后续节点。
+ */
+function normalizeResult(result) {
+  const ccNames = ((result && result.ccUsers) || [])
+    .map(a => a.userName || '')
+    .filter(Boolean)
+  if (!result) return emptyResult(ccNames)
+
+  const approval = result.currentApproval
+    || (result.nextNodePreview && result.nextNodePreview.approval)
+    || null
+  if (approval && approval.displayText && (approval.groups || []).length) {
+    return fromApproval(result, approval, ccNames)
+  }
+  // SCM NextApproverInfo：displayText 已由服务端生成（只含当前/下一节点）
+  if (result.displayText) {
+    return fromScmDisplay(result, ccNames)
+  }
+  // 旧版 SCM：只取第一个有审批人的节点
+  if (Array.isArray(result.nodes)) {
+    return fromScmNodes(result, ccNames)
+  }
+  // 旧版底座 FlowResult：会签未完成优先当前节点剩余待办，否则下一节点
+  return fromLegacyFlow(result, ccNames)
+}
+
+function emptyResult(ccNames) {
+  return { status: '', displayText: '', names: [], roles: [], nodeName: '', message: '', ccNames }
+}
+
+function fromApproval(result, approval, ccNames) {
+  const groups = approval.groups || []
+  return {
+    status: result.status || '',
+    displayText: approval.displayText,
+    names: groups.flatMap(g => (g.approvers || []).map(a => a.userName)).filter(Boolean),
+    roles: groups.map(g => g.roleName).filter(Boolean),
+    nodeName: approval.nodeName || '',
+    message: approval.resolveMessage || result.resolveMessage || '',
+    ccNames
+  }
+}
+
+function fromScmDisplay(result, ccNames) {
+  const node = (result.nodes || []).find(n => (n.approvers || []).length)
+  const approvers = (node && node.approvers) || []
+  return {
+    status: '',
+    displayText: result.displayText,
+    names: [...new Set(approvers.map(a => a.userName).filter(Boolean))],
+    roles: [...new Set(approvers.map(a => a.roleName).filter(Boolean))],
+    nodeName: (node && node.nodeName) || '',
+    message: result.fallbackMessage || '',
+    ccNames
+  }
+}
+
+function fromScmNodes(result, ccNames) {
+  const node = result.nodes.find(n => (n.approvers || []).length)
+  const approvers = (node && node.approvers) || []
+  return {
+    status: '',
+    displayText: displayFromApprovers(approvers, node && node.rule),
+    names: [...new Set(approvers.map(a => a.userName).filter(Boolean))],
+    roles: [...new Set(approvers.map(a => a.roleName).filter(Boolean))],
+    nodeName: (node && node.nodeName) || '',
+    message: result.fallbackMessage || '',
+    ccNames
+  }
+}
+
+function fromLegacyFlow(result, ccNames) {
   const pending = result.pendingApprovers || []
   const source = pending.length ? pending : (result.nextApprovers || [])
-  const names = source.map(a => a.userName).filter(Boolean)
+  const names = [...new Set(source.map(a => a.userName).filter(Boolean))]
   const roles = [...new Set(source.map(a => a.roleName).filter(Boolean))]
   const nodeName = pending.length
     ? (result.currentNode?.nodeName || '')
     : (result.nextNodeName || '')
-  return { names, roles, nodeName, message: result.resolveMessage || '' }
+  const remaining = Math.max(0, (result.totalApprovers || 0) - (result.approvedCount || 0))
+  const displayText = result.status === 'WAITING_SIBLINGS'
+    ? `本节点还需 ${remaining || source.length} 人审批：${names.join('、')}`
+    : displayFromApprovers(source, result.approverMode)
+  return {
+    status: result.status || '', displayText, names, roles, nodeName,
+    message: result.resolveMessage || '', ccNames
+  }
 }
 
-function buildApprover(nodeName, names, roles, rule, message) {
+/** 旧响应兜底：按角色分组，仅用于当前节点/下一节点，不跨节点聚合。 */
+function displayFromApprovers(approvers, mode) {
+  const groups = new Map()
+  ;(approvers || []).forEach(a => {
+    if (!a || !a.userName) return
+    const role = a.roleName || '审批人'
+    if (!groups.has(role)) groups.set(role, [])
+    if (!groups.get(role).includes(a.userName)) groups.get(role).push(a.userName)
+  })
+  const modeText = mode === 'ALL' ? '，会签' : mode === 'ANY' ? '，或签' : ''
+  return [...groups.entries()].map(([role, names]) => {
+    const folded = names.length > 3
+      ? `${names.slice(0, 2).join('、')}等 ${names.length} 人`
+      : names.join('、')
+    return `${role}（${folded}${names.length > 1 ? modeText : ''}）`
+  }).join('、')
+}
+
+function buildApprover(nodeName, names, roles, rule, message, displayText) {
   const collapsed = names.length > 2 && !approverExpanded.value
   const shown = collapsed ? names.slice(0, 1) : names
   const namesText = names.length
     ? shown.map(shortName).join('、') + (collapsed ? ` 等 ${names.length} 人` : '')
     : ''
   const roleText = (roles || []).join('、')
-  // 角色配置时展示“总经办：张三、李四”；无法展开时至少保留角色名
-  const display = names.length
+  // 折叠时用后端统一文案（含“等 N 人”）；展开后展示完整姓名。
+  const expandedFull = displayText && names.length > 2 && !collapsed
+  const fallback = names.length
     ? (roleText ? `${roleText}：${namesText}` : namesText)
     : ''
+  const display = expandedFull ? fallback : (displayText || fallback)
   return {
     nodeName, display, message, roleText,
     ruleText: ruleLabel(rule), expandable: names.length > 2

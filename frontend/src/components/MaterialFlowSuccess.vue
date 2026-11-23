@@ -16,8 +16,9 @@
         <text class="v">{{ result.requisitionNo || '—' }}</text>
       </view>
       <view class="result-row">
-        <text class="k">下一审批人</text>
-        <text class="v approver" :class="{ fallback: !result.currentApproverName }">{{ approverText }}</text>
+        <text class="k">当前审批人</text>
+        <text class="v approver"
+          :class="{ fallback: !result.currentApprovalDisplay && !result.currentApproverName }">{{ approverText }}</text>
       </view>
       <view class="result-row">
         <text class="k">物料</text>
@@ -59,11 +60,13 @@ defineEmits(['continue', 'view-records'])
 const requisition = computed(() => props.kind !== 'write-off')
 const approverText = computed(() => {
   const result = props.result || {}
+  if (result.currentApprovalDisplay) {
+    return result.currentApprovalDisplay
+  }
   if (result.currentApproverName) {
-    const who = result.currentApproverRole
-      ? `${result.currentApproverRole}：${result.currentApproverName}`
+    return result.currentApproverRole
+      ? `${result.currentApproverRole}（${result.currentApproverName}）`
       : result.currentApproverName
-    return `已提交给 ${who} 审批`
   }
   return result.approverMessage || '审批人信息加载中，请稍后查看'
 })
@@ -94,7 +97,7 @@ const approverText = computed(() => {
 .result-row { display: flex; align-items: flex-start; padding: 14rpx 0; }
 .result-row + .result-row { border-top: 1rpx solid #f7f7f7; }
 .k { width: 160rpx; flex-shrink: 0; font-size: 25rpx; color: #999; }
-.v { flex: 1; font-size: 27rpx; color: #333; line-height: 1.5; }
+.v { flex: 1; font-size: 27rpx; color: #333; line-height: 1.5; word-break: break-all; }
 .order-no { font-weight: 700; color: #FF6B35; letter-spacing: 1rpx; }
 .amount { font-size: 32rpx; font-weight: 700; color: #FF6B35; }
 .approver { color: #07C160; font-weight: 600; }
