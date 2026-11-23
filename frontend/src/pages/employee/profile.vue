@@ -11,7 +11,6 @@
         <text class="edit-icon">✎</text>
       </view>
       <text class="phone">{{ info.phone || '' }}</text>
-      <text class="role-tag">{{ info.role || '员工' }}</text>
     </view>
 
     <!-- Info Cards -->
@@ -244,7 +243,6 @@ function doLogout() {
 .avatar { width: 120rpx; height: 120rpx; border-radius: 50%; border: 4rpx solid rgba(255,255,255,.4); }
 .name { display: block; font-size: 36rpx; color: #fff; font-weight: 700; margin-top: 20rpx; }
 .phone { display: block; font-size: 26rpx; color: rgba(255,255,255,.7); margin-top: 8rpx; }
-.role-tag { display: inline-block; margin-top: 16rpx; font-size: 24rpx; color: #fff; background: rgba(255,255,255,.2); padding: 6rpx 24rpx; border-radius: 20rpx; }
 .cards { margin: 24rpx; background: #fff; border-radius: 16rpx; padding: 8rpx 0; }
 .card { display: flex; justify-content: space-between; align-items: center; padding: 28rpx 32rpx; border-bottom: 1rpx solid #f0f0f0; }
 .card:last-child { border-bottom: none; }
