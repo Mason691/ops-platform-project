@@ -1,7 +1,7 @@
 import { computed, onUnmounted, ref } from 'vue'
 import { api } from '@/api'
 import {
-  TODO_PAGE_SIZE, decorateTodo, filterIneligibleConstruct, filterIneligibleDispatch,
+  TODO_PAGE_SIZE, decorateTodo, filterIneligibleConstruct, filterDispatchTodoVisibility,
   sortTodoByCreateTime
 } from '@/utils/workflowTodo'
 
@@ -52,7 +52,7 @@ export function useWorkTodo() {
       if (seq !== requestSeq) return
       const raw = Array.isArray(data && data.records) ? data.records : []
       const filtered = await filterIneligibleConstruct(
-        await filterIneligibleDispatch(raw))
+        await filterDispatchTodoVisibility(raw))
       if (seq !== requestSeq) return
       const receivedAt = Date.now()
       items.value = sortTodoByCreateTime(decorateTodo(filtered, receivedAt))

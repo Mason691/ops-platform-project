@@ -63,11 +63,6 @@ export function sortTodoByCreateTime(records) {
 }
 
 /**
- * 派工待办不展示给未收齐全款的订单：底座仍会生成任务（工作流结构决定），
- * H5 按订单派工资格过滤；任务页与后端节点动作仍会二次拦截。
- * 资格查询失败时 fail-open，由任务页/后端的最终校验兜底。
- */
-/**
  * 施工任务按当前组织过滤：施工员在多个组织任职时，切换组织后
  * 首页/待办只展示当前组织的施工任务。
  *
@@ -88,18 +83,35 @@ function isConstructTask(item) {
   return nodeName.includes('施工')
 }
 
-export async function filterIneligibleDispatch(records) {
-  const dispatch = (records || []).filter(item => item.businessType === 'OPS_BUSINESS_ORDER'
-    && String((item.task && item.task.nodeName) || item.currentNodeName || '').includes('派工'))
+function isDispatchTask(item) {
+  return !!item && item.businessType === 'OPS_BUSINESS_ORDER'
+    && String((item.task && item.task.nodeName) || item.currentNodeName || '').includes('派工')
+}
+
+/**
+ * 派工待办可见性：
+ * - 全款已付 / 定金尾款已结清 → 可见且可派工（待派工）
+ * - 定金已付、尾款未结清、财务已核对 → 可见但不可派工（待收款）
+ * - 定金未核对 / 未支付 → 不进入待办
+ * 资格查询失败时 fail-open，由任务页与后端节点动作兜底。
+ */
+export async function filterDispatchTodoVisibility(records) {
+  const dispatch = (records || []).filter(isDispatchTask)
   const ids = [...new Set(dispatch.map(item => Number(item.businessId)).filter(Boolean))]
   if (!ids.length) return records || []
   try {
     const infos = await api.businessDispatchEligibility(ids)
-    const blocked = new Set((infos || [])
-      .filter(info => info.canDispatch === false)
-      .map(info => String(info.orderId)))
-    return (records || []).filter(item => !(item.businessType === 'OPS_BUSINESS_ORDER'
-      && blocked.has(String(item.businessId))))
+    const byOrder = new Map((infos || []).map(info => [String(info.orderId), info]))
+    return (records || []).flatMap(item => {
+      if (!isDispatchTask(item)) return [item]
+      const info = byOrder.get(String(item.businessId))
+      if (!info) return [item]
+      // 兼容旧后端：无 visibleInDispatchTodo 时退回 canDispatch
+      const visible = info.visibleInDispatchTodo !== undefined
+        ? info.visibleInDispatchTodo : info.canDispatch === true
+      if (!visible) return []
+      return [{ ...item, dispatchInfo: info }]
+    })
   } catch (e) {
     return records || []
   }
