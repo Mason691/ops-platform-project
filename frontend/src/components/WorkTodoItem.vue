@@ -4,6 +4,8 @@
     <view class="ti-main">
       <view class="ti-top">
         <text class="ti-type">{{ typeLabel }}</text>
+        <text v-if="payTag" class="ti-pay-tag"
+              :class="payTag === '待收款' ? 'ti-pay-wait' : 'ti-pay-ready'">{{ payTag }}</text>
         <text v-if="level === 'overdue'" class="ti-tag ti-tag-overdue">已超时</text>
         <text v-else-if="level === 'urgent'" class="ti-tag ti-tag-urgent">临期</text>
         <text class="ti-remain" :class="'ti-remain-' + level">{{ remainText }}</text>
@@ -45,6 +47,8 @@ const level = computed(() => urgencyLevel(remainMs.value))
 const remainText = computed(() => formatRemain(remainMs.value))
 const typeLabel = computed(() => businessTypeLabel(props.item.businessType)
   || props.item.definitionName || '待办')
+/** 派工待办状态标签：待收款（不可派工）/ 待派工（可派工），由后端资格接口下发。 */
+const payTag = computed(() => (props.item.dispatchInfo && props.item.dispatchInfo.payTag) || '')
 const title = computed(() => props.item.businessSummary || props.item.businessId || '—')
 const nodeName = computed(() => (props.item.task && props.item.task.nodeName)
   || props.item.currentNodeName || '待处理')
@@ -102,6 +106,9 @@ function open() {
   background: #F2F3F5;
 }
 .ti-tag { font-size: 19rpx; padding: 2rpx 8rpx; border-radius: 4rpx; font-weight: 600; }
+.ti-pay-tag { font-size: 19rpx; padding: 2rpx 8rpx; border-radius: 4rpx; font-weight: 600; }
+.ti-pay-wait { background: #FFF5E8; color: #C75A00; }
+.ti-pay-ready { background: #E8FFEA; color: #0B7A42; }
 .ti-tag-overdue { background: #FFF1F0; color: #C62828; }
 .ti-tag-urgent { background: #FFF5E8; color: #C75A00; }
 .ti-remain { margin-left: auto; font-size: 21rpx; font-weight: 600; }

@@ -681,10 +681,17 @@ public class BusinessDataServiceImpl implements BusinessDataService {
             item.put("orderId", e.orderId());
             item.put("orderNo", e.orderNo());
             item.put("canDispatch", e.canDispatch());
+            item.put("visibleInDispatchTodo", e.visibleInDispatchTodo());
             item.put("fullPayment", e.fullPayment());
             item.put("financeChecked", e.financeChecked());
             item.put("balanceAmount", e.balanceAmount());
             item.put("reason", e.reason());
+            item.put("dispatchBlockReason", e.reason());
+            item.put("errorCode", e.errorCode());
+            item.put("payType", e.payType());
+            item.put("paymentStatus", e.paymentStatus());
+            item.put("handlerName", e.handlerName());
+            item.put("payTag", e.payTag());
             result.add(item);
         }
         return result;
@@ -733,7 +740,22 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         view.put("refund", refundService.latestRefundView(orderId));
         attachTradeInItems(List.of(view));
         enrichTradeInStatus(view);
+        putDispatchEligibility(view, order);
         return view;
+    }
+
+    /** 派工资格与提示由后端统一下发，前端只渲染 canDispatch / dispatchBlockReason / payTag。 */
+    private void putDispatchEligibility(Map<String, Object> view, OpsBusinessOrder order) {
+        DispatchEligibilityService.Eligibility e = dispatchEligibilityService.evaluate(order);
+        view.put("canDispatch", e.canDispatch());
+        view.put("visibleInDispatchTodo", e.visibleInDispatchTodo());
+        view.put("payType", e.payType());
+        view.put("paymentStatus", e.paymentStatus());
+        view.put("financeChecked", e.financeChecked());
+        view.put("handlerName", e.handlerName());
+        view.put("payTag", e.payTag());
+        view.put("dispatchBlockReason", e.reason());
+        view.put("dispatchBlockCode", e.errorCode());
     }
 
     @Override

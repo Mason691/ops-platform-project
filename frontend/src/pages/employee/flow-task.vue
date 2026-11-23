@@ -23,6 +23,13 @@
     </view>
 
     <template v-else>
+      <!-- 派工待办顶部拦截提示：后端统一下发 canDispatch/dispatchBlockReason -->
+      <view v-if="isBusinessOrder && actionType === 'OPS_DISPATCH_OUTBOUND' && dispatchBlockedReason"
+            class="block-banner">
+        <text class="block-banner-title">暂不能发起派工出库</text>
+        <text class="block-banner-text">{{ dispatchBlockedReason }}</text>
+      </view>
+
       <view v-if="isPurchase" class="card">
         <view class="card-title">
           <text>采购订单</text>
@@ -160,6 +167,16 @@
         <view class="info-row"><text class="k">客户</text><text class="v">{{ order.customer || '-' }} {{ order.customerPhone || '' }}</text></view>
         <view class="info-row"><text class="k">小区/地址</text><text class="v">{{ order.communityName || '-' }} {{ order.detailedAddress || '' }}</text></view>
         <view class="info-row"><text class="k">合计金额</text><text class="v money">{{ money(order.totalAmount) }}</text></view>
+        <view class="info-row">
+          <text class="k">支付状态</text>
+          <view class="v pay-cell">
+            <text>{{ order.paymentTypeName || '全款支付' }}</text>
+            <text v-if="dispatchPayTag" class="pay-tag"
+                  :class="dispatchPayTag === '待收款' ? 'pay-tag-wait' : 'pay-tag-ready'">
+              {{ dispatchPayTag }}
+            </text>
+          </view>
+        </view>
         <view v-if="order.hasTradeIn" class="info-row">
           <text class="k">抵扣金额</text>
           <text class="v deduction">-{{ money(order.tradeInDeductionAmount) }}</text>
@@ -288,9 +305,6 @@
         </template>
 
         <template v-else-if="actionType === 'OPS_DISPATCH_OUTBOUND'">
-          <view v-if="dispatchBlockedReason" class="block-alert">
-            <text>{{ dispatchBlockedReason }}</text>
-          </view>
           <view class="field"><text class="label">工单类型 <text class="req">*</text></text>
             <view class="chips">
               <view class="chip" :class="{ on: form.dispatchType === 'CONSTRUCTION' }" @click="form.dispatchType = 'CONSTRUCTION'">施工</view>
@@ -377,9 +391,14 @@
 
       <view v-if="taskPending" class="actions">
         <button v-if="showGenericReject" class="btn danger" :disabled="submitting" @click="rejectVisible = true">驳回</button>
-        <button class="btn primary"
-                :disabled="submitting || !!dispatchBlockedReason || !!constructionBlockedReason"
-                @click="submit">{{ submitting ? '提交中...' : submitButtonText }}</button>
+        <view class="submit-wrap">
+          <button class="btn primary"
+                  :disabled="submitting || !!dispatchBlockedReason || !!constructionBlockedReason"
+                  @click="submit">{{ submitting ? '提交中...' : submitButtonText }}</button>
+          <!-- 禁用态遮罩：点击仍能看到后端下发的拦截原因，避免"点了没反应" -->
+          <view v-if="dispatchBlockedReason" class="submit-block-mask"
+                @click="showDispatchBlocked" />
+        </view>
       </view>
     </template>
 
@@ -500,6 +519,8 @@ const submitButtonText = computed(() => {
 const dispatchBlockedReason = computed(() => {
   if (actionType.value !== 'OPS_DISPATCH_OUTBOUND') return ''
   const o = order.value || {}
+  // 后端统一下发，包含经办人姓名与错误语义；旧数据回退本地计算
+  if (o.dispatchBlockReason) return o.dispatchBlockReason
   const full = Number(o.isFullPayment) === 1
   const finance = Number(o.bizStatus || 0) >= 2 || !!o.financeCheckTime
     || String(o.financeCheckConclusion || '') === 'PASS'
@@ -511,6 +532,29 @@ const dispatchBlockedReason = computed(() => {
   if (!finance) return '该订单尚未财务核对，暂不能派工出库'
   return ''
 })
+/** 派工待办状态标签：待收款（不可派工）/ 待派工（可派工），后端下发。 */
+const dispatchPayTag = computed(() => actionType.value === 'OPS_DISPATCH_OUTBOUND'
+  ? ((order.value && order.value.payTag) || '') : '')
+
+let dispatchBlockedTracked = false
+/** 禁用派工按钮的遮罩点击：直接展示后端拦截原因。 */
+function showDispatchBlocked() {
+  if (!dispatchBlockedReason.value) return
+  track('dispatch_block_click', { taskId: Number(taskId.value) })
+  uni.showModal({
+    title: '不能发起派工出库',
+    content: dispatchBlockedReason.value,
+    showCancel: false
+  })
+}
+watch(dispatchBlockedReason, (reason) => {
+  if (!reason || dispatchBlockedTracked) return
+  dispatchBlockedTracked = true
+  track('dispatch_todo_view_blocked', {
+    taskId: Number(taskId.value),
+    orderId: Number(order.value && order.value.orderId) || null
+  })
+}, { immediate: true })
 const detailNodeName = computed(() => (detail.value && detail.value.task && detail.value.task.nodeName) || '')
 /** 同一底座工作流 H5 页面按 businessType 分支展示与审批 */
 const businessType = computed(() => {
@@ -1329,6 +1373,17 @@ function goBack() {
   background: #FFF7E6; border: 2rpx solid #FFD591; color: #B26A00;
   font-size: 24rpx; line-height: 1.5;
 }
+.block-banner {
+  margin: 0 24rpx 20rpx; padding: 22rpx 24rpx; border-radius: 16rpx;
+  background: #FFF7E6; border: 2rpx solid #FFD591;
+  display: flex; flex-direction: column; gap: 8rpx;
+}
+.block-banner-title { font-size: 27rpx; font-weight: 700; color: #B26A00; }
+.block-banner-text { font-size: 24rpx; color: #B26A00; line-height: 1.6; word-break: break-all; }
+.pay-cell { display: flex; align-items: center; justify-content: flex-end; gap: 10rpx; flex-wrap: wrap; }
+.pay-tag { font-size: 20rpx; padding: 3rpx 10rpx; border-radius: 6rpx; font-weight: 600; }
+.pay-tag-wait { background: #FFF5E8; color: #C75A00; }
+.pay-tag-ready { background: #E8FFEA; color: #0B7A42; }
 .construct-hint {
   margin: 0 0 16rpx; padding: 18rpx 20rpx; border-radius: 12rpx;
   background: #F0F7FF; border: 2rpx solid #B8D7FF; color: #2F5B99;
@@ -1356,6 +1411,9 @@ function goBack() {
 .hint { display: block; margin-top: 8rpx; font-size: 22rpx; color: #86909C; }
 .no-action { padding: 20rpx 0; font-size: 26rpx; color: #86909C; }
 .actions { display: flex; gap: 20rpx; padding: 24rpx 28rpx 0; }
+.submit-wrap { flex: 1; position: relative; }
+.submit-wrap .btn { width: 100%; }
+.submit-block-mask { position: absolute; top: 0; right: 0; bottom: 0; left: 0; border-radius: 44rpx; }
 .btn { flex: 1; height: 88rpx; line-height: 88rpx; border-radius: 44rpx; font-size: 30rpx; border: none; }
 .btn.primary { background: #FF6B35; color: #fff; }
 .btn.danger { background: #fff; color: #F53F3F; border: 1rpx solid #F53F3F; }

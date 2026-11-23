@@ -17,7 +17,13 @@
     <view v-else class="list">
       <view v-for="item in list" :key="item.task.id" class="card" @click="goTask(item)">
         <view class="card-top">
-          <text class="node">{{ item.task.nodeName || item.currentNodeName || '待处理' }}</text>
+          <view class="node-wrap">
+            <text class="node">{{ item.task.nodeName || item.currentNodeName || '待处理' }}</text>
+            <text v-if="payTagOf(item)" class="pay-tag"
+                  :class="payTagOf(item) === '待收款' ? 'pay-tag-wait' : 'pay-tag-ready'">
+              {{ payTagOf(item) }}
+            </text>
+          </view>
           <text class="time">{{ item.submitTime || '' }}</text>
         </view>
         <text class="summary">{{ item.businessSummary || item.businessId }}</text>
@@ -38,7 +44,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 import {
-  TODO_PAGE_SIZE, decorateTodo, filterIneligibleConstruct, filterIneligibleDispatch,
+  TODO_PAGE_SIZE, decorateTodo, filterIneligibleConstruct, filterDispatchTodoVisibility,
   sortTodoByCreateTime
 } from '@/utils/workflowTodo'
 import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
@@ -64,7 +70,7 @@ async function loadData() {
     const data = await api.workflowTodo({ pageNum: 1, pageSize: TODO_PAGE_SIZE })
     const records = Array.isArray(data && data.records) ? data.records : []
     const filtered = await filterIneligibleConstruct(
-      await filterIneligibleDispatch(records))
+      await filterDispatchTodoVisibility(records))
     // 与工作台首页共用同一套过滤/排序口径（任务创建时间倒序），保证两处顺序一致
     const receivedAt = Date.now()
     list.value = sortTodoByCreateTime(decorateTodo(filtered, receivedAt))
@@ -73,6 +79,10 @@ async function loadData() {
   } finally {
     loading.value = false
   }
+}
+
+function payTagOf(item) {
+  return (item && item.dispatchInfo && item.dispatchInfo.payTag) || ''
 }
 
 function goTask(item) {
@@ -110,8 +120,12 @@ function onTabSwitch(key) {
 .btn.ghost { background: #fff; color: #FF6B35; border: 1rpx solid #FF6B35; }
 .list { padding: 24rpx; }
 .card { background: #fff; border-radius: 20rpx; padding: 26rpx; margin-bottom: 20rpx; box-shadow: 0 4rpx 16rpx rgba(0,0,0,.04); }
-.card-top { display: flex; justify-content: space-between; align-items: center; }
+.card-top { display: flex; justify-content: space-between; align-items: center; gap: 12rpx; }
+.node-wrap { display: flex; align-items: center; gap: 10rpx; min-width: 0; }
 .node { font-size: 30rpx; font-weight: 600; color: #1D2129; }
+.pay-tag { font-size: 20rpx; padding: 3rpx 10rpx; border-radius: 6rpx; font-weight: 600; flex-shrink: 0; }
+.pay-tag-wait { background: #FFF5E8; color: #C75A00; }
+.pay-tag-ready { background: #E8FFEA; color: #0B7A42; }
 .time { font-size: 22rpx; color: #86909C; }
 .summary { display: block; margin: 16rpx 0; font-size: 26rpx; color: #4E5969; line-height: 1.6; }
 .card-bottom { display: flex; justify-content: space-between; align-items: center; }
