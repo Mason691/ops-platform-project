@@ -13,8 +13,10 @@ import com.aip.ops.entity.OpsBusinessOrder;
 import com.aip.ops.mapper.OpsBusinessDataMapper;
 import com.aip.ops.mapper.OpsBusinessFlowRecordMapper;
 import com.aip.ops.mapper.OpsBusinessOrderMapper;
+import com.aip.ops.service.construct.ConstructionTaskHintService;
 import com.aip.ops.service.construct.OrderConstructService;
 import com.aip.ops.service.construct.OrderConstructStatus;
+import com.aip.ops.util.OrderPartyText;
 import com.aip.ops.util.VideoDurationValidator;
 import com.aip.sdk.exception.BusinessException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -66,6 +68,8 @@ public class BusinessOrderFlowActionService {
     private final DispatchEligibilityService dispatchEligibilityService;
     /** 派工成功回写施工员/待接收，并校验施工记录只允许在已开工后提交。 */
     private final OrderConstructService orderConstructService;
+    /** 施工节点唯一处理人（订单施工员）与施工完成提示文案的唯一来源。 */
+    private final ConstructionTaskHintService constructionTaskHintService;
     private final ScmStockOutClient scmClient;
     /** 以旧换新采购单：财务核对触发自动审核 / 撤销核对联动反审 */
     private final ScmPurchaseOrderClient scmPurchaseOrderClient;
@@ -93,6 +97,8 @@ public class BusinessOrderFlowActionService {
             case "NODE_ACTION" -> executeNodeAction(order, event);
             // 完工验收节点动态解析为订单主经办人；解析失败由平台阻断推进并落异常中心
             case "RESOLVE_APPROVER" -> resolveOrderHandler(order);
+            // 施工节点动态解析为订单已指派的唯一施工员，禁止按角色解析全量施工员
+            case "RESOLVE_WORKER" -> resolveOrderWorker(order);
             case "NODE_ENTERED", "INSTANCE_COMPLETED", "INSTANCE_REJECTED",
                  "INSTANCE_TERMINATED" -> {
                 syncStatus(order, event);
@@ -131,7 +137,7 @@ public class BusinessOrderFlowActionService {
             case ACTION_FINANCE -> financeCheck(order, event);
             case ACTION_DISPATCH -> dispatchOutbound(order, event);
             case ACTION_ACCEPTANCE -> acceptance(order, event);
-            case ACTION_CONSTRUCTION -> constructionRecord(order);
+            case ACTION_CONSTRUCTION -> constructionRecord(order, event);
             default -> throw BusinessException.of("未知节点动作：" + actionType);
         };
         saveRecord(order, event, result);
@@ -200,35 +206,35 @@ public class BusinessOrderFlowActionService {
      * 多经办人订单不猜测、不轮询，保证「完工验收审批人」唯一且可解释。
      */
     private Map<String, Object> resolveOrderHandler(OpsBusinessOrder order) {
-        String phone = primaryAgentPhone(order.getAgentPhones());
+        String phone = OrderPartyText.primaryPhone(order.getAgentPhones());
         if (phone.isEmpty()) {
             throw BusinessException.of("ORDER_HANDLER_NOT_SET：订单未指定经办人，请联系管理员");
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("approverPhone", phone);
-        result.put("approverName", primaryAgentName(order.getAgentNames()));
+        result.put("approverName", OrderPartyText.primaryName(order.getAgentNames()));
         result.put("handlerSource", "AGENT_PHONE");
         log.info("完工验收经办人解析: orderId={}, orderNo={}, phone={}", order.getId(),
                 order.getOrderNo(), phone);
         return result;
     }
 
-    private static String primaryAgentPhone(String phones) {
-        String value = phones == null ? "" : phones;
-        for (String item : value.split("[、,，;；]")) {
-            String phone = item.trim();
-            if (!phone.isEmpty()) return phone;
-        }
-        return "";
-    }
-
-    private static String primaryAgentName(String names) {
-        String value = names == null ? "" : names;
-        for (String item : value.split("[、,，;；]")) {
-            String name = item.trim();
-            if (!name.isEmpty()) return name;
-        }
-        return "";
+    /**
+     * 订单施工员解析：只认派工出库写入的 order.worker_id 唯一施工员。
+     * 施工执行/施工完成节点的任务与“下一步处理人”都由本结果生成，
+     * 禁止按“施工员角色”查全量人员（会解析出孙莉娟等其他施工员）。
+     */
+    private Map<String, Object> resolveOrderWorker(OpsBusinessOrder order) {
+        ConstructionTaskHintService.OrderWorker worker =
+                constructionTaskHintService.resolveOrderWorker(order);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("approverUserId", worker.userId());
+        result.put("approverName", worker.userName());
+        result.put("roleName", "施工员");
+        result.put("workerSource", "ORDER_FIELD");
+        log.info("施工节点施工员解析: orderId={}, orderNo={}, workerId={}, workerName={}",
+                order.getId(), order.getOrderNo(), worker.userId(), worker.userName());
+        return result;
     }
 
     /**
@@ -489,12 +495,18 @@ public class BusinessOrderFlowActionService {
      * 施工记录（施工完成）节点动作：只有已确认开工（或验收退回返工）才允许提交，
      * 防止绕过确认接收/打卡/客户签字直接推进流程。
      */
-    private Map<String, Object> constructionRecord(OpsBusinessOrder order) {
+    private Map<String, Object> constructionRecord(OpsBusinessOrder order,
+                                                  WorkflowBusinessEvent event) {
         String status = order.getBizStatus();
         if (!OrderConstructStatus.isConstructing(status)) {
             throw BusinessException.of(
                     "CONSTRUCTION_NOT_STARTED：请先完成确认接收、上门打卡、客户签字与确认开工");
         }
+        // 施工执行/施工完成两个节点共用本动作，日志带上节点与任务，便于串联一次施工完成提交
+        log.info("施工记录提交: orderId={}, orderNo={}, instanceId={}, nodeName={}, taskId={}, "
+                        + "operator={}, bizStatus={}",
+                order.getId(), order.getOrderNo(), event.getInstanceId(), event.getNodeName(),
+                event.getTaskId(), event.getOperatorUserId(), status);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("recorded", true);
         result.put("bizStatus", status);

@@ -173,10 +173,15 @@
           <text class="v">{{ order.tradeInPurchaseBillNo || '—' }}</text>
         </view>
         <view class="info-row"><text class="k">计算状态</text><text class="v">{{ order.calcStatus || '未计算' }}</text></view>
+        <view v-if="isConstructionTask && currentHandlerText" class="info-row">
+          <text class="k">当前处理人</text>
+          <text class="v strong">{{ currentHandlerText }}</text>
+        </view>
       </view>
 
       <ConstructFlowActions v-if="isBusinessOrder && actionType === 'OPS_CONSTRUCTION_RECORD'"
                             :order-id="order.orderId" :construct="order.construct"
+                            :completion="isConstructionCompletion"
                             @changed="onConstructChanged" />
 
       <view v-if="isBusinessOrder && order.refund" class="card">
@@ -243,7 +248,8 @@
         </view>
       </view>
 
-      <ApproverCard v-if="nextApprover" :info="nextApprover"
+      <!-- 施工节点处理人固定为订单唯一施工员，不展示“下一步审批人”，避免误列同角色其他施工员 -->
+      <ApproverCard v-if="nextApprover && !isConstructionTask" :info="nextApprover"
         @toggle="approverExpanded = !approverExpanded" />
 
       <view v-if="!taskPending" class="card">
@@ -334,6 +340,9 @@
           <view v-if="constructionBlockedReason" class="block-alert">
             <text>{{ constructionBlockedReason }}</text>
           </view>
+          <view v-if="isConstructionCompletion && constructionHint" class="construct-hint">
+            <text>{{ constructionHint.hintText }}</text>
+          </view>
           <view class="field"><text class="label">施工说明</text>
             <textarea v-model="form.constructionNote" class="textarea" maxlength="1000" placeholder="现场施工情况" />
           </view>
@@ -370,7 +379,7 @@
         <button v-if="showGenericReject" class="btn danger" :disabled="submitting" @click="rejectVisible = true">驳回</button>
         <button class="btn primary"
                 :disabled="submitting || !!dispatchBlockedReason || !!constructionBlockedReason"
-                @click="submit">{{ submitting ? '提交中...' : '提交处理' }}</button>
+                @click="submit">{{ submitting ? '提交中...' : submitButtonText }}</button>
       </view>
     </template>
 
@@ -389,6 +398,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 import { REQUISITION_STATUS, WRITE_OFF_STATUS } from '@/utils/materialForm'
+import { track } from '@/utils/track'
 import ApproverCard from '@/components/ApproverCard.vue'
 import RejectPopup from '@/components/RejectPopup.vue'
 import DispatchMaterialList from '@/components/DispatchMaterialList.vue'
@@ -456,6 +466,36 @@ const conclusions = [
 ]
 
 const actionType = computed(() => (detail.value && detail.value.node && detail.value.node.actionType) || '')
+/** 施工节点专用：后端返回的施工完成提示（含施工员/订单/经办人/按钮文案） */
+const constructionHint = computed(() => (order.value && order.value.constructTaskHint) || null)
+const isConstructionTask = computed(() => actionType.value === 'OPS_CONSTRUCTION_RECORD')
+/** 仅“施工完成”节点有提示对象；施工执行节点仍提交施工记录 */
+const isConstructionCompletion = computed(() => {
+  if (!isConstructionTask.value) return false
+  if (constructionHint.value) return true
+  // 兜底：后端提示加载失败时按节点名/业务状态识别施工完成，避免退回“提交处理”
+  const nodeName = (detail.value && detail.value.node && detail.value.node.nodeName)
+    || (detail.value && detail.value.task && detail.value.task.nodeName) || ''
+  return nodeName.includes('施工完成') || String((order.value && order.value.bizStatus) || '') === '5'
+})
+/** 施工环节处理人固定为订单唯一施工员，只展示当前处理人，不展示下一步审批人 */
+const currentHandlerText = computed(() => {
+  if (!isConstructionTask.value) return ''
+  if (isConstructionCompletion.value && constructionHint.value.workerName) {
+    return `施工员（${constructionHint.value.workerName}）`
+  }
+  const approval = detail.value && detail.value.instance && detail.value.instance.currentApproval
+  if (approval && approval.displayText && (approval.groups || []).length) {
+    return approval.displayText
+  }
+  return ''
+})
+/** 施工环节不使用“提交处理”兜底：施工执行=提交施工记录，施工完成=提交验收申请 */
+const submitButtonText = computed(() => {
+  if (!isConstructionTask.value) return '提交处理'
+  if (!isConstructionCompletion.value) return '提交施工记录'
+  return (constructionHint.value && constructionHint.value.buttonText) || '提交验收申请'
+})
 /** 派工准入：is_full_payment=1 且已财务核对；定金未收齐或未核对时禁止提交。 */
 const dispatchBlockedReason = computed(() => {
   if (actionType.value !== 'OPS_DISPATCH_OUTBOUND') return ''
@@ -561,6 +601,9 @@ const actionTitle = computed(() => {
   if (isMaterialWriteOff.value) return '物资核销审批'
   if (isScmPick.value) return '物料领用审批'
   if (isScmWriteOff.value) return '物料核销审批'
+  if (isConstructionTask.value) {
+    return isConstructionCompletion.value ? '施工完成验收' : '施工记录'
+  }
   return {
     OPS_FINANCE_CHECK: '财务核对',
     OPS_DISPATCH_OUTBOUND: '派工出库',
@@ -827,6 +870,27 @@ async function submit() {
   if (willReject) {
     return doSubmit()
   }
+  if (isConstructionCompletion.value) {
+    const hint = constructionHint.value
+    uni.showModal({
+      title: '确认提交验收申请',
+      content: hint && hint.hintText
+        ? hint.hintText
+        : '提交后由订单经办人验收确认，确认施工完成。',
+      confirmText: (hint && hint.buttonText) || '提交验收申请',
+      success: (res) => { if (res.confirm) doSubmit() }
+    })
+    return
+  }
+  if (isConstructionTask.value) {
+    uni.showModal({
+      title: '确认提交施工记录',
+      content: '提交后进入施工完成节点，施工完成后还需向订单经办人提交验收申请。',
+      confirmText: '提交施工记录',
+      success: (res) => { if (res.confirm) doSubmit() }
+    })
+    return
+  }
   const info = nextApprover.value
   const content = info && info.display
     ? `确认提交给 ${info.display}${info.nodeName ? '（' + info.nodeName + '）' : ''} 审批？`
@@ -883,6 +947,13 @@ async function doSubmit() {
       formData
     })
     if (actionType.value === 'OPS_ACCEPTANCE') clearEvidenceDraft()
+    if (isConstructionCompletion.value) {
+      track('construct_task_submit_acceptance', {
+        taskId: Number(taskId.value),
+        orderId: order.value.orderId,
+        instanceId: Number(instanceId.value) || null
+      })
+    }
     // 派工出库带物料清单时，SCM 已同事务生成领用草稿：按派工记录（=当前 taskId）查回单号提示
     if (actionType.value === 'OPS_DISPATCH_OUTBOUND'
         && form.dispatchType === 'CONSTRUCTION' && dispatchMaterials.value.length) {
@@ -936,6 +1007,16 @@ function showDispatchMaterialResult(pick, result) {
 function showSubmitResult(result, fallback) {
   const info = normalizeResult(result)
   if (showTerminalResult(info)) return
+  if (isConstructionCompletion.value) {
+    const handler = (constructionHint.value && constructionHint.value.handlerName) || '订单经办人'
+    uni.showModal({
+      title: '验收申请已提交',
+      content: `验收申请已提交，等待经办人（${handler}）验收确认`,
+      showCancel: false,
+      success: goTodo
+    })
+    return
+  }
   if (info.displayText) {
     showActiveResult(info, fallback)
     return
@@ -1215,6 +1296,7 @@ function goBack() {
 .info-row { display: flex; justify-content: space-between; padding: 9rpx 0; font-size: 26rpx; }
 .k { color: #86909C; flex: 0 0 150rpx; }
 .v { color: #1D2129; text-align: right; flex: 1; word-break: break-all; }
+.v.strong { color: #1D2129; font-weight: 600; }
 .money { color: #FF6B35; font-weight: 600; }
 .deduction { color: #C62828; font-weight: 600; }
 .product { display: flex; justify-content: space-between; padding: 14rpx 0; border-top: 1rpx solid #F2F3F5; }
@@ -1246,6 +1328,11 @@ function goBack() {
   margin: 0 0 16rpx; padding: 18rpx 20rpx; border-radius: 12rpx;
   background: #FFF7E6; border: 2rpx solid #FFD591; color: #B26A00;
   font-size: 24rpx; line-height: 1.5;
+}
+.construct-hint {
+  margin: 0 0 16rpx; padding: 18rpx 20rpx; border-radius: 12rpx;
+  background: #F0F7FF; border: 2rpx solid #B8D7FF; color: #2F5B99;
+  font-size: 24rpx; line-height: 1.6;
 }
 .field { margin-top: 22rpx; }
 .label { display: block; font-size: 25rpx; color: #4E5969; margin-bottom: 10rpx; }

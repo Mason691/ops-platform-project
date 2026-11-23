@@ -23,7 +23,9 @@
       <text>客户拒绝确认，请派工人/运营介入；客户同意后可重新签字。</text>
     </view>
     <view v-else-if="isConstructing" class="alert done">
-      <text>订单已开工，施工完成后请提交下方【施工记录】。</text>
+      <text>{{ completion
+        ? '施工已完成，请提交验收申请，由订单经办人验收确认。'
+        : '订单已开工，施工完成后请提交下方【施工记录】。' }}</text>
     </view>
 
     <view v-if="hasActions" class="action-row">
@@ -69,7 +71,9 @@ import { useOrderConstruct } from '@/hooks/useOrderConstruct'
 
 const props = defineProps({
   orderId: { type: [Number, String], required: true },
-  construct: { type: Object, default: null }
+  construct: { type: Object, default: null },
+  /** true=当前是“施工完成”节点，提示改为提交验收申请 */
+  completion: { type: Boolean, default: false }
 })
 const emit = defineEmits(['changed'])
 
