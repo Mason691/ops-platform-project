@@ -583,10 +583,18 @@ const isScmWriteOff = computed(() => businessType.value === 'MATERIAL_WRITE_OFF'
 const isBusinessOrder = computed(() => !isPurchase.value
   && !isMaterialRequisition.value && !isMaterialWriteOff.value
   && !isScmPick.value && !isScmWriteOff.value)
-/** 定金支付且尾款已补录：财务核对、派工出库任务页展示定金/尾款与收据信息 */
+/** 部长审核节点未配置 actionType，按业务订单流程的节点顺序与名称识别 */
+const isMinisterReviewTask = computed(() => {
+  const node = detail.value && detail.value.node
+  return !!node && Number(node.nodeOrder) === 2
+    && String(node.nodeName || '').includes('部长')
+})
+/** 定金支付且尾款已补录：部长审核、财务核对、派工出库任务页展示定金/尾款与收据信息 */
 const showDepositBalanceInfo = computed(() => {
   if (!isBusinessOrder.value) return false
-  if (!['OPS_FINANCE_CHECK', 'OPS_DISPATCH_OUTBOUND'].includes(actionType.value)) return false
+  const depositTask = ['OPS_FINANCE_CHECK', 'OPS_DISPATCH_OUTBOUND'].includes(actionType.value)
+    || isMinisterReviewTask.value
+  if (!depositTask) return false
   const o = order.value || {}
   if (String(o.paymentType || '') !== 'DEPOSIT' || Number(o.isFullPayment) !== 1) return false
   // is_full_payment 历史空值会被后端兜底为 1，必须有尾款补录痕迹才展示
