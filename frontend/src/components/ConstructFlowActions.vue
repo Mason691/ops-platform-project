@@ -16,23 +16,42 @@
       </view>
     </view>
 
-    <view v-if="construct.operateBlockedReason" class="alert">
+    <view v-if="construct.isWorker && construct.operateBlockedReason" class="alert">
       <text>{{ construct.operateBlockedReason }}</text>
     </view>
     <view v-else-if="isRefused" class="alert danger">
       <text>客户拒绝确认，请派工人/运营介入；客户同意后可重新签字。</text>
     </view>
     <view v-else-if="isConstructing" class="alert done">
-      <text>{{ completion
-        ? '施工已完成，请提交验收申请，由订单经办人验收确认。'
-        : '订单已开工，施工完成后请提交下方【施工记录】。' }}</text>
+      <text>{{ constructingHint }}</text>
+    </view>
+
+    <view v-if="hasRecord" class="record-block">
+      <view class="record-head">
+        <text>施工记录</text>
+        <text v-if="construct.acceptanceSubmittedTime" class="record-time">
+          {{ construct.acceptanceSubmittedTime }} 已提交验收
+        </text>
+      </view>
+      <view v-if="construct.constructionNote" class="record-row">
+        <text class="record-label">施工说明</text>
+        <text class="record-text">{{ construct.constructionNote }}</text>
+      </view>
+      <view v-if="construct.completionNote" class="record-row">
+        <text class="record-label">完工说明</text>
+        <text class="record-text">{{ construct.completionNote }}</text>
+      </view>
+      <view v-if="photos.length" class="record-photos">
+        <image v-for="file in photos" :key="file.id" :src="assetUrl(file.url)"
+               class="record-photo" mode="aspectFill" @click="previewPhotos(file)" />
+      </view>
     </view>
 
     <view v-if="hasActions" class="action-row">
       <button v-if="permissions.accept" class="btn primary" :disabled="submitting"
-              @click="onAccept">确认接收</button>
+              @click="onAccept">确认接受</button>
       <button v-if="permissions.reject" class="btn ghost-danger" :disabled="submitting"
-              @click="openReason('reject')">拒绝接单</button>
+              @click="openReason('reject')">拒绝接受</button>
       <button v-if="permissions.arrive" class="btn primary" :disabled="submitting"
               @click="arriveVisible = true">上门打卡</button>
       <button v-if="permissions.customerConfirm" class="btn primary" :disabled="submitting"
@@ -41,8 +60,6 @@
       </button>
       <button v-if="permissions.customerRefuse" class="btn ghost-danger" :disabled="submitting"
               @click="openReason('refuse')">客户拒绝</button>
-      <button v-if="permissions.start" class="btn primary" :disabled="submitting"
-              @click="onStart">确认开工</button>
     </view>
 
     <view class="timeline-head" @click="showTimeline = !showTimeline">
@@ -68,16 +85,15 @@ import ArriveCheckIn from '@/components/ArriveCheckIn.vue'
 import CustomerSign from '@/components/CustomerSign.vue'
 import ConstructReasonDialog from '@/components/ConstructReasonDialog.vue'
 import { useOrderConstruct } from '@/hooks/useOrderConstruct'
+import { assetUrl } from '@/utils/image'
 
 const props = defineProps({
   orderId: { type: [Number, String], required: true },
-  construct: { type: Object, default: null },
-  /** true=当前是“施工完成”节点，提示改为提交验收申请 */
-  completion: { type: Boolean, default: false }
+  construct: { type: Object, default: null }
 })
 const emit = defineEmits(['changed'])
 
-const { submitting, accept, reject, arrive, customerConfirm, customerRefuse, start } =
+const { submitting, accept, reject, arrive, customerConfirm, customerRefuse } =
   useOrderConstruct()
 
 const arriveVisible = ref(false)
@@ -87,8 +103,8 @@ const reasonAction = ref('reject')
 const showTimeline = ref(true)
 
 const steps = [
-  { key: 'WAIT_ACCEPT', name: '待接收' },
-  { key: 'ACCEPTED', name: '已接收' },
+  { key: 'WAIT_ACCEPT', name: '待接受' },
+  { key: 'ACCEPTED', name: '已接受' },
   { key: 'ARRIVED', name: '已上门' },
   { key: 'CUSTOMER_CONFIRMED', name: '客户已确认' },
   { key: 'CONSTRUCTING', name: '施工中' }
@@ -96,9 +112,18 @@ const steps = [
 const status = computed(() => String((props.construct && props.construct.bizStatus) || ''))
 const permissions = computed(() => (props.construct && props.construct.permissions) || {})
 const logs = computed(() => (props.construct && props.construct.logs) || [])
+const photos = computed(() => (props.construct && props.construct.constructionPhotos) || [])
+const hasRecord = computed(() => !!(props.construct && (props.construct.constructionNote
+  || props.construct.completionNote || photos.value.length)))
 const isRefused = computed(() => status.value === 'CUSTOMER_REFUSED')
 const isCustomerConfirmed = computed(() => status.value === 'CUSTOMER_CONFIRMED')
 const isConstructing = computed(() => ['4', '5', '6', '7'].includes(status.value))
+const constructingHint = computed(() => {
+  if (status.value === '7') return '订单已完成验收。'
+  if (status.value === '6') return '订单已提交验收，请核对施工记录后填写验收结论。'
+  if (status.value === '5') return '施工记录已提交，等待验收确认；如被退回，请修改后重新提交。'
+  return '施工已开始，完成后请在下方填写施工记录并提交验收申请。'
+})
 const activeIndex = computed(() => {
   if (isRefused.value) return 2
   if (isConstructing.value) return 4
@@ -113,7 +138,7 @@ const statusTone = computed(() => {
   return 'active'
 })
 const reasonTitle = computed(() => (reasonAction.value === 'refuse'
-  ? '客户拒绝确认' : '拒绝接单'))
+  ? '客户拒绝确认' : '拒绝接受任务'))
 
 function openReason(action) {
   reasonAction.value = action
@@ -133,7 +158,7 @@ async function run(action, successText, meta) {
 }
 
 async function onAccept() {
-  await run(() => accept(props.orderId), '确认接收成功')
+  await run(() => accept(props.orderId), '确认接受成功')
 }
 
 async function onArrive(payload) {
@@ -141,26 +166,39 @@ async function onArrive(payload) {
   if (ok) arriveVisible.value = false
 }
 
-async function onSign(payload) {
-  const ok = await run(() => customerConfirm(props.orderId, payload), '客户已确认')
-  if (ok) signVisible.value = false
+function onSign(payload) {
+  // 签字后自动进入施工中且告知书不可修改，提交前再做一次明确确认
+  uni.showModal({
+    title: '确认客户签字',
+    content: '客户签字确认后，任务将自动进入施工中，告知书内容不可修改。请确认客户已阅读并同意。',
+    confirmText: '确认签字',
+    success: (res) => { if (res.confirm) doSign(payload) }
+  })
+}
+
+async function doSign(payload) {
+  const ok = await run(() => customerConfirm(props.orderId, payload),
+    '客户已签字确认，任务已进入施工中')
+  if (!ok) return
+  signVisible.value = false
+  uni.showModal({
+    title: '客户已签字确认',
+    content: '任务已进入施工中，请完成施工后填写施工记录并提交验收申请。',
+    showCancel: false
+  })
 }
 
 async function onReason(reason) {
   const refuse = reasonAction.value === 'refuse'
   const ok = refuse
     ? await run(() => customerRefuse(props.orderId, reason), '已记录客户拒绝')
-    : await run(() => reject(props.orderId, reason), '已拒绝接单', { rejected: true })
+    : await run(() => reject(props.orderId, reason), '已拒绝接受', { rejected: true })
   if (ok) reasonVisible.value = false
 }
 
-function onStart() {
-  uni.showModal({
-    title: '确认开工',
-    content: '确认客户已签字并开始施工？开工后告知书不可修改。',
-    confirmText: '确认开工',
-    success: res => { if (res.confirm) run(() => start(props.orderId), '已确认开工') }
-  })
+function previewPhotos(current) {
+  const urls = photos.value.map(file => assetUrl(file.url))
+  uni.previewImage({ urls, current: assetUrl(current.url) })
 }
 </script>
 
@@ -196,6 +234,20 @@ function onStart() {
 .alert { font-size: 23rpx; color: #4E5969; background: #F7F8FA; border-radius: 8rpx; padding: 12rpx 16rpx; line-height: 1.6; }
 .alert.danger { color: #C62828; background: #FFF1F0; }
 .alert.done { color: #0B7A42; background: #F0F9F2; }
+.record-block {
+  border-top: 1rpx dashed #E5E6EB; padding-top: 14rpx;
+  display: flex; flex-direction: column; gap: 8rpx;
+}
+.record-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12rpx;
+  font-size: 25rpx; font-weight: 600; color: #1D2129;
+}
+.record-time { font-size: 20rpx; color: #86909C; font-weight: 400; }
+.record-row { display: flex; flex-direction: column; gap: 2rpx; }
+.record-label { font-size: 21rpx; color: #86909C; }
+.record-text { font-size: 23rpx; color: #4E5969; line-height: 1.6; white-space: pre-wrap; }
+.record-photos { display: flex; flex-wrap: wrap; gap: 10rpx; }
+.record-photo { width: 120rpx; height: 120rpx; border-radius: 8rpx; background: #F2F3F5; }
 .action-row { display: flex; flex-wrap: wrap; gap: 14rpx; }
 .btn {
   flex: 1; min-width: 200rpx; height: 78rpx; line-height: 78rpx; border-radius: 39rpx;

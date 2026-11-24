@@ -1,6 +1,7 @@
 package com.aip.ops.client;
 
 import com.aip.ops.service.CommissionRuleService;
+import com.aip.ops.service.ProductCategoryConfigService;
 import com.aip.sdk.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -72,6 +73,7 @@ public class ScmBaseDataClient {
 
     private final RestTemplate restTemplate;
     private final CommissionRuleService commissionRuleService;
+    private final ProductCategoryConfigService categoryConfigService;
     private final String baseUrl;
 
     private final Map<Long, CachedOptions> cache = new ConcurrentHashMap<>();
@@ -80,9 +82,11 @@ public class ScmBaseDataClient {
 
     public ScmBaseDataClient(RestTemplate restTemplate,
                              CommissionRuleService commissionRuleService,
+                             ProductCategoryConfigService categoryConfigService,
                              @Value("${scm-service.base-url:http://localhost:8084}") String baseUrl) {
         this.restTemplate = restTemplate;
         this.commissionRuleService = commissionRuleService;
+        this.categoryConfigService = categoryConfigService;
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
     }
 
@@ -128,14 +132,47 @@ public class ScmBaseDataClient {
                         "品类「" + categoryName + "」未在供应链商品类别中找到"));
     }
 
-    /** 校验 品牌+品类+型号 组合存在于 SCM 商品资料。 */
+    /** 校验 品牌+品类+型号 组合存在于 SCM 商品资料（无品牌品类允许品牌为空）。 */
     public void requireMaterial(Long corpId, String brand, String categoryName, String model) {
         ScmOptions opts = options(corpId);
         boolean exists = opts.materials().stream().anyMatch(m ->
-                m.brand().equals(brand) && m.category().equals(categoryName) && m.model().equals(model));
+                sameText(m.brand(), brand) && m.category().equals(categoryName)
+                        && m.model().equals(model));
         if (!exists) {
             throw BusinessException.of("品牌/品类/型号未在供应链商品资料中找到："
-                    + brand + " / " + categoryName + " / " + model);
+                    + normalize(brand) + " / " + categoryName + " / " + model);
+        }
+    }
+
+    /** 品类是否必须选择品牌；未配置时按“该品类存在带品牌商品”自动判定。 */
+    public boolean requiresBrand(Long corpId, String categoryName) {
+        return options(corpId).categories().stream()
+                .filter(c -> c.name().equals(categoryName))
+                .map(CategoryOption::brandRequired)
+                .findFirst()
+                .orElse(true);
+    }
+
+    /**
+     * 品类 key/名称 → SCM 类别名称。
+     *
+     * <p>订单落库的 category 是字典 itemKey（如 1/2/3/4），SCM 商品类别名是
+     * 灶具/烟机/燃气热水器，库存查询必须换回 SCM 名称；传名称时原样返回。</p>
+     */
+    public String scmCategoryName(Long corpId, String category) {
+        if (category == null || category.isBlank()) return category;
+        String value = category.trim();
+        // 兼容旧数据：订单可能落字典中文名（燃气灶），SCM 类别名为「灶具」
+        String key = FALLBACK_CATEGORY_KEYS.getOrDefault(value, value);
+        try {
+            return options(corpId).categories().stream()
+                    .filter(c -> value.equals(c.name()) || key.equals(c.key()))
+                    .map(CategoryOption::name)
+                    .findFirst()
+                    .orElse(value);
+        } catch (Exception e) {
+            log.warn("品类映射 SCM 名称失败 category={}: {}", category, e.getMessage());
+            return value;
         }
     }
 
@@ -155,7 +192,7 @@ public class ScmBaseDataClient {
                 .findFirst()
                 .orElseThrow(() -> BusinessException.of(
                         "供应链商品不存在或已停用，请重新选择型号"));
-        if (!material.brand().equals(brand) || !material.category().equals(categoryName)
+        if (!sameText(material.brand(), brand) || !material.category().equals(categoryName)
                 || !material.model().equals(model)) {
             throw BusinessException.of("商品与品牌/品类/型号不一致，请重新选择型号");
         }
@@ -186,7 +223,29 @@ public class ScmBaseDataClient {
         Set<String> categoryNames = new LinkedHashSet<>();
         for (CategoryOption c : categories) categoryNames.add(c.name());
         List<MaterialOption> materials = fetchMaterials(auth, brandSet, categoryNames);
-        return new ScmOptions(brands, categories, materials);
+        return new ScmOptions(brands, withBrandRules(categories, materials), materials);
+    }
+
+    /**
+     * 计算品类品牌规则：字典配置优先；未配置时按该品类是否存在带品牌商品兜底。
+     * 无品牌品类（如报警器）的品牌字段可隐藏，型号按品类维度选择。
+     */
+    private List<CategoryOption> withBrandRules(List<CategoryOption> categories,
+                                                List<MaterialOption> materials) {
+        Set<String> brandedCategories = new LinkedHashSet<>();
+        for (MaterialOption material : materials) {
+            if (!normalize(material.brand()).isEmpty()) {
+                brandedCategories.add(material.category());
+            }
+        }
+        List<CategoryOption> result = new ArrayList<>();
+        for (CategoryOption category : categories) {
+            Boolean configured = categoryConfigService.brandRequired(category.name());
+            boolean required = configured != null
+                    ? configured : brandedCategories.contains(category.name());
+            result.add(new CategoryOption(category.key(), category.name(), required));
+        }
+        return result;
     }
 
     private List<String> fetchBrands(String auth) {
@@ -224,7 +283,7 @@ public class ScmBaseDataClient {
             // 字典同名 → itemKey；未同名 → SCM 类别名称（保持运营商目录完整）
             String key = nameToKey.getOrDefault(name, name);
             if (!name.isEmpty() && seen.add(name)) {
-                out.add(new CategoryOption(key, name));
+                out.add(new CategoryOption(key, name, true));
             }
             Object children = node.get("children");
             if (children instanceof List<?> list) {
@@ -301,8 +360,10 @@ public class ScmBaseDataClient {
             // 规格型号为空时回退商品名称：金蝶部分商品只填名称（如 燃气灶JZT-CA021）
             String model = str(row.get("model"));
             if (model.isEmpty()) model = str(row.get("name"));
-            if (brand.isEmpty() || category.isEmpty() || model.isEmpty()) continue;
-            if (!brands.contains(brand) || !categories.contains(category)) continue;
+            if (category.isEmpty() || model.isEmpty()) continue;
+            // 无品牌商品（报警器/辅材耗材）必须保留：品牌为空是合法业务数据
+            if (!brand.isEmpty() && !brands.contains(brand)) continue;
+            if (!categories.contains(category)) continue;
             if (seen.add(brand + "\u0001" + category + "\u0001" + model)) {
                 Long id = toLong(row.get("id"));
                 out.add(new MaterialOption(id, str(row.get("number")), brand, category, model,
@@ -442,6 +503,14 @@ public class ScmBaseDataClient {
         return value == null ? "" : value.toString().trim();
     }
 
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private static boolean sameText(String left, String right) {
+        return normalize(left).equals(normalize(right));
+    }
+
     /** SCM/金蝶 JSON 的 ID 可能是数字或字符串，统一转 Long。 */
     private static Long toLong(Object value) {
         if (value instanceof Number n) return n.longValue();
@@ -457,7 +526,7 @@ public class ScmBaseDataClient {
 
     // ── records ──
 
-    public record CategoryOption(String key, String name) {}
+    public record CategoryOption(String key, String name, boolean brandRequired) {}
 
     public record MaterialOption(Long id, String number, String brand, String category,
                                  String model, String name, String unit) {}

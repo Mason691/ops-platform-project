@@ -51,7 +51,8 @@ export function useProductPrice(product) {
 
   async function lookup(options = {}) {
     const preservePrice = options.preservePrice === true
-    if (!product || !product.brand || !product.category || !product.model) {
+    // 品牌可选品类（报警器等）不要求品牌；有 productId 时后端按商品ID查价
+    if (!product || !product.category || !product.model) {
       resetPrice()
       return
     }
@@ -68,7 +69,7 @@ export function useProductPrice(product) {
     try {
       const info = await api.employeeProductPrice({
         productId: product.productId || undefined,
-        brand: product.brand,
+        brand: product.brand || undefined,
         category: product.category,
         model: product.model
       })

@@ -48,7 +48,7 @@
       </view>
       <view v-for="(product, index) in form.products" :key="index" class="product-summary">
         <view class="product-head">
-          <text class="product-name">{{ product.brand }} · {{ product.model }}</text>
+          <text class="product-name">{{ product.brand ? product.brand + ' · ' : '' }}{{ product.model }}</text>
           <text class="product-amount">¥{{ amountOf(product) }}</text>
         </view>
         <text class="product-meta">
@@ -90,7 +90,7 @@
         <text class="k">特批/提成</text>
         <view class="special-list">
           <text v-for="(product, index) in specialProducts" :key="index" class="special-line">
-            {{ product.brand }} · {{ product.model }}：提成 {{ product.commissionRate || '—' }}%
+            {{ product.brand ? product.brand + ' · ' : '' }}{{ product.model }}：提成 {{ product.commissionRate || '—' }}%
           </text>
         </view>
       </view>

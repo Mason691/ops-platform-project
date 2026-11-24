@@ -199,7 +199,7 @@ public class OpsBusinessOrder extends BaseEntity {
     @TableField("draft_flag")
     private Integer draftFlag;
 
-    /** 指派施工员 sys_user.id（派工出库时写入；拒绝接单/退回派工后清空）。 */
+    /** 指派施工员 sys_user.id（派工出库时写入；拒绝接受/退回派工后清空）。 */
     @TableField("worker_id")
     private Long workerId;
 
@@ -225,6 +225,20 @@ public class OpsBusinessOrder extends BaseEntity {
 
     @TableField("start_time")
     private LocalDateTime startTime;
+
+    /** 施工记录（施工说明/完工说明/现场照片）：提交验收申请时一次性落库，供验收人查看。 */
+    @TableField("construction_note")
+    private String constructionNote;
+
+    @TableField("completion_note")
+    private String completionNote;
+
+    /** 施工记录现场照片附件ID，逗号分隔。 */
+    @TableField("construction_attachment_ids")
+    private String constructionAttachmentIds;
+
+    @TableField("acceptance_submitted_time")
+    private LocalDateTime acceptanceSubmittedTime;
 
     /** 乐观锁版本：施工流转每次状态变更 +1，与 biz_status 一起做 CAS。 */
     @TableField("version")

@@ -62,18 +62,18 @@ public class EmployeeConstructController {
         return R.ok(constructService.verifyNotice(orderId));
     }
 
-    @OperationLog(module = "运营管理", action = "施工员确认接收", targetTable = "ops_business_order")
+    @OperationLog(module = "运营管理", action = "施工员确认接受", targetTable = "ops_business_order")
     @PostMapping("/accept")
     public R<?> accept(@PathVariable Long orderId) {
-        if (isSso()) return R.fail(403, "仅员工可确认接收");
+        if (isSso()) return R.fail(403, "仅员工可确认接受");
         return R.ok(constructService.accept(orderId));
     }
 
-    @OperationLog(module = "运营管理", action = "施工员拒绝接单", targetTable = "ops_business_order")
+    @OperationLog(module = "运营管理", action = "施工员拒绝接受", targetTable = "ops_business_order")
     @PostMapping("/reject")
     public R<?> reject(@PathVariable Long orderId,
                        @RequestBody ConstructActionDtos.ReasonRequest request) {
-        if (isSso()) return R.fail(403, "仅员工可拒绝接单");
+        if (isSso()) return R.fail(403, "仅员工可拒绝接受");
         return R.ok(constructService.reject(orderId, request == null ? null : request.reason()));
     }
 
@@ -105,10 +105,10 @@ public class EmployeeConstructController {
                 orderId, request == null ? null : request.reason()));
     }
 
-    @OperationLog(module = "运营管理", action = "确认开工", targetTable = "ops_business_order")
+    @OperationLog(module = "运营管理", action = "开始施工", targetTable = "ops_business_order")
     @PostMapping("/start")
     public R<?> start(@PathVariable Long orderId) {
-        if (isSso()) return R.fail(403, "仅员工可确认开工");
+        if (isSso()) return R.fail(403, "仅员工可开始施工");
         return R.ok(constructService.start(orderId));
     }
 

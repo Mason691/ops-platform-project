@@ -262,6 +262,7 @@ export const api = {
   employeeLookupMember: (phone) => request({url:'/api/ops/employee/business-data/manual/member',data:{phone}}),
   employeeCreateCommunity: (data) => request({url:'/api/ops/employee/business-data/communities',method:'POST',data}),
   employeeProductPrice: (params) => request({url:'/api/ops/employee/business-data/product-price', data:params}),
+  employeeModelStock: (params) => request({url:'/api/ops/employee/business-data/model-stock', data:params}),
   employeeCheckReceiptNo: (params) => request({url:'/api/ops/employee/business-data/receipt-no/check', data:params}),
   employeeReceiptOcr: (data) => request({url:'/api/ops/employee/business-data/receipt-ocr', method:'POST', data}),
   employeeReceiptOcrFeedback: (data) => request({
@@ -338,7 +339,7 @@ export const api = {
   // 业务订单详情 / 派工可选员工 / 财务暂缓（ops，员工 JWT + 数据范围）
   businessOrderDetail: (orderId) => request({url:'/api/ops/admin/business-data/orders/' + orderId}),
   businessTaskOrderDetail: (taskId) => request({url:'/api/ops/employee/business-data/tasks/' + taskId + '/order'}),
-  // 施工状态链（派工 → 待接收 → 已接收 → 已上门 → 客户已确认 → 施工中）
+  // 施工状态链（派工 → 待接受 → 已接受 → 已上门 → 客户已确认 → 施工中）
   constructView: (orderId) => request({
     url: '/api/ops/employee/business-data/orders/' + orderId + '/construct'
   }),
@@ -361,10 +362,6 @@ export const api = {
   constructCustomerRefuse: (orderId, reason) => request({
     url: '/api/ops/employee/business-data/orders/' + orderId + '/construct/customer-refuse',
     method: 'POST', data: { reason }
-  }),
-  constructStart: (orderId) => request({
-    url: '/api/ops/employee/business-data/orders/' + orderId + '/construct/start',
-    method: 'POST'
   }),
   constructVerifyNotice: (orderId) => request({
     url: '/api/ops/employee/business-data/orders/' + orderId + '/construct/notice/verify'

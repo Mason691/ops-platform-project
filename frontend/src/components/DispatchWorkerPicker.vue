@@ -8,7 +8,7 @@
       <text class="arrow">›</text>
     </view>
     <text v-if="selected && selected.wechatBound === false" class="warn">
-      该员工未绑定微信，可能无法接收任务通知
+      该员工未绑定微信，可能收不到任务通知
     </text>
 
     <view v-if="visible" class="mask" @click.self="visible = false">

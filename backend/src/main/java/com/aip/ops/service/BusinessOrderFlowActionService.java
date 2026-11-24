@@ -66,9 +66,9 @@ public class BusinessOrderFlowActionService {
     private final OpsBusinessFlowRecordMapper flowRecordMapper;
     private final BusinessDataFinanceService financeService;
     private final DispatchEligibilityService dispatchEligibilityService;
-    /** 派工成功回写施工员/待接收，并校验施工记录只允许在已开工后提交。 */
+    /** 派工成功回写施工员/待接受，并校验施工记录只允许在已开工后提交。 */
     private final OrderConstructService orderConstructService;
-    /** 施工节点唯一处理人（订单施工员）与施工完成提示文案的唯一来源。 */
+    /** 施工节点唯一处理人（订单施工员）：平台 RESOLVE_WORKER 解析来源。 */
     private final ConstructionTaskHintService constructionTaskHintService;
     private final ScmStockOutClient scmClient;
     /** 以旧换新采购单：财务核对触发自动审核 / 撤销核对联动反审 */
@@ -221,7 +221,7 @@ public class BusinessOrderFlowActionService {
 
     /**
      * 订单施工员解析：只认派工出库写入的 order.worker_id 唯一施工员。
-     * 施工执行/施工完成节点的任务与“下一步处理人”都由本结果生成，
+     * 施工执行节点的任务与“下一步处理人”都由本结果生成，
      * 禁止按“施工员角色”查全量人员（会解析出孙莉娟等其他施工员）。
      */
     private Map<String, Object> resolveOrderWorker(OpsBusinessOrder order) {
@@ -420,7 +420,7 @@ public class BusinessOrderFlowActionService {
             }
             result.put("visitNote", form.get("visitNote"));
             result.put("productCount", 0);
-            // 随访保持旧口径：派工后直接进入施工中；施工派工则进入待接收
+            // 随访保持旧口径：派工后直接进入施工中；施工派工则进入待接受
             markDispatched(order, assignee, assigneeUserId, dispatchType, form, event);
             return result;
         }
@@ -431,7 +431,7 @@ public class BusinessOrderFlowActionService {
         List<ScmDispatchOutboundRequest.Item> outboundItems = groupItems(items);
         // SCM 不可达时 fail-closed。已存在出库单时区分两种可恢复场景：
         //   1) 同一派工任务重试（SCM 已建单但状态回写失败）：SCM 按 dispatchId 幂等复用；
-        //   2) 拒绝接单后重新指派：货物已出库，复用原出库单，不再重复出库。
+        //   2) 拒绝接受后重新指派：货物已出库，复用原出库单，不再重复出库。
         Set<Long> outbounds = scmClient.outboundOrderIds(List.of(order.getId()));
         boolean outboundExists = outbounds.contains(order.getId());
         boolean reDispatch = outboundExists
@@ -479,37 +479,41 @@ public class BusinessOrderFlowActionService {
         return result;
     }
 
-    /** 派工成功后把施工员与「待接收」写回订单；SCM 出库失败时不会走到这里。 */
+    /** 派工成功后把施工员与「待接受」写回订单；SCM 出库失败时不会走到这里。 */
     private void markDispatched(OpsBusinessOrder order, Map<String, Object> assignee,
                                 Long assigneeUserId, String dispatchType,
                                 Map<String, Object> form, WorkflowBusinessEvent event) {
         Integer userType = assignee.get("userType") instanceof Number n ? n.intValue() : null;
         String expectTime = str(form.get("expectTime"));
         orderConstructService.markDispatched(order, assigneeUserId,
-                str(assignee.get("name")), userType, dispatchType,
+                str(assignee.get("name")), str(assignee.get("phone")), userType, dispatchType,
                 event.getOperatorUserId(), event.getOperatorName(),
                 expectTime.isEmpty() ? null : "期望上门：" + expectTime);
     }
 
     /**
-     * 施工记录（施工完成）节点动作：只有已确认开工（或验收退回返工）才允许提交，
-     * 防止绕过确认接收/打卡/客户签字直接推进流程。
+     * 施工执行节点动作：只有客户已签字进入施工中（或验收退回返工）才允许提交，
+     * 防止绕过确认接受/打卡/客户签字直接推进流程；施工记录与验收申请一次提交。
      */
     private Map<String, Object> constructionRecord(OpsBusinessOrder order,
                                                   WorkflowBusinessEvent event) {
-        String status = order.getBizStatus();
-        if (!OrderConstructStatus.isConstructing(status)) {
-            throw BusinessException.of(
-                    "CONSTRUCTION_NOT_STARTED：请先完成确认接收、上门打卡、客户签字与确认开工");
-        }
-        // 施工执行/施工完成两个节点共用本动作，日志带上节点与任务，便于串联一次施工完成提交
+        Map<String, Object> form = event.getFormData() == null
+                ? Map.of() : event.getFormData();
+        Object rawAttachments = form.get("constructionAttachmentIds");
+        // null=旧客户端未传，保留上次照片；[]=新客户端明确清空
+        List<Long> attachmentIds = rawAttachments == null
+                ? null : new ArrayList<>(parseIds(rawAttachments));
+        Map<String, Object> record = orderConstructService.submitAcceptanceRecord(
+                order.getId(), str(form.get("constructionNote")),
+                str(form.get("completionNote")), attachmentIds,
+                event.getOperatorUserId(), event.getOperatorName());
+        // 施工执行/验收退回返工共用本动作，日志带上节点与任务便于追溯
         log.info("施工记录提交: orderId={}, orderNo={}, instanceId={}, nodeName={}, taskId={}, "
                         + "operator={}, bizStatus={}",
                 order.getId(), order.getOrderNo(), event.getInstanceId(), event.getNodeName(),
-                event.getTaskId(), event.getOperatorUserId(), status);
-        Map<String, Object> result = new LinkedHashMap<>();
+                event.getTaskId(), event.getOperatorUserId(), record.get("bizStatus"));
+        Map<String, Object> result = new LinkedHashMap<>(record);
         result.put("recorded", true);
-        result.put("bizStatus", status);
         return result;
     }
 
@@ -596,6 +600,7 @@ public class BusinessOrderFlowActionService {
                     "SELECT u.id, COALESCE(NULLIF(u.real_name,''), NULLIF(u.nickname,''), "
                             + "u.username) AS name, "
                             + "uc.corp_id AS corpId, c.name AS corpName, "
+                            + "COALESCE(u.phone, u.username) AS phone, "
                             // TINYINT(1) 会被 Connector/J 映射为 Boolean，显式 CAST 保证 0/1
                             + "CAST(u.user_type AS SIGNED) AS userType, "
                             + "(SELECT COUNT(1) FROM ai_platform.sys_user_wechat w "
@@ -647,8 +652,15 @@ public class BusinessOrderFlowActionService {
         boolean skipStatus = voidOwned || staleInstance;
         String incomingStatus = event.getBizStatus() == null
                 ? "" : event.getBizStatus().trim();
+        // 完工验收退回施工执行：平台按“上一节点”回退，但施工执行节点 biz_status 为空，
+        // 需把业务状态拉回 5（施工完成/返工），否则施工员页面会因状态 6 无法重新提交
+        if (incomingStatus.isEmpty() && "NODE_ENTERED".equals(event.getEvent())
+                && Integer.valueOf(5).equals(event.getNodeOrder())
+                && "6".equals(oldBizStatus)) {
+            incomingStatus = OrderConstructStatus.CONSTRUCTION_DONE;
+        }
         // 新状态链订单的迟到「派工出库」回调：只有工作流确实退回派工节点（node_order=4）
-        // 才接受回退；否则忽略，避免把待接收/已开工的订单冲回派工状态。
+        // 才接受回退；否则忽略，避免把待接受/已开工的订单冲回派工状态。
         boolean dispatchRegression = isDispatchRegression(incomingStatus, oldBizStatus);
         // 迟到回调的 wf 节点字段同样过期（会把「施工执行」显示回「派工出库」），一并忽略
         skipWf = skipWf || dispatchRegression;
@@ -696,7 +708,7 @@ public class BusinessOrderFlowActionService {
     /**
      * 新状态链订单的迟到「派工出库」回调一律忽略。
      *
-     * <p>合法退回派工只有一条路径：施工员在工作台点「拒绝接单」——业务接口已在
+     * <p>合法退回派工只有一条路径：施工员在工作台点「拒绝接受」——业务接口已在
      * 同一事务内把状态写回 3 并清空施工员，状态回调无需再写。若回调把
      * WAIT_ACCEPT/ACCEPTED 覆盖回 3，反而会造成「有施工任务但订单无施工员」的卡单。</p>
      */

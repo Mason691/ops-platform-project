@@ -12,7 +12,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * 订单施工流转日志：派工 → 待接收 → 已接收 → 已上门 → 客户确认 → 施工中。
+ * 订单施工流转日志：派工 → 待接受 → 已接受 → 已上门 → 客户确认 → 施工中。
  *
  * <p>每一步一条，含操作人、时间、定位、现场照片与备注；只增不改，
  * 是施工责任界定的审计依据。拒绝原因使用 {@link BaseEntity#getRemark()}。</p>
@@ -29,6 +29,7 @@ public class OpsOrderConstructLog extends BaseEntity {
     public static final String ACTION_CUSTOMER_CONFIRM = "CUSTOMER_CONFIRM";
     public static final String ACTION_CUSTOMER_REFUSE = "CUSTOMER_REFUSE";
     public static final String ACTION_START = "START";
+    public static final String ACTION_SUBMIT_ACCEPTANCE = "SUBMIT_ACCEPTANCE";
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -85,4 +86,14 @@ public class OpsOrderConstructLog extends BaseEntity {
     /** 客户告知书ID（CUSTOMER_CONFIRM 动作）。 */
     @TableField("notice_id")
     private Long noticeId;
+
+    /** 派工指派的目标施工员（ASSIGN 动作）：操作人仍是派工人，施工员单独留痕。 */
+    @TableField("worker_id")
+    private Long workerId;
+
+    @TableField("worker_name")
+    private String workerName;
+
+    @TableField("worker_phone")
+    private String workerPhone;
 }
