@@ -393,11 +393,23 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         String construction = noteText(constructionNote, "施工说明");
         String completion = requireCompletionNote(completionNote);
         List<Long> ids = acceptancePhotos(order, attachmentIds, operatorUserId);
-        OpsCustomerNotice notice = requireSignedNotice(orderId);
+        // 历史订单在施工链上线前已置施工中（无客户签字/打卡记录），沿用旧口径允许直接提交；
+        // 新流程订单完成签字后 customerConfirmTime 必非空，仍需满足签字与打卡校验。
+        boolean legacy = isLegacyConstruction(order);
+        OpsCustomerNotice notice = legacy ? null : requireSignedNotice(orderId);
+        if (!legacy && !hasLog(orderId, OpsOrderConstructLog.ACTION_ARRIVE, null)) {
+            throw BusinessException.of("ARRIVE_BEFORE_ACCEPT：未完成上门打卡，无法提交验收");
+        }
         saveAcceptanceRecord(order, from, construction, completion, ids, notice,
                 operatorUserId, operatorName);
         // 验收人通知由工作流创建节点待办时统一发送（既有消息机制），此处不重复推送
         return result(order, "施工记录已保存，验收申请已提交");
+    }
+
+    /** 施工链上线前的在途订单：无客户确认时间且无上门打卡记录。 */
+    private boolean isLegacyConstruction(OpsBusinessOrder order) {
+        return order.getCustomerConfirmTime() == null
+                && !hasLog(order.getId(), OpsOrderConstructLog.ACTION_ARRIVE, null);
     }
 
     private OpsBusinessOrder requireAcceptanceOrder(Long orderId) {
@@ -409,9 +421,6 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         if (!CONSTRUCTING.equals(status) && !CONSTRUCTION_DONE.equals(status)) {
             throw BusinessException.of(
                     "CONSTRUCTION_NOT_STARTED：请先完成确认接受、上门打卡与客户签字");
-        }
-        if (!hasLog(orderId, OpsOrderConstructLog.ACTION_ARRIVE, null)) {
-            throw BusinessException.of("ARRIVE_BEFORE_ACCEPT：未完成上门打卡，无法提交验收");
         }
         return order;
     }
@@ -464,7 +473,7 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         order.setVersion(nextVersion);
         insertLogAs(order, OpsOrderConstructLog.ACTION_SUBMIT_ACCEPTANCE, from,
                 CONSTRUCTION_DONE, operatorUserId, operatorName, null, Location.none(),
-                joinIds(ids), notice.getId(), null);
+                joinIds(ids), notice == null ? null : notice.getId(), null);
     }
 
     /** 施工记录文本：允许为空；填写时最多 1000 字。 */
