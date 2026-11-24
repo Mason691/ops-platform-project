@@ -725,7 +725,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         String status = order.getBizStatus() == null || order.getBizStatus().isBlank()
                 ? "0" : order.getBizStatus();
         view.put("bizStatus", status);
-        view.put("bizStatusName", bizStatusService.label(status));
+        view.put("bizStatusName", orderStatusName(order, status));
+        view.put("returnedBack", isReturnedBack(order, status));
         view.put("receiptImageUrl", order.getReceiptImageUrl());
         view.put("paymentVoucherUrls", splitUrlCsv(order.getPaymentVoucherUrls()));
         view.put("contractAttachmentUrls", splitUrlCsv(order.getContractAttachmentUrls()));
@@ -742,6 +743,28 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         enrichTradeInStatus(view);
         putDispatchEligibility(view, order);
         return view;
+    }
+
+    /**
+     * 订单状态名：驳回退回经办人时业务状态仍是 0（经办人上报），
+     * 但流程实例未结束，前端需显示「已驳回 · 待修改」而不是「经办人上报」。
+     */
+    private String orderStatusName(OpsBusinessOrder order, String status) {
+        if (isReturnedBack(order, status)) {
+            return "已驳回 · 待修改";
+        }
+        return bizStatusService.label(status);
+    }
+
+    /**
+     * 仅「流程停在节点 1 经办人上报」视为驳回退回；历史整单驳回终止的订单
+     * wf_node_order 仍停在驳回节点（2/3），不能误显示为待修改。
+     */
+    private static boolean isReturnedBack(OpsBusinessOrder order, String status) {
+        return "0".equals(status) && order != null
+                && order.getWfInstanceId() != null
+                && Integer.valueOf(1).equals(order.getWfNodeOrder())
+                && !Integer.valueOf(1).equals(order.getDraftFlag());
     }
 
     /** 派工资格与提示由后端统一下发，前端只渲染 canDispatch / dispatchBlockReason / payTag。 */
@@ -1093,7 +1116,8 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         String bizStatus = master != null && hasText(master.getBizStatus())
                 ? master.getBizStatus() : "0";
         order.put("bizStatus", bizStatus);
-        order.put("bizStatusName", bizStatusService.label(bizStatus));
+        order.put("bizStatusName", orderStatusName(master, bizStatus));
+        order.put("returnedBack", isReturnedBack(master, bizStatus));
         order.put("draftFlag", master != null && Integer.valueOf(1).equals(master.getDraftFlag())
                 ? 1 : 0);
         order.put("wfInstanceId", master != null ? master.getWfInstanceId() : null);

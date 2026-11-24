@@ -40,6 +40,8 @@ export function useBusinessWizard() {
   const bannerType = ref('error')
   const memberStatus = ref('idle')
   const editOrderId = ref('')
+  // 驳回退回修改：复用同一向导，但保存接口与提交语义不同（推进原实例，不重新发起）
+  const reviseMode = ref(false)
   const meta = reactive(emptyMeta())
   const form = reactive(emptyBusinessForm())
   const errors = reactive({})
@@ -99,7 +101,9 @@ export function useBusinessWizard() {
       Object.assign(meta, emptyMeta(), data || {})
       normalizeMeta()
       if (editOrderId.value) {
-        const draft = await api.employeeDraftEditData(editOrderId.value)
+        const draft = reviseMode.value
+          ? await api.employeeRevisionEditData(editOrderId.value)
+          : await api.employeeDraftEditData(editOrderId.value)
         applyDraftForm(draft)
         return
       }
@@ -127,6 +131,10 @@ export function useBusinessWizard() {
 
   function setEditOrderId(id) {
     editOrderId.value = id ? String(id) : ''
+  }
+
+  function setReviseMode(value) {
+    reviseMode.value = !!value
   }
 
   /** 草稿编辑回显：沿用原订单编号/批次/经办人，允许跨步骤修改后重新提交。 */
@@ -342,7 +350,9 @@ export function useBusinessWizard() {
     submitting.value = true
     try {
       const created = editOrderId.value
-        ? await api.employeeUpdateDraft(editOrderId.value, buildPayload())
+        ? (reviseMode.value
+          ? await api.employeeSubmitRevision(editOrderId.value, buildPayload())
+          : await api.employeeUpdateDraft(editOrderId.value, buildPayload()))
         : await api.employeeCreateBusiness(buildPayload())
       // 提交成功后取消排队中的草稿写入，避免 600ms 后把已提交数据重新存成草稿
       clearTimeout(draftTimer)
@@ -670,7 +680,7 @@ export function useBusinessWizard() {
   return {
     loading, errorMsg, querying, submitting, step, maxVisited, success, banner,
     bannerType, memberStatus, meta, form, errors, showErrors, steps, missing,
-    editOrderId, setEditOrderId,
+    editOrderId, setEditOrderId, reviseMode, setReviseMode,
     loadOptions, queryMember, next, back, goStep, submit,
     continueOrdering, viewOrder, showBanner
   }

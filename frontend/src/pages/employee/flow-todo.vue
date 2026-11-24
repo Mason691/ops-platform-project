@@ -27,6 +27,15 @@
           <text class="time">{{ item.submitTime || '' }}</text>
         </view>
         <text class="summary">{{ item.businessSummary || item.businessId }}</text>
+        <view v-if="item.returnInfo" class="return-row">
+          <text class="return-tag">已驳回</text>
+          <text class="return-from">
+            {{ item.returnInfo.nodeName || '上一环节' }} · {{ item.returnInfo.operatorName || '—' }}
+          </text>
+        </view>
+        <text v-if="item.returnInfo && item.returnInfo.opinion" class="return-opinion">
+          驳回意见：{{ item.returnInfo.opinion }}
+        </text>
         <view class="card-bottom">
           <text class="initiator">发起人：{{ item.initiatorName || '—' }}</text>
           <text class="go">去处理 ›</text>
@@ -127,6 +136,13 @@ function onTabSwitch(key) {
 .pay-tag-wait { background: #FFF5E8; color: #C75A00; }
 .pay-tag-ready { background: #E8FFEA; color: #0B7A42; }
 .time { font-size: 22rpx; color: #86909C; }
+.return-row { display: flex; align-items: center; gap: 10rpx; margin-top: 10rpx; }
+.return-tag { font-size: 20rpx; color: #CF1322; background: #FFF1F0; border: 1rpx solid #FFCCC7; padding: 3rpx 10rpx; border-radius: 6rpx; font-weight: 600; }
+.return-from { font-size: 22rpx; color: #A8071A; }
+.return-opinion {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; margin-top: 8rpx; font-size: 23rpx; color: #5C0011; line-height: 1.5;
+}
 .summary { display: block; margin: 16rpx 0; font-size: 26rpx; color: #4E5969; line-height: 1.6; }
 .card-bottom { display: flex; justify-content: space-between; align-items: center; }
 .initiator { font-size: 23rpx; color: #86909C; }

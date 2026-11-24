@@ -386,6 +386,93 @@ public class WorkflowPlatformClient {
     }
 
     /**
+     * 查询订单「驳回退回待重新提交」的发起节点任务。
+     *
+     * <p>只有当前节点是发起节点且任务属于该员工时才返回；ops 编辑/重新提交
+     * 以此为准，避免把普通订单当成退回单修改。</p>
+     */
+    @SuppressWarnings("unchecked")
+    public PendingReturnTask pendingReturnTask(Long orderId, Long userId) {
+        if (orderId == null || userId == null) {
+            return null;
+        }
+        String url = baseUrl + "/api/internal/wf/task/pending-return"
+                + "?businessType=OPS_BUSINESS_ORDER&businessId=" + orderId + "&userId=" + userId;
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Internal-Token", internalToken);
+        try {
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(headers), Map.class);
+            Map<String, Object> body = resp.getBody();
+            if (body == null || !(body.get("code") instanceof Number n) || n.intValue() != 200) {
+                return null;
+            }
+            if (!(body.get("data") instanceof Map<?, ?> data)) {
+                return null;
+            }
+            Object taskId = data.get("taskId");
+            if (!(taskId instanceof Number id)) {
+                return null;
+            }
+            return new PendingReturnTask(id.longValue(), longOrNull(data.get("instanceId")),
+                    longOrNull(data.get("nodeId")), str(data.get("nodeName")),
+                    str(data.get("nodeType")));
+        } catch (RestClientResponseException e) {
+            log.warn("查询退回任务失败 status={}, body={}",
+                    e.getStatusCode().value(), e.getResponseBodyAsString());
+            return null;
+        } catch (Exception e) {
+            log.warn("查询退回任务异常 orderId={}: {}", orderId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 代员工提交「驳回退回修改」的发起节点任务（重新提交审批）。
+     * 平台仍会校验 operatorUserId 是任务处理人；formData 为空不触发节点动作。
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> approveReturnTask(Long taskId, Long operatorUserId,
+                                                 String operatorName) {
+        if (taskId == null || operatorUserId == null) {
+            throw BusinessException.of("缺少退回任务信息，请刷新待办后重试");
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Internal-Token", internalToken);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("taskId", taskId);
+        body.put("opinion", "");
+        body.put("operatorUserId", operatorUserId);
+        body.put("operatorName", operatorName);
+        try {
+            Map<String, Object> resp = restTemplate.postForObject(
+                    baseUrl + "/api/internal/wf/task/approve",
+                    new HttpEntity<>(body, headers), Map.class);
+            if (resp == null) {
+                throw BusinessException.of("工作流服务无响应");
+            }
+            Object code = resp.get("code");
+            if (code instanceof Number n && n.intValue() != 200) {
+                Object msg = resp.get("msg");
+                throw BusinessException.of(msg instanceof String s && !s.isBlank()
+                        ? s : "重新提交审批失败，请稍后重试");
+            }
+            return resp.get("data") instanceof Map<?, ?> data
+                    ? (Map<String, Object>) data : Map.of();
+        } catch (RestClientResponseException e) {
+            log.warn("重新提交审批失败 status={}, body={}",
+                    e.getStatusCode().value(), e.getResponseBodyAsString());
+            throw BusinessException.of("工作流服务不可用，请稍后重试");
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("重新提交审批异常 taskId={}: {}", taskId, e.getMessage());
+            throw BusinessException.of("工作流服务不可用，请稍后重试");
+        }
+    }
+
+    /**
      * 解析底座发起响应 / 实例详情中的审批人字段。
      *
      * <p>优先 currentApprovers（当前待办），其次 nextApprovers（下一节点），
@@ -554,6 +641,11 @@ public class WorkflowPlatformClient {
     public record StartRequest(String definitionCode, String businessType, String businessId,
                                String businessSummary, String businessAddress, String requestId,
                                Long corpId, Long initiatorUserId, String initiatorName) {
+    }
+
+    /** 驳回退回待重新提交的发起节点任务。 */
+    public record PendingReturnTask(Long taskId, Long instanceId, Long nodeId,
+                                    String nodeName, String nodeType) {
     }
 
     /** 审批任务的归属与状态（服务端权限校验用）。 */

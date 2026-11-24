@@ -54,6 +54,18 @@ public interface BusinessOrderService {
                           BigDecimal depositAmount, Integer isFullPayment,
                           BigDecimal balanceAmount, String calcStatus);
 
+    /**
+     * 驳回退回修改：更新订单头内容，但保留工作流实例/节点字段。
+     * 退回任务重新提交时流程沿同一实例推进，不能像草稿提交那样清空 wf_instance_id。
+     */
+    void updateRevisionOrder(Long orderId, Long corpId, String batchNo, String receiptNo,
+                             String company, String customer, String customerPhone,
+                             Long platformMemberId, Long communityId, String communityName,
+                             String detailedAddress, String receiptDate, BigDecimal totalAmount,
+                             String remark, String paymentMethod, String paymentType,
+                             BigDecimal depositAmount, Integer isFullPayment,
+                             BigDecimal balanceAmount, String calcStatus);
+
     OpsBusinessOrder findByOrderKey(Long corpId, String orderKey);
 
     OpsBusinessOrder getById(Long id);
