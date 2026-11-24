@@ -29,6 +29,9 @@ public interface BusinessDataService {
     /** 订单详情（按订单编号）：历史无主表行回退子表分组，供列表双击查看。 */
     Map<String, Object> orderDetailByNo(String orderNo);
 
+    /** 订单商品分组（与订单详情 products 同口径），供向上采购申请等复用。 */
+    List<Map<String, Object>> listProductsForOrder(Long orderId);
+
     /** 派工资格批量查询（H5/PC 待办过滤与任务页提示共用）。 */
     List<Map<String, Object>> dispatchEligibility(List<Long> orderIds);
 

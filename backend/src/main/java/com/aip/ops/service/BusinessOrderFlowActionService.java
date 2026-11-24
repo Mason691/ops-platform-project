@@ -5,6 +5,7 @@ import com.aip.ops.client.ScmStockOutClient;
 import com.aip.ops.client.WorkflowPlatformClient;
 import com.aip.ops.dto.FinanceCheckRequest;
 import com.aip.ops.dto.ScmDispatchOutboundRequest;
+import com.aip.ops.dto.UpwardPurchaseDtos;
 import com.aip.ops.dto.WorkflowBusinessEvent;
 import com.aip.ops.entity.OpsBusinessAttachment;
 import com.aip.ops.entity.OpsBusinessData;
@@ -52,6 +53,7 @@ import java.util.Set;
 public class BusinessOrderFlowActionService {
 
     public static final String ACTION_FINANCE = "OPS_FINANCE_CHECK";
+    public static final String ACTION_MINISTER = "OPS_MINISTER_REVIEW";
     public static final String ACTION_DISPATCH = "OPS_DISPATCH_OUTBOUND";
     public static final String ACTION_CONSTRUCTION = "OPS_CONSTRUCTION_RECORD";
     public static final String ACTION_ACCEPTANCE = "OPS_ACCEPTANCE";
@@ -65,6 +67,7 @@ public class BusinessOrderFlowActionService {
     private final OpsBusinessDataMapper itemMapper;
     private final OpsBusinessFlowRecordMapper flowRecordMapper;
     private final BusinessDataFinanceService financeService;
+    private final UpwardPurchaseService upwardPurchaseService;
     private final DispatchEligibilityService dispatchEligibilityService;
     /** 派工成功回写施工员/待接受，并校验施工记录只允许在已开工后提交。 */
     private final OrderConstructService orderConstructService;
@@ -134,6 +137,7 @@ public class BusinessOrderFlowActionService {
             return parseResult(existing.getResultJson());
         }
         Map<String, Object> result = switch (actionType) {
+            case ACTION_MINISTER -> ministerReview(order, event);
             case ACTION_FINANCE -> financeCheck(order, event);
             case ACTION_DISPATCH -> dispatchOutbound(order, event);
             case ACTION_ACCEPTANCE -> acceptance(order, event);
@@ -142,6 +146,15 @@ public class BusinessOrderFlowActionService {
         };
         saveRecord(order, event, result);
         return result;
+    }
+
+    private Map<String, Object> ministerReview(OpsBusinessOrder order,
+                                               WorkflowBusinessEvent event) {
+        List<UpwardPurchaseDtos.SelectionItem> selections = upwardPurchaseService
+                .parseSelections(event.getFormData() == null ? Map.of() : event.getFormData());
+        int updated = upwardPurchaseService.saveMinisterSelection(order, selections,
+                event.getOperatorUserId(), event.getOperatorName());
+        return Map.of("upwardPurchaseRows", updated);
     }
 
     private Map<String, Object> financeCheck(OpsBusinessOrder order, WorkflowBusinessEvent event) {
@@ -166,6 +179,16 @@ public class BusinessOrderFlowActionService {
         request.setCheckRemark(str(form.get("checkRemark")));
         Map<String, Object> result = financeService.financeCheckByOrder(
                 order.getId(), request, event.getOperatorUserId(), event.getOperatorName());
+        // 财务核对通过：按部长勾选生成待发起采购申请；驳回/暂缓：失效待发起记录
+        String conclusion = str(result.get("checkConclusion"));
+        if ("PASS".equalsIgnoreCase(conclusion)) {
+            int count = upwardPurchaseService.createPending(order, form,
+                    event.getOperatorUserId(), event.getOperatorName());
+            result.put("upwardPurchaseCount", count);
+        } else {
+            upwardPurchaseService.invalidatePending(order.getId(), order.getCorpId(),
+                    "HOLD".equalsIgnoreCase(conclusion) ? "财务核对暂缓" : "财务核对不通过");
+        }
         // 财务核对完成 → 事务提交后触发 SCM 采购单自动审核（失败不阻塞财务核对）
         triggerFinanceAutoApprove(order, event);
         return new LinkedHashMap<>(result);
@@ -701,8 +724,41 @@ public class BusinessOrderFlowActionService {
             runAfterCommit(() -> scmPurchaseOrderClient.financeReverted(
                     order.getCorpId(), order.getId()));
         }
+        if (!staleInstance) {
+            syncUpwardPurchaseStatus(order, event, oldBizStatus, incomingStatus, applyStatus);
+        }
         log.info("订单 {} 业务状态同步：{} -> {} ({})", order.getId(),
                 event.getEvent(), event.getBizStatus(), event.getNodeName());
+    }
+
+    /** 订单退回/终止：失效待发起；订单完成：已发起置已处理、未发起置失效。 */
+    private void syncUpwardPurchaseStatus(OpsBusinessOrder order, WorkflowBusinessEvent event,
+                                          String oldStatus, String incomingStatus,
+                                          boolean applyStatus) {
+        boolean rejected = "INSTANCE_REJECTED".equals(event.getEvent())
+                || "INSTANCE_TERMINATED".equals(event.getEvent());
+        if (rejected) {
+            runAfterCommit(() -> upwardPurchaseService.invalidatePending(
+                    order.getId(), order.getCorpId(), "订单退回或终止"));
+            return;
+        }
+        if ("INSTANCE_COMPLETED".equals(event.getEvent())) {
+            runAfterCommit(() -> upwardPurchaseService.closeAfterCompletion(
+                    order.getId(), order.getCorpId()));
+            return;
+        }
+        if (!applyStatus) return;
+        if (isBackToBeforeFinance(oldStatus, incomingStatus)) {
+            runAfterCommit(() -> upwardPurchaseService.invalidatePending(
+                    order.getId(), order.getCorpId(), "订单退回或终止"));
+        }
+    }
+
+    private static boolean isBackToBeforeFinance(String oldStatus, String incomingStatus) {
+        boolean incomingEarly = "0".equals(incomingStatus) || "1".equals(incomingStatus);
+        boolean oldEarly = oldStatus == null || oldStatus.isBlank()
+                || "0".equals(oldStatus.trim()) || "1".equals(oldStatus.trim());
+        return incomingEarly && !oldEarly;
     }
 
     /**

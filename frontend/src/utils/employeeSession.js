@@ -156,12 +156,12 @@ export function getEmployeeUserType() {
   return Number(uni.getStorageSync('ops_employee_user_type')) === 1 ? 1 : 0
 }
 
-/** 外部用户：仅可登录公众号工作台，禁止 PC 端与“已核对业务”等内部能力。 */
+/** 外部用户：仅可登录公众号工作台，禁止 PC 端与“向上采购申请”等内部能力。 */
 export function isExternalUser() {
   return getEmployeeUserType() === 1
 }
 
-/** 员工工作台「已核对业务」卡片权限（采购订单 H5 制单）。业务员角色默认不含此权限。 */
+/** 员工工作台「向上采购申请」卡片权限（采购订单 H5 制单）。业务员角色默认不含此权限。 */
 export const PERM_VERIFIED_BUSINESS = 'scm:pur-order:h5:create'
 
 /** 当前登录员工是否拥有指定权限（多角色权限并集，由登录/切换组织响应下发）。 */

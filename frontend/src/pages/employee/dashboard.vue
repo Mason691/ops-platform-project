@@ -104,13 +104,13 @@ const employeeName = ref('')
 // 展示当前组织全部角色，避免只显示第一个角色
 const roleText     = computed(() => getCompanyRoleText(company.value))
 const noPermissionTip = ref(uni.getStorageSync('ops_employee_no_permission') === '1')
-// 常用功能卡片由底座按 userType + 权限下发；前端不硬编码“已核对业务”等敏感卡片
+// 常用功能卡片由底座按 userType + 权限下发；前端不硬编码“向上采购申请”等敏感卡片
 const cards = ref([])
 const visibleCards = computed(() => (cards.value || [])
   .filter(card => card.visible !== false))
 const currentYear  = new Date().getFullYear().toString()
 
-/** 后端配置接口失败时的兜底卡片（不含仅内部可见的“已核对业务”）。 */
+/** 后端配置接口失败时的兜底卡片（不含仅内部可见的“向上采购申请”）。 */
 const FALLBACK_CARDS = [
   { code: 'business-data', name: '业务数据', desc: '查看提成与业绩明细', icon: '📊', tone: 'mc-icon-data', path: '/pages/employee/business-data' },
   { code: 'balance-pending', name: '货款补录', desc: '定金订单收齐余款，解锁派工', icon: '💰', tone: 'mc-icon-pay', path: '/pages/employee/balance-pending' },
@@ -213,6 +213,21 @@ async function loadCards() {
   }
   await loadPickBadge()
   await loadBalanceBadge()
+  await loadUpwardPurchaseBadge()
+}
+
+/** 向上采购申请角标：财务核对后待发起的商品记录数；无权限/接口失败不阻塞工作台。 */
+async function loadUpwardPurchaseBadge() {
+  const card = (cards.value || []).find(item => item.code === 'verified-business'
+    || String(item.path || '').includes('verified-business'))
+  // 无权限时平台下发 visible=false 或不返回该卡片：不再请求角标，避免 403 提示
+  if (!card || card.visible === false) return
+  try {
+    const result = await api.upwardPurchasePendingCount()
+    card.badge = Number(result && result.count) || 0
+  } catch (_) {
+    // 角标失败不影响常用功能展示
+  }
 }
 
 /** 货款补录角标：定金支付且尾款未结清数量；结清后接口返回 0，角标自动消失。 */

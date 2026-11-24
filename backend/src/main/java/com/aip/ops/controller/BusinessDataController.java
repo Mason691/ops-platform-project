@@ -15,6 +15,7 @@ import com.aip.ops.service.BusinessOrderWorkflowService;
 import com.aip.ops.service.ExportTaskService;
 import com.aip.ops.service.ImportTaskService;
 import com.aip.ops.service.OrgRoleService;
+import com.aip.ops.service.UpwardPurchaseService;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -54,6 +55,7 @@ public class BusinessDataController {
     private final BizStatusService bizStatusService;
     private final BusinessOrderWorkflowService workflowService;
     private final BusinessDataFinanceService financeService;
+    private final UpwardPurchaseService upwardPurchaseService;
     private final BusinessAttachmentService attachmentService;
     private final com.aip.ops.service.WorkflowFinancePermissionService workflowFinancePermissionService;
     /** 施工状态链只读视图：派工人/运营在订单详情页查看时间线与告知书。 */
@@ -132,6 +134,7 @@ public class BusinessDataController {
                                   BizStatusService bizStatusService,
                                   BusinessOrderWorkflowService workflowService,
                                   BusinessDataFinanceService financeService,
+                                  UpwardPurchaseService upwardPurchaseService,
                                   BusinessAttachmentService attachmentService,
                                   com.aip.ops.service.WorkflowFinancePermissionService workflowFinancePermissionService,
                                   com.aip.ops.service.construct.OrderConstructService orderConstructService,
@@ -145,6 +148,7 @@ public class BusinessDataController {
         this.bizStatusService = bizStatusService;
         this.workflowService = workflowService;
         this.financeService = financeService;
+        this.upwardPurchaseService = upwardPurchaseService;
         this.attachmentService = attachmentService;
         this.workflowFinancePermissionService = workflowFinancePermissionService;
         this.orderConstructService = orderConstructService;
@@ -299,10 +303,21 @@ public class BusinessDataController {
         if (!workflowFinancePermissionService.canHoldFinance()) {
             return R.fail("仅财务角色或运营商管理员可执行财务暂缓");
         }
-        service.orderDetail(orderId);
+        Map<String, Object> detail = service.orderDetail(orderId);
+        Long corpId = detail.get("corpId") instanceof Number n
+                ? n.longValue() : SecurityUtils.getCurrentCorpIdOrNull();
         request.setCheckConclusion("HOLD");
-        return R.ok(financeService.financeCheckByOrder(orderId, request,
-                SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentUser().getUsername()));
+        Map<String, Object> result = financeService.financeCheckByOrder(orderId, request,
+                SecurityUtils.getCurrentUserId(), SecurityUtils.getCurrentUser().getUsername());
+        // 暂缓不推进财务核对：失效该订单待发起的向上采购记录，避免卡片残留
+        if (corpId != null) {
+            try {
+                upwardPurchaseService.invalidatePending(orderId, corpId, "财务核对暂缓");
+            } catch (Exception e) {
+                log.warn("财务暂缓失效向上采购记录失败 orderId={}: {}", orderId, e.getMessage());
+            }
+        }
+        return R.ok(result);
     }
 
     /**
