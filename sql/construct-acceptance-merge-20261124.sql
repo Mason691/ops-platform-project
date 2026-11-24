@@ -71,17 +71,25 @@ SET @ddl := IF(@has_col = 0,
     'SELECT ''worker_phone already exists''');
 PREPARE s FROM @ddl; EXECUTE s; DEALLOCATE PREPARE s;
 
--- 历史 ASSIGN 日志回填：仅订单只有一次派工历史时回填，多次指派不猜测
+-- 历史 ASSIGN 日志回填：仅订单只有一次派工历史时回填，多次指派不猜测。
+-- 先用临时表固化“单次派工”订单，避免 MySQL 1093（更新目标表出现在子查询）。
+DROP TEMPORARY TABLE IF EXISTS tmp_single_assign_order;
+CREATE TEMPORARY TABLE tmp_single_assign_order AS
+SELECT order_id FROM ops_order_construct_log
+WHERE action = 'ASSIGN' AND delete_flag = 0
+GROUP BY order_id HAVING COUNT(*) = 1;
+
 UPDATE ops_order_construct_log l
 JOIN ops_business_order o ON o.id = l.order_id
+JOIN tmp_single_assign_order t ON t.order_id = l.order_id
 LEFT JOIN ai_platform.sys_user u ON u.id = o.worker_id
 SET l.worker_id = o.worker_id,
     l.worker_name = o.worker_name,
     l.worker_phone = COALESCE(u.phone, u.username)
 WHERE l.action = 'ASSIGN' AND l.delete_flag = 0 AND l.worker_id IS NULL
-  AND o.worker_id IS NOT NULL
-  AND (SELECT COUNT(*) FROM ops_order_construct_log l2
-       WHERE l2.order_id = l.order_id AND l2.action = 'ASSIGN' AND l2.delete_flag = 0) = 1;
+  AND o.worker_id IS NOT NULL;
+
+DROP TEMPORARY TABLE IF EXISTS tmp_single_assign_order;
 
 -- ═══════════════════════════════════════════════════════════════════
 -- 3. 存量 CUSTOMER_CONFIRMED 订单自动进入施工中（签字即开工）
