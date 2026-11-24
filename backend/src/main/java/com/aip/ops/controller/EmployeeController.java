@@ -222,6 +222,27 @@ public class EmployeeController {
         return R.ok(employeeBusinessEntryService.draftEditData(orderId));
     }
 
+    /** 驳回退回修改回显：仅当前订单经办人且流程停在发起节点时可读。 */
+    @GetMapping("/business-data/orders/{orderId}/revision")
+    public R<?> revisionEditData(@PathVariable Long orderId) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可编辑业务订单");
+        }
+        return R.ok(employeeBusinessEntryService.revisionEditData(orderId));
+    }
+
+    /** 驳回退回修改后重新提交：保存内容并推进发起节点任务。 */
+    @OperationLog(module = "运营管理", action = "员工驳回退回修改后重新提交",
+            targetTable = "ops_business_order")
+    @PutMapping("/business-data/orders/{orderId}/revision")
+    public R<?> updateRevision(@PathVariable Long orderId,
+                               @RequestBody EmployeeBusinessEntryRequest request) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可编辑业务订单");
+        }
+        return R.ok(employeeBusinessEntryService.updateRevision(orderId, request));
+    }
+
     /** 草稿编辑提交：沿用原订单编号/业务组号，替换明细并重新发起审批。 */
     @OperationLog(module = "运营管理", action = "员工编辑业务订单草稿",
             targetTable = "ops_business_order")

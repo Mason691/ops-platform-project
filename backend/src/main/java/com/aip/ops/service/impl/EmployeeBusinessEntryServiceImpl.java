@@ -374,14 +374,34 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
             throw BusinessException.forbidden("外部用户暂不可编辑业务");
         }
         EmployeeContext ctx = resolveEmployeeContext();
-        OpsBusinessOrder order = requireDraftOrder(ctx, orderId);
+        return buildEditForm(requireDraftOrder(ctx, orderId), ctx);
+    }
+
+    /** 驳回退回修改：订单不是草稿，工作流实例停在发起节点等待重新提交。 */
+    @Override
+    public Map<String, Object> revisionEditData(Long orderId) {
+        if (jwtTokenInspector.isExternalUser()) {
+            throw BusinessException.forbidden("外部用户暂不可编辑业务");
+        }
+        EmployeeContext ctx = resolveEmployeeContext();
+        OpsBusinessOrder order = requireReturnedOrder(ctx, orderId);
+        requireReturnPendingTask(ctx, order);
+        return buildEditForm(order, ctx);
+    }
+
+    /**
+     * 草稿编辑与驳回退回修改共用的回显：按「品类|品牌|型号|单价」合并商品行，
+     * 多经办人行只回显一行，并带回旧品/凭证/附件。
+     */
+    private Map<String, Object> buildEditForm(OpsBusinessOrder order, EmployeeContext ctx) {
+        Long orderId = order.getId();
         List<OpsBusinessData> rows = businessDataMapper.selectList(
                 new LambdaQueryWrapper<OpsBusinessData>()
                         .eq(OpsBusinessData::getOrderId, orderId)
                         .eq(OpsBusinessData::getDeleteFlag, 0)
                         .orderByAsc(OpsBusinessData::getId));
         if (rows.isEmpty()) {
-            throw BusinessException.of("草稿订单没有商品明细，无法编辑");
+            throw BusinessException.of("订单没有商品明细，无法编辑");
         }
         List<OpsBusinessOrderTradeIn> tradeIns = tradeInMapper.selectList(
                 new LambdaQueryWrapper<OpsBusinessOrderTradeIn>()
@@ -507,6 +527,55 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         return result;
     }
 
+    /**
+     * 驳回退回修改后重新提交：在同一工作流实例上推进发起节点任务，
+     * 不再像草稿提交那样终止旧流程、重新发起新实例。
+     */
+    @Override
+    public Map<String, Object> updateRevision(Long orderId, EmployeeBusinessEntryRequest request) {
+        if (jwtTokenInspector.isExternalUser()) {
+            throw BusinessException.forbidden("外部用户暂不可编辑业务");
+        }
+        if (request == null) throw BusinessException.of("请求参数不能为空");
+        EmployeeContext ctx = resolveEmployeeContext();
+        OpsBusinessOrder order = requireReturnedOrder(ctx, orderId);
+        WorkflowPlatformClient.PendingReturnTask returnTask = requireReturnPendingTask(ctx, order);
+        Validated v = validateRequest(request, ctx, orderId);
+        Map<String, Object> result = transactionTemplate.execute(
+                status -> persistDraftUpdate(request, ctx, v, order, true));
+        if (result != null && Boolean.TRUE.equals(result.get("hasTradeIn"))
+                && result.get("orderId") instanceof Number oid) {
+            autoCreateTradeInPurchase(oid.longValue(), ctx.corpId(),
+                    str(result.get("orderNo")), ctx.employeeUserId(), ctx.employeeName(), result);
+        }
+        applyReturnSubmitResult(result, returnTask, ctx);
+        return result;
+    }
+
+    /** 重新提交结果：用平台返回的当前节点/审批人填充成功页，失败时明确告知。 */
+    private void applyReturnSubmitResult(Map<String, Object> result,
+                                         WorkflowPlatformClient.PendingReturnTask returnTask,
+                                         EmployeeContext ctx) {
+        Map<String, Object> flow = workflowPlatformClient.approveReturnTask(returnTask.taskId(),
+                ctx.employeeUserId(), ctx.employeeName());
+        Map<String, Object> approval = asMap(flow.get("currentApproval"));
+        List<?> approvers = flow.get("nextApprovers") instanceof List<?> list ? list : List.of();
+        Map<String, Object> first = approvers.isEmpty() ? Map.of() : asMap(approvers.get(0));
+        result.put("wfInstanceId", returnTask.instanceId());
+        result.put("currentApproverName", first.get("userName"));
+        result.put("currentApproverRole", first.get("roleName"));
+        result.put("currentApprovalDisplay", approval.get("displayText"));
+        result.put("currentApprovalNodeName", flow.get("nextNodeName"));
+        result.put("currentApprovalMode", flow.get("approverMode"));
+        boolean resolved = "SUCCESS".equals(str(flow.get("resolveStatus"))) && !first.isEmpty();
+        result.put("approverResolved", resolved);
+        result.put("approverMessage", resolved ? null : flow.get("resolveMessage"));
+    }
+
+    private static Map<String, Object> asMap(Object value) {
+        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+    }
+
     private OpsBusinessOrder requireDraftOrder(EmployeeContext ctx, Long orderId) {
         OpsBusinessOrder order = requireAgentOrder(ctx, orderId);
         if (!Integer.valueOf(1).equals(order.getDraftFlag())) {
@@ -518,13 +587,56 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         return order;
     }
 
+    /**
+     * 驳回退回待修改：非草稿且流程未结束。是否真的处于退回状态由平台
+     * pending-return 任务判定（业务状态回调失败时不至于把经办人挡在门外）。
+     */
+    private OpsBusinessOrder requireReturnedOrder(EmployeeContext ctx, Long orderId) {
+        OpsBusinessOrder order = requireAgentOrder(ctx, orderId);
+        if (Integer.valueOf(1).equals(order.getDraftFlag())) {
+            throw BusinessException.of("订单为草稿状态，请使用草稿编辑");
+        }
+        if (order.getWfInstanceId() == null) {
+            throw BusinessException.of("订单当前不是驳回待修改状态");
+        }
+        if (refundService.findPending(orderId) != null) {
+            throw BusinessException.of("订单正在作废退款审批中，不可编辑");
+        }
+        return order;
+    }
+
+    /** 平台侧二次确认：当前节点必须是发起节点，且退回任务属于当前员工。 */
+    private WorkflowPlatformClient.PendingReturnTask requireReturnPendingTask(EmployeeContext ctx,
+                                                                             OpsBusinessOrder order) {
+        WorkflowPlatformClient.PendingReturnTask task =
+                workflowPlatformClient.pendingReturnTask(order.getId(), ctx.employeeUserId());
+        if (task == null) {
+            throw BusinessException.of("未找到该订单的驳回待重新提交任务，请刷新待办后重试");
+        }
+        return task;
+    }
+
     private Map<String, Object> persistDraftUpdate(EmployeeBusinessEntryRequest request,
                                                    EmployeeContext ctx, Validated v,
                                                    OpsBusinessOrder order) {
+        return persistDraftUpdate(request, ctx, v, order, false);
+    }
+
+    /**
+     * @param revision true=驳回退回修改：保留工作流实例/节点字段
+     */
+    private Map<String, Object> persistDraftUpdate(EmployeeBusinessEntryRequest request,
+                                                   EmployeeContext ctx, Validated v,
+                                                   OpsBusinessOrder order, boolean revision) {
         // 事务内锁定订单并复查：与并发退款/重复提交串行化
         OpsBusinessOrder locked = orderService.lockById(order.getId());
-        if (locked == null || !Integer.valueOf(1).equals(locked.getDraftFlag())) {
-            throw BusinessException.of("订单不是草稿状态，无法编辑");
+        boolean stateOk = locked != null && (revision
+                ? !Integer.valueOf(1).equals(locked.getDraftFlag())
+                && locked.getWfInstanceId() != null
+                : Integer.valueOf(1).equals(locked.getDraftFlag()));
+        if (!stateOk) {
+            throw BusinessException.of(revision
+                    ? "订单当前不是驳回待修改状态" : "订单不是草稿状态，无法编辑");
         }
         if (refundService.findPending(order.getId()) != null) {
             throw BusinessException.of("订单正在作废退款审批中，不可编辑");
@@ -535,11 +647,19 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         CommunityInfo community = resolveCommunity(v.communityId(), ctx.corpId());
         BigDecimal totalAmount = v.products().stream().map(ValidatedProduct::amount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        orderService.updateDraftOrder(order.getId(), ctx.corpId(), batchNo, v.receiptNo(),
-                ctx.company(), v.customer(), v.phone(), member.id(), community.id(),
-                community.name(), v.detailAddress(), v.receiptDate(), totalAmount, v.remark(),
-                v.paymentMethod(), v.paymentType(), v.depositAmount(), v.isFullPayment(),
-                v.balanceAmount(), INITIAL_CALC_STATUS);
+        if (revision) {
+            orderService.updateRevisionOrder(order.getId(), ctx.corpId(), batchNo, v.receiptNo(),
+                    ctx.company(), v.customer(), v.phone(), member.id(), community.id(),
+                    community.name(), v.detailAddress(), v.receiptDate(), totalAmount, v.remark(),
+                    v.paymentMethod(), v.paymentType(), v.depositAmount(), v.isFullPayment(),
+                    v.balanceAmount(), INITIAL_CALC_STATUS);
+        } else {
+            orderService.updateDraftOrder(order.getId(), ctx.corpId(), batchNo, v.receiptNo(),
+                    ctx.company(), v.customer(), v.phone(), member.id(), community.id(),
+                    community.name(), v.detailAddress(), v.receiptDate(), totalAmount, v.remark(),
+                    v.paymentMethod(), v.paymentType(), v.depositAmount(), v.isFullPayment(),
+                    v.balanceAmount(), INITIAL_CALC_STATUS);
+        }
         orderService.updateVoucherAttachments(order.getId(), ctx.corpId(), v.receiptImageUrl(),
                 v.paymentVoucherUrls(), v.contractAttachmentUrls());
         // 替换旧明细/旧品（逻辑删除，保留历史审计）

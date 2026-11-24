@@ -251,6 +251,8 @@ export const api = {
   employeeRestartFlow: (orderId) => request({url:'/api/ops/employee/business-data/orders/' + orderId + '/restart-flow', method:'POST'}),
   employeeDraftEditData: (orderId) => request({url:'/api/ops/employee/business-data/orders/' + orderId + '/edit'}),
   employeeUpdateDraft: (orderId, data) => request({url:'/api/ops/employee/business-data/orders/' + orderId + '/draft', method:'PUT', data}),
+  employeeRevisionEditData: (orderId) => request({url:'/api/ops/employee/business-data/orders/' + orderId + '/revision'}),
+  employeeSubmitRevision: (orderId, data) => request({url:'/api/ops/employee/business-data/orders/' + orderId + '/revision', method:'PUT', data}),
   employeeRetryTradeInPurchase: (orderId) => request({
     url: '/api/ops/employee/business-data/orders/' + orderId + '/trade-in-purchase/retry',
     method: 'POST'

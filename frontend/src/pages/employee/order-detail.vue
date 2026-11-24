@@ -70,6 +70,7 @@
       <view v-if="showActions" class="card action-card">
         <text class="card-title">订单操作</text>
         <view class="action-row">
+          <view v-if="order.returnedBack" class="action-btn primary" @click="reviseOrder">修改并重新提交</view>
           <view v-if="order.canEdit" class="action-btn primary" @click="editDraft">编辑订单</view>
           <view v-if="order.canReturnDraft" class="action-btn ghost" @click="returnDraft">退回草稿</view>
           <view v-if="order.canApplyRefund" class="action-btn danger" @click="openRefund">发起退款申请</view>
@@ -361,7 +362,7 @@ const flowRecords = computed(() => {
 
 const showActions = computed(() => {
   const o = order.value || {}
-  return !!(o.canEdit || o.canReturnDraft || o.canApplyRefund || o.canRestartFlow)
+  return !!(o.returnedBack || o.canEdit || o.canReturnDraft || o.canApplyRefund || o.canRestartFlow)
 })
 
 /**
@@ -407,6 +408,13 @@ const refundApproverText = computed(() => {
 function editDraft() {
   uni.navigateTo({
     url: '/pages/employee/business-data-new?orderId=' + encodeURIComponent(orderId.value)
+  })
+}
+
+/** 驳回退回：进入制单向导修改并推进原工作流实例。 */
+function reviseOrder() {
+  uni.navigateTo({
+    url: '/pages/employee/business-data-new?orderId=' + encodeURIComponent(orderId.value) + '&revise=1'
   })
 }
 

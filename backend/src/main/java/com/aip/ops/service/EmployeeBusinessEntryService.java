@@ -30,6 +30,12 @@ public interface EmployeeBusinessEntryService {
     /** 草稿编辑数据：订单头 + 商品/旧品/凭证附件回显。 */
     Map<String, Object> draftEditData(Long orderId);
 
+    /** 驳回退回修改回显（非草稿，流程停在发起节点）。 */
+    Map<String, Object> revisionEditData(Long orderId);
+
+    /** 驳回退回修改后重新提交：保存内容并推进同一工作流实例的发起节点任务。 */
+    Map<String, Object> updateRevision(Long orderId, EmployeeBusinessEntryRequest request);
+
     /** 草稿编辑提交：沿用原订单编号/业务组号，替换明细并重新发起审批。 */
     Map<String, Object> updateDraft(Long orderId, EmployeeBusinessEntryRequest request);
 

@@ -61,7 +61,7 @@
           <view v-if="step > 0" class="btn ghost" @click="back"><text>上一步</text></view>
           <view v-if="step < 4" class="btn primary" @click="next"><text>下一步</text></view>
           <view v-else class="btn primary" :class="{ disabled: submitting }" @click="submit">
-            <text>{{ submitting ? '提交中...' : '提交制单' }}</text>
+            <text>{{ submitting ? '提交中...' : (reviseMode ? '重新提交审批' : '提交制单') }}</text>
           </view>
         </view>
       </view>
@@ -94,10 +94,13 @@ import AnimatedAmount from '@/components/AnimatedAmount.vue'
 const {
   loading, errorMsg, querying, submitting, step, maxVisited, success, banner,
   bannerType, memberStatus, meta, form, errors, steps, missing, loadOptions, queryMember,
-  next, back, goStep, submit, continueOrdering, viewOrder, editOrderId, setEditOrderId
+  next, back, goStep, submit, continueOrdering, viewOrder, editOrderId, setEditOrderId,
+  reviseMode, setReviseMode
 } = useBusinessWizard()
 
-const pageTitle = computed(() => editOrderId.value ? '编辑业务订单' : '新增业务订单')
+const pageTitle = computed(() => reviseMode.value
+  ? '修改并重新提交'
+  : (editOrderId.value ? '编辑业务订单' : '新增业务订单'))
 
 const animClass = ref('')
 const productsTotal = computed(() => computeProductsTotal(form.products))
@@ -116,6 +119,7 @@ watch(step, (current, previous) => {
 onLoad(options => {
   const id = options && options.orderId ? decodeURIComponent(options.orderId) : ''
   if (id) setEditOrderId(id)
+  setReviseMode(!!(options && options.revise))
 })
 
 onMounted(() => {

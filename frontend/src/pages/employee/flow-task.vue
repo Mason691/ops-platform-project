@@ -35,6 +35,17 @@
         <text class="block-banner-text">{{ dispatchBlockedReason }}</text>
       </view>
 
+      <view v-if="isReturnTask" class="return-banner">
+        <view class="return-banner-head">
+          <text class="return-banner-title">已驳回 · 请修改后重新提交</text>
+          <text class="return-banner-time">{{ fmtTime(returnInfo.time) }}</text>
+        </view>
+        <text class="return-banner-meta">
+          {{ returnInfo.nodeName || '上一环节' }} · {{ returnInfo.operatorName || '—' }}
+        </text>
+        <text class="return-banner-opinion">驳回意见：{{ returnInfo.opinion || '—' }}</text>
+      </view>
+
       <view v-if="isPurchase" class="card">
         <view class="card-title">
           <text>采购订单</text>
@@ -306,7 +317,7 @@
         <view class="no-action"><text>{{ taskStatusHint }}</text></view>
       </view>
 
-      <view v-if="taskPending" class="card">
+      <view v-if="taskPending && !isReturnTask" class="card">
         <text class="card-title">{{ actionTitle }}</text>
 
         <template v-if="actionType === 'OPS_FINANCE_CHECK'">
@@ -424,7 +435,11 @@
         </view>
       </view>
 
-      <view v-if="taskPending" class="actions">
+      <view v-if="isReturnTask" class="actions">
+        <button class="btn primary" :disabled="submitting" @click="goRevise">修改并重新提交</button>
+      </view>
+
+      <view v-if="taskPending && !isReturnTask" class="actions">
         <button v-if="showGenericReject" class="btn danger" :disabled="submitting" @click="rejectVisible = true">驳回</button>
         <view class="submit-wrap">
           <button class="btn primary"
@@ -638,6 +653,12 @@ const showDepositBalanceInfo = computed(() => {
   // is_full_payment 历史空值会被后端兜底为 1，必须有尾款补录痕迹才展示
   return o.balanceReceivedAmount != null || !!o.balancePaidAt || !!o.balanceVoucherUrl
 })
+/** 最近一次驳回：发起节点的退回任务展示「已驳回」并只提供修改重新提交入口。 */
+const returnInfo = computed(() => (detail.value && detail.value.returnInfo) || null)
+const isReturnTask = computed(() => taskPending.value && !!returnInfo.value
+  && detail.value && detail.value.node && detail.value.node.nodeType === 'START'
+  && isBusinessOrder.value)
+
 /** 任务是否仍待处理：或签被他人处理后状态为 SKIPPED，不能再提交 */
 const taskPending = computed(() => {
   const task = detail.value && detail.value.task
@@ -818,10 +839,24 @@ onLoad((options) => {
   loadData()
 })
 
-onShow(() => {
+onShow(async () => {
   // 首次展示由 loadData 负责；从其他页面返回时自动刷新派工收款状态
   startDispatchRefreshTimer()
-  if (pageReady) refreshDispatchOrder(false)
+  if (!pageReady) return
+  // 驳回退回任务：从制单页返回后重新加载；任务已提交则直接回待办
+  if (isReturnTask.value) {
+    await loadData()
+    if (!taskPending.value) {
+      uni.showModal({
+        title: '已重新提交',
+        content: '订单已重新提交，流程回到部长审核',
+        showCancel: false,
+        success: goTodo
+      })
+    }
+    return
+  }
+  refreshDispatchOrder(false)
 })
 
 onHide(stopDispatchRefreshTimer)
@@ -1509,14 +1544,19 @@ async function confirmReject(opinionText) {
   submitting.value = true
   try {
     const payload = { taskId: Number(taskId.value), opinion: text }
-    if (isPurchase.value) {
-      await api.scmPurOrderReject(payload)
-    } else {
-      await api.workflowReject(payload)
-    }
+    const result = isPurchase.value
+      ? await api.scmPurOrderReject(payload)
+      : await api.workflowReject(payload)
     rejectVisible.value = false
-    toast('已驳回')
-    goTodo()
+    const target = rejectTargetText(result)
+    uni.showModal({
+      title: '已驳回',
+      content: target
+        ? `已驳回至${target}，订单已退回其待办`
+        : '已驳回，流程已退回上一级处理人',
+      showCancel: false,
+      success: goTodo
+    })
   } catch (e) {
     toast((e && e.msg) || '驳回失败，请重试')
   } finally {
@@ -1524,8 +1564,27 @@ async function confirmReject(opinionText) {
   }
 }
 
+/** 驳回目标：优先使用后端退回节点 + 处理人，不回退到前端拼接角色文案。 */
+function rejectTargetText(result) {
+  const handlers = (result && result.targetHandlers) || []
+  const names = handlers.map(item => item.userName).filter(Boolean)
+  const nodeName = result && result.returnToNode ? result.returnToNode.nodeName : ''
+  if (names.length) return `${nodeName ? '「' + nodeName + '」' : ''}${names.join('、')}`
+  const display = result && result.currentApproval && result.currentApproval.displayText
+  return display || ''
+}
+
 function toast(title) { uni.showToast({ title, icon: 'none', duration: 2500 }) }
 function goTodo() { uni.redirectTo({ url: '/pages/employee/flow-todo' }) }
+
+/** 驳回退回修改：进入制单向导的“修改并重新提交”模式（沿用原订单编号）。 */
+function goRevise() {
+  const orderId = order.value && order.value.orderId
+  if (!orderId) return toast('订单信息不完整，请返回待办重试')
+  uni.navigateTo({
+    url: '/pages/employee/business-data-new?orderId=' + encodeURIComponent(orderId) + '&revise=1'
+  })
+}
 function goDashboard() { uni.redirectTo({ url: '/pages/employee/dashboard' }) }
 function goBack() {
   const pages = getCurrentPages()
@@ -1599,6 +1658,16 @@ function goBack() {
 .block-banner-title { font-size: 27rpx; font-weight: 700; color: #B26A00; }
 .block-banner-head { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; }
 .block-banner-refresh { font-size: 23rpx; color: #8C5A00; font-weight: 600; flex-shrink: 0; padding: 8rpx 0 8rpx 20rpx; }
+.return-banner {
+  margin: 0 24rpx 20rpx; padding: 22rpx 24rpx; border-radius: 16rpx;
+  background: #FFF1F0; border: 2rpx solid #FFCCC7;
+  display: flex; flex-direction: column; gap: 8rpx;
+}
+.return-banner-head { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; }
+.return-banner-title { font-size: 28rpx; font-weight: 700; color: #CF1322; }
+.return-banner-time { font-size: 22rpx; color: #A8071A; flex-shrink: 0; }
+.return-banner-meta { font-size: 23rpx; color: #A8071A; }
+.return-banner-opinion { font-size: 25rpx; color: #5C0011; line-height: 1.6; word-break: break-all; }
 .block-banner-text { font-size: 24rpx; color: #B26A00; line-height: 1.6; word-break: break-all; }
 .pay-cell { display: flex; align-items: center; justify-content: flex-end; gap: 10rpx; flex-wrap: wrap; }
 .pay-tag { font-size: 20rpx; padding: 3rpx 10rpx; border-radius: 6rpx; font-weight: 600; }

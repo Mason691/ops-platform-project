@@ -133,6 +133,39 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
                                  String remark, String paymentMethod, String paymentType,
                                  BigDecimal depositAmount, Integer isFullPayment,
                                  BigDecimal balanceAmount, String calcStatus) {
+        updateOrderContent(orderId, corpId, batchNo, receiptNo, company, customer, customerPhone,
+                platformMemberId, communityId, communityName, detailedAddress, receiptDate,
+                totalAmount, remark, paymentMethod, paymentType, depositAmount, isFullPayment,
+                balanceAmount, calcStatus, true);
+    }
+
+    @Override
+    public void updateRevisionOrder(Long orderId, Long corpId, String batchNo, String receiptNo,
+                                    String company, String customer, String customerPhone,
+                                    Long platformMemberId, Long communityId, String communityName,
+                                    String detailedAddress, String receiptDate,
+                                    BigDecimal totalAmount, String remark, String paymentMethod,
+                                    String paymentType, BigDecimal depositAmount,
+                                    Integer isFullPayment, BigDecimal balanceAmount,
+                                    String calcStatus) {
+        updateOrderContent(orderId, corpId, batchNo, receiptNo, company, customer, customerPhone,
+                platformMemberId, communityId, communityName, detailedAddress, receiptDate,
+                totalAmount, remark, paymentMethod, paymentType, depositAmount, isFullPayment,
+                balanceAmount, calcStatus, false);
+    }
+
+    /**
+     * @param resetWorkflow true=草稿重新提交（清空流程字段）；false=驳回退回修改（保留实例）
+     */
+    private void updateOrderContent(Long orderId, Long corpId, String batchNo, String receiptNo,
+                                    String company, String customer, String customerPhone,
+                                    Long platformMemberId, Long communityId,
+                                    String communityName, String detailedAddress,
+                                    String receiptDate, BigDecimal totalAmount, String remark,
+                                    String paymentMethod, String paymentType,
+                                    BigDecimal depositAmount, Integer isFullPayment,
+                                    BigDecimal balanceAmount, String calcStatus,
+                                    boolean resetWorkflow) {
         if (orderId == null || corpId == null) {
             throw BusinessException.of("订单归属信息缺失");
         }
@@ -159,9 +192,9 @@ public class BusinessOrderServiceImpl implements BusinessOrderService {
                 .set(OpsBusinessOrder::getCalcStatus, calcStatus)
                 .set(OpsBusinessOrder::getDraftFlag, 0)
                 .set(OpsBusinessOrder::getBizStatus, "0")
-                .set(OpsBusinessOrder::getWfInstanceId, null)
-                .set(OpsBusinessOrder::getWfNodeOrder, null)
-                .set(OpsBusinessOrder::getWfNodeName, null)
+                .set(resetWorkflow, OpsBusinessOrder::getWfInstanceId, null)
+                .set(resetWorkflow, OpsBusinessOrder::getWfNodeOrder, null)
+                .set(resetWorkflow, OpsBusinessOrder::getWfNodeName, null)
                 .set(OpsBusinessOrder::getModifyTime, LocalDateTime.now()));
     }
 
