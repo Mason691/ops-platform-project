@@ -36,6 +36,11 @@ import java.util.Objects;
 @Component
 public class WorkflowPlatformClient {
 
+    /** 施工进度通知场景（与平台 wf_message_template.scene_code 保持一致） */
+    public static final String SCENE_CONSTRUCT_PROGRESS = "CONSTRUCT_PROGRESS";
+    /** 尾款结清通知场景（与平台 wf_message_template.scene_code 保持一致） */
+    public static final String SCENE_BALANCE_PAID = "BALANCE_PAID";
+
     private final RestTemplate restTemplate;
     private final String baseUrl;
     private final String internalToken;
@@ -186,10 +191,6 @@ public class WorkflowPlatformClient {
     public void notifyConstructProgress(Long instanceId, Long receiverUserId, String orderNo,
                                         String actionName, String operatorName, String remark,
                                         String dedupKey) {
-        if (instanceId == null || receiverUserId == null) return;
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("X-Internal-Token", internalToken);
         Map<String, Object> vars = new LinkedHashMap<>();
         vars.put("orderNo", orderNo == null ? "" : orderNo);
         vars.put("constructAction", actionName == null ? "" : actionName);
@@ -199,18 +200,36 @@ public class WorkflowPlatformClient {
         vars.put("orgTaskTypeFull", "施工进度");
         vars.put("submitTime", java.time.LocalDateTime.now().format(
                 java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        notifyBusinessProgress(SCENE_CONSTRUCT_PROGRESS, instanceId, receiverUserId, vars, dedupKey);
+    }
+
+    /**
+     * 业务进度公众号通知（通用场景，尽力而为）。
+     *
+     * <p>模板未配置、接收人未关注、微信接口失败均只记日志，不抛异常，
+     * 避免通知问题影响尾款补录/施工等业务状态。</p>
+     */
+    public void notifyBusinessProgress(String sceneCode, Long instanceId, Long receiverUserId,
+                                       Map<String, Object> vars, String dedupKey) {
+        if (sceneCode == null || sceneCode.isBlank()
+                || instanceId == null || receiverUserId == null) {
+            return;
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Internal-Token", internalToken);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("instanceId", instanceId);
         body.put("receiverUserId", receiverUserId);
-        body.put("sceneCode", "CONSTRUCT_PROGRESS");
+        body.put("sceneCode", sceneCode);
         body.put("dedupKey", dedupKey);
-        body.put("vars", vars);
+        body.put("vars", vars == null ? Map.of() : vars);
         try {
             restTemplate.postForObject(baseUrl + "/api/internal/wf/notify",
                     new HttpEntity<>(body, headers), Map.class);
         } catch (Exception e) {
-            log.warn("施工进度通知失败 instanceId={}, receiver={}: {}",
-                    instanceId, receiverUserId, e.getMessage());
+            log.warn("业务进度通知失败 scene={}, instanceId={}, receiver={}: {}",
+                    sceneCode, instanceId, receiverUserId, e.getMessage());
         }
     }
 

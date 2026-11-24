@@ -26,7 +26,12 @@
       <!-- 派工待办顶部拦截提示：后端统一下发 canDispatch/dispatchBlockReason -->
       <view v-if="isBusinessOrder && actionType === 'OPS_DISPATCH_OUTBOUND' && dispatchBlockedReason"
             class="block-banner">
-        <text class="block-banner-title">暂不能发起派工出库</text>
+        <view class="block-banner-head">
+          <text class="block-banner-title">暂不能发起派工出库</text>
+          <text class="block-banner-refresh" @click="refreshDispatchOrder(true)">
+            {{ refreshing ? '刷新中…' : '刷新状态' }}
+          </text>
+        </view>
         <text class="block-banner-text">{{ dispatchBlockedReason }}</text>
       </view>
 
@@ -425,7 +430,7 @@
 <script setup>
 import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { computed, reactive, ref, watch } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 import { REQUISITION_STATUS, WRITE_OFF_STATUS } from '@/utils/materialForm'
@@ -459,6 +464,11 @@ const opinion = ref('')
 const rejectVisible = ref(false)
 const categoryMap = ref({})
 const approverExpanded = ref(false)
+/** 派工页刷新尾款状态：仅更新订单资格字段，不重置已填写的派工表单 */
+const refreshing = ref(false)
+let pageReady = false
+let dispatchRefreshTimer = null
+const DISPATCH_REFRESH_MS = 30 * 1000
 
 const form = reactive({
   receiptNo: '', financeReceiptDate: '', fundDynamicRows: null,
@@ -711,6 +721,7 @@ watch(() => form.dispatchType, type => {
 })
 
 onLoad((options) => {
+  pageReady = false
   taskId.value = (options && options.taskId) || ''
   instanceId.value = (options && options.instanceId) || ''
   if (!taskId.value) {
@@ -727,6 +738,15 @@ onLoad((options) => {
   }
   loadData()
 })
+
+onShow(() => {
+  // 首次展示由 loadData 负责；从其他页面返回时自动刷新派工收款状态
+  startDispatchRefreshTimer()
+  if (pageReady) refreshDispatchOrder(false)
+})
+
+onHide(stopDispatchRefreshTimer)
+onUnload(stopDispatchRefreshTimer)
 
 async function loadData() {
   loading.value = true
@@ -791,6 +811,56 @@ async function loadData() {
     errorMsg.value = (e && e.msg) || '加载任务失败，请稍后重试'
   } finally {
     loading.value = false
+    pageReady = !missing.value && !errorMsg.value
+    if (actionType.value === 'OPS_DISPATCH_OUTBOUND') startDispatchRefreshTimer()
+  }
+}
+
+/** 派工被尾款拦截时每 30 秒自动检测一次；尾款结清后立即停止轮询。 */
+function startDispatchRefreshTimer() {
+  if (dispatchRefreshTimer) return
+  if (actionType.value !== 'OPS_DISPATCH_OUTBOUND' || !dispatchBlockedReason.value) return
+  dispatchRefreshTimer = setInterval(() => {
+    if (!dispatchBlockedReason.value) {
+      stopDispatchRefreshTimer()
+      return
+    }
+    refreshDispatchOrder(false)
+  }, DISPATCH_REFRESH_MS)
+}
+
+function stopDispatchRefreshTimer() {
+  if (!dispatchRefreshTimer) return
+  clearInterval(dispatchRefreshTimer)
+  dispatchRefreshTimer = null
+}
+
+/**
+ * 派工页自动/手动刷新：尾款由经办人补录后，无需退出页面即可解除禁用。
+ * 只刷新订单资格字段，保留已选择的员工、日期与物料，避免表单被重置。
+ */
+async function refreshDispatchOrder(manual) {
+  if (loading.value || refreshing.value || submitting.value) return
+  if (actionType.value !== 'OPS_DISPATCH_OUTBOUND' || !taskId.value) return
+  const requestTaskId = taskId.value
+  refreshing.value = true
+  const wasBlocked = !!dispatchBlockedReason.value
+  try {
+    const latest = await api.businessTaskOrderDetail(requestTaskId)
+    // 页面可能已切换到另一个任务：丢弃过期响应
+    if (String(taskId.value) !== String(requestTaskId)) return
+    if (latest) {
+      order.value = latest
+      if (dispatchBlockedReason.value) startDispatchRefreshTimer()
+      else stopDispatchRefreshTimer()
+      if (wasBlocked && !dispatchBlockedReason.value) {
+        toast('尾款已结清，可发起派工出库')
+      }
+    }
+  } catch (e) {
+    if (manual) toast('刷新失败，请稍后重试')
+  } finally {
+    refreshing.value = false
   }
 }
 
@@ -1422,6 +1492,8 @@ function goBack() {
   display: flex; flex-direction: column; gap: 8rpx;
 }
 .block-banner-title { font-size: 27rpx; font-weight: 700; color: #B26A00; }
+.block-banner-head { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; }
+.block-banner-refresh { font-size: 23rpx; color: #8C5A00; font-weight: 600; flex-shrink: 0; padding: 8rpx 0 8rpx 20rpx; }
 .block-banner-text { font-size: 24rpx; color: #B26A00; line-height: 1.6; word-break: break-all; }
 .pay-cell { display: flex; align-items: center; justify-content: flex-end; gap: 10rpx; flex-wrap: wrap; }
 .pay-tag { font-size: 20rpx; padding: 3rpx 10rpx; border-radius: 6rpx; font-weight: 600; }
