@@ -137,7 +137,7 @@ public class WorkflowPlatformClient {
     }
 
     /**
-     * 施工员拒绝接单：以内部身份驳回「施工执行」待办，工作流按 PREVIOUS 退回派工节点。
+     * 施工员拒绝接受：以内部身份驳回「施工执行」待办，工作流按 PREVIOUS 退回派工节点。
      *
      * <p>ops 侧已校验任务归属与订单状态；平台侧 {@code requireTaskOwner} 会再次
      * 校验 operatorUserId 是否为任务处理人。formData 为空，避免触发派工节点动作。</p>
@@ -169,13 +169,13 @@ public class WorkflowPlatformClient {
                         + (msg instanceof String s && !s.isBlank() ? s : "未知错误"));
             }
         } catch (RestClientResponseException e) {
-            log.warn("施工员拒绝接单失败 status={}, body={}",
+            log.warn("施工员拒绝接受失败 status={}, body={}",
                     e.getStatusCode().value(), e.getResponseBodyAsString());
             throw BusinessException.of("工作流服务不可用，请稍后重试");
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.warn("施工员拒绝接单异常 taskId={}: {}", taskId, e.getMessage());
+            log.warn("施工员拒绝接受异常 taskId={}: {}", taskId, e.getMessage());
             throw BusinessException.of("工作流服务不可用，请稍后重试");
         }
     }

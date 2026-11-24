@@ -261,16 +261,20 @@ export function validateBusinessForm(form, meta = {}) {
   products.forEach((product, index) => {
     const key = field => `products.${index}.${field}`
     const prefix = `第${index + 1}个产品：`
+    const categoryInfo = (meta.categories || [])
+      .find(item => item && item.name === (product && product.category))
+    // 品牌必填规则由品类配置下发；未下发时保持存量必填口径
+    const brandRequired = !categoryInfo || categoryInfo.brandRequired !== false
     if (!product || !product.category) {
       errors[key('category')] = prefix + '请选择品类'
     }
-    if (!product || !product.brand) {
+    if (!product || (brandRequired && !product.brand)) {
       errors[key('brand')] = prefix + '请选择品牌'
     }
     if (!product || !product.model) {
       errors[key('model')] = prefix + '请选择型号'
-    } else if (product.brand && product.category) {
-      const combo = [product.brand, product.category, product.model].join('|')
+    } else if (product.category) {
+      const combo = [product.brand || '', product.category, product.model].join('|')
       if (seenModels[combo]) {
         errors[key('model')] = prefix + `与第${seenModels[combo]}个产品重复，请合并数量`
       } else {

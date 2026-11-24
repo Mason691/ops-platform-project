@@ -32,7 +32,7 @@
           <view v-for="(p, i) in (order.products || [])" :key="p.productKey || i"
                 class="product-row" :class="{ ret: p.isReturnEntry }">
             <view class="product-info">
-              <text class="product-name">{{ p.brand || '' }} {{ p.model || '' }}</text>
+              <text class="product-name">{{ [p.brand, p.model].filter(Boolean).join(' ') }}</text>
               <text class="product-meta">
                 {{ p.categoryName || p.category || '—' }} · ¥{{ money(p.salePrice) }} × {{ p.saleQuantity }}
               </text>

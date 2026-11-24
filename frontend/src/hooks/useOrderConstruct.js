@@ -33,7 +33,6 @@ export function useOrderConstruct() {
     reject: (orderId, reason) => run(() => api.constructReject(orderId, reason)),
     arrive: (orderId, data) => run(() => api.constructArrive(orderId, data)),
     customerConfirm: (orderId, data) => run(() => api.constructCustomerConfirm(orderId, data)),
-    customerRefuse: (orderId, reason) => run(() => api.constructCustomerRefuse(orderId, reason)),
-    start: orderId => run(() => api.constructStart(orderId))
+    customerRefuse: (orderId, reason) => run(() => api.constructCustomerRefuse(orderId, reason))
   }
 }

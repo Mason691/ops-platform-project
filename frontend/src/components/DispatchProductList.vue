@@ -21,7 +21,7 @@
         {{ isSelected(p.productKey) ? '✓' : '' }}
       </view>
       <view class="info">
-        <text class="name">{{ p.productName || ((p.brand || '') + ' ' + (p.model || '')) }}</text>
+        <text class="name">{{ p.productName || [p.brand, p.model].filter(Boolean).join(' ') }}</text>
         <text class="meta">
           {{ p.categoryName || categoryLabel(p.category) }} · 数量 {{ p.saleQuantity }} · ¥{{ money(p.salePrice) }}
         </text>

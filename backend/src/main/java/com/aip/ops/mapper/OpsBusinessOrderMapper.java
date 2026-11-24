@@ -35,7 +35,7 @@ public interface OpsBusinessOrderMapper extends BaseMapper<OpsBusinessOrder> {
 
     /**
      * 施工流转串行化：行级悲观锁（跨实例有效），配合 biz_status/version CAS
-     * 防止确认接收/打卡/签字/开工并发重放。
+     * 防止确认接受/打卡/签字/开工并发重放。
      */
     @Select("SELECT * FROM ops_business_order WHERE id = #{id} AND delete_flag = 0 FOR UPDATE")
     com.aip.ops.entity.OpsBusinessOrder selectForUpdate(@Param("id") Long id);

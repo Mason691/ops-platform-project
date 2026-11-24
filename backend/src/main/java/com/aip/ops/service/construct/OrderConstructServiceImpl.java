@@ -45,6 +45,7 @@ import java.util.stream.Collectors;
 import static com.aip.ops.service.construct.OrderConstructStatus.ACCEPTED;
 import static com.aip.ops.service.construct.OrderConstructStatus.ARRIVED;
 import static com.aip.ops.service.construct.OrderConstructStatus.CONSTRUCTING;
+import static com.aip.ops.service.construct.OrderConstructStatus.CONSTRUCTION_DONE;
 import static com.aip.ops.service.construct.OrderConstructStatus.CUSTOMER_CONFIRMED;
 import static com.aip.ops.service.construct.OrderConstructStatus.CUSTOMER_REFUSED;
 import static com.aip.ops.service.construct.OrderConstructStatus.DISPATCH;
@@ -141,6 +142,11 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         view.put("arriveTime", text(order.getArriveTime()));
         view.put("customerConfirmTime", text(order.getCustomerConfirmTime()));
         view.put("startTime", text(order.getStartTime()));
+        view.put("constructionNote", order.getConstructionNote());
+        view.put("completionNote", order.getCompletionNote());
+        view.put("acceptanceSubmittedTime", text(order.getAcceptanceSubmittedTime()));
+        view.put("constructionPhotos",
+                attachmentViews(order.getConstructionAttachmentIds(), orderAttachments(order)));
         view.put("isWorker", worker);
         view.put("permissions", permissions(order, canOperate));
         view.put("operateBlockedReason", blockedReason(worker, active, corpMatch, running));
@@ -179,7 +185,6 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         p.put("customerConfirm", canOperate && (ARRIVED.equals(status)
                 || CUSTOMER_REFUSED.equals(status) || CUSTOMER_CONFIRMED.equals(status)));
         p.put("customerRefuse", canOperate && ARRIVED.equals(status));
-        p.put("start", canOperate && CUSTOMER_CONFIRMED.equals(status));
         return p;
     }
 
@@ -199,15 +204,15 @@ public class OrderConstructServiceImpl implements OrderConstructService {
     public Map<String, Object> accept(Long orderId) {
         OpsBusinessOrder order = requireOperableOrder(orderId, false);
         String from = statusOf(order);
-        if (ACCEPTED.equals(from)) return result(order, "您已接收该任务");
+        if (ACCEPTED.equals(from)) return result(order, "您已接受该任务");
         OrderConstructStatus.requireTransition(from, ACCEPTED);
         LocalDateTime now = LocalDateTime.now();
         transitionAsCurrent(order, ACCEPTED,
                 w -> w.set(OpsBusinessOrder::getAcceptTime, now));
         insertLog(order, OpsOrderConstructLog.ACTION_ACCEPT, from, ACCEPTED,
                 Location.none(), null, null, null);
-        notifyProgress(order, "已接单", null);
-        return result(order, "确认接收成功");
+        notifyProgress(order, "已接受任务", null);
+        return result(order, "确认接受成功");
     }
 
     @Override
@@ -232,8 +237,8 @@ public class OrderConstructServiceImpl implements OrderConstructService {
                 Location.none(), null, null, clean);
         // 平台侧按任务所有者再次校验后驳回，工作流 PREVIOUS 退回派工节点并重建派工待办
         workflowClient.rejectConstructTask(taskId, clean, userId, operatorName());
-        notifyProgress(order, "拒绝接单", clean);
-        return result(order, "已拒绝接单，订单退回派工");
+        notifyProgress(order, "拒绝接受", clean);
+        return result(order, "已拒绝接受，订单退回派工");
     }
 
     @Override
@@ -272,7 +277,6 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         if (order.getArriveTime() == null) {
             throw BusinessException.of("请先完成上门打卡，再请客户签字");
         }
-        OrderConstructStatus.requireTransition(from, CUSTOMER_CONFIRMED);
         ConstructSignatureStorage.StoredSignature stored = signatureStorage.store(
                 order.getCorpId(), order.getId(),
                 request == null ? null : request.signImageBase64());
@@ -290,8 +294,17 @@ public class OrderConstructServiceImpl implements OrderConstructService {
                                                      ConstructSignatureStorage.StoredSignature stored) {
         if (CUSTOMER_CONFIRMED.equals(from) && isSameSignature(order.getId(), stored.sha256())) {
             signatureStorage.delete(stored);
-            return result(order, "客户已签字确认，请勿重复提交");
+            // 兼容上线前已签字未开工的存量单：重试时自动补齐开工
+            startConstructing(order, requireSignedNotice(order.getId()),
+                    "已开始施工", "存量签字单自动进入施工中");
+            return result(order, "客户已签字确认，任务已进入施工中");
         }
+        // 签字即开工后，网络重试同一签名按幂等成功返回，不能报状态不允许
+        if (CONSTRUCTING.equals(from) && isSameSignature(order.getId(), stored.sha256())) {
+            signatureStorage.delete(stored);
+            return result(order, "客户已签字确认，任务已进入施工中");
+        }
+        OrderConstructStatus.requireTransition(from, CUSTOMER_CONFIRMED);
         LocalDateTime now = LocalDateTime.now();
         // 签字定位优先取请求坐标，缺省沿用上门打卡坐标（客户签字时通常就在现场）
         Location location = customerLocation(order.getId(), request);
@@ -304,7 +317,9 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         insertLog(order, OpsOrderConstructLog.ACTION_CUSTOMER_CONFIRM, from,
                 CUSTOMER_CONFIRMED, location, null, notice.getId(), remark);
         notifyProgress(order, "客户已签字确认", null);
-        return result(order, "客户已确认");
+        // 签字即开工：客户确认后无需再点“确认开工”，同一事务内自动进入施工中
+        startConstructing(order, notice, "已开始施工", "客户签字后自动进入施工中");
+        return result(order, "客户已签字确认，任务已进入施工中");
     }
 
     @Override
@@ -333,23 +348,133 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         if (CONSTRUCTING.equals(from)) return result(order, "订单已开工");
         if (!CUSTOMER_CONFIRMED.equals(from)) {
             throw BusinessException.of(
-                    "INVALID_STATUS_TRANSITION：当前状态不允许确认开工，请先完成客户签字");
+                    "INVALID_STATUS_TRANSITION：当前状态不允许开始施工，请先完成客户签字");
         }
-        OpsCustomerNotice notice = activeNotice(orderId);
+        OpsCustomerNotice notice = requireSignedNotice(orderId);
+        startConstructing(order, notice, "已开始施工", "兼容旧流程：确认开工");
+        return result(order, "已开始施工");
+    }
+
+    /** 客户签字后自动开工（历史“确认开工”接口也复用）：强校验告知书与上门打卡。 */
+    private void startConstructing(OpsBusinessOrder order, OpsCustomerNotice notice,
+                                   String notifyAction, String remark) {
         if (notice == null || isBlank(notice.getSignImageUrl())) {
             throw BusinessException.of(
                     "CUSTOMER_NOTICE_REQUIRED：客户尚未签署用户告知书，无法开工");
         }
-        if (!hasLog(orderId, OpsOrderConstructLog.ACTION_ARRIVE, null)) {
+        if (!hasLog(order.getId(), OpsOrderConstructLog.ACTION_ARRIVE, null)) {
             throw BusinessException.of("ARRIVE_BEFORE_ACCEPT：未完成上门打卡，无法开工");
         }
         LocalDateTime now = LocalDateTime.now();
         transitionAsCurrent(order, CONSTRUCTING,
                 w -> w.set(OpsBusinessOrder::getStartTime, now));
-        insertLog(order, OpsOrderConstructLog.ACTION_START, from, CONSTRUCTING,
-                Location.none(), null, notice.getId(), null);
-        notifyProgress(order, "已确认开工", null);
-        return result(order, "已确认开工");
+        insertLog(order, OpsOrderConstructLog.ACTION_START, CUSTOMER_CONFIRMED, CONSTRUCTING,
+                Location.none(), null, notice.getId(), remark);
+        notifyProgress(order, notifyAction, null);
+    }
+
+    private OpsCustomerNotice requireSignedNotice(Long orderId) {
+        OpsCustomerNotice notice = activeNotice(orderId);
+        if (notice == null || isBlank(notice.getSignImageUrl())) {
+            throw BusinessException.of(
+                    "CUSTOMER_NOTICE_REQUIRED：客户尚未签署用户告知书，无法开工");
+        }
+        return notice;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> submitAcceptanceRecord(Long orderId, String constructionNote,
+                                                      String completionNote,
+                                                      List<Long> attachmentIds,
+                                                      Long operatorUserId, String operatorName) {
+        OpsBusinessOrder order = requireAcceptanceOrder(orderId);
+        String from = statusOf(order);
+        String construction = noteText(constructionNote, "施工说明");
+        String completion = requireCompletionNote(completionNote);
+        List<Long> ids = acceptancePhotos(order, attachmentIds, operatorUserId);
+        OpsCustomerNotice notice = requireSignedNotice(orderId);
+        saveAcceptanceRecord(order, from, construction, completion, ids, notice,
+                operatorUserId, operatorName);
+        // 验收人通知由工作流创建节点待办时统一发送（既有消息机制），此处不重复推送
+        return result(order, "施工记录已保存，验收申请已提交");
+    }
+
+    private OpsBusinessOrder requireAcceptanceOrder(Long orderId) {
+        OpsBusinessOrder order = orderId == null ? null : orderMapper.selectForUpdate(orderId);
+        if (order == null || Integer.valueOf(1).equals(order.getDeleteFlag())) {
+            throw BusinessException.notFound("业务订单不存在");
+        }
+        String status = statusOf(order);
+        if (!CONSTRUCTING.equals(status) && !CONSTRUCTION_DONE.equals(status)) {
+            throw BusinessException.of(
+                    "CONSTRUCTION_NOT_STARTED：请先完成确认接受、上门打卡与客户签字");
+        }
+        if (!hasLog(orderId, OpsOrderConstructLog.ACTION_ARRIVE, null)) {
+            throw BusinessException.of("ARRIVE_BEFORE_ACCEPT：未完成上门打卡，无法提交验收");
+        }
+        return order;
+    }
+
+    private static String requireCompletionNote(String raw) {
+        String completion = noteText(raw, "完工说明");
+        if (completion == null) {
+            throw BusinessException.of("COMPLETION_NOTE_REQUIRED：请填写完工说明");
+        }
+        return completion;
+    }
+
+    /** 施工照片：新上传优先；旧客户端未传时保留上次已绑定照片。 */
+    private List<Long> acceptancePhotos(OpsBusinessOrder order, List<Long> attachmentIds,
+                                        Long operatorUserId) {
+        List<Long> ids = validAttachmentIds(attachmentIds);
+        if (attachmentIds == null && !isBlank(order.getConstructionAttachmentIds())) {
+            ids = validAttachmentIds(parseIds(order.getConstructionAttachmentIds()));
+        }
+        if (!ids.isEmpty()) {
+            attachmentService.requireOwnedListForUploader(ids, OpsBusinessAttachment.TYPE_CONSTRUCT,
+                    order.getCorpId(), order.getId(), operatorUserId);
+        }
+        return ids;
+    }
+
+    private void saveAcceptanceRecord(OpsBusinessOrder order, String from, String construction,
+                                      String completion, List<Long> ids,
+                                      OpsCustomerNotice notice, Long operatorUserId,
+                                      String operatorName) {
+        LocalDateTime now = LocalDateTime.now();
+        int nextVersion = versionOf(order) + 1;
+        int updated = orderMapper.update(null, Wrappers.<OpsBusinessOrder>lambdaUpdate()
+                .eq(OpsBusinessOrder::getId, order.getId())
+                .in(OpsBusinessOrder::getBizStatus, CONSTRUCTING, CONSTRUCTION_DONE)
+                .set(OpsBusinessOrder::getConstructionNote, construction)
+                .set(OpsBusinessOrder::getCompletionNote, completion)
+                .set(OpsBusinessOrder::getConstructionAttachmentIds, joinIds(ids))
+                .set(OpsBusinessOrder::getAcceptanceSubmittedTime, now)
+                .set(OpsBusinessOrder::getBizStatus, CONSTRUCTION_DONE)
+                .set(OpsBusinessOrder::getVersion, nextVersion)
+                .set(OpsBusinessOrder::getModifyTime, now));
+        if (updated == 0) {
+            throw BusinessException.of("ORDER_STATUS_CHANGED：订单状态已变更，请刷新后重试");
+        }
+        if (!ids.isEmpty()) {
+            attachmentService.bindToOrder(ids, order.getId(), order.getCorpId());
+        }
+        order.setBizStatus(CONSTRUCTION_DONE);
+        order.setVersion(nextVersion);
+        insertLogAs(order, OpsOrderConstructLog.ACTION_SUBMIT_ACCEPTANCE, from,
+                CONSTRUCTION_DONE, operatorUserId, operatorName, null, Location.none(),
+                joinIds(ids), notice.getId(), null);
+    }
+
+    /** 施工记录文本：允许为空；填写时最多 1000 字。 */
+    private static String noteText(String value, String label) {
+        String text = trimToNull(value);
+        if (text == null) return null;
+        if (text.length() > 1000) {
+            throw BusinessException.of(label + "不能超过1000字");
+        }
+        return text;
     }
 
     @Override
@@ -374,8 +499,8 @@ public class OrderConstructServiceImpl implements OrderConstructService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void markDispatched(OpsBusinessOrder order, Long workerUserId, String workerName,
-                               Integer workerType, String dispatchType, Long operatorUserId,
-                               String operatorName, String remark) {
+                               String workerPhone, Integer workerType, String dispatchType,
+                               Long operatorUserId, String operatorName, String remark) {
         if (order == null || order.getId() == null) return;
         OpsBusinessOrder fresh = orderMapper.selectForUpdate(order.getId());
         if (fresh == null) {
@@ -402,7 +527,8 @@ public class OrderConstructServiceImpl implements OrderConstructService {
                 .set(OpsBusinessOrder::getCustomerConfirmTime, null)
                 .set(OpsBusinessOrder::getStartTime, null));
         insertLogAs(fresh, OpsOrderConstructLog.ACTION_ASSIGN, from, to,
-                operatorUserId, operatorName, null, remark);
+                operatorUserId, operatorName, null, Location.none(), null, null, remark,
+                workerUserId, workerName, workerPhone);
     }
 
     @Override
@@ -626,13 +752,22 @@ public class OrderConstructServiceImpl implements OrderConstructService {
                              Long operatorId, String operator, Integer operatorType,
                              String remark) {
         insertLogAs(order, action, from, to, operatorId, operator, operatorType,
-                Location.none(), null, null, remark);
+                Location.none(), null, null, remark, null, null, null);
     }
 
     private void insertLogAs(OpsBusinessOrder order, String action, String from, String to,
                              Long operatorId, String operator, Integer operatorType,
                              Location location, String attachmentIds, Long noticeId,
                              String remark) {
+        insertLogAs(order, action, from, to, operatorId, operator, operatorType,
+                location, attachmentIds, noticeId, remark, null, null, null);
+    }
+
+    private void insertLogAs(OpsBusinessOrder order, String action, String from, String to,
+                             Long operatorId, String operator, Integer operatorType,
+                             Location location, String attachmentIds, Long noticeId,
+                             String remark, Long workerId, String workerName,
+                             String workerPhone) {
         LocalDateTime now = LocalDateTime.now();
         OpsOrderConstructLog row = new OpsOrderConstructLog();
         row.setCorpId(order.getCorpId());
@@ -651,6 +786,9 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         row.setLocationAddress(location.address());
         row.setAttachmentIds(attachmentIds);
         row.setNoticeId(noticeId);
+        row.setWorkerId(workerId);
+        row.setWorkerName(workerName);
+        row.setWorkerPhone(workerPhone);
         row.setCreateTime(now);
         row.setModifyTime(now);
         row.setCreateUser(operatorId);
@@ -670,22 +808,29 @@ public class OrderConstructServiceImpl implements OrderConstructService {
                         .eq(OpsOrderConstructLog::getOrderId, order.getId())
                         .eq(OpsOrderConstructLog::getDeleteFlag, 0)
                         .orderByAsc(OpsOrderConstructLog::getId));
-        Map<Long, OpsBusinessAttachment> files = attachmentService.listByOrder(order.getId())
-                .stream().collect(Collectors.toMap(OpsBusinessAttachment::getId, f -> f,
-                        (a, b) -> a, LinkedHashMap::new));
+        Map<Long, OpsBusinessAttachment> files = orderAttachments(order);
         List<Map<String, Object>> rows = new ArrayList<>();
         for (OpsOrderConstructLog row : logs) {
-            rows.add(logView(row, files));
+            rows.add(logView(row, files, order));
         }
         return rows;
     }
 
+    private Map<Long, OpsBusinessAttachment> orderAttachments(OpsBusinessOrder order) {
+        return attachmentService.listByOrder(order.getId())
+                .stream().collect(Collectors.toMap(OpsBusinessAttachment::getId, f -> f,
+                        (a, b) -> a, LinkedHashMap::new));
+    }
+
     private Map<String, Object> logView(OpsOrderConstructLog row,
-                                        Map<Long, OpsBusinessAttachment> files) {
+                                        Map<Long, OpsBusinessAttachment> files,
+                                        OpsBusinessOrder order) {
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("id", row.getId());
         view.put("action", row.getAction());
         view.put("actionName", actionName(row.getAction()));
+        view.put("displayText", displayText(row, order));
+        view.put("displayHint", displayHint(row));
         view.put("fromStatus", row.getFromStatus());
         view.put("fromStatusName", bizStatusService.label(row.getFromStatus()));
         view.put("toStatus", row.getToStatus());
@@ -693,6 +838,9 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         view.put("operatorId", row.getOperatorId());
         view.put("operatorName", row.getOperatorName());
         view.put("operatorType", row.getOperatorType());
+        view.put("workerId", row.getWorkerId());
+        view.put("workerName", workerName(row, order));
+        view.put("workerPhone", maskPhone(row.getWorkerPhone()));
         view.put("operateTime", text(row.getOperateTime()));
         view.put("locationStatus", row.getLocationStatus());
         view.put("locationLng", row.getLocationLng());
@@ -768,7 +916,7 @@ public class OrderConstructServiceImpl implements OrderConstructService {
                         + "AND i.business_id = ? AND i.id = ? AND t.approver_user_id = ? "
                         + "AND t.status = 'PENDING' AND i.status = 'RUNNING' "
                         + "AND t.delete_flag = 0 AND i.delete_flag = 0 AND n.delete_flag = 0 "
-                        // 施工执行(5)与施工完成(6)的处理人都是施工侧人员，均可读施工视图
+                        // 施工执行节点及执行中的历史任务处理人均为施工侧人员，可读施工视图
                         + "AND n.node_order IN (5, 6)",
                 Long.class, String.valueOf(orderId), instanceId, userId);
         return count != null && count > 0;
@@ -823,7 +971,7 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         Runnable send = () -> executor.execute(() -> receivers.forEach(userId ->
                 workflowClient.notifyConstructProgress(instanceId, userId, orderNo,
                         actionName, operator, remark, dedup + ":" + userId)));
-        // 事务提交成功后再发消息：回滚的操作不应产生「已接单/已开工」通知
+        // 事务提交成功后再发消息：回滚的操作不应产生「已接受任务/已开工」通知
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(
                     new TransactionSynchronization() {
@@ -940,10 +1088,10 @@ public class OrderConstructServiceImpl implements OrderConstructService {
 
     private void assertAfterAccept(OpsBusinessOrder order, LocalDateTime now) {
         if (order.getAcceptTime() == null) {
-            throw BusinessException.of("ARRIVE_BEFORE_ACCEPT：未接收任务，无法上门打卡");
+            throw BusinessException.of("ARRIVE_BEFORE_ACCEPT：未接受任务，无法上门打卡");
         }
         if (now.isBefore(order.getAcceptTime())) {
-            throw BusinessException.of("ARRIVE_BEFORE_ACCEPT：打卡时间早于接收时间");
+            throw BusinessException.of("ARRIVE_BEFORE_ACCEPT：打卡时间早于接受时间");
         }
     }
 
@@ -1050,14 +1198,68 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         if (action == null) return "";
         return switch (action) {
             case OpsOrderConstructLog.ACTION_ASSIGN -> "派工指派";
-            case OpsOrderConstructLog.ACTION_ACCEPT -> "确认接收";
-            case OpsOrderConstructLog.ACTION_REJECT -> "拒绝接单";
+            case OpsOrderConstructLog.ACTION_ACCEPT -> "确认接受";
+            case OpsOrderConstructLog.ACTION_REJECT -> "拒绝接受";
             case OpsOrderConstructLog.ACTION_ARRIVE -> "上门打卡";
             case OpsOrderConstructLog.ACTION_CUSTOMER_CONFIRM -> "客户签字确认";
             case OpsOrderConstructLog.ACTION_CUSTOMER_REFUSE -> "客户拒绝确认";
-            case OpsOrderConstructLog.ACTION_START -> "确认开工";
+            case OpsOrderConstructLog.ACTION_START -> "开始施工";
+            case OpsOrderConstructLog.ACTION_SUBMIT_ACCEPTANCE -> "提交验收申请";
             default -> action;
         };
+    }
+
+    /** 流转记录统一文案：角色 + 人员 + 动作；派工指派展示目标施工员而不是派工人。 */
+    private static String displayText(OpsOrderConstructLog row, OpsBusinessOrder order) {
+        if (row.getAction() == null) return actionName(null);
+        String actor = roleActor(row.getOperatorName(), order.getWorkerName());
+        return switch (row.getAction()) {
+            case OpsOrderConstructLog.ACTION_ASSIGN -> {
+                String name = workerName(row, order);
+                String phone = maskPhone(row.getWorkerPhone());
+                String suffix = isBlank(phone) ? "" : "（" + phone + "）";
+                yield "施工员 " + (isBlank(name) ? "待定" : name) + suffix + " 待接受任务";
+            }
+            case OpsOrderConstructLog.ACTION_ACCEPT -> actor + " 已接受任务";
+            case OpsOrderConstructLog.ACTION_REJECT -> actor + " 拒绝接受任务";
+            case OpsOrderConstructLog.ACTION_ARRIVE -> actor + " 已上门打卡";
+            case OpsOrderConstructLog.ACTION_CUSTOMER_CONFIRM -> actor + " 客户已签字确认";
+            case OpsOrderConstructLog.ACTION_CUSTOMER_REFUSE -> actor + " 客户拒绝确认";
+            case OpsOrderConstructLog.ACTION_START -> actor + " 已开始施工";
+            case OpsOrderConstructLog.ACTION_SUBMIT_ACCEPTANCE -> actor + " 提交验收申请";
+            default -> actionName(row.getAction());
+        };
+    }
+
+    private static String roleActor(String operatorName, String fallbackWorker) {
+        // 历史账号可能以手机号作为显示名；优先展示施工员姓名，避免流转记录只有手机号
+        String name = operatorName;
+        if (isBlank(name) || name.matches("\\d{6,}")) {
+            name = fallbackWorker;
+        }
+        return "施工员 " + (isBlank(name) ? "—" : name);
+    }
+
+    /** 派工指派补充派工人，避免把派工人误当成施工员。 */
+    private static String displayHint(OpsOrderConstructLog row) {
+        if (!OpsOrderConstructLog.ACTION_ASSIGN.equals(row.getAction())
+                || isBlank(row.getOperatorName())) {
+            return null;
+        }
+        String dispatcher = row.getOperatorName().trim();
+        return "派工人：" + (dispatcher.matches("\\d{7,}") ? maskPhone(dispatcher) : dispatcher);
+    }
+
+    private static String workerName(OpsOrderConstructLog row, OpsBusinessOrder order) {
+        if (!isBlank(row.getWorkerName())) return row.getWorkerName();
+        return OpsOrderConstructLog.ACTION_ASSIGN.equals(row.getAction())
+                ? order.getWorkerName() : null;
+    }
+
+    private static String maskPhone(String phone) {
+        String value = phone == null ? "" : phone.trim();
+        if (value.length() < 7) return value;
+        return value.substring(0, 3) + "****" + value.substring(value.length() - 4);
     }
 
     private static List<Long> parseIds(String csv) {

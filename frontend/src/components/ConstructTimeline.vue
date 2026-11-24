@@ -10,10 +10,11 @@
       </view>
       <view class="body">
         <view class="head">
-          <text class="action" :class="tone(log)">{{ log.actionName }}</text>
+          <text class="action" :class="tone(log)">{{ log.displayText || log.actionName }}</text>
           <text class="time">{{ fmt(log.operateTime) }}</text>
         </view>
-        <text class="meta">
+        <text v-if="log.displayHint" class="meta">{{ log.displayHint }}</text>
+        <text v-else-if="!log.displayText" class="meta">
           {{ log.operatorName || '—' }}
           <text v-if="log.toStatusName"> · {{ log.toStatusName }}</text>
         </text>
@@ -43,7 +44,7 @@ defineProps({
 function tone(log) {
   const action = log && log.action
   if (action === 'REJECT' || action === 'CUSTOMER_REFUSE') return 'danger'
-  if (action === 'ACCEPT' || action === 'START') return 'primary'
+  if (action === 'ACCEPT' || action === 'START' || action === 'SUBMIT_ACCEPTANCE') return 'primary'
   if (action === 'CUSTOMER_CONFIRM') return 'success'
   if (action === 'ARRIVE') return 'warning'
   return 'info'

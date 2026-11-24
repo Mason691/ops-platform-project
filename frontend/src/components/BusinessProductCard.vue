@@ -16,8 +16,11 @@
       <text v-if="errors.category" class="ferr">{{ errors.category }}</text>
     </view>
 
-    <view :id="fieldId('brand')" class="field">
-      <text class="label" @click="focusField(fieldId('brand'))">品牌 <text class="req">*</text></text>
+    <view v-if="showBrandField" :id="fieldId('brand')" class="field">
+      <text class="label" @click="focusField(fieldId('brand'))">
+        品牌 <text v-if="brandRequired" class="req">*</text>
+        <text v-else class="optional">（可选）</text>
+      </text>
       <FieldChips v-if="brands.length <= 6 && brands.length" class="chips-block"
                   :class="{ 'control-error-box': errors.brand }"
                   :options="brandChips" :model-value="product.brand"
@@ -45,9 +48,19 @@
         <text class="arrow">›</text>
       </view>
       <text v-if="errors.model" class="ferr">{{ errors.model }}</text>
-      <text v-else-if="product.category && product.brand && !models.length" class="hint">
-        该品类与品牌组合暂无可用型号
+      <text v-else-if="product.category && brandRequired && !product.brand" class="hint">
+        请先选择品牌后查看型号
       </text>
+      <text v-else-if="product.category && !models.length" class="hint">
+        该品类暂无可用型号
+      </text>
+      <ProductStockInfo v-if="product.model"
+                        :material-id="product.productId"
+                        :brand="product.brand"
+                        :category="product.category"
+                        :model="product.model"
+                        :quantity="product.saleQuantity"
+                        compact />
     </view>
 
     <view :id="fieldId('salePrice')" class="field">
@@ -166,6 +179,7 @@ import AnimatedAmount from '@/components/AnimatedAmount.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
 import BusinessSpecialApproval from '@/components/BusinessSpecialApproval.vue'
 import BusinessTradeInSection from '@/components/BusinessTradeInSection.vue'
+import ProductStockInfo from '@/components/ProductStockInfo.vue'
 import { useProductPrice } from '@/hooks/useProductPrice'
 import {
   computeProductAmount, computeProductDeduction,
@@ -208,6 +222,12 @@ onMounted(() => {
 const categoryOptions = computed(() => (props.meta.categories || [])
   .map(item => ({ value: item.name, label: item.name })))
 
+/** 品类品牌规则：字典/SCM 目录下发；未下发时按必填处理，避免放宽存量品类。 */
+const categoryInfo = computed(() => (props.meta.categories || [])
+  .find(item => item && item.name === props.product.category))
+const brandRequired = computed(() => !categoryInfo.value
+  || categoryInfo.value.brandRequired !== false)
+
 const brands = computed(() => {
   if (!props.product.category) return []
   const seen = new Set()
@@ -216,24 +236,28 @@ const brands = computed(() => {
     if (material.category !== props.product.category) continue
     // “旧品”品牌只用于以旧换新旧品选择，不作为正常销售商品
     if (isOldGoodsBrand(material.brand)) continue
-    if (seen.has(material.brand)) continue
+    if (!material.brand || seen.has(material.brand)) continue
     seen.add(material.brand)
     result.push(material.brand)
   }
   return result.sort()
 })
+const showBrandField = computed(() => brandRequired.value || brands.value.length > 0)
 const brandChips = computed(() => brands.value.map(brand => ({ value: brand, label: brand })))
 const brandOptions = computed(() => brandChips.value)
 
 const models = computed(() => {
-  if (!props.product.category || !props.product.brand) return []
+  if (!props.product.category) return []
+  // 品牌必填品类必须先选品牌；品牌可选品类允许按品类直接列型号
+  if (brandRequired.value && !props.product.brand) return []
+  const useBrand = !!props.product.brand
   const seen = new Set()
   const result = []
   for (const material of props.meta.materials || []) {
-    if (material.brand !== props.product.brand
-      || material.category !== props.product.category) continue
+    if (material.category !== props.product.category) continue
+    if (useBrand && material.brand !== props.product.brand) continue
     if (isOldGoodsBrand(material.brand)) continue
-    if (seen.has(material.model)) continue
+    if (!material.model || seen.has(material.model)) continue
     seen.add(material.model)
     result.push(material.model)
   }
@@ -250,7 +274,7 @@ const brandPlaceholder = computed(() => {
 const modelPlaceholder = computed(() => {
   if (props.product.model) return props.product.model
   if (!props.product.category) return '请先选择品类'
-  if (!props.product.brand) return '请先选择品牌'
+  if (brandRequired.value && !props.product.brand) return '请先选择品牌'
   if (!models.value.length) return '暂无可用型号'
   return '请选择型号'
 })
@@ -332,8 +356,13 @@ function setBrand(value) {
 function setModel(value) {
   props.product.model = value
   const material = (props.meta.materials || []).find(item =>
-    item && item.brand === props.product.brand
-    && item.category === props.product.category && item.model === value)
+    item && item.category === props.product.category && item.model === value
+    && (!props.product.brand || item.brand === props.product.brand)
+    && !isOldGoodsBrand(item.brand))
+  // 品牌可选品类：选中带品牌的型号时自动带出品牌；无品牌型号保持为空
+  if (material && !props.product.brand && material.brand) {
+    props.product.brand = material.brand
+  }
   props.product.productId = material && material.id != null ? material.id : null
   editingPrice.value = false
   floorVisible.value = false
@@ -422,6 +451,7 @@ function restoreStandardPrice() {
 .field:last-child { margin-bottom: 0; }
 .label { display: block; font-size: 25rpx; color: #666; margin-bottom: 10rpx; }
 .req { color: #e53935; }
+.optional { color: #A9AEB8; font-weight: 400; }
 .label-row {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 10rpx;

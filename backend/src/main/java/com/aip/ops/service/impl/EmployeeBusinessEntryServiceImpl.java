@@ -1613,11 +1613,15 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                                              int rowNo, Long corpId) {
         String prefix = "第" + rowNo + "个产品：";
         if (item == null) throw BusinessException.of(prefix + "信息不能为空");
-        String brand = requireText(item.getBrand(), prefix + "品牌");
+        String categoryName = requireText(item.getCategory(), prefix + "品类");
+        // 品牌必填规则由品类配置/SCM 目录决定：报警器这类无品牌品类允许品牌为空
+        boolean brandRequired = scmClient.requiresBrand(corpId, categoryName);
+        String brand = brandRequired
+                ? requireText(item.getBrand(), prefix + "品牌", 50)
+                : optionalText(item.getBrand(), 50, prefix + "品牌");
         if (OLD_GOODS_BRAND.equals(brand)) {
             throw BusinessException.of(prefix + "旧品品牌不能作为销售商品，请选择正常商品");
         }
-        String categoryName = requireText(item.getCategory(), prefix + "品类");
         String model = requireText(item.getModel(), prefix + "型号");
         BigDecimal price = normalizePrice(item.getSalePrice(), prefix);
         int qty = item.getSaleQuantity() != null ? item.getSaleQuantity() : 0;
@@ -1970,8 +1974,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
             result.put("brands", opts.brands());
             result.put("categories", opts.categories());
             result.put("materials", opts.materials());
-            boolean empty = opts.brands().isEmpty() || opts.categories().isEmpty()
-                    || opts.materials().isEmpty();
+            boolean empty = opts.categories().isEmpty() || opts.materials().isEmpty();
             result.put("productError", empty
                     ? "供应链基础资料为空，请联系管理员在供应链管理模块同步品牌/商品类别/商品信息"
                     : null);

@@ -33,7 +33,7 @@ public final class ConstructActionDtos {
             String remark) {
     }
 
-    /** 拒绝接单/客户拒绝确认：原因必填（≥5 字）。 */
+    /** 拒绝接受/客户拒绝确认：原因必填（≥5 字）。 */
     public record ReasonRequest(String reason) {
     }
 }

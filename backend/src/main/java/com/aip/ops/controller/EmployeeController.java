@@ -6,6 +6,7 @@ import com.aip.ops.dto.BusinessRefundApplyRequest;
 import com.aip.ops.dto.CommunityCreateRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 import com.aip.ops.dto.ReceiptOcrFeedbackRequest;
+import com.aip.ops.client.ScmInventoryClient;
 import com.aip.ops.security.JwtTokenInspector;
 import com.aip.ops.service.BusinessAttachmentService;
 import com.aip.ops.service.BusinessDataService;
@@ -16,8 +17,8 @@ import com.aip.ops.service.EmployeeBusinessEntryService;
 import com.aip.ops.service.EmployeeService;
 import com.aip.ops.service.ProductPriceService;
 import com.aip.ops.service.ReceiptOcrService;
-import com.aip.ops.service.construct.ConstructionTaskHintService;
 import com.aip.ops.service.construct.OrderConstructService;
+import com.aip.ops.client.ScmBaseDataClient;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.result.R;
 import com.aip.sdk.security.LoginUser;
@@ -66,7 +67,8 @@ public class EmployeeController {
     private final JwtTokenInspector jwtTokenInspector;
     private final PlatformInternalClient platformInternalClient;
     private final OrderConstructService orderConstructService;
-    private final ConstructionTaskHintService constructionTaskHintService;
+    private final ScmInventoryClient scmInventoryClient;
+    private final ScmBaseDataClient scmBaseDataClient;
 
     @Value("${app.upload.base-dir:/home/jason/ops-platform-project/uploads}")
     private String uploadBaseDir;
@@ -155,21 +157,8 @@ public class EmployeeController {
         Object orderId = detail.get("orderId");
         if (orderId instanceof Number number) {
             attachConstruct(detail, number.longValue());
-            attachConstructionTaskHint(detail, taskId, number.longValue());
         }
         return R.ok(detail);
-    }
-
-    /** 施工完成节点提示随任务详情返回；非施工节点/加载失败不阻断主详情。 */
-    private void attachConstructionTaskHint(Map<String, Object> detail, Long taskId, Long orderId) {
-        try {
-            Object hint = constructionTaskHintService.constructTaskHint(taskId, orderId);
-            if (hint != null) {
-                detail.put("constructTaskHint", hint);
-            }
-        } catch (Exception e) {
-            log.warn("加载施工完成提示失败 taskId={}, orderId={}: {}", taskId, orderId, e.getMessage());
-        }
     }
 
     /** 施工状态链随详情返回；加载失败不阻断主详情。 */
@@ -385,6 +374,24 @@ public class EmployeeController {
         }
         return R.ok(productPriceService.lookupForEmployee(
                 SecurityUtils.getCurrentCorpIdOrNull(), productId, brand, category, model));
+    }
+
+    /**
+     * 型号库存（制单/审核只读参考）：本组织可用库存 + 同运营商其他城市合伙人库存。
+     * 库存不足不参与校验，仅展示提醒。
+     */
+    @GetMapping("/business-data/model-stock")
+    public R<?> modelStock(@RequestParam(required = false) Long materialId,
+                           @RequestParam(required = false) String brand,
+                           @RequestParam(required = false) String category,
+                           @RequestParam(required = false) String model) {
+        if ("sso".equals(jwtTokenInspector.currentTokenType())) {
+            return R.fail(403, "仅员工可查询库存");
+        }
+        Long corpId = SecurityUtils.getCurrentCorpIdOrNull();
+        String scmCategory = materialId == null
+                ? scmBaseDataClient.scmCategoryName(corpId, category) : category;
+        return R.ok(scmInventoryClient.modelStock(materialId, brand, scmCategory, model));
     }
 
     /**
