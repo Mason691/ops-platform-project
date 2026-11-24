@@ -21,28 +21,18 @@
     </picker>
     <text v-if="dateError" class="ferr">{{ dateError }}</text>
   </view>
-
-  <view class="field">
-    <text class="label">收据号</text>
-    <input class="text-input" :value="receiptNo" maxlength="50"
-           placeholder="选填，字母/数字/短横线/下划线/斜杠"
-           @input="$emit('update:receiptNo', $event.detail.value)" />
-    <text v-if="receiptNoError" class="ferr">{{ receiptNoError }}</text>
-  </view>
 </template>
 
 <script setup>
-/** 货款补录收款明细字段：方式/日期/收据号；校验由父页面统一执行。 */
+/** 货款补录收款明细字段：方式/日期；收据号与 OCR 由 ReceiptNoOcrField 负责。 */
 defineProps({
   paymentMethod: { type: String, default: 'QR' },
   receiptDate: { type: String, default: '' },
-  receiptNo: { type: String, default: '' },
   today: { type: String, default: '' },
   payError: { type: String, default: '' },
-  dateError: { type: String, default: '' },
-  receiptNoError: { type: String, default: '' }
+  dateError: { type: String, default: '' }
 })
-const emit = defineEmits(['update:paymentMethod', 'update:receiptDate', 'update:receiptNo'])
+const emit = defineEmits(['update:paymentMethod', 'update:receiptDate'])
 
 const payMethods = [
   { code: 'QR', label: '二维码' },
@@ -71,11 +61,6 @@ function onDate(event) {
   font-size: 28rpx; color: #1D2129; box-sizing: border-box;
 }
 .picker-arrow { color: #C9CDD4; font-size: 32rpx; }
-.text-input {
-  width: 100%; height: 88rpx !important; min-height: 88rpx !important;
-  padding: 0 20rpx; background: #f7f7f7; border-radius: 12rpx;
-  font-size: 28rpx; color: #1D2129; box-sizing: border-box;
-}
 .control-error { border: 1rpx solid #e53935; background: #FFF8F8; }
 .ferr { display: block; font-size: 22rpx; color: #e53935; margin-top: 6rpx; }
 </style>

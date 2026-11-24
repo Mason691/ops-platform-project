@@ -50,11 +50,15 @@
           <BalanceReceiptFields
             v-model:paymentMethod="form.paymentMethod"
             v-model:receiptDate="form.receiptDate"
-            v-model:receiptNo="form.receiptNo"
             :today="today"
             :pay-error="payError"
             :date-error="dateError"
-            :receipt-no-error="receiptNoError"
+          />
+          <ReceiptNoOcrField
+            v-model="form.receiptNo"
+            v-model:receipt-image="form.receiptImage"
+            :error="receiptNoError"
+            @change="receiptNoError = ''"
           />
           <view class="field">
             <text class="label">收款凭证 <text class="req">*</text></text>
@@ -85,10 +89,11 @@
 
 <script setup>
 import EmployeePageHead from '@/components/EmployeePageHead.vue'
-import { reactive, ref } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import BusinessSpecialFileUploader from '@/components/BusinessSpecialFileUploader.vue'
 import BalanceReceiptFields from '@/components/BalanceReceiptFields.vue'
+import ReceiptNoOcrField from '@/components/ReceiptNoOcrField.vue'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 
@@ -115,7 +120,12 @@ function localToday() {
 const today = localToday()
 const form = reactive({
   receivedAmount: '', paymentMethod: 'QR', receiptDate: today,
-  receiptNo: '', voucher: null, remark: ''
+  receiptNo: '', receiptImage: null, voucher: null, remark: ''
+})
+
+// 收据号变化（手填、识别回填或切换候选）后立即清除上一次的校验提示
+watch(() => form.receiptNo, () => {
+  if (receiptNoError.value) receiptNoError.value = ''
 })
 
 onLoad((options) => {
@@ -266,27 +276,18 @@ function back() {
 .label { display: block; font-size: 25rpx; color: #666; margin-bottom: 10rpx; }
 .req { color: #e53935; }
 .amount-input {
-  display: flex; align-items: center; background: #f7f7f7; border-radius: 12rpx;
-  padding: 0 20rpx; height: 88rpx;
+  display: flex; align-items: center; background: #f7f7f7; border-radius: 12rpx; padding: 0 20rpx; height: 88rpx;
 }
 .currency { font-size: 32rpx; color: #FF6B35; font-weight: 700; margin-right: 8rpx; }
 .input { flex: 1; height: 88rpx !important; min-height: 88rpx !important; font-size: 34rpx; color: #1D2129; }
 .textarea {
-  width: 100%; height: 140rpx !important; min-height: 140rpx !important;
-  background: #f7f7f7; border-radius: 12rpx; padding: 16rpx 20rpx;
-  font-size: 27rpx; color: #333; box-sizing: border-box;
+  width: 100%; height: 140rpx !important; min-height: 140rpx !important; background: #f7f7f7; border-radius: 12rpx; padding: 16rpx 20rpx; font-size: 27rpx; color: #333; box-sizing: border-box;
 }
 .control-error { border: 1rpx solid #e53935; background: #FFF8F8; }
 .hint { display: block; font-size: 21rpx; color: #999; margin-top: 8rpx; }
 .ferr { display: block; font-size: 22rpx; color: #e53935; margin-top: 6rpx; }
-.done-card {
-  margin-top: 16rpx; padding: 40rpx 24rpx; background: #fff; border-radius: 16rpx;
-  display: flex; flex-direction: column; align-items: center; gap: 10rpx;
-}
-.done-icon {
-  width: 80rpx; height: 80rpx; line-height: 80rpx; text-align: center; border-radius: 50%;
-  background: #07C160; color: #fff; font-size: 42rpx; font-weight: 700;
-}
+.done-card { margin-top: 16rpx; padding: 40rpx 24rpx; background: #fff; border-radius: 16rpx; display: flex; flex-direction: column; align-items: center; gap: 10rpx; }
+.done-icon { width: 80rpx; height: 80rpx; line-height: 80rpx; text-align: center; border-radius: 50%; background: #07C160; color: #fff; font-size: 42rpx; font-weight: 700; }
 .done-title { font-size: 30rpx; font-weight: 700; color: #1D2129; }
 .done-sub { font-size: 23rpx; color: #86909C; }
 .done-btn { margin-top: 16rpx; padding: 14rpx 48rpx; border-radius: 999rpx; background: #FF6B35; color: #fff; font-size: 25rpx; }
