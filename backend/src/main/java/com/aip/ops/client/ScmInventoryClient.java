@@ -15,6 +15,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.util.Map;
 
 /**
@@ -58,7 +59,8 @@ public class ScmInventoryClient {
         headers.set("Authorization", auth);
         headers.setAccept(java.util.List.of(MediaType.APPLICATION_JSON));
         try {
-            ResponseEntity<Map> resp = restTemplate.exchange(builder.encode().toUriString(),
+            URI uri = builder.build().encode().toUri();
+            ResponseEntity<Map> resp = restTemplate.exchange(uri,
                     HttpMethod.GET, new HttpEntity<>(headers), Map.class);
             Map<?, ?> body = resp.getBody();
             Object code = body == null ? null : body.get("code");
