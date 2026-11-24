@@ -241,6 +241,7 @@ function doLogout() {
 .page { min-height: 100vh; background: #f5f5f5; padding-bottom: 130rpx; }
 .header { background: linear-gradient(135deg, #FF6B35, #FF8C5A); padding: 60rpx 32rpx 48rpx; text-align: center; }
 .avatar { width: 120rpx; height: 120rpx; border-radius: 50%; border: 4rpx solid rgba(255,255,255,.4); }
+.avatar-hint { display: block; margin-top: 10rpx; font-size: 22rpx; color: #fff; }
 .name { display: block; font-size: 36rpx; color: #fff; font-weight: 700; margin-top: 20rpx; }
 .phone { display: block; font-size: 26rpx; color: rgba(255,255,255,.7); margin-top: 8rpx; }
 .cards { margin: 24rpx; background: #fff; border-radius: 16rpx; padding: 8rpx 0; }
