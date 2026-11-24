@@ -196,6 +196,8 @@
         </view>
       </view>
 
+      <DepositBalanceInfo v-if="showDepositBalanceInfo" :order="order" />
+
       <ConstructFlowActions v-if="isBusinessOrder && isConstructFlowNode"
                             :order-id="order.orderId" :construct="order.construct"
                             @changed="onConstructChanged" />
@@ -434,6 +436,7 @@ import DispatchMaterialList from '@/components/DispatchMaterialList.vue'
 import AcceptanceEvidence from '@/components/AcceptanceEvidence.vue'
 import DispatchWorkerPicker from '@/components/DispatchWorkerPicker.vue'
 import ConstructFlowActions from '@/components/ConstructFlowActions.vue'
+import DepositBalanceInfo from '@/components/DepositBalanceInfo.vue'
 import ProductStockInfo from '@/components/ProductStockInfo.vue'
 import BusinessAttachmentUploader from '@/components/BusinessAttachmentUploader.vue'
 
@@ -580,6 +583,15 @@ const isScmWriteOff = computed(() => businessType.value === 'MATERIAL_WRITE_OFF'
 const isBusinessOrder = computed(() => !isPurchase.value
   && !isMaterialRequisition.value && !isMaterialWriteOff.value
   && !isScmPick.value && !isScmWriteOff.value)
+/** 定金支付且尾款已补录：财务核对、派工出库任务页展示定金/尾款与收据信息 */
+const showDepositBalanceInfo = computed(() => {
+  if (!isBusinessOrder.value) return false
+  if (!['OPS_FINANCE_CHECK', 'OPS_DISPATCH_OUTBOUND'].includes(actionType.value)) return false
+  const o = order.value || {}
+  if (String(o.paymentType || '') !== 'DEPOSIT' || Number(o.isFullPayment) !== 1) return false
+  // is_full_payment 历史空值会被后端兜底为 1，必须有尾款补录痕迹才展示
+  return o.balanceReceivedAmount != null || !!o.balancePaidAt || !!o.balanceVoucherUrl
+})
 /** 任务是否仍待处理：或签被他人处理后状态为 SKIPPED，不能再提交 */
 const taskPending = computed(() => {
   const task = detail.value && detail.value.task
