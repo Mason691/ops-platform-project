@@ -49,6 +49,7 @@ const props = defineProps({
   quantity: { type: [Number, String], default: null },
   compact: { type: Boolean, default: false }
 })
+const emit = defineEmits(['loaded'])
 
 const CACHE_TTL_MS = 30 * 1000
 const cache = new Map()
@@ -105,6 +106,7 @@ async function load(force = false) {
     if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
       data.value = cached.data
       error.value = false
+      emit('loaded', cached.data)
       return
     }
   }
@@ -115,7 +117,10 @@ async function load(force = false) {
     const result = await api.employeeModelStock(params())
     if (token !== requestToken) return
     data.value = result || null
-    if (result) cache.set(key, { data: result, ts: Date.now() })
+    if (result) {
+      cache.set(key, { data: result, ts: Date.now() })
+      emit('loaded', result)
+    }
   } catch (e) {
     if (token === requestToken) error.value = !data.value
   } finally {

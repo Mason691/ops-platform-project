@@ -999,22 +999,10 @@ public class BusinessDataServiceImpl implements BusinessDataService {
     private Map<String, Object> buildOrderView(List<OpsBusinessData> rows, OpsBusinessOrder master) {
         rows.sort(Comparator.comparing(OpsBusinessData::getId));
         OpsBusinessData first = rows.get(0);
-        Map<String, List<OpsBusinessData>> productGroups = new LinkedHashMap<>();
-        for (OpsBusinessData row : rows) {
-            // 退货分录按退货单单独成组，保证正/负分录并列展示且金额各计一次
-            String key = (isReturnEntry(row) ? "RET|" + row.getSourceReturnId() + "|" : "")
-                    + Objects.toString(row.getCategory(), "") + "|"
-                    + Objects.toString(row.getBrand(), "") + "|"
-                    + Objects.toString(row.getModel(), "") + "|"
-                    + priceKey(row.getSalePrice());
-            productGroups.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
-        }
-        List<Map<String, Object>> products = new ArrayList<>();
+        List<Map<String, Object>> products = buildProducts(rows);
         BigDecimal computedAmount = BigDecimal.ZERO;
         BigDecimal computedCommission = BigDecimal.ZERO;
-        for (List<OpsBusinessData> productRows : productGroups.values()) {
-            Map<String, Object> product = buildProductView(productRows);
-            products.add(product);
+        for (Map<String, Object> product : products) {
             computedAmount = computedAmount.add((BigDecimal) product.get("receiptAmount"));
             computedCommission = computedCommission.add((BigDecimal) product.get("commissionAmount"));
         }
@@ -1289,6 +1277,33 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         return masterValue != null ? masterValue : firstNonNull(rows, getter);
     }
 
+    /** 订单商品分组：品类+品牌+型号+单价；退货按退货单单独成组。 */
+    private List<Map<String, Object>> buildProducts(List<OpsBusinessData> rows) {
+        rows.sort(Comparator.comparing(OpsBusinessData::getId));
+        Map<String, List<OpsBusinessData>> productGroups = new LinkedHashMap<>();
+        for (OpsBusinessData row : rows) {
+            // 退货分录按退货单单独成组，保证正/负分录并列展示且金额各计一次
+            String key = (isReturnEntry(row) ? "RET|" + row.getSourceReturnId() + "|" : "")
+                    + Objects.toString(row.getCategory(), "") + "|"
+                    + Objects.toString(row.getBrand(), "") + "|"
+                    + Objects.toString(row.getModel(), "") + "|"
+                    + priceKey(row.getSalePrice());
+            productGroups.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
+        }
+        List<Map<String, Object>> products = new ArrayList<>();
+        for (List<OpsBusinessData> productRows : productGroups.values()) {
+            products.add(buildProductView(productRows));
+        }
+        return products;
+    }
+
+    @Override
+    public List<Map<String, Object>> listProductsForOrder(Long orderId) {
+        if (orderId == null) return List.of();
+        List<OpsBusinessData> rows = orderMapper.selectItems(orderId);
+        return rows == null || rows.isEmpty() ? List.of() : buildProducts(rows);
+    }
+
     private Map<String, Object> buildProductView(List<OpsBusinessData> rows) {
         rows.sort(Comparator.comparing(OpsBusinessData::getId));
         OpsBusinessData first = rows.get(0);
@@ -1347,6 +1362,9 @@ public class BusinessDataServiceImpl implements BusinessDataService {
         product.put("sourceReturnId", first.getSourceReturnId());
         product.put("sourceReturnNo", first.getSourceReturnNo());
         product.put("rowIds", rows.stream().map(OpsBusinessData::getId).toList());
+        // 同商品组任一行被部长勾选即视为该商品需要向上采购（保存时整组同写）
+        product.put("isUpwardPurchase", rows.stream()
+                .anyMatch(row -> Integer.valueOf(1).equals(row.getIsUpwardPurchase())));
         return product;
     }
 

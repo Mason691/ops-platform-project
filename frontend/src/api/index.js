@@ -288,9 +288,13 @@ export const api = {
   workflowReject: (data) => request({url:'/api/wf/task/reject', method:'POST', data}),
   workflowMyLogs: (params) => request({url:'/api/wf/log/my', data:params}),
   workflowLogDetail: (key) => request({url:'/api/wf/log/detail', data:{key}}),
-  // SCM 采购（已核对业务 → 发起采购申请；总经办 H5 核审）
-  scmFinanceCheckedOrders: () => request({url:'/api/scm/pur-order/h5/finance-checked-orders'}),
+  // SCM 采购（向上采购申请 → 发起采购订单草稿；总经办 H5 核审）
   scmCreatePurchaseRequest: (data) => request({url:'/api/scm/pur-order/h5/purchase-requests', method:'POST', data}),
+  // 向上采购申请（ops 记录：部长勾选 → 财务核对生成待发起 → H5 发起）
+  upwardPurchasePage: (params) => request({url:'/api/ops/employee/upward-purchase/page', data:params}),
+  upwardPurchasePendingCount: () => request({url:'/api/ops/employee/upward-purchase/pending-count'}),
+  upwardPurchasePendingItems: (orderId) => request({url:'/api/ops/employee/upward-purchase/pending-items', data:{orderId}}),
+  upwardPurchaseMarkRequested: (data) => request({url:'/api/ops/employee/upward-purchase/requested', method:'POST', data}),
   scmPurOrderDetail: (id) => request({url:'/api/scm/pur-order/h5/' + id}),
   scmPurOrderApprove: (data) => request({url:'/api/scm/pur-order/h5/workflow/approve', method:'POST', data}),
   scmPurOrderReject: (data) => request({url:'/api/scm/pur-order/h5/workflow/reject', method:'POST', data}),

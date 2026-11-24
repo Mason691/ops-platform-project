@@ -271,7 +271,25 @@
                               :category="p.category || ''"
                               :model="p.model || ''"
                               :quantity="p.saleQuantity"
-                              compact />
+                              compact
+                              @loaded="onProductStockLoaded(p, $event)" />
+            <template v-if="!p.isReturnEntry">
+              <view v-if="isMinisterReviewTask && taskPending" class="upward-row"
+                    @click="toggleUpwardPurchase(p)">
+                <view class="upward-check" :class="{ on: isUpwardChecked(p) }">
+                  <text v-if="isUpwardChecked(p)">✓</text>
+                </view>
+                <text class="upward-label">是否向上采购该商品</text>
+                <text v-if="isUpwardChecked(p)" class="upward-tag">需要向上采购申请</text>
+              </view>
+              <view v-else-if="isMinisterReviewTask || actionType === 'OPS_FINANCE_CHECK'"
+                    class="upward-readonly">
+                <text class="upward-readonly-label">向上采购</text>
+                <text class="upward-readonly-value" :class="{ on: isUpwardChecked(p) }">
+                  {{ isUpwardChecked(p) ? '是' : '否' }}
+                </text>
+              </view>
+            </template>
           </view>
           <text class="product-amount" :class="{ negative: Number(p.receiptAmount) < 0 }">{{ money(p.receiptAmount) }}</text>
         </view>
@@ -469,6 +487,12 @@ const refreshing = ref(false)
 let pageReady = false
 let dispatchRefreshTimer = null
 const DISPATCH_REFRESH_MS = 30 * 1000
+/** 向上采购勾选：productKey -> boolean；部长审核可改，财务核对只读 */
+const upwardSelections = ref({})
+/** 用户手动操作过的商品，库存加载后不再自动改默认值 */
+const upwardTouched = ref({})
+/** 财务核对时随表单提交的库存快照：productKey -> {localStock, unit, others} */
+const stockSnapshots = ref({})
 
 const form = reactive({
   receiptNo: '', financeReceiptDate: '', fundDynamicRows: null,
@@ -593,12 +617,16 @@ const isScmWriteOff = computed(() => businessType.value === 'MATERIAL_WRITE_OFF'
 const isBusinessOrder = computed(() => !isPurchase.value
   && !isMaterialRequisition.value && !isMaterialWriteOff.value
   && !isScmPick.value && !isScmWriteOff.value)
-/** 部长审核节点未配置 actionType，按业务订单流程的节点顺序与名称识别 */
+/** 部长审核节点：新流程已配置 actionType；旧数据按节点顺序/名称兜底识别 */
 const isMinisterReviewTask = computed(() => {
+  if (actionType.value === 'OPS_MINISTER_REVIEW') return true
   const node = detail.value && detail.value.node
   return !!node && Number(node.nodeOrder) === 2
     && String(node.nodeName || '').includes('部长')
 })
+/** 已提交过部长审核（返工时保留上次勾选，不再按库存自动默认） */
+const hasMinisterReviewed = computed(() => (order.value.flowRecords || [])
+  .some(record => record && record.actionType === 'OPS_MINISTER_REVIEW'))
 /** 定金支付且尾款已补录：部长审核、财务核对、派工出库任务页展示定金/尾款与收据信息 */
 const showDepositBalanceInfo = computed(() => {
   if (!isBusinessOrder.value) return false
@@ -688,6 +716,7 @@ const actionTitle = computed(() => {
     return '提交验收申请'
   }
   return {
+    OPS_MINISTER_REVIEW: '部长审核',
     OPS_FINANCE_CHECK: '财务核对',
     OPS_DISPATCH_OUTBOUND: '派工出库',
     OPS_CONSTRUCTION_RECORD: '施工记录',
@@ -709,6 +738,56 @@ const dispatchProducts = computed(() => (order.value.products || [])
 function onWorkerSelected(worker) {
   selectedWorker.value = worker || null
   form.assignSource = worker?.createdOnSite ? 'CREATED_ON_SITE' : 'SELECTED'
+}
+
+/** 部长/财务按商品分组读取向上采购勾选；财务与已处理任务只读。 */
+function isUpwardChecked(product) {
+  return !!upwardSelections.value[product.productKey]
+}
+
+function toggleUpwardPurchase(product) {
+  if (!isMinisterReviewTask.value || !taskPending.value) return
+  const key = product.productKey
+  if (!key) return
+  upwardTouched.value = { ...upwardTouched.value, [key]: true }
+  upwardSelections.value = {
+    ...upwardSelections.value,
+    [key]: !upwardSelections.value[key]
+  }
+}
+
+/**
+ * 库存加载完成：财务核对留快照；首次部长审核且本组织库存为 0 时默认勾选。
+ * 已审核过（返工）或用户手动操作过的不再自动改，避免覆盖人工决定。
+ */
+function onProductStockLoaded(product, stock) {
+  const key = product && product.productKey
+  if (!key || !stock || product.isReturnEntry) return
+  stockSnapshots.value = {
+    ...stockSnapshots.value,
+    [key]: {
+      localStock: stock.currentStock,
+      unit: stock.unit || '',
+      // 仅保存前 10 个组织快照，完整实时库存由列表页重新查询，避免 formData 过大
+      others: (stock.others || []).slice(0, 10)
+    }
+  }
+  if (!isMinisterReviewTask.value || !taskPending.value || hasMinisterReviewed.value) return
+  if (upwardTouched.value[key]) return
+  if (Number(stock.currentStock) > 0) return
+  upwardSelections.value = { ...upwardSelections.value, [key]: true }
+}
+
+/** 回显部长上次勾选；未审核过的商品默认不勾选，待库存加载后按 0 库存自动勾选。 */
+function initUpwardSelections() {
+  const selections = {}
+  for (const product of order.value.products || []) {
+    if (product.isReturnEntry || !product.productKey) continue
+    selections[product.productKey] = Number(product.isUpwardPurchase) === 1
+  }
+  upwardSelections.value = selections
+  upwardTouched.value = {}
+  stockSnapshots.value = {}
 }
 
 /** 施工工单只允许施工员：切换工单类型时清掉不符合角色的已选人员 */
@@ -783,6 +862,7 @@ async function loadData() {
     // 统一走按 taskId 鉴权的员工端接口，避免 /api/ops/admin 对外部用户 403。
     order.value = await api.businessTaskOrderDetail(taskId.value)
     restoreEvidenceDraft()
+    initUpwardSelections()
     const r = order.value || {}
     form.receiptNo = r.receiptNo || ''
     form.financeReceiptDate = normalizeDate(r.financeReceiptDate || r.receiptDate)
@@ -964,6 +1044,22 @@ function buildFormData() {
     data.constructionAttachmentIds = (form.constructionPhotos || [])
       .map(file => file.id).filter(Boolean)
     delete data.constructionPhotos
+  }
+  if (actionType.value === 'OPS_MINISTER_REVIEW') {
+    // 每条商品独立勾选；后端按 rowIds 整组写入 is_upward_purchase
+    data.upwardPurchaseItems = (order.value.products || [])
+      .filter(product => !product.isReturnEntry && product.productKey)
+      .map(product => ({
+        productKey: product.productKey,
+        rowIds: product.rowIds || [],
+        checked: isUpwardChecked(product)
+      }))
+  }
+  if (actionType.value === 'OPS_FINANCE_CHECK') {
+    // 财务核对通过时才生成待发起记录，库存快照只随 PASS 提交（暂缓接口不接收该字段）
+    if (form.checkConclusion === 'PASS') {
+      data.stockSnapshots = stockSnapshots.value
+    }
   }
   return data
 }
@@ -1481,6 +1577,15 @@ function goBack() {
 .inbound-done-sub { font-size: 21rpx; color: #3D8B62; }
 .product-trade { display: block; margin-top: 6rpx; font-size: 21rpx; color: #B26A00; }
 .product-old { display: block; margin-top: 4rpx; font-size: 20rpx; color: #A9812F; line-height: 1.5; }
+.upward-row { display: flex; align-items: center; gap: 10rpx; margin-top: 10rpx; padding: 12rpx 16rpx; background: #FFF7F2; border: 1rpx solid #FFE1D2; border-radius: 10rpx; }
+.upward-check { width: 32rpx; height: 32rpx; border: 2rpx solid #C9CDD4; border-radius: 8rpx; display: flex; align-items: center; justify-content: center; background: #fff; flex-shrink: 0; }
+.upward-check.on { background: #FF6B35; border-color: #FF6B35; color: #fff; font-size: 22rpx; font-weight: 700; }
+.upward-label { font-size: 23rpx; color: #4E5969; flex: 1; }
+.upward-tag { font-size: 20rpx; color: #C75A00; background: #FFF1E8; padding: 4rpx 8rpx; border-radius: 6rpx; flex-shrink: 0; }
+.upward-readonly { display: flex; align-items: center; gap: 10rpx; margin-top: 8rpx; font-size: 22rpx; }
+.upward-readonly-label { color: #86909C; }
+.upward-readonly-value { color: #86909C; font-weight: 600; }
+.upward-readonly-value.on { color: #C75A00; }
 .block-alert {
   margin: 0 0 16rpx; padding: 18rpx 20rpx; border-radius: 12rpx;
   background: #FFF7E6; border: 2rpx solid #FFD591; color: #B26A00;

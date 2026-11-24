@@ -221,6 +221,10 @@ public class OpsBusinessData extends BaseEntity {
     @TableField("calc_status")
     private String calcStatus;
 
+    /** 是否向上采购：1是 0否；部长审核写入，财务核对只读。 */
+    @TableField("is_upward_purchase")
+    private Integer isUpwardPurchase;
+
     /** 备注（Excel 备注列直接映射） */
     @TableField("remark")
     private String remark;
