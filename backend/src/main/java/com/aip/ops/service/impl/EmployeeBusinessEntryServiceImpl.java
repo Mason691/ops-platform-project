@@ -26,6 +26,7 @@ import com.aip.ops.service.BusinessSpecialFileService;
 import com.aip.ops.service.EmployeeBusinessEntryService;
 import com.aip.ops.service.GasMemberMatcher;
 import com.aip.ops.service.ProductPriceService;
+import com.aip.ops.util.OrderPartyText;
 import com.aip.ops.util.PaymentMethod;
 import com.aip.sdk.client.PlatformInternalClient;
 import com.aip.sdk.exception.BusinessException;
@@ -36,6 +37,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -44,6 +46,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.Normalizer;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -119,6 +122,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private final ProductPriceService productPriceService;
     private final BusinessSpecialFileService specialFileService;
     private final BusinessAttachmentService attachmentService;
+    private final WorkflowPlatformClient workflowPlatformClient;
+    private final ThreadPoolTaskExecutor workflowTaskExecutor;
 
     private TransactionTemplate transactionTemplate;
 
@@ -907,8 +912,96 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
                 .normalizeDate(request.getReceiptDate());
         String receiptNo = com.aip.ops.util.BalanceReceiptRules
                 .normalizeOptionalReceiptNo(request.getReceiptNo());
-        return transactionTemplate.execute(status -> doReceiveBalance(
+        Map<String, Object> result = transactionTemplate.execute(status -> doReceiveBalance(
                 ctx, orderId, amount, method, receiptDate, receiptNo, voucher, remark));
+        // 尾款已结清：异步通知当前派工节点审批人可派工；通知失败不影响收款结果。
+        // 订单必须在请求线程按租户上下文加载，异步线程没有 SecurityContext，
+        // 直接查 orderService 会被租户过滤器拦截为空。
+        if (result != null && !Boolean.TRUE.equals(result.get("alreadyReceived"))) {
+            try {
+                OpsBusinessOrder latest = orderService.getById(orderId);
+                if (latest != null) {
+                    workflowTaskExecutor.execute(() -> notifyBalancePaid(
+                            latest, ctx.employeeName(), ctx.employeePhone()));
+                }
+            } catch (Exception e) {
+                log.warn("尾款结清通知调度失败 orderId={}: {}", orderId, e.getMessage());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 尾款结清后通知派工节点审批人（部长/派工员）可派工。
+     *
+     * <p>仅通知当前 PENDING 的派工任务处理人；订单尚未进入派工节点时
+     * 由工作流后续进入节点时正常发待办通知。通知失败只记日志。</p>
+     */
+    private void notifyBalancePaid(OpsBusinessOrder order, String operatorName,
+                                   String operatorPhone) {
+        if (order == null || order.getWfInstanceId() == null) return;
+        try {
+            List<Map<String, Object>> tasks = pendingDispatchTasks(order.getWfInstanceId());
+            if (tasks.isEmpty()) return;
+            Map<String, Object> baseVars = balancePaidVars(order, operatorName, operatorPhone);
+            tasks.forEach(task -> sendBalancePaidNotice(order, task, baseVars));
+            log.info("尾款结清通知已提交 orderId={}, instanceId={}, receiverCount={}",
+                    order.getId(), order.getWfInstanceId(), tasks.size());
+        } catch (Exception e) {
+            log.warn("尾款结清通知失败 orderId={}: {}",
+                    order == null ? null : order.getId(), e.getMessage());
+        }
+    }
+
+    /** 当前仍在派工节点（当前节点 + PENDING）的审批人；同一审批人只取一条任务。 */
+    private List<Map<String, Object>> pendingDispatchTasks(Long instanceId) {
+        return jdbcTemplate.queryForList(
+                "SELECT t.approver_user_id AS approverUserId, MIN(t.id) AS taskId "
+                        + "FROM ai_platform.wf_task t "
+                        + "JOIN ai_platform.wf_instance i ON i.id = t.instance_id "
+                        + "  AND i.current_node_id = t.node_id "
+                        + "  AND i.status = 'RUNNING' AND i.delete_flag = 0 "
+                        + "JOIN ai_platform.wf_definition_node n ON n.id = t.node_id "
+                        + "WHERE t.instance_id = ? AND t.status = 'PENDING' "
+                        + "AND t.delete_flag = 0 AND t.cc_flag = 0 "
+                        + "AND n.delete_flag = 0 "
+                        + "AND n.action_type = 'OPS_DISPATCH_OUTBOUND' "
+                        + "AND t.approver_user_id IS NOT NULL "
+                        + "GROUP BY t.approver_user_id ORDER BY MIN(t.id)",
+                instanceId);
+    }
+
+    /** 尾款结清通知变量：经办人姓名/电话用于部长催收或派工前联系。 */
+    private Map<String, Object> balancePaidVars(OpsBusinessOrder order, String operatorName,
+                                                String operatorPhone) {
+        Map<String, Object> vars = new LinkedHashMap<>();
+        vars.put("orderNo", order.getOrderNo());
+        vars.put("businessSummary", "订单" + str(order.getOrderNo()) + "尾款已结清，可派工");
+        vars.put("nodeName", "尾款结清");
+        vars.put("changeAction", "尾款结清");
+        vars.put("handlerName", OrderPartyText.primaryName(order.getAgentNames()));
+        String phone = OrderPartyText.primaryPhone(order.getAgentPhones());
+        if (phone.isEmpty()) phone = str(order.getCustomerPhone());
+        if (phone.isEmpty()) phone = str(operatorPhone);
+        vars.put("handlerPhone", phone);
+        vars.put("operatorName", str(operatorName).isEmpty() ? "系统" : operatorName);
+        vars.put("remark", "订单尾款已结清，可派工出库");
+        vars.put("submitTime", LocalDateTime.now().format(
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        return vars;
+    }
+
+    private void sendBalancePaidNotice(OpsBusinessOrder order, Map<String, Object> task,
+                                       Map<String, Object> baseVars) {
+        Long taskId = longVal(task.get("taskId"));
+        Long receiverUserId = longVal(task.get("approverUserId"));
+        if (taskId == null || receiverUserId == null) return;
+        Map<String, Object> vars = new LinkedHashMap<>(baseVars);
+        vars.put("taskId", taskId);
+        workflowPlatformClient.notifyBusinessProgress(
+                WorkflowPlatformClient.SCENE_BALANCE_PAID,
+                order.getWfInstanceId(), receiverUserId, vars,
+                "BALANCE_PAID:" + order.getId() + ":" + taskId);
     }
 
     /** 事务内：行锁订单 → 重新校验经办人/付款方式/金额 → 原子置全款。 */
