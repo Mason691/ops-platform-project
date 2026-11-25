@@ -2,6 +2,17 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-25（施工员拒绝接受任务原因输入框无法输入修复）
+
+- **根因**：`ConstructReasonDialog` 的 textarea 只设置 `min-height:180rpx`，被 `App.vue` 全局 `uni-textarea{height:auto!important;min-height:auto!important}` 覆盖，宿主高度塌陷，内层绝对定位 textarea 高度为 0，点击无法聚焦、键盘不弹出。
+- **修复**：
+  - 显式 `height/min-height:240rpx !important` 撑开宿主，恢复中文/多行输入；
+  - 打开弹层时 `focus` 属性复位→置真 + DOM `textarea.focus()` 兜底，适配微信 WebView；
+  - `maxlength=200`，空值就地提示“请填写驳回原因”，少于 5 字提示“原因不少于5个字”；
+  - `ConstructFlowActions` 按“拒绝接受/客户拒绝”传对应占位与必填文案；
+  - 同源修复 `ArriveCheckIn` 备注 textarea 的宿主高度（同一全局样式陷阱）。
+- **验证**：`npm run build:h5` 通过；编译产物 CSS 已含 `height:7.5rem!important`（240rpx）。微信开发者工具/真机端到端待验证。
+
 ## 2026-11-25（物料领用核销通过后推送金蝶其他出库单）
 
 - **触发点（架构决策）**：新流程领用/打印不扣库存，只有核销通过（状态 4）才写负数 `MATERIAL_WRITE_OFF` 并生成 `HXC-` 核销出库单，因此金蝶「其他出库单」在**核销通过时**推送，而非领用单状态 1。需求原文的“领用审批通过即扣库存/推送”对应旧流程；若在领用阶段推送会造成金蝶先扣、平台后扣的账实差异。
