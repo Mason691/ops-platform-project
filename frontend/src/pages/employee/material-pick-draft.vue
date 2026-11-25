@@ -5,7 +5,7 @@
         <text class="title">物料领用单</text>
         <EmployeeHomeLink />
       </view>
-      <text class="sub">补充领用仓库与批次后提交本组织部长审批；提交前请确认数量</text>
+      <text class="sub">补充领用仓库与批次后提交本组织部长审批；已审核单修改后需重新审批</text>
     </view>
 
     <view v-if="loading" class="state"><text>加载中...</text></view>
@@ -21,7 +21,24 @@
         <view class="kv"><text class="k">领用事由</text><text class="v">{{ reasonLabel(detail.pickReason) }}</text></view>
         <view class="kv"><text class="k">领用人</text><text class="v">{{ detail.pickerName || '—' }}</text></view>
         <view class="kv"><text class="k">状态</text>
-          <text class="v" :class="materialPickStatusClass(detail.approvalStatus)">{{ materialPickStatusLabel(detail.approvalStatus) }}</text>
+          <text class="v" :class="materialPickStatusClass(detail.status)">{{ detail.statusName || materialPickStatusLabel(detail.status) }}</text>
+        </view>
+        <view v-if="detail.inApproval" class="kv">
+          <text class="k">部长审核</text>
+          <text class="v pending">审核中 · {{ detail.currentApproverDisplay || '审批人待分配' }}</text>
+        </view>
+        <view v-else-if="detail.approvedByName" class="kv">
+          <text class="k">部长审核</text>
+          <text class="v">{{ detail.approvedByName }} · {{ formatTime(detail.approvedTime) }}</text>
+        </view>
+        <view v-else-if="detail.approvalRemark" class="kv">
+          <text class="k">审批意见</text>
+          <text class="v warn">{{ detail.approvalRemark }}</text>
+        </view>
+        <view v-if="detail.printTime" class="kv">
+          <text class="k">库管打印</text>
+          <text class="v">{{ detail.printByName || '库管' }} · {{ formatTime(detail.printTime) }}
+            （{{ detail.printCount || 0 }} 次）</text>
         </view>
         <view class="field">
           <text class="label">领用仓库</text>
@@ -50,6 +67,22 @@
         <text v-else class="order-unavailable">
           {{ detail.taskOrder.statusLabel || '无权查看该工单' }}
         </text>
+      </view>
+
+      <view v-if="detail.status === '4'" class="card jdy-card">
+        <view class="kv">
+          <text class="k">金蝶其他出库</text>
+          <text class="v" :class="detail.jdySyncStatus === 'PUSH_FAILED' ? 'warn' : ''">
+            {{ materialPickJdyStatusLabel(detail.jdySyncStatus) }}
+          </text>
+        </view>
+        <view v-if="detail.jdyBillno" class="kv">
+          <text class="k">金蝶单号</text><text class="v">{{ detail.jdyBillno }}</text>
+        </view>
+        <view v-if="detail.pushError" class="kv">
+          <text class="k">同步提示</text><text class="v warn">{{ detail.pushError }}</text>
+        </view>
+        <text class="jdy-hint">本地库存已扣减；金蝶同步失败请联系库管/供应链在 PC 端重试推送。</text>
       </view>
 
       <view class="section">
@@ -94,7 +127,7 @@
           <text>{{ saving ? '保存中...' : '保存草稿' }}</text>
         </view>
         <view class="btn primary footer-btn" :class="{ disabled: submitting }" @click="submit">
-          <text>{{ submitting ? '提交中...' : '提交审批' }}</text>
+          <text>{{ submitting ? '提交中...' : '提交部长审批' }}</text>
         </view>
       </view>
     </template>
@@ -128,9 +161,11 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
+import { formatTime } from '@/utils/materialForm'
 import {
   materialPickStatusLabel,
-  materialPickStatusClass
+  materialPickStatusClass,
+  materialPickJdyStatusLabel
 } from '@/utils/materialPickStatus'
 
 /**
@@ -154,8 +189,11 @@ const form = ref({ stockNumber: null })
 let rowKey = 0
 
 const editable = computed(() => {
-  const status = detail.value && detail.value.approvalStatus
-  return status === 'DRAFT' || status === 'REJECTED'
+  const d = detail.value
+  if (!d) return false
+  // 0 未审核（非审批中）或 1 已审核：修改后回到 0，需部长重新审批
+  if (String(d.status) === '0') return !d.inApproval
+  return String(d.status) === '1'
 })
 const warehouseLabels = computed(() => warehouses.value.map(w => w.name || w.number))
 const warehouseName = computed(() => {
@@ -234,7 +272,8 @@ async function refreshRowStock(row) {
     row.available = await api.scmMaterialPickStock({
       stockNumber: form.value.stockNumber,
       materialNumber: row.materialNumber,
-      batchNo: row.batchNo || ''
+      batchNo: row.batchNo || '',
+      pickId: id.value
     })
   } catch (e) {
     row.available = null
@@ -559,4 +598,8 @@ function openTaskOrder(item) {
 .stock-row { display: flex; justify-content: space-between; align-items: center; padding: 20rpx 4rpx; border-bottom: 1rpx solid #F2F3F5; }
 .stock-main { display: flex; flex-direction: column; gap: 4rpx; }
 .stock { font-size: 24rpx; color: #00B42A; }
+.jdy-card { background: #FBFDFC; }
+.jdy-card .kv { align-items: flex-start; padding: 10rpx 0; }
+.jdy-card .v { word-break: break-all; line-height: 1.5; }
+.jdy-hint { display: block; margin-top: 10rpx; color: #86909C; font-size: 24rpx; line-height: 1.5; }
 </style>

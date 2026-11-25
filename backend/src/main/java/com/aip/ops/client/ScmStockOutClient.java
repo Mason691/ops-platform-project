@@ -65,6 +65,101 @@ public class ScmStockOutClient {
         }
     }
 
+    /** 施工员接受派工：SCM 领用单 0 未审核 → 1 已审核（幂等）。 */
+    public void dispatchAccepted(Long corpId, Long sourceDispatchId, Long workerUserId) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("corpId", corpId);
+        body.put("sourceDispatchId", sourceDispatchId);
+        body.put("workerUserId", workerUserId);
+        postInternal("/api/internal/scm/material-pick/dispatch-accepted", body,
+                "物料领用单状态同步失败");
+    }
+
+    /** 施工员拒绝派工：SCM 领用单逻辑删除并留痕（幂等）。 */
+    public void dispatchRejected(Long corpId, Long sourceDispatchId, String reason,
+                                 Long operatorUserId, String operatorName) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("corpId", corpId);
+        body.put("sourceDispatchId", sourceDispatchId);
+        body.put("reason", reason);
+        body.put("operatorUserId", operatorUserId);
+        body.put("operatorName", operatorName);
+        postInternal("/api/internal/scm/material-pick/dispatch-rejected", body,
+                "物料领用单删除失败");
+    }
+
+    private void postInternal(String path, Map<String, Object> body, String errorPrefix) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Internal-Token", internalToken);
+        try {
+            Map<String, Object> resp = restTemplate.postForObject(
+                    baseUrl + path, new HttpEntity<>(body, headers), Map.class);
+            Object code = resp == null ? null : resp.get("code");
+            if (code != null && !"200".equals(String.valueOf(code))
+                    && !Integer.valueOf(200).equals(code)) {
+                throw BusinessException.of(errorPrefix + "："
+                        + Objects.toString(resp.get("msg"), "未知错误"));
+            }
+        } catch (RestClientResponseException e) {
+            log.warn("SCM 物料领用联动失败 path={}, status={}, body={}",
+                    path, e.getStatusCode().value(), e.getResponseBodyAsString());
+            throw BusinessException.of(errorPrefix + "：" + extractError(e.getResponseBodyAsString()));
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("SCM 物料领用联动异常 path={}: {}", path, e.getMessage());
+            throw BusinessException.of("供应链服务不可用，请稍后重试");
+        }
+    }
+
+    /**
+     * 拒绝接单后重新派工：只为新施工员生成物料领用单（销售出库单复用原有单据）。
+     * SCM 按 (corp_id, source_dispatch_id=新 taskId) 幂等。
+     */
+    public MaterialPickResult createMaterialPick(ScmDispatchOutboundRequest request) {
+        String url = baseUrl + "/api/internal/scm/material-pick/from-dispatch";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Internal-Token", internalToken);
+        try {
+            Map<String, Object> resp = restTemplate.postForObject(
+                    url, new HttpEntity<>(request, headers), Map.class);
+            Map<String, Object> data = responseData(resp);
+            if (data == null || data.get("id") == null) {
+                return null;
+            }
+            return new MaterialPickResult(((Number) data.get("id")).longValue(),
+                    Objects.toString(data.get("billNo"), null));
+        } catch (RestClientResponseException e) {
+            log.warn("SCM 生成物料领用单失败 dispatchId={}, status={}, body={}",
+                    request.dispatchId(), e.getStatusCode().value(), e.getResponseBodyAsString());
+            throw BusinessException.of("生成物料领用单失败：" + extractError(e.getResponseBodyAsString()));
+        } catch (Exception e) {
+            log.warn("SCM 生成物料领用单异常 dispatchId={}: {}", request.dispatchId(), e.getMessage());
+            throw BusinessException.of("供应链服务不可用，请稍后重试");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> responseData(Map<String, Object> resp) {
+        if (resp == null) {
+            return null;
+        }
+        Object code = resp.get("code");
+        boolean ok = code == null || "200".equals(String.valueOf(code))
+                || Integer.valueOf(200).equals(code);
+        if (!ok) {
+            String msg = Objects.toString(resp.get("msg"), "未知错误");
+            throw BusinessException.of("生成物料领用单失败：" + msg);
+        }
+        Object data = resp.get("data");
+        return data instanceof Map<?, ?> map ? (Map<String, Object>) map : null;
+    }
+
+    public record MaterialPickResult(Long id, String billNo) {
+    }
+
     private static final int OUTBOUND_QUERY_BATCH = 200;
 
     /**

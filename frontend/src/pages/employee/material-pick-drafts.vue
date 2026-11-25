@@ -3,7 +3,7 @@
     <view class="head">
       <view class="head-main">
         <text class="title">物料领用单</text>
-        <text class="sub">派工自动生成的领用草稿，补充仓库/批次后提交审批</text>
+        <text class="sub">派工自动生成；施工员接受任务后自动确认，修改明细需重新提交部长审批</text>
       </view>
       <view class="head-actions">
         <view class="create-btn" @click="createNew"><text>＋ 新建领用</text></view>
@@ -19,11 +19,11 @@
     <view v-if="loading" class="state"><text>加载中...</text></view>
     <view v-else-if="!rows.length" class="state"><text>暂无领用单</text></view>
     <view v-else class="list">
-      <view v-for="item in rows" :key="item.id" class="card" @click="openDraft(item)">
+      <view v-for="item in rows" :key="item.id" class="card" @click="openDetail(item)">
         <view class="card-head">
           <text class="card-no">{{ item.billNo || '草稿未编号' }}</text>
-          <text class="status" :class="materialPickStatusClass(item.approvalStatus)">
-            {{ materialPickStatusLabel(item.approvalStatus) }}
+          <text class="status" :class="materialPickStatusClass(item.status)">
+            {{ item.statusName || materialPickStatusLabel(item.status) }}
           </text>
         </view>
         <text class="card-meta">
@@ -42,11 +42,41 @@
           <text v-if="item.stockNumber"> · 仓库 {{ item.stockNumber }}</text>
           <text v-else class="warn"> · 待选仓库</text>
         </text>
+        <text v-if="item.inApproval" class="card-approval">
+          部长审核中 · {{ item.currentApproverDisplay || '审批人待分配' }}
+        </text>
+        <text v-else-if="item.approvedByName" class="card-approval">
+          部长已审核：{{ item.approvedByName }}
+        </text>
+        <text v-else-if="item.approvalRemark" class="card-approval warn">
+          审批意见：{{ item.approvalRemark }}
+        </text>
+        <text v-if="item.printTime" class="card-print">
+          库管已打印：{{ item.printByName || '库管' }} {{ formatTime(item.printTime) }}
+          （{{ item.printCount || 0 }} 次）
+        </text>
+        <text v-if="item.status === '4'" class="card-print">
+          金蝶其他出库：{{ materialPickJdyStatusLabel(item.jdySyncStatus) }}
+        </text>
         <view class="card-foot">
           <text class="card-date">创建 {{ formatTime(item.createTime) }}</text>
-          <view v-if="item.approvalStatus === 'DRAFT'" class="card-actions" @click.stop>
-            <text class="act primary" @click="submitDraft(item)">提交</text>
-            <text class="act danger" @click="deleteDraft(item)">删除</text>
+          <view class="card-actions" @click.stop>
+            <template v-if="item.status === '0' && !item.inApproval">
+              <text class="act primary" @click="submitDraft(item)">提交部长审批</text>
+              <text v-if="!item.sourceDispatchId" class="act danger" @click="deleteDraft(item)">删除</text>
+            </template>
+            <template v-else-if="item.status === '0' && item.inApproval">
+              <text class="act muted">部长审核中</text>
+            </template>
+            <template v-else-if="item.status === '1'">
+              <text class="act primary" @click="openDetail(item)">修改明细</text>
+            </template>
+            <template v-else-if="item.status === '2'">
+              <text class="act primary" @click="applyWriteOff(item)">申请核销</text>
+            </template>
+            <template v-else>
+              <text class="act muted">{{ item.status === '3' ? '核销审批中' : '核销已完成' }}</text>
+            </template>
           </view>
         </view>
       </view>
@@ -67,23 +97,20 @@ import { api } from '@/api/index'
 import { formatTime } from '@/utils/materialForm'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 import {
+  MATERIAL_PICK_STATUS_OPTIONS,
   materialPickStatusLabel,
-  materialPickStatusClass
+  materialPickStatusClass,
+  materialPickJdyStatusLabel
 } from '@/utils/materialPickStatus'
 
-/** 我的物料领用单：默认 DRAFT（派工自动生成待补充），可切换审批中/已通过/已驳回。 */
-const statusOptions = [
-  { value: 'DRAFT', label: '待提交' },
-  { value: 'IN_APPROVAL', label: '审批中' },
-  { value: 'APPROVED', label: '已通过' },
-  { value: 'REJECTED', label: '已驳回' }
-]
+/** 我的物料领用单：派工自动生成；施工员接受后自动确认，修改后需部长重新审批。 */
+const statusOptions = MATERIAL_PICK_STATUS_OPTIONS
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
 const pageNum = ref(1)
 const pageSize = ref(10)
-const status = ref('DRAFT')
+const status = ref('')
 
 onPullDownRefresh(async () => {
   await load()
@@ -102,7 +129,7 @@ onShow(() => {
 })
 
 function onStatusChange(value) {
-  status.value = value || 'DRAFT'
+  status.value = value || ''
   pageNum.value = 1
   load()
 }
@@ -110,10 +137,10 @@ function onStatusChange(value) {
 async function load() {
   loading.value = true
   try {
-    const res = await api.scmMaterialPickMyDrafts({
+    const res = await api.scmMaterialPickMyPicks({
       pageNum: pageNum.value,
       pageSize: pageSize.value,
-      approvalStatus: status.value
+      status: status.value || undefined
     })
     rows.value = (res && res.records) || []
     total.value = Number(res && res.total) || 0
@@ -126,8 +153,14 @@ async function load() {
   }
 }
 
-function openDraft(item) {
+function openDetail(item) {
   uni.navigateTo({ url: '/pages/employee/material-pick-draft?id=' + item.id })
+}
+
+function applyWriteOff(item) {
+  uni.navigateTo({
+    url: '/pages/employee/material-write-off?pickId=' + encodeURIComponent(item.id)
+  })
 }
 
 function openTaskOrder(item) {
@@ -155,7 +188,7 @@ function createNew() {
 
 async function submitDraft(item) {
   // 提交前预览本组织部长；预览失败不阻塞提交
-  let content = `确认提交领用单 ${item.billNo || ''} 给本组织部长审批？提交后不可修改。`
+  let content = `确认提交领用单 ${item.billNo || ''} 给本组织部长审批？提交后需等待审核。`
   try {
     const preview = await api.scmMaterialPickApprovalPreview(item.id)
     if (preview && preview.displayText) {
@@ -167,7 +200,7 @@ async function submitDraft(item) {
     // 预览失败使用兜底文案
   }
   uni.showModal({
-    title: '提交审批',
+    title: '提交部长审批',
     content,
     success: async (res) => {
       if (!res.confirm) return
@@ -189,8 +222,8 @@ async function submitDraft(item) {
 
 function deleteDraft(item) {
   uni.showModal({
-    title: '删除草稿',
-    content: '删除后不可恢复，确认删除该领用草稿？',
+    title: '删除领用单',
+    content: '删除后不可恢复，确认删除该领用单？',
     success: async (res) => {
       if (!res.confirm) return
       try {
@@ -234,6 +267,8 @@ function totalQty(item) {
 .card-meta { display: block; margin-top: 10rpx; font-size: 24rpx; color: #4E5969; }
 .order-link { color: #FF6B35; }
 .card-summary { display: block; margin-top: 6rpx; font-size: 24rpx; color: #86909C; }
+.card-approval { display: block; margin-top: 6rpx; font-size: 22rpx; color: #165DFF; }
+.card-print { display: block; margin-top: 6rpx; font-size: 22rpx; color: #00B42A; word-break: break-all; }
 .warn { color: #FF7D00; }
 .card-foot { margin-top: 16rpx; display: flex; align-items: center; justify-content: space-between; }
 .card-date { font-size: 22rpx; color: #86909C; }
@@ -241,4 +276,5 @@ function totalQty(item) {
 .act { font-size: 24rpx; font-weight: 600; }
 .act.primary { color: #FF6B35; }
 .act.danger { color: #F53F3F; }
+.act.muted { color: #86909C; font-weight: 400; }
 </style>

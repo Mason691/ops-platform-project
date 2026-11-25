@@ -171,7 +171,11 @@ function toast(title) {
 .label { display: block; font-size: 26rpx; color: #1D2129; font-weight: 600; margin-bottom: 12rpx; }
 .hint { font-size: 21rpx; color: #A9AEB8; font-weight: 400; }
 .textarea {
-  width: 100%; box-sizing: border-box; min-height: 120rpx; background: #F7F8FA;
+  width: 100%; box-sizing: border-box; background: #F7F8FA;
+  /* App.vue 全局 uni-textarea{height:auto!important} 会压塌宿主高度，
+     内层绝对定位 textarea 高度为 0；显式 !important 撑开才能聚焦录入。 */
+  height: 120rpx !important;
+  min-height: 120rpx !important;
   border-radius: 10rpx; padding: 16rpx; font-size: 26rpx; color: #1D2129;
 }
 .sheet-foot {

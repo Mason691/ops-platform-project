@@ -60,62 +60,6 @@
         <view class="info-row"><text class="k">提交时间</text><text class="v">{{ fmtTime(order.approvalSubmittedAt) }}</text></view>
       </view>
 
-      <view v-if="isMaterialRequisition" class="card">
-        <view class="card-title">
-          <text>物资领用</text>
-          <text class="node">{{ detailNodeName }}</text>
-        </view>
-        <view class="info-row"><text class="k">领用单号</text><text class="v">{{ order.requisitionNo || '-' }}</text></view>
-        <view class="info-row"><text class="k">领用用途</text><text class="v">{{ order.purpose || '-' }}</text></view>
-        <view class="info-row"><text class="k">领用人</text><text class="v">{{ order.applicantNames || order.applicantName || '-' }}</text></view>
-        <view class="info-row"><text class="k">所属部门</text><text class="v">{{ order.deptName || '未设置部门' }}</text></view>
-        <view class="info-row"><text class="k">期望领用日期</text><text class="v">{{ order.expectedDate || '-' }}</text></view>
-        <view class="info-row"><text class="k">状态</text><text class="v">{{ materialReqStatus(order.status) }}</text></view>
-        <view class="info-row"><text class="k">物料</text><text class="v">{{ order.itemCount || 0 }} 种 · {{ order.totalQty || 0 }} 件</text></view>
-      </view>
-
-      <view v-if="isMaterialRequisition && (order.entries || []).length" class="card">
-        <text class="card-title">领用明细</text>
-        <view v-for="(entry, index) in order.entries" :key="entry.id || index" class="product">
-          <view class="product-main">
-            <text class="product-name">{{ entry.materialName || entry.materialNumber }}</text>
-            <text class="product-meta">
-              {{ [entry.category, entry.brand, entry.model].filter(Boolean).join(' · ') }}
-              剩余 {{ entry.remainingQty || 0 }} {{ entry.unit || '' }}
-            </text>
-          </view>
-          <text class="product-amount">{{ entry.quantity }} {{ entry.unit || '' }}</text>
-        </view>
-      </view>
-
-      <view v-if="isMaterialWriteOff" class="card">
-        <view class="card-title">
-          <text>物资核销</text>
-          <text class="node">{{ detailNodeName }}</text>
-        </view>
-        <view class="info-row"><text class="k">核销单号</text><text class="v">{{ order.writeOffNo || '-' }}</text></view>
-        <view class="info-row"><text class="k">关联领用单</text><text class="v">{{ order.requisitionNo || '-' }}</text></view>
-        <view class="info-row"><text class="k">领用人</text><text class="v">{{ order.applicantName || '-' }}</text></view>
-        <view class="info-row"><text class="k">所属部门</text><text class="v">{{ order.deptName || '未设置部门' }}</text></view>
-        <view class="info-row"><text class="k">核销日期</text><text class="v">{{ order.writeOffDate || '-' }}</text></view>
-        <view class="info-row"><text class="k">状态</text><text class="v">{{ materialWriteOffStatus(order.status) }}</text></view>
-        <view class="info-row"><text class="k">数量</text><text class="v">核销 {{ order.writeOffTotal || 0 }} · 退回 {{ order.returnTotal || 0 }}</text></view>
-      </view>
-
-      <view v-if="isMaterialWriteOff && (order.entries || []).length" class="card">
-        <text class="card-title">核销明细</text>
-        <view v-for="(entry, index) in order.entries" :key="entry.id || index" class="product">
-          <view class="product-main">
-            <text class="product-name">{{ entry.materialName || entry.materialNumber }}</text>
-            <text class="product-meta">
-              {{ [entry.category, entry.brand, entry.model].filter(Boolean).join(' · ') }}
-              领用 {{ entry.requisitionQty || 0 }} · 余量 {{ entry.remainingQty || 0 }} {{ entry.unit || '' }}
-            </text>
-          </view>
-          <text class="product-amount">核销 {{ entry.writeOffQty || 0 }} / 退回 {{ entry.returnQty || 0 }}</text>
-        </view>
-      </view>
-
       <view v-if="isScmPick" class="card">
         <view class="card-title">
           <text>物料领用</text>
@@ -123,7 +67,8 @@
         </view>
         <view class="info-row"><text class="k">领用单号</text><text class="v">{{ order.billNo || '-' }}</text></view>
         <view class="info-row"><text class="k">领用事由</text><text class="v">{{ pickReasonLabel(order.pickReason) }}</text></view>
-        <view class="info-row"><text class="k">领用人</text><text class="v">{{ order.pickerName || '-' }}</text></view>
+        <view class="info-row"><text class="k">领用人（施工员）</text><text class="v">{{ order.pickerName || '-' }}</text></view>
+        <view class="info-row"><text class="k">领用状态</text><text class="v">{{ order.statusName || '-' }}</text></view>
         <view class="info-row"><text class="k">领用仓库</text><text class="v">{{ order.stockNumber || '未指定' }}</text></view>
         <view v-if="order.taskOrderNo" class="info-row">
           <text class="k">关联工单</text><text class="v">{{ order.taskOrderNo }}</text>
@@ -153,6 +98,11 @@
         <view class="info-row"><text class="k">核销单号</text><text class="v">{{ order.billNo || '-' }}</text></view>
         <view class="info-row"><text class="k">关联领用单</text><text class="v">{{ order.pickBillNo || '-' }}</text></view>
         <view class="info-row"><text class="k">核销人</text><text class="v">{{ order.writeOffByName || '-' }}</text></view>
+        <view class="info-row"><text class="k">审批节点</text><text class="v">{{ detailNodeName || '库管审批' }}</text></view>
+        <view v-if="order.approvedByName" class="info-row">
+          <text class="k">库管审批</text>
+          <text class="v">{{ order.approvedByName }} · {{ fmtTime(order.approvedTime) }}</text>
+        </view>
         <view class="info-row"><text class="k">提交时间</text><text class="v">{{ fmtTime(order.approvalSubmittedAt) }}</text></view>
       </view>
 
@@ -466,7 +416,6 @@ import { computed, reactive, ref, watch } from 'vue'
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
-import { REQUISITION_STATUS, WRITE_OFF_STATUS } from '@/utils/materialForm'
 import { track } from '@/utils/track'
 import ApproverCard from '@/components/ApproverCard.vue'
 import RejectPopup from '@/components/RejectPopup.vue'
@@ -623,14 +572,10 @@ const businessType = computed(() => {
   return (instance && instance.businessType) || ''
 })
 const isPurchase = computed(() => businessType.value === 'PUR_ORDER')
-/** 物资领用/核销：底座待办只返回“当前用户是审批人”的任务，这里补详情展示 */
-const isMaterialRequisition = computed(() => businessType.value === 'OPS_MATERIAL_REQUISITION')
-const isMaterialWriteOff = computed(() => businessType.value === 'OPS_MATERIAL_WRITE_OFF')
 /** SCM 供应链物料领用/核销：详情走 SCM，审批动作仍代理底座工作流 */
 const isScmPick = computed(() => businessType.value === 'MATERIAL_PICK')
 const isScmWriteOff = computed(() => businessType.value === 'MATERIAL_WRITE_OFF')
 const isBusinessOrder = computed(() => !isPurchase.value
-  && !isMaterialRequisition.value && !isMaterialWriteOff.value
   && !isScmPick.value && !isScmWriteOff.value)
 /** 部长审核节点：新流程已配置 actionType；旧数据按节点顺序/名称兜底识别 */
 const isMinisterReviewTask = computed(() => {
@@ -729,8 +674,6 @@ const nextApprover = computed(() => {
   return buildApprover('', [], [], '', '暂无法获取下一审批人，提交后可在详情页查看')
 })
 const actionTitle = computed(() => {
-  if (isMaterialRequisition.value) return '物资领用审批'
-  if (isMaterialWriteOff.value) return '物资核销审批'
   if (isScmPick.value) return '物料领用审批'
   if (isScmWriteOff.value) return '物料核销审批'
   if (isConstructionTask.value) {
@@ -882,15 +825,6 @@ async function loadData() {
     }
     if (isScmWriteOff.value) {
       order.value = await api.scmMaterialWriteOffDetail(businessId)
-      return
-    }
-    if (isMaterialRequisition.value) {
-      // 审批人视角详情：后端用 taskId 再校验当前用户是本任务审批人，避免越权读他人单据
-      order.value = await api.materialRequisitionApprovalDetail(businessId, taskId.value)
-      return
-    }
-    if (isMaterialWriteOff.value) {
-      order.value = await api.materialWriteOffApprovalDetail(businessId, taskId.value)
       return
     }
     // 任务处理人可能是外部施工员/外部验收人，且不一定是订单经办人；
@@ -1280,9 +1214,9 @@ function showDispatchMaterialResult(pick) {
   const assigned = name ? `已指派施工员：${name}；` : ''
   uni.showModal({
     title: '派工出库成功',
-    content: `${assigned}已生成物料领用单 ${pick.billNo}，`
-      + '请前往【常用功能 → 物料领用】补充仓库、批次并提交审批',
-    confirmText: '去处理',
+    content: `${assigned}已生成物料领用单 ${pick.billNo}；`
+      + '施工员接受任务后自动确认，如需调整明细请进入【常用功能 → 物料领用】修改并提交部长审批',
+    confirmText: '去查看',
     cancelText: '稍后',
     success: (res) => {
       if (res.confirm) {
@@ -1523,14 +1457,6 @@ function statusText(status) {
 
 function pickReasonLabel(value) {
   return { DISPATCH: '派工施工', ACTIVITY: '活动物料', OTHER: '其它事宜' }[value] || value || '-'
-}
-
-function materialReqStatus(value) {
-  return REQUISITION_STATUS[value] || value || '-'
-}
-
-function materialWriteOffStatus(value) {
-  return WRITE_OFF_STATUS[value] || value || '-'
 }
 
 async function confirmReject(opinionText) {

@@ -308,13 +308,14 @@ export const api = {
   scmMaterialPickTaskOrders: () => request({url:'/api/scm/material-pick/task-orders'}),
   scmMaterialPickCreate: (data) => request({url:'/api/scm/material-pick', method:'POST', data}),
   // 派工自动生成的物料领用草稿（H5 常用功能）
-  scmMaterialPickMyDrafts: (params) => request({url:'/api/scm/material-pick/my-drafts', data:params}),
-  scmMaterialPickDraftCount: () => request({url:'/api/scm/material-pick/draft-count'}),
+  scmMaterialPickMyPicks: (params) => request({url:'/api/scm/material-pick/my-picks', data:params}),
+  scmMaterialPickPendingCount: () => request({url:'/api/scm/material-pick/pending-count'}),
   scmMaterialPickDetail: (id) => request({url:'/api/scm/material-pick/' + id}),
   scmMaterialPickByDispatch: (dispatchId) => request({url:'/api/scm/material-pick/by-dispatch/' + dispatchId}),
   scmMaterialPickMaterialOptions: () => request({url:'/api/scm/material-pick/material-options'}),
   scmMaterialPickBatches: (params) => request({url:'/api/scm/material-pick/batches', data:params}),
   scmMaterialPickStock: (params) => request({url:'/api/scm/material-pick/stock', data:params}),
+  scmMaterialPickCommitments: (params) => request({url:'/api/scm/material-pick/commitments', data:params}),
   scmMaterialPickSave: (id, data) => request({
     url: '/api/scm/material-pick/save' + (id ? '?id=' + id : ''), method: 'POST', data
   }),
@@ -326,22 +327,6 @@ export const api = {
   scmMaterialWriteOffFromPick: (pickId) => request({url:'/api/scm/material-write-off/from-pick/' + pickId}),
   scmMaterialWriteOffCreate: (data) => request({url:'/api/scm/material-write-off', method:'POST', data}),
   scmMaterialWriteOffDetail: (id) => request({url:'/api/scm/material-write-off/' + id}),
-  // 员工物资领用 / 物资核销（ops 员工端；物资=申请制，不经仓库）
-  materialOptions: () => request({url:'/api/ops/employee/material/options'}),
-  materialSearch: (params) => request({url:'/api/ops/employee/material/materials', data:params}),
-  materialRequisitionCreate: (data) => request({url:'/api/ops/employee/material/requisitions', method:'POST', data}),
-  materialRequisitionPage: (params) => request({url:'/api/ops/employee/material/requisitions', data:params}),
-  materialRequisitionDetail: (id) => request({url:'/api/ops/employee/material/requisitions/' + id}),
-  materialRequisitionApprovalDetail: (id, taskId) => request({
-    url: '/api/ops/employee/material/requisitions/' + id + '/approval', data: { taskId }
-  }),
-  materialPickableRequisitions: (params) => request({url:'/api/ops/employee/material/requisitions/pickable', data:params}),
-  materialWriteOffCreate: (data) => request({url:'/api/ops/employee/material/write-offs', method:'POST', data}),
-  materialWriteOffPage: (params) => request({url:'/api/ops/employee/material/write-offs', data:params}),
-  materialWriteOffDetail: (id) => request({url:'/api/ops/employee/material/write-offs/' + id}),
-  materialWriteOffApprovalDetail: (id, taskId) => request({
-    url: '/api/ops/employee/material/write-offs/' + id + '/approval', data: { taskId }
-  }),
   // 业务订单详情 / 派工可选员工 / 财务暂缓（ops，员工 JWT + 数据范围）
   businessOrderDetail: (orderId) => request({url:'/api/ops/admin/business-data/orders/' + orderId}),
   businessTaskOrderDetail: (taskId) => request({url:'/api/ops/employee/business-data/tasks/' + taskId + '/order'}),

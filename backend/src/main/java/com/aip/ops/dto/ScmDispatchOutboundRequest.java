@@ -14,6 +14,9 @@ public record ScmDispatchOutboundRequest(
         String sourceOrderNo,
         Long operatorUserId,
         String operatorName,
+        /** 派工指定的施工员（物料领用单领用人） */
+        Long workerUserId,
+        String workerName,
         String customerName,
         String customerPhone,
         Long platformMemberId,

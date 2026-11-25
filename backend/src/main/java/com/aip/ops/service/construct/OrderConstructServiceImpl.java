@@ -86,6 +86,7 @@ public class OrderConstructServiceImpl implements OrderConstructService {
     private final ThreadPoolTaskExecutor executor;
     private final ConstructSignatureStorage signatureStorage;
     private final DataScopeService dataScopeService;
+    private final com.aip.ops.client.ScmStockOutClient scmClient;
 
     @Value("${construct.notice-template:}")
     private String configuredNoticeTemplate;
@@ -103,7 +104,8 @@ public class OrderConstructServiceImpl implements OrderConstructService {
                                      @Qualifier("workflowTaskExecutor")
                                      ThreadPoolTaskExecutor executor,
                                      ConstructSignatureStorage signatureStorage,
-                                     DataScopeService dataScopeService) {
+                                     DataScopeService dataScopeService,
+                                     com.aip.ops.client.ScmStockOutClient scmClient) {
         this.orderMapper = orderMapper;
         this.logMapper = logMapper;
         this.noticeMapper = noticeMapper;
@@ -114,6 +116,7 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         this.executor = executor;
         this.signatureStorage = signatureStorage;
         this.dataScopeService = dataScopeService;
+        this.scmClient = scmClient;
     }
 
     // ═══ 读视图 ═══
@@ -211,6 +214,11 @@ public class OrderConstructServiceImpl implements OrderConstructService {
                 w -> w.set(OpsBusinessOrder::getAcceptTime, now));
         insertLog(order, OpsOrderConstructLog.ACTION_ACCEPT, from, ACCEPTED,
                 Location.none(), null, null, null);
+        // 接受任务 → 对应物料领用单 0 未审核 自动置 1 已审核（SCM 幂等；失败则整体回滚）
+        if (order.getDispatchTaskId() != null) {
+            Long workerId = SecurityUtils.getCurrentUserId();
+            scmClient.dispatchAccepted(order.getCorpId(), order.getDispatchTaskId(), workerId);
+        }
         notifyProgress(order, "已接受任务", null);
         return result(order, "确认接受成功");
     }
@@ -235,6 +243,11 @@ public class OrderConstructServiceImpl implements OrderConstructService {
         transitionAsCurrent(order, DISPATCH, this::clearWorkerAndTimes);
         insertLog(order, OpsOrderConstructLog.ACTION_REJECT, from, DISPATCH,
                 Location.none(), null, null, clean);
+        // 拒绝接单 → 对应物料领用单逻辑删除并留痕（SCM 幂等；失败则整体回滚）
+        if (order.getDispatchTaskId() != null) {
+            scmClient.dispatchRejected(order.getCorpId(), order.getDispatchTaskId(),
+                    clean, userId, operatorName());
+        }
         // 平台侧按任务所有者再次校验后驳回，工作流 PREVIOUS 退回派工节点并重建派工待办
         workflowClient.rejectConstructTask(taskId, clean, userId, operatorName());
         notifyProgress(order, "拒绝接受", clean);

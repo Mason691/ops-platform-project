@@ -74,6 +74,8 @@
                   :content="construct.noticePreview" :existing-notice="construct.notice"
                   :resign="isCustomerConfirmed" :submitting="submitting" @submit="onSign" />
     <ConstructReasonDialog v-model:visible="reasonVisible" :title="reasonTitle"
+                           :placeholder="reasonPlaceholder"
+                           :required-message="reasonRequiredMessage"
                            :submitting="submitting" @confirm="onReason" />
   </view>
 </template>
@@ -139,6 +141,10 @@ const statusTone = computed(() => {
 })
 const reasonTitle = computed(() => (reasonAction.value === 'refuse'
   ? '客户拒绝确认' : '拒绝接受任务'))
+const reasonPlaceholder = computed(() => (reasonAction.value === 'refuse'
+  ? '请填写客户拒绝原因（不少于5个字）' : '请填写驳回原因（不少于5个字）'))
+const reasonRequiredMessage = computed(() => (reasonAction.value === 'refuse'
+  ? '请填写客户拒绝原因' : '请填写驳回原因'))
 
 function openReason(action) {
   reasonAction.value = action

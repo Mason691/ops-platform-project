@@ -72,26 +72,14 @@
       </view>
     </template>
 
-    <!-- Bottom Bar -->
-    <view class="bottom-bar">
-      <view class="bar-item active">
-        <text class="bar-icon">📊</text>
-        <text class="bar-label">业务数据</text>
-      </view>
-      <view class="bar-item" @click="goAiChat">
-        <text class="bar-icon">🤖</text>
-        <text class="bar-label">AI助手</text>
-      </view>
-      <view class="bar-item" @click="goProfile">
-        <text class="bar-icon">👤</text>
-        <text class="bar-label">我的</text>
-      </view>
-    </view>
+    <!-- 底部导航与员工工作台主页保持一致（AI助手/主页/待办/我的） -->
+    <EmployeeTabBar active-key="home" :allow-active-click="true" @switch="onTabSwitch" />
   </view>
 </template>
 
 <script setup>
 import EmployeePageHead from '@/components/EmployeePageHead.vue'
+import EmployeeTabBar from '@/components/EmployeeTabBar.vue'
 import { ref, reactive, computed, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
@@ -241,8 +229,15 @@ function formatMoney(val) {
   return '¥' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
-function goAiChat() { uni.navigateTo({ url: '/pages/employee/ai-chat' }) }
-function goProfile() { uni.navigateTo({ url: '/pages/employee/profile' }) }
+function onTabSwitch(key) {
+  const routes = {
+    ai: '/pages/employee/ai-chat',
+    home: '/pages/employee/dashboard',
+    todo: '/pages/employee/flow-todo',
+    profile: '/pages/employee/profile'
+  }
+  if (routes[key]) uni.redirectTo({ url: routes[key] })
+}
 function goAddBusiness() { uni.navigateTo({ url: '/pages/employee/business-data-new' }) }
 </script>
 
@@ -286,16 +281,6 @@ function goAddBusiness() { uni.navigateTo({ url: '/pages/employee/business-data-
 .at-val.commission { color: #4caf50; }
 .at-val.count { color: #333; }
 
-/* Bottom Bar */
-.bottom-bar {
-  position: fixed; bottom: 0; left: 0; right: 0; height: 110rpx;
-  background: #fff; display: flex; align-items: center; justify-content: space-around;
-  border-top: 1rpx solid #f0f0f0; padding-bottom: env(safe-area-inset-bottom); z-index: 100;
-}
-.bar-item { display: flex; flex-direction: column; align-items: center; gap: 4rpx; padding: 8rpx 24rpx; }
-.bar-icon { font-size: 40rpx; }
-.bar-label { font-size: 22rpx; color: #999; }
-.bar-item.active .bar-label { color: #FF6B35; font-weight: 600; }
 .batch-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:16rpx; gap:12rpx; }
 .batch-picker { display:flex; align-items:center; padding:12rpx 20rpx; background:#f5f5f5; border-radius:8rpx; font-size:26rpx; color:#333; flex:1; }
 .batch-arrow { font-size:20rpx; color:#999; margin-left:8rpx; }

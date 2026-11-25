@@ -2,6 +2,90 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-25（业务数据列表底部导航与工作台主页统一）
+
+- **需求**：公众号员工工作台「业务数据」列表页底部栏目与主页保持一致。
+- **修改**：
+  - `EmployeeTabBar` 新增 `allowActiveClick`（默认 false，不改变既有四个主页面行为）；
+    子页面沿用「主页」高亮时，点主页仍可跳回工作台。
+  - `business-data.vue` 移除自定义「业务数据/AI助手/我的」三栏，改用统一
+    `EmployeeTabBar`（AI助手/主页/待办/我的），主页高亮，四个入口均走
+    `uni.redirectTo`，与工作台/待办/个人中心一致。
+  - 删除页面内旧 `.bottom-bar/.bar-item/.bar-icon/.bar-label` 样式及 `goAiChat/goProfile`。
+- **验证**：`npm run build:h5` 通过；编译产物引用 `EmployeeTabBar`，业务数据页 CSS 已无旧 `bottom-bar`。
+- **生产发布（2026-11-25 16:18-16:19，已发布）**：仅 ops H5；备份 `backups/frontend-ops-pre-tabbar-20261125_161811.tgz`；业务数据 chunk `pages-employee-business-data.BGFNtCmE.js` 含 `allow-active-click`，`/ops/` 200，nginx reload 成功；无后端/数据库变更。微信内需退出重进以刷新旧 entry chunk。
+
+## 2026-11-25（施工员拒绝接受任务原因输入框无法输入修复）
+
+- **根因**：`ConstructReasonDialog` 的 textarea 只设置 `min-height:180rpx`，被 `App.vue` 全局 `uni-textarea{height:auto!important;min-height:auto!important}` 覆盖，宿主高度塌陷，内层绝对定位 textarea 高度为 0，点击无法聚焦、键盘不弹出。
+- **修复**：
+  - 显式 `height/min-height:240rpx !important` 撑开宿主，恢复中文/多行输入；
+  - 打开弹层时 `focus` 属性复位→置真 + DOM `textarea.focus()` 兜底，适配微信 WebView；
+  - `maxlength=200`，空值就地提示“请填写驳回原因”，少于 5 字提示“原因不少于5个字”；
+  - `ConstructFlowActions` 按“拒绝接受/客户拒绝”传对应占位与必填文案；
+  - 同源修复 `ArriveCheckIn` 备注 textarea 的宿主高度（同一全局样式陷阱）。
+- **验证**：`npm run build:h5` 通过；编译产物 CSS 已含 `height:7.5rem!important`（240rpx）。
+- **生产发布（2026-11-25 16:11-16:12，已发布）**：仅 ops H5；备份 `backups/frontend-ops-pre-reject-input-20261125_161141.tgz`；新入口 chunk `pages-employee-flow-task.S1R4sKA3.js`，`/ops/` 200，nginx reload 成功；无后端/数据库变更。微信开发者工具/真机端到端待业务用订单 25003（施工员焦小瑞，corp 9）验证。
+
+## 2026-11-25（物料领用核销通过后推送金蝶其他出库单）
+
+- **触发点（架构决策）**：新流程领用/打印不扣库存，只有核销通过（状态 4）才写负数 `MATERIAL_WRITE_OFF` 并生成 `HXC-` 核销出库单，因此金蝶「其他出库单」在**核销通过时**推送，而非领用单状态 1。需求原文的“领用审批通过即扣库存/推送”对应旧流程；若在领用阶段推送会造成金蝶先扣、平台后扣的账实差异。
+- **SCM 后端**：
+  - 新增 `MaterialPickToOtherOutConverter`：`bill_no` 原样传递、`bill_date`、`trans_type_id="13"`（其他出库固定值）、`material_entity`（`material_id`/`qty`字符串/`unit_id`/`stock_id`/`batch_no`）；审核 payload `common_operate(audit)` 单独调用。
+  - 新增 `MaterialPickJdyPushService`：保存 → 审核两步；先查 `scm_jdy_push_log` 成功 SAVE 记录实现重试幂等；保存成功但审核失败记 `PUSH_FAILED` 并提示“保存时更新账套可能已扣库存”；失败不回滚本地核销与库存。
+  - `MaterialWriteOffServiceImpl.approveAndDeduct` 核销通过后调用推送；`MaterialPick`/DTO 新增 `jdy_id/jdy_billno/jdy_sync_status/push_error`；`POST /api/scm/material-pick/{id}/retry-push`（库管/供应链，打印权限）重试。
+  - DDL `sql/material_pick_jdy_sync.sql`（mall_db，条件化 ADD COLUMN，先于新 JAR）。
+- **前端**：平台主站 `MaterialPickList` 展开行新增「金蝶其他出库」状态/单号/错误与重试按钮；H5 领用单列表/详情在状态 4 展示简洁同步状态（H5 不提供重试）。
+- **全部退回**：核销数量为 0 时不生成金蝶其他出库单，`jdy_sync_status=NOT_REQUIRED`（前端显示“无需同步”），不记失败、不可重试。
+- **前置确认（代码常量 + TODO）**：账套库存更新参数（保存时/审核时）、分录传 `material_id`/`stock_id` 还是 `number`、审核 `entity_number` 精确值；默认按金蝶其他出库文档使用 `material_id`/`stock_id`/`batch_no`，联调不一致时只改 Converter 常量。
+- **验证**：SCM `mvn -o test` 通过（新增 4 条 Converter 单测）；平台 `npm run build`、ops H5 `npm run build:h5` 通过。
+- **生产发布（2026-11-25 16:04-16:06，已发布）**：
+  - 备份：`backups/mall_db-pre-material-jdy-20261125_160438.sql.gz`（7.7M）、`backups/frontend-pre-material-jdy-20261125_160438.tgz`（2.0M）；回滚镜像 `boss-platform/scm:rollback-material-jdy-20261125_160438`。
+  - DDL：`mall_db.scm_material_pick` 已新增 `jdy_id/jdy_billno/jdy_sync_status/push_error` 并验证。
+  - SCM：overlay 镜像 `boss-platform/scm:material-jdy-20261125_160438`（jar sha256 `783d1a24…55da0`，容器内 sha256 一致），`docker compose up -d --no-deps scm-backend` 后 healthy（8084 health 200），实体注册 18 个。
+  - 前端：平台入口 `index-E_imBbO8.js` / `MaterialPickList-DRG94UWL.js`；H5 入口 `materialPickStatus.B0MdPsps.js`；公网主站与 `/ops/` 均 200，nginx reload 成功。
+  - **未执行**：真实金蝶推送联调。生产已有状态 4 领用单 id=8（`LTLL-20261125-001`）与核销出库单 `LTHXC-20261125-001`（qty=3），可在 PC 展开行点「重试推送」做首次真实联调；字段名/`entity_number`/`operation_key` 不匹配时只会 `PUSH_FAILED`，本地库存不回滚。
+
+## 2026-11-25（操作手册按派工—物料领用—核销新流程修订）
+
+- **手册 7.3/7.4 重写**：物料领用单状态 0 未审核→1 已审核→2 已领用→3 申请核销→4 物料核销；派工生成（领用人=施工员）→施工员接单自动确认→库管 PC 打印（打印即发放）→施工员申请核销→库管单节点审批→扣库存并生成 `HXC-` 核销出库单；领用阶段不扣库存，修改 0/1 明细回 0 重走部长审批，拒单逻辑删除领用单。
+- **7.2 派工出库**：物料清单增加领用仓库说明，明确生成状态0领用单、派工/领用不扣库存、施工派工进入待接受。
+- **跨章同步**：术语表、2.1 角色（新增库管，派工员负责派工物料与仓库）、第 5 章状态表、附录 A（状态/库存变更类型）、B（截图 7-4/7-5）、C、D 与 OUTLINE 清除旧“财务审批”“部长→总经办两级核销”“领取审批扣库存”口径。
+- **构建**：重新生成 `docs/manual/build/金地美家供应链云平台操作手册_V1.0.docx`，并校验不再包含旧表述。
+
+## 2026-11-25（员工工作台「物资领用/物资核销」功能彻底删除，已发布）
+
+- **删除范围**（ops 自有物资申请域，单号 `LY-`/`WX-`）：
+  - H5：`material-requisition-new/detail/records`、`material-write-off-new/records/detail` 6 个页面；`useMaterialRequisitionWizard`/`useMaterialWriteOffWizard` 2 个 hooks；`MaterialItemsStep`/`MaterialPickerSheet`/`RequisitionPickerSheet`/`MaterialVoucherUploader`/`MaterialFlowSuccess`/`MaterialRequisition*`/`MaterialWriteOff*` 11 个组件；`pages.json` 路由；`api/index.js` 12 个方法；`flow-task` 审批分支、`work-log` 筛选/跳转、待办标签；`materialForm.js` 仅保留 SCM 使用的 `formatTime`/`formatMaterialLabel`。
+  - 后端：`EmployeeMaterialController`、`InternalMaterialWorkflowController`、`MaterialRequisitionService/Impl`、`MaterialWriteOffService/Impl`、`EmployeeMaterialSupport`、`MaterialNoGenerator`、`MaterialWorkflowProperties`、`OpsMaterialRequisition*`/`OpsMaterialWriteOff*` 实体/Mapper/DTO 共 23 个文件；`application.yml` 的 `material.*` 配置。
+  - DB：`ops_material_requisition`、`ops_material_requisition_entry`、`ops_material_write_off`、`ops_material_write_off_entry`、`ops_material_seq` 5 张表；工作流定义 `OPS_MATERIAL_REQUISITION_APPROVAL`/`OPS_MATERIAL_WRITE_OFF_APPROVAL` 及节点/审批人（无实例/待办）。
+  - 文档：`docs/material-requisition.md`、手册/规格/CLAUDE 中相关条目。
+- **保留**：SCM 物料领用/核销（`LL-`/`HX-`，`MATERIAL_PICK`/`MATERIAL_WRITE_OFF`）及 2026-11-25 新流程不受影响。
+- **备份**：`backups/mall_db-ops-material-pre-delete-20261125_152033.sql.gz`、`backups/ai_platform-wf-pre-delete-ops-material-20261125_152033.sql.gz`。
+- **生产清理（2026-11-25 15:20）**：已删除 `ops_material_*` 5 张表、`OPS_MATERIAL_REQUISITION_APPROVAL`/`OPS_MATERIAL_WRITE_OFF_APPROVAL` 定义（id 6/7）及节点/审批人；无进行中实例/待办。
+- **发布（2026-11-25 15:22）**：ops JAR overlay（新镜像 `boss-platform/ops:ops-material-delete-20261125_152208`，回滚镜像 `boss-platform/ops:rollback-ops-material-delete-20261125_152208`）；ops H5 入口 `index-CXpZKTAW.js`（flow-task chunk sha256 与本地一致）。部署后 JAR 已无物资域类，SCM 物料领用/核销类与页面保留；三后端 healthy（8080/8082/8084 health 200），公网 `/ops/` 200。回滚点：`ops-app.jar.bak-ops-material-delete-20261125_152208`、`html-ops-pre-ops-material-delete-20261125_152208.tgz`。
+
+## 2026-11-25（派工—物料领用—物料核销全流程重构，已发布）
+
+- **需求**：明确物料领用单 0 未审核 → 1 已审核 → 2 已领用 → 3 申请核销 → 4 物料核销 状态流转；新增「库管」角色负责打印领用单与审核核销；领用阶段不扣库存，核销通过才扣库存并生成核销出库单。
+- **SCM 后端**：
+  - `scm_material_pick` 新增 `status`/审核/打印/删除原因/修改前数量等字段（`sql/material_pick_flow_v2.sql`）；派工生成 0、施工员接受自动 1、库管打印 2、核销申请 3、库管通过 4。
+  - 新增 `scm_material_outbound`/`scm_material_outbound_entry`（`HXC-`，`write_off_id` 唯一，生成即已审核，不推金蝶）；核销通过写负数 `MATERIAL_WRITE_OFF` 流水，取消领用审批时扣库存/反审逻辑。
+  - 施工员修改 0/1 明细 → 回 0 重新走 `MATERIAL_PICK_APPROVAL`；核销改为 `MATERIAL_WRITE_OFF_APPROVAL` 单节点「库管审批」；PC 增加 `/pending-tasks` + `/review`，H5 继续代理底座工作流。
+  - 拒单逻辑删除领用单并留痕（`delete_reason`/`deleted_source_dispatch_id`，释放幂等唯一键）；重新派工走 `POST /api/internal/scm/material-pick/from-dispatch` 为新施工员生成新单。
+  - 可领用口径 = 账面 `valid_qty` − 状态 1/2/3 领用剩余量；`/stock`、`/commitments` 返回并用于派工/领用校验。
+  - 外部用户边界：SCM 守卫放行物料领用/核销 H5 所需路径，列表/打印/核销审批/出库单等内部接口显式拒绝外部用户；详情仅本人。
+- **ops 后端**：派工请求新增 `workerUserId/workerName`（领用单领用人=施工员）；接受/拒绝派工同步调用 SCM 内部接口；拒绝后重新派工先更新 `dispatch_task_id` 并生成新领用单。
+- **前端**：
+  - 平台主站 `MaterialPickList`（状态 0-4、打印/补打、审核/打印留痕）、`MaterialWriteOffList`（待我审批、同意核销/驳回、核销出库单弹窗）、打印模板。
+  - ops H5 `material-pick-drafts`/`material-pick-draft`/`material-write-off`/`flow-task`/`dashboard`/`DispatchMaterialList`：状态筛选、修改重审、申请核销、库管审批、可领用量提示。
+- **工作台常用功能卡片（2026-11-25 15:20，已发布）**：移除「物资领用」「物资核销」卡片定义（前端兜底 + 平台 `/api/workbench/cards`）；「个人中心」「AI 助手」保留卡片定义但 `visible=false`，不在常用功能展示。已发布平台后端 overlay 与 ops H5（入口 `index-CadnfcML.js`；dashboard chunk sha256 与本地一致），卡片接口与 H5 兜底均生效。
+- **种子**：`material_pick_status_dict.sql`（字典）、`material_warehouse_role.sql`（库管角色 + 2118 核销审批 + 任务待办）、`doc/material_workflow_v2.sql`（存量流程升级）；`material_menu.sql` 增加 2118。
+- **验证（本地）**：SCM/ops `mvn -o test` 通过；平台前端 `npm run build`、ops H5 `npm run build:h5` 通过。
+- **生产发布（2026-11-25 14:56-15:02）**：备份 `backups/{mall_db,ai_platform}-pre-material-v2-20261125_145623.sql.gz` 与 `backups/frontend-pre-material-v2-20261125_145623/{html-platform.tgz,html-ops.tgz,docker-compose.yml}`；回滚镜像 `boss-platform/{scm,ops}:rollback-material-v2-20261125_145623`。按用户确认清空物料测试数据（7 领用单/20 分录/8 库存流水/6 流程实例/4 单号序列），执行 `material_pick_flow_v2.sql`、字典、菜单（核销审批菜单 ID 因 2108 已被货款补录占用改为 **2118**）、库管角色、流程 v2；库管角色为 corp 9-14 绑定临时审批人（9 孙莉娟、10 张小俊、11 杨秀淑、12 覃国强、13 侯学红、14 王莉莉），需业务方改派真实库管。SCM/ops overlay 发布、平台后端重启清权限缓存；三后端 healthy（8080/8082/8084 health 200），公网主站/`/ops/` 200（平台入口 `index-oSplxKMa.js`、H5 入口 `index-CgsF9hrR.js`），新实体已注册 `sys_entity_config`。
+- **未执行**：登录态真机端到端（派工→接单→打印→核销→库管审批）与微信消息验证；员工需重新登录刷新 JWT 权限。
+- **回滚**：`docker tag boss-platform/scm:rollback-material-v2-20261125_145623 boss-platform/scm:latest && docker tag boss-platform/ops:rollback-material-v2-20261125_145623 boss-platform/ops:latest && cd /data2/boss-platform && docker compose up -d scm-backend ops-backend`；前端解压对应 tgz 后 reload nginx；DB 如需回滚用迁移前 dump。
+
 ## 2026-11-23（客户签字「横屏签字」按钮无响应/旋转不生效修复，已发布）
 
 - **问题**：生产反馈点击「尝试全屏横屏」很难有反应；手机横过来后页面基本不进入横屏，客户无法按预期横屏签字。

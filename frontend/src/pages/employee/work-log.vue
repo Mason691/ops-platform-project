@@ -75,9 +75,7 @@ const businessTypeOptions = ref([
   { value: '', label: '全部类型' },
   { value: 'OPS_BUSINESS_ORDER', label: '业务数据订单' },
   { value: 'OPS_BUSINESS_ORDER_VOID', label: '业务订单作废' },
-  { value: 'PUR_ORDER', label: '采购订单' },
-  { value: 'OPS_MATERIAL_REQUISITION', label: '物资领用' },
-  { value: 'OPS_MATERIAL_WRITE_OFF', label: '物资核销' }
+  { value: 'PUR_ORDER', label: '采购订单' }
 ])
 const actionOptions = ref([
   { value: '', label: '全部动作' },
