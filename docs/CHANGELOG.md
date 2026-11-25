@@ -11,7 +11,8 @@
   - `maxlength=200`，空值就地提示“请填写驳回原因”，少于 5 字提示“原因不少于5个字”；
   - `ConstructFlowActions` 按“拒绝接受/客户拒绝”传对应占位与必填文案；
   - 同源修复 `ArriveCheckIn` 备注 textarea 的宿主高度（同一全局样式陷阱）。
-- **验证**：`npm run build:h5` 通过；编译产物 CSS 已含 `height:7.5rem!important`（240rpx）。微信开发者工具/真机端到端待验证。
+- **验证**：`npm run build:h5` 通过；编译产物 CSS 已含 `height:7.5rem!important`（240rpx）。
+- **生产发布（2026-11-25 16:11-16:12，已发布）**：仅 ops H5；备份 `backups/frontend-ops-pre-reject-input-20261125_161141.tgz`；新入口 chunk `pages-employee-flow-task.S1R4sKA3.js`，`/ops/` 200，nginx reload 成功；无后端/数据库变更。微信开发者工具/真机端到端待业务用订单 25003（施工员焦小瑞，corp 9）验证。
 
 ## 2026-11-25（物料领用核销通过后推送金蝶其他出库单）
 
