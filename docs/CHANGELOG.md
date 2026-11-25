@@ -13,6 +13,7 @@
     `uni.redirectTo`，与工作台/待办/个人中心一致。
   - 删除页面内旧 `.bottom-bar/.bar-item/.bar-icon/.bar-label` 样式及 `goAiChat/goProfile`。
 - **验证**：`npm run build:h5` 通过；编译产物引用 `EmployeeTabBar`，业务数据页 CSS 已无旧 `bottom-bar`。
+- **生产发布（2026-11-25 16:18-16:19，已发布）**：仅 ops H5；备份 `backups/frontend-ops-pre-tabbar-20261125_161811.tgz`；业务数据 chunk `pages-employee-business-data.BGFNtCmE.js` 含 `allow-active-click`，`/ops/` 200，nginx reload 成功；无后端/数据库变更。微信内需退出重进以刷新旧 entry chunk。
 
 ## 2026-11-25（施工员拒绝接受任务原因输入框无法输入修复）
 
