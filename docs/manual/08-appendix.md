@@ -31,8 +31,9 @@
 | 盘点单 | `process_status` | PENDING/PROCESSED/PROCESS_REVERSED/PROCESS_FAILED | 只表示处理进度 |
 | 物料领用 | `status` | 0/1/2/3/4 | 0未审核→1已审核→2已领用→3申请核销→4物料核销 |
 | 物料领用 | `print_by/print_time/print_count` | — | 首次打印1→2（发放）；补打只累加次数 |
+| 物料领用 | `jdy_sync_status` | NULL/PUSHED/AUDITED/PUSH_FAILED/NOT_REQUIRED | 未推送/已保存待审核/已审核同步/推送失败/无需同步（全部退回） |
 | 物料核销 | `approval_status` | DRAFT/IN_APPROVAL/APPROVED/REJECTED | 发起→库管审批（单节点） |
-| 物料核销 | `audit_status` | DRAFT/AUDITED | 审批通过即 AUDITED，并生成 HXC- 核销出库单 |
+| 物料核销 | `audit_status` | DRAFT/AUDITED | 审批通过即 AUDITED，并生成 HXC- 核销出库单、推送金蝶其他出库单 |
 
 ### A.3 金蝶同步状态（`sync_status`）
 
@@ -170,7 +171,7 @@
 | C7 | 外部施工员首次登录/微信绑定流程 | 正文只写创建与选中，未展开其登录步骤 | 产品/实施 |
 | C8 | 退款申请通过后实际打款渠道/时限 | 系统记录退款申请与审批，不执行支付；正文未承诺打款时效 | 财务 |
 | C9 | 以旧换新历史单（`source_type=MANUAL`）与新自动单的展示差异 | 正文按新流程描述；历史单仍走人工审批 | 供应链/产品 |
-| C10 | 物料领用/核销是否后续推送金蝶 | 当前决策“不推送”；正文按不推送描述 | 财务/供应链 |
+| C10 | 物料领用/核销推送金蝶的字段与账套参数 | 已决策核销通过后推送其他出库单（保存→审核）；`material_id`/`stock_id` 与审核 `entity_number` 待联调确认 | 财务/供应链/金蝶实施 |
 
 ## 附录 D 29 项功能交付检查表
 

@@ -2,6 +2,19 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-25（物料领用核销通过后推送金蝶其他出库单）
+
+- **触发点（架构决策）**：新流程领用/打印不扣库存，只有核销通过（状态 4）才写负数 `MATERIAL_WRITE_OFF` 并生成 `HXC-` 核销出库单，因此金蝶「其他出库单」在**核销通过时**推送，而非领用单状态 1。需求原文的“领用审批通过即扣库存/推送”对应旧流程；若在领用阶段推送会造成金蝶先扣、平台后扣的账实差异。
+- **SCM 后端**：
+  - 新增 `MaterialPickToOtherOutConverter`：`bill_no` 原样传递、`bill_date`、`trans_type_id="13"`（其他出库固定值）、`material_entity`（`material_id`/`qty`字符串/`unit_id`/`stock_id`/`batch_no`）；审核 payload `common_operate(audit)` 单独调用。
+  - 新增 `MaterialPickJdyPushService`：保存 → 审核两步；先查 `scm_jdy_push_log` 成功 SAVE 记录实现重试幂等；保存成功但审核失败记 `PUSH_FAILED` 并提示“保存时更新账套可能已扣库存”；失败不回滚本地核销与库存。
+  - `MaterialWriteOffServiceImpl.approveAndDeduct` 核销通过后调用推送；`MaterialPick`/DTO 新增 `jdy_id/jdy_billno/jdy_sync_status/push_error`；`POST /api/scm/material-pick/{id}/retry-push`（库管/供应链，打印权限）重试。
+  - DDL `sql/material_pick_jdy_sync.sql`（mall_db，条件化 ADD COLUMN，先于新 JAR）。
+- **前端**：平台主站 `MaterialPickList` 展开行新增「金蝶其他出库」状态/单号/错误与重试按钮；H5 领用单列表/详情在状态 4 展示简洁同步状态（H5 不提供重试）。
+- **全部退回**：核销数量为 0 时不生成金蝶其他出库单，`jdy_sync_status=NOT_REQUIRED`（前端显示“无需同步”），不记失败、不可重试。
+- **前置确认（代码常量 + TODO）**：账套库存更新参数（保存时/审核时）、分录传 `material_id`/`stock_id` 还是 `number`、审核 `entity_number` 精确值；默认按金蝶其他出库文档使用 `material_id`/`stock_id`/`batch_no`，联调不一致时只改 Converter 常量。
+- **验证**：SCM `mvn -o test` 通过（新增 4 条 Converter 单测）；平台 `npm run build`、ops H5 `npm run build:h5` 通过。未做金蝶联调与真机端到端。
+
 ## 2026-11-25（操作手册按派工—物料领用—核销新流程修订）
 
 - **手册 7.3/7.4 重写**：物料领用单状态 0 未审核→1 已审核→2 已领用→3 申请核销→4 物料核销；派工生成（领用人=施工员）→施工员接单自动确认→库管 PC 打印（打印即发放）→施工员申请核销→库管单节点审批→扣库存并生成 `HXC-` 核销出库单；领用阶段不扣库存，修改 0/1 明细回 0 重走部长审批，拒单逻辑删除领用单。
