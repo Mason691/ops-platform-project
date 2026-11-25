@@ -2,7 +2,7 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
-## 2026-11-25（派工—物料领用—物料核销全流程重构，未发布）
+## 2026-11-25（派工—物料领用—物料核销全流程重构，已发布）
 
 - **需求**：明确物料领用单 0 未审核 → 1 已审核 → 2 已领用 → 3 申请核销 → 4 物料核销 状态流转；新增「库管」角色负责打印领用单与审核核销；领用阶段不扣库存，核销通过才扣库存并生成核销出库单。
 - **SCM 后端**：
@@ -17,8 +17,10 @@
   - 平台主站 `MaterialPickList`（状态 0-4、打印/补打、审核/打印留痕）、`MaterialWriteOffList`（待我审批、同意核销/驳回、核销出库单弹窗）、打印模板。
   - ops H5 `material-pick-drafts`/`material-pick-draft`/`material-write-off`/`flow-task`/`dashboard`/`DispatchMaterialList`：状态筛选、修改重审、申请核销、库管审批、可领用量提示。
 - **种子**：`material_pick_status_dict.sql`（字典）、`material_warehouse_role.sql`（库管角色 + 2118 核销审批 + 任务待办）、`doc/material_workflow_v2.sql`（存量流程升级）；`material_menu.sql` 增加 2118。
-- **验证（本地）**：SCM/ops `mvn -o test` 通过；平台前端 `npm run build`、ops H5 `npm run build:h5` 通过。**未执行**：生产 DDL/种子、库管人员绑定、真机端到端联调、微信消息验证。
-- **部署顺序**：`mall_db` DDL → `ai_platform` 字典/角色/流程 → 绑定各组织库管在职员工 → SCM JAR → ops JAR → 平台主站前端 → ops H5 → 重启平台清权限缓存 / 员工重新登录。
+- **验证（本地）**：SCM/ops `mvn -o test` 通过；平台前端 `npm run build`、ops H5 `npm run build:h5` 通过。
+- **生产发布（2026-11-25 14:56-15:02）**：备份 `backups/{mall_db,ai_platform}-pre-material-v2-20261125_145623.sql.gz` 与 `backups/frontend-pre-material-v2-20261125_145623/{html-platform.tgz,html-ops.tgz,docker-compose.yml}`；回滚镜像 `boss-platform/{scm,ops}:rollback-material-v2-20261125_145623`。按用户确认清空物料测试数据（7 领用单/20 分录/8 库存流水/6 流程实例/4 单号序列），执行 `material_pick_flow_v2.sql`、字典、菜单（核销审批菜单 ID 因 2108 已被货款补录占用改为 **2118**）、库管角色、流程 v2；库管角色为 corp 9-14 绑定临时审批人（9 孙莉娟、10 张小俊、11 杨秀淑、12 覃国强、13 侯学红、14 王莉莉），需业务方改派真实库管。SCM/ops overlay 发布、平台后端重启清权限缓存；三后端 healthy（8080/8082/8084 health 200），公网主站/`/ops/` 200（平台入口 `index-oSplxKMa.js`、H5 入口 `index-CgsF9hrR.js`），新实体已注册 `sys_entity_config`。
+- **未执行**：登录态真机端到端（派工→接单→打印→核销→库管审批）与微信消息验证；员工需重新登录刷新 JWT 权限。
+- **回滚**：`docker tag boss-platform/scm:rollback-material-v2-20261125_145623 boss-platform/scm:latest && docker tag boss-platform/ops:rollback-material-v2-20261125_145623 boss-platform/ops:latest && cd /data2/boss-platform && docker compose up -d scm-backend ops-backend`；前端解压对应 tgz 后 reload nginx；DB 如需回滚用迁移前 dump。
 
 ## 2026-11-23（客户签字「横屏签字」按钮无响应/旋转不生效修复，已发布）
 
