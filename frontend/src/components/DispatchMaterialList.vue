@@ -11,9 +11,9 @@
       </picker>
     </view>
     <text class="hint">
-      派工成功后自动生成物料领用草稿，员工补充批次后提交审批；
-      不指定物料则不生成领用单（派工不扣库存、不发起审批）。
-      数量支持 －/＋ 步进、长按连续调整，也可点击数字直接输入。
+      派工成功后生成物料领用单（状态0未审核），施工员接受任务后自动确认；
+      领用阶段不扣库存，核销通过才扣减。可领用量已扣除其他领用单「已领用未核销」占用。
+      不指定物料则不生成领用单。数量支持 －/＋ 步进、长按连续调整，也可点击数字直接输入。
     </text>
 
     <view v-if="!rows.length" class="dm-empty">
@@ -92,6 +92,8 @@ const keyword = ref('')
 const options = ref([])
 const warehouses = ref([])
 const stockMap = ref({})
+const bookMap = ref({})
+const commitmentMap = ref({})
 const stockLoading = ref(false)
 
 const warehouseLabels = computed(() => warehouses.value.map(w => w.name || w.number))
@@ -127,36 +129,51 @@ function onWarehouseChange(e) {
   emit('update:stockNumber', w.number)
 }
 
-/** 按仓库聚合物料总库存（含批次），派工阶段不区分批次。 */
+/** 按仓库聚合物料总库存（含批次），并扣除已领用未核销占用，派工阶段不区分批次。 */
 async function loadStock() {
   if (!props.stockNumber) {
     stockMap.value = {}
+    bookMap.value = {}
+    commitmentMap.value = {}
     return
   }
   stockLoading.value = true
   try {
-    const res = await api.scmInventoryQuery({
-      pageNum: 1, pageSize: 200, stockNumber: props.stockNumber
-    })
-    const map = {}
+    const [res, commitments] = await Promise.all([
+      api.scmInventoryQuery({ pageNum: 1, pageSize: 200, stockNumber: props.stockNumber }),
+      api.scmMaterialPickCommitments({ stockNumber: props.stockNumber }).catch(() => [])
+    ])
+    const book = {}
     for (const group of (res && res.records) || []) {
       for (const d of group.details || []) {
-        map[d.materialNumber] = (map[d.materialNumber] || 0) + (Number(d.validQty) || 0)
+        book[d.materialNumber] = (book[d.materialNumber] || 0) + (Number(d.validQty) || 0)
       }
     }
-    stockMap.value = map
-    // 切仓后库存可能变小，已录入数量同步压到库存上限
+    const committed = {}
+    for (const item of commitments || []) {
+      committed[item.materialNumber] = Number(item.outstandingQty) || 0
+    }
+    const available = {}
+    for (const number of Object.keys(book)) {
+      available[number] = Math.max(0, book[number] - (committed[number] || 0))
+    }
+    bookMap.value = book
+    commitmentMap.value = committed
+    stockMap.value = available
+    // 切仓后库存可能变小，已录入数量同步压到可领用上限
     rows.value = rows.value.map(row => {
-      const available = map[row.materialNumber] == null ? 0 : map[row.materialNumber]
+      const value = available[row.materialNumber] == null ? 0 : available[row.materialNumber]
       const qty = Number(row.qty)
       return {
         ...row,
-        available,
-        qty: Number.isFinite(qty) && qty > available ? String(available > 0 ? available : 1) : row.qty
+        available: value,
+        qty: Number.isFinite(qty) && qty > value ? String(value > 0 ? value : 1) : row.qty
       }
     })
   } catch (e) {
     stockMap.value = {}
+    bookMap.value = {}
+    commitmentMap.value = {}
     uni.showToast({ title: (e && e.msg) || '库存加载失败', icon: 'none' })
   } finally {
     stockLoading.value = false
@@ -171,13 +188,23 @@ function availableOf(row) {
 
 function availableText(row) {
   const value = availableOf(row)
-  return value === null ? '—' : qtyText(value)
+  if (value === null) return '—'
+  const committed = commitmentMap.value[row.materialNumber] || 0
+  return committed > 0
+    ? `${qtyText(value)}（已扣未核销 ${qtyText(committed)}）`
+    : qtyText(value)
 }
 
 function stockText(materialNumber) {
   if (!props.stockNumber) return '请先选择仓库'
   const value = stockMap.value[materialNumber]
-  return value == null ? '0' : qtyText(value)
+  const available = value == null ? 0 : qtyText(value)
+  const committed = commitmentMap.value[materialNumber] || 0
+  if (committed > 0) {
+    const book = bookMap.value[materialNumber] == null ? 0 : bookMap.value[materialNumber]
+    return `${available}（账面 ${qtyText(book)}，未核销占用 ${qtyText(committed)}）`
+  }
+  return available
 }
 
 function maxOf(row) {

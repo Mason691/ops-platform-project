@@ -123,7 +123,8 @@
         </view>
         <view class="info-row"><text class="k">领用单号</text><text class="v">{{ order.billNo || '-' }}</text></view>
         <view class="info-row"><text class="k">领用事由</text><text class="v">{{ pickReasonLabel(order.pickReason) }}</text></view>
-        <view class="info-row"><text class="k">领用人</text><text class="v">{{ order.pickerName || '-' }}</text></view>
+        <view class="info-row"><text class="k">领用人（施工员）</text><text class="v">{{ order.pickerName || '-' }}</text></view>
+        <view class="info-row"><text class="k">领用状态</text><text class="v">{{ order.statusName || '-' }}</text></view>
         <view class="info-row"><text class="k">领用仓库</text><text class="v">{{ order.stockNumber || '未指定' }}</text></view>
         <view v-if="order.taskOrderNo" class="info-row">
           <text class="k">关联工单</text><text class="v">{{ order.taskOrderNo }}</text>
@@ -153,6 +154,11 @@
         <view class="info-row"><text class="k">核销单号</text><text class="v">{{ order.billNo || '-' }}</text></view>
         <view class="info-row"><text class="k">关联领用单</text><text class="v">{{ order.pickBillNo || '-' }}</text></view>
         <view class="info-row"><text class="k">核销人</text><text class="v">{{ order.writeOffByName || '-' }}</text></view>
+        <view class="info-row"><text class="k">审批节点</text><text class="v">{{ detailNodeName || '库管审批' }}</text></view>
+        <view v-if="order.approvedByName" class="info-row">
+          <text class="k">库管审批</text>
+          <text class="v">{{ order.approvedByName }} · {{ fmtTime(order.approvedTime) }}</text>
+        </view>
         <view class="info-row"><text class="k">提交时间</text><text class="v">{{ fmtTime(order.approvalSubmittedAt) }}</text></view>
       </view>
 
@@ -1280,9 +1286,9 @@ function showDispatchMaterialResult(pick) {
   const assigned = name ? `已指派施工员：${name}；` : ''
   uni.showModal({
     title: '派工出库成功',
-    content: `${assigned}已生成物料领用单 ${pick.billNo}，`
-      + '请前往【常用功能 → 物料领用】补充仓库、批次并提交审批',
-    confirmText: '去处理',
+    content: `${assigned}已生成物料领用单 ${pick.billNo}；`
+      + '施工员接受任务后自动确认，如需调整明细请进入【常用功能 → 物料领用】修改并提交部长审批',
+    confirmText: '去查看',
     cancelText: '稍后',
     success: (res) => {
       if (res.confirm) {

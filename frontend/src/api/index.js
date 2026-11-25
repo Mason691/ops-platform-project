@@ -308,13 +308,14 @@ export const api = {
   scmMaterialPickTaskOrders: () => request({url:'/api/scm/material-pick/task-orders'}),
   scmMaterialPickCreate: (data) => request({url:'/api/scm/material-pick', method:'POST', data}),
   // 派工自动生成的物料领用草稿（H5 常用功能）
-  scmMaterialPickMyDrafts: (params) => request({url:'/api/scm/material-pick/my-drafts', data:params}),
-  scmMaterialPickDraftCount: () => request({url:'/api/scm/material-pick/draft-count'}),
+  scmMaterialPickMyPicks: (params) => request({url:'/api/scm/material-pick/my-picks', data:params}),
+  scmMaterialPickPendingCount: () => request({url:'/api/scm/material-pick/pending-count'}),
   scmMaterialPickDetail: (id) => request({url:'/api/scm/material-pick/' + id}),
   scmMaterialPickByDispatch: (dispatchId) => request({url:'/api/scm/material-pick/by-dispatch/' + dispatchId}),
   scmMaterialPickMaterialOptions: () => request({url:'/api/scm/material-pick/material-options'}),
   scmMaterialPickBatches: (params) => request({url:'/api/scm/material-pick/batches', data:params}),
   scmMaterialPickStock: (params) => request({url:'/api/scm/material-pick/stock', data:params}),
+  scmMaterialPickCommitments: (params) => request({url:'/api/scm/material-pick/commitments', data:params}),
   scmMaterialPickSave: (id, data) => request({
     url: '/api/scm/material-pick/save' + (id ? '?id=' + id : ''), method: 'POST', data
   }),

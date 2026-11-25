@@ -5,7 +5,7 @@
         <text class="title">物料领用</text>
         <EmployeeHomeLink />
       </view>
-      <text class="sub">提交后由本组织部长审批，审批通过才扣减库存并生成可打印单据</text>
+      <text class="sub">手工领用提交后由本组织部长审批；库管打印领用，核销通过才扣减库存</text>
     </view>
 
     <view class="card">
@@ -65,7 +65,7 @@
 
     <view class="footer">
       <view class="btn primary" :class="{ disabled: submitting }" @click="submit">
-        <text>{{ submitting ? '提交中...' : '提交审批' }}</text>
+        <text>{{ submitting ? '提交中...' : '提交部长审批' }}</text>
       </view>
     </view>
 

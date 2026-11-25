@@ -2,6 +2,24 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-25（派工—物料领用—物料核销全流程重构，未发布）
+
+- **需求**：明确物料领用单 0 未审核 → 1 已审核 → 2 已领用 → 3 申请核销 → 4 物料核销 状态流转；新增「库管」角色负责打印领用单与审核核销；领用阶段不扣库存，核销通过才扣库存并生成核销出库单。
+- **SCM 后端**：
+  - `scm_material_pick` 新增 `status`/审核/打印/删除原因/修改前数量等字段（`sql/material_pick_flow_v2.sql`）；派工生成 0、施工员接受自动 1、库管打印 2、核销申请 3、库管通过 4。
+  - 新增 `scm_material_outbound`/`scm_material_outbound_entry`（`HXC-`，`write_off_id` 唯一，生成即已审核，不推金蝶）；核销通过写负数 `MATERIAL_WRITE_OFF` 流水，取消领用审批时扣库存/反审逻辑。
+  - 施工员修改 0/1 明细 → 回 0 重新走 `MATERIAL_PICK_APPROVAL`；核销改为 `MATERIAL_WRITE_OFF_APPROVAL` 单节点「库管审批」；PC 增加 `/pending-tasks` + `/review`，H5 继续代理底座工作流。
+  - 拒单逻辑删除领用单并留痕（`delete_reason`/`deleted_source_dispatch_id`，释放幂等唯一键）；重新派工走 `POST /api/internal/scm/material-pick/from-dispatch` 为新施工员生成新单。
+  - 可领用口径 = 账面 `valid_qty` − 状态 1/2/3 领用剩余量；`/stock`、`/commitments` 返回并用于派工/领用校验。
+  - 外部用户边界：SCM 守卫放行物料领用/核销 H5 所需路径，列表/打印/核销审批/出库单等内部接口显式拒绝外部用户；详情仅本人。
+- **ops 后端**：派工请求新增 `workerUserId/workerName`（领用单领用人=施工员）；接受/拒绝派工同步调用 SCM 内部接口；拒绝后重新派工先更新 `dispatch_task_id` 并生成新领用单。
+- **前端**：
+  - 平台主站 `MaterialPickList`（状态 0-4、打印/补打、审核/打印留痕）、`MaterialWriteOffList`（待我审批、同意核销/驳回、核销出库单弹窗）、打印模板。
+  - ops H5 `material-pick-drafts`/`material-pick-draft`/`material-write-off`/`flow-task`/`dashboard`/`DispatchMaterialList`：状态筛选、修改重审、申请核销、库管审批、可领用量提示。
+- **种子**：`material_pick_status_dict.sql`（字典）、`material_warehouse_role.sql`（库管角色 + 2108 核销审批 + 任务待办）、`doc/material_workflow_v2.sql`（存量流程升级）；`material_menu.sql` 增加 2108。
+- **验证（本地）**：SCM/ops `mvn -o test` 通过；平台前端 `npm run build`、ops H5 `npm run build:h5` 通过。**未执行**：生产 DDL/种子、库管人员绑定、真机端到端联调、微信消息验证。
+- **部署顺序**：`mall_db` DDL → `ai_platform` 字典/角色/流程 → 绑定各组织库管在职员工 → SCM JAR → ops JAR → 平台主站前端 → ops H5 → 重启平台清权限缓存 / 员工重新登录。
+
 ## 2026-11-23（客户签字「横屏签字」按钮无响应/旋转不生效修复，已发布）
 
 - **问题**：生产反馈点击「尝试全屏横屏」很难有反应；手机横过来后页面基本不进入横屏，客户无法按预期横屏签字。

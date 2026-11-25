@@ -5,7 +5,7 @@
         <text class="title">物料领用单</text>
         <EmployeeHomeLink />
       </view>
-      <text class="sub">补充领用仓库与批次后提交本组织部长审批；提交前请确认数量</text>
+      <text class="sub">补充领用仓库与批次后提交本组织部长审批；已审核单修改后需重新审批</text>
     </view>
 
     <view v-if="loading" class="state"><text>加载中...</text></view>
@@ -21,7 +21,24 @@
         <view class="kv"><text class="k">领用事由</text><text class="v">{{ reasonLabel(detail.pickReason) }}</text></view>
         <view class="kv"><text class="k">领用人</text><text class="v">{{ detail.pickerName || '—' }}</text></view>
         <view class="kv"><text class="k">状态</text>
-          <text class="v" :class="materialPickStatusClass(detail.approvalStatus)">{{ materialPickStatusLabel(detail.approvalStatus) }}</text>
+          <text class="v" :class="materialPickStatusClass(detail.status)">{{ detail.statusName || materialPickStatusLabel(detail.status) }}</text>
+        </view>
+        <view v-if="detail.inApproval" class="kv">
+          <text class="k">部长审核</text>
+          <text class="v pending">审核中 · {{ detail.currentApproverDisplay || '审批人待分配' }}</text>
+        </view>
+        <view v-else-if="detail.approvedByName" class="kv">
+          <text class="k">部长审核</text>
+          <text class="v">{{ detail.approvedByName }} · {{ formatTime(detail.approvedTime) }}</text>
+        </view>
+        <view v-else-if="detail.approvalRemark" class="kv">
+          <text class="k">审批意见</text>
+          <text class="v warn">{{ detail.approvalRemark }}</text>
+        </view>
+        <view v-if="detail.printTime" class="kv">
+          <text class="k">库管打印</text>
+          <text class="v">{{ detail.printByName || '库管' }} · {{ formatTime(detail.printTime) }}
+            （{{ detail.printCount || 0 }} 次）</text>
         </view>
         <view class="field">
           <text class="label">领用仓库</text>
@@ -94,7 +111,7 @@
           <text>{{ saving ? '保存中...' : '保存草稿' }}</text>
         </view>
         <view class="btn primary footer-btn" :class="{ disabled: submitting }" @click="submit">
-          <text>{{ submitting ? '提交中...' : '提交审批' }}</text>
+          <text>{{ submitting ? '提交中...' : '提交部长审批' }}</text>
         </view>
       </view>
     </template>
@@ -128,6 +145,7 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
+import { formatTime } from '@/utils/materialForm'
 import {
   materialPickStatusLabel,
   materialPickStatusClass
@@ -154,8 +172,11 @@ const form = ref({ stockNumber: null })
 let rowKey = 0
 
 const editable = computed(() => {
-  const status = detail.value && detail.value.approvalStatus
-  return status === 'DRAFT' || status === 'REJECTED'
+  const d = detail.value
+  if (!d) return false
+  // 0 未审核（非审批中）或 1 已审核：修改后回到 0，需部长重新审批
+  if (String(d.status) === '0') return !d.inApproval
+  return String(d.status) === '1'
 })
 const warehouseLabels = computed(() => warehouses.value.map(w => w.name || w.number))
 const warehouseName = computed(() => {
@@ -234,7 +255,8 @@ async function refreshRowStock(row) {
     row.available = await api.scmMaterialPickStock({
       stockNumber: form.value.stockNumber,
       materialNumber: row.materialNumber,
-      batchNo: row.batchNo || ''
+      batchNo: row.batchNo || '',
+      pickId: id.value
     })
   } catch (e) {
     row.available = null

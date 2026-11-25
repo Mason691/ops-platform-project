@@ -5,7 +5,8 @@
         <text class="title">物料核销</text>
         <EmployeeHomeLink />
       </view>
-      <text class="sub">核销数量 = 领用数量（剩余可核销）− 退回数量，系统自动计算；提交后部长 → 总经办审批</text>
+      <text class="sub">核销数量 = 领用数量（剩余可核销）− 退回数量，系统自动计算；提交后由本组织库管审批</text>
+      <text class="sub">库管通过后扣减库存并生成核销出库单；驳回后可在领用单中重新发起</text>
     </view>
 
     <view class="card">
@@ -60,7 +61,7 @@
 <script setup>
 import EmployeeHomeLink from '@/components/EmployeeHomeLink.vue'
 import { computed, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { api } from '@/api/index'
 import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 
@@ -70,6 +71,8 @@ const rows = ref([])
 const remark = ref('')
 const pickId = ref(null)
 const submitting = ref(false)
+const presetPickId = ref(null)
+let presetApplied = false
 
 const pickLabels = computed(() => pickable.value.map(p =>
   (p.billNo || ('#' + p.id)) + ' ' + (p.pickerName || '')))
@@ -78,6 +81,11 @@ const pickLabel = computed(() => {
   return p ? (p.billNo || ('#' + p.id)) : '请选择领用单'
 })
 const warehouseLabels = computed(() => warehouses.value.map(w => w.name || w.number))
+
+onLoad((options) => {
+  const value = Number(options && options.pickId)
+  presetPickId.value = Number.isFinite(value) && value > 0 ? value : null
+})
 
 onShow(() => {
   if (!isEmployeeLoggedIn()) {
@@ -97,6 +105,14 @@ async function loadBase() {
     ])
     pickable.value = picks || []
     warehouses.value = (wh && wh.records) || []
+    // 从「物料领用单-申请核销」进入：自动选中该领用单
+    if (!presetApplied && presetPickId.value) {
+      const preset = pickable.value.find(p => p.id === presetPickId.value)
+      if (preset) {
+        presetApplied = true
+        await selectPick(preset)
+      }
+    }
   } catch (e) {
     uni.showToast({ title: (e && e.msg) || '加载失败', icon: 'none' })
   }
@@ -104,7 +120,10 @@ async function loadBase() {
 
 async function onPickChange(e) {
   const pick = pickable.value[Number(e.detail.value)]
-  if (!pick) return
+  if (pick) await selectPick(pick)
+}
+
+async function selectPick(pick) {
   pickId.value = pick.id
   try {
     const d = await api.scmMaterialWriteOffFromPick(pick.id)

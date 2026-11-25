@@ -116,8 +116,8 @@ const FALLBACK_CARDS = [
   { code: 'balance-pending', name: '货款补录', desc: '定金订单收齐余款，解锁派工', icon: '💰', tone: 'mc-icon-pay', path: '/pages/employee/balance-pending' },
   { code: 'material-requisition', name: '物资领用', desc: '申请领用物料，部长审批', icon: '🧰', tone: 'mc-icon-data', path: '/pages/employee/material-requisition-records' },
   { code: 'material-write-off-records', name: '物资核销', desc: '核销使用与退回，回写领用余量', icon: '✅', tone: 'mc-icon-pending', path: '/pages/employee/material-write-off-records' },
-  { code: 'material-pick', name: '物料领用', desc: '派工施工领用物料，部长审批', icon: '📦', tone: 'mc-icon-dispatch', path: '/pages/employee/material-pick' },
-  { code: 'material-write-off', name: '物料核销', desc: '剩余物料退回与消耗核销', icon: '♻️', tone: 'mc-icon-dispatch', path: '/pages/employee/material-write-off' },
+  { code: 'material-pick', name: '物料领用', desc: '派工物料领用，库管打印、核销扣库存', icon: '📦', tone: 'mc-icon-dispatch', path: '/pages/employee/material-pick' },
+  { code: 'material-write-off', name: '物料核销', desc: '已领用物料核销，库管审批', icon: '♻️', tone: 'mc-icon-dispatch', path: '/pages/employee/material-write-off' },
   { code: 'work-log', name: '工作业务日志', desc: '查看我发起与处理的流程操作', icon: '📝', tone: 'mc-icon-data', path: '/pages/employee/work-log' },
   { code: 'ai-chat', name: 'AI 助手', desc: '智能问答，随时解答', icon: '🤖', tone: 'mc-icon-ai', path: '/pages/employee/ai-chat' },
   { code: 'profile', name: '个人中心', desc: '账户信息与密码管理', icon: '👤', tone: 'mc-icon-me', path: '/pages/employee/profile' }
@@ -244,18 +244,18 @@ async function loadBalanceBadge() {
 }
 
 /**
- * 物料领用草稿角标：只统计当前登录人的 DRAFT，不含审批中/已通过。
+ * 物料领用角标：当前登录人名下待完善/可处理（状态 0、1）的领用单数量。
  * 无权限或接口失败不阻塞工作台（角标是提醒，不是功能前提）。
  */
 async function loadPickBadge() {
   try {
-    const count = Number(await api.scmMaterialPickDraftCount()) || 0
+    const count = Number(await api.scmMaterialPickPendingCount()) || 0
     let card = (cards.value || []).find(item => item.code === 'material-pick'
       || String(item.path || '').includes('material-pick'))
     if (!card && count > 0) {
       card = {
         code: 'material-pick-drafts', name: '物料领用单',
-        desc: '补充仓库/批次并提交审批', icon: '📦', tone: 'mc-icon-dispatch',
+        desc: '查看/修改领用单并提交部长审批', icon: '📦', tone: 'mc-icon-dispatch',
         path: '/pages/employee/material-pick-drafts'
       }
       cards.value = [...cards.value, card]

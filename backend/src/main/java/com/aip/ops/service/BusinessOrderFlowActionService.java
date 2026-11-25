@@ -452,6 +452,11 @@ public class BusinessOrderFlowActionService {
             throw BusinessException.of("订单没有可施工的正数商品分录");
         }
         List<ScmDispatchOutboundRequest.Item> outboundItems = groupItems(items);
+        // 派工物料清单是“需求预填”：随派工一起传给 SCM，由 SCM 同事务生成物料领用单；
+        // 为空表示本次派工不需要物料，不生成领用单。
+        List<ScmDispatchOutboundRequest.MaterialItem> materialItems =
+                dispatchMaterialItems(form.get("materialList"));
+        String materialStockNumber = str(form.get("materialStockNumber"));
         // SCM 不可达时 fail-closed。已存在出库单时区分两种可恢复场景：
         //   1) 同一派工任务重试（SCM 已建单但状态回写失败）：SCM 按 dispatchId 幂等复用；
         //   2) 拒绝接受后重新指派：货物已出库，复用原出库单，不再重复出库。
@@ -473,19 +478,36 @@ public class BusinessOrderFlowActionService {
             result.put("reusedOutbound", true);
             result.put("stockOutId", outbounds.iterator().next());
             result.put("productCount", outboundItems.size());
+            // 新任务ID必须落库：accept/reject 钩子按 dispatch_task_id 找领用单
+            orderConstructService.markDispatchAttempt(order.getId(), event.getTaskId());
+            // 拒单时旧领用单已逻辑删除；重新派工必须为新施工员生成新的领用单，
+            // 否则新施工员在「物料领用」里看不到任何单据。
+            if (!materialItems.isEmpty()) {
+                String dispatchNo = dispatchNo(order, event.getTaskId(), event.getInstanceId());
+                ScmDispatchOutboundRequest pickRequest = new ScmDispatchOutboundRequest(
+                        order.getCorpId(), event.getTaskId(), dispatchNo,
+                        order.getId(), order.getOrderNo(),
+                        event.getOperatorUserId(), event.getOperatorName(),
+                        assigneeUserId, Objects.toString(assignee.get("name"), null),
+                        order.getCustomer(), order.getCustomerPhone(), order.getPlatformMemberId(),
+                        order.getCommunityName(), order.getDetailedAddress(), outboundItems,
+                        materialStockNumber.isEmpty() ? null : materialStockNumber, materialItems);
+                ScmStockOutClient.MaterialPickResult pick = scmClient.createMaterialPick(pickRequest);
+                if (pick != null) {
+                    result.put("materialPickId", pick.id());
+                    result.put("materialPickBillNo", pick.billNo());
+                    result.put("materialPickCount", materialItems.size());
+                }
+            }
             markDispatched(order, assignee, assigneeUserId, dispatchType, form, event);
             return result;
         }
-        // 派工物料清单是“需求预填”：随派工一起传给 SCM，由 SCM 同事务生成物料领用草稿；
-        // 为空表示本次派工不需要物料，不生成领用单。
-        List<ScmDispatchOutboundRequest.MaterialItem> materialItems =
-                dispatchMaterialItems(form.get("materialList"));
-        String materialStockNumber = str(form.get("materialStockNumber"));
         String dispatchNo = dispatchNo(order, event.getTaskId(), event.getInstanceId());
         ScmDispatchOutboundRequest request = new ScmDispatchOutboundRequest(
                 order.getCorpId(), event.getTaskId(), dispatchNo,
                 order.getId(), order.getOrderNo(),
                 event.getOperatorUserId(), event.getOperatorName(),
+                assigneeUserId, Objects.toString(assignee.get("name"), null),
                 order.getCustomer(), order.getCustomerPhone(), order.getPlatformMemberId(),
                 order.getCommunityName(), order.getDetailedAddress(), outboundItems,
                 materialStockNumber.isEmpty() ? null : materialStockNumber, materialItems);
