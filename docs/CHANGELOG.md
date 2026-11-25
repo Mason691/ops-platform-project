@@ -16,7 +16,7 @@
 - **前端**：
   - 平台主站 `MaterialPickList`（状态 0-4、打印/补打、审核/打印留痕）、`MaterialWriteOffList`（待我审批、同意核销/驳回、核销出库单弹窗）、打印模板。
   - ops H5 `material-pick-drafts`/`material-pick-draft`/`material-write-off`/`flow-task`/`dashboard`/`DispatchMaterialList`：状态筛选、修改重审、申请核销、库管审批、可领用量提示。
-- **种子**：`material_pick_status_dict.sql`（字典）、`material_warehouse_role.sql`（库管角色 + 2108 核销审批 + 任务待办）、`doc/material_workflow_v2.sql`（存量流程升级）；`material_menu.sql` 增加 2108。
+- **种子**：`material_pick_status_dict.sql`（字典）、`material_warehouse_role.sql`（库管角色 + 2118 核销审批 + 任务待办）、`doc/material_workflow_v2.sql`（存量流程升级）；`material_menu.sql` 增加 2118。
 - **验证（本地）**：SCM/ops `mvn -o test` 通过；平台前端 `npm run build`、ops H5 `npm run build:h5` 通过。**未执行**：生产 DDL/种子、库管人员绑定、真机端到端联调、微信消息验证。
 - **部署顺序**：`mall_db` DDL → `ai_platform` 字典/角色/流程 → 绑定各组织库管在职员工 → SCM JAR → ops JAR → 平台主站前端 → ops H5 → 重启平台清权限缓存 / 员工重新登录。
 
