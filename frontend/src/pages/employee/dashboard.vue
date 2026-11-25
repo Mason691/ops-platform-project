@@ -114,13 +114,12 @@ const currentYear  = new Date().getFullYear().toString()
 const FALLBACK_CARDS = [
   { code: 'business-data', name: '业务数据', desc: '查看提成与业绩明细', icon: '📊', tone: 'mc-icon-data', path: '/pages/employee/business-data' },
   { code: 'balance-pending', name: '货款补录', desc: '定金订单收齐余款，解锁派工', icon: '💰', tone: 'mc-icon-pay', path: '/pages/employee/balance-pending' },
-  { code: 'material-requisition', name: '物资领用', desc: '申请领用物料，部长审批', icon: '🧰', tone: 'mc-icon-data', path: '/pages/employee/material-requisition-records' },
-  { code: 'material-write-off-records', name: '物资核销', desc: '核销使用与退回，回写领用余量', icon: '✅', tone: 'mc-icon-pending', path: '/pages/employee/material-write-off-records' },
   { code: 'material-pick', name: '物料领用', desc: '派工物料领用，库管打印、核销扣库存', icon: '📦', tone: 'mc-icon-dispatch', path: '/pages/employee/material-pick' },
   { code: 'material-write-off', name: '物料核销', desc: '已领用物料核销，库管审批', icon: '♻️', tone: 'mc-icon-dispatch', path: '/pages/employee/material-write-off' },
   { code: 'work-log', name: '工作业务日志', desc: '查看我发起与处理的流程操作', icon: '📝', tone: 'mc-icon-data', path: '/pages/employee/work-log' },
-  { code: 'ai-chat', name: 'AI 助手', desc: '智能问答，随时解答', icon: '🤖', tone: 'mc-icon-ai', path: '/pages/employee/ai-chat' },
-  { code: 'profile', name: '个人中心', desc: '账户信息与密码管理', icon: '👤', tone: 'mc-icon-me', path: '/pages/employee/profile' }
+  // 个人中心/AI 助手保留卡片定义，暂不在常用功能展示
+  { code: 'ai-chat', name: 'AI 助手', desc: '智能问答，随时解答', icon: '🤖', tone: 'mc-icon-ai', path: '/pages/employee/ai-chat', visible: false },
+  { code: 'profile', name: '个人中心', desc: '账户信息与密码管理', icon: '👤', tone: 'mc-icon-me', path: '/pages/employee/profile', visible: false }
 ]
 
 const yearlyStats = ref({
