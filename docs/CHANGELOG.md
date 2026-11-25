@@ -2,6 +2,18 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-25（员工工作台「物资领用/物资核销」功能彻底删除，已发布）
+
+- **删除范围**（ops 自有物资申请域，单号 `LY-`/`WX-`）：
+  - H5：`material-requisition-new/detail/records`、`material-write-off-new/records/detail` 6 个页面；`useMaterialRequisitionWizard`/`useMaterialWriteOffWizard` 2 个 hooks；`MaterialItemsStep`/`MaterialPickerSheet`/`RequisitionPickerSheet`/`MaterialVoucherUploader`/`MaterialFlowSuccess`/`MaterialRequisition*`/`MaterialWriteOff*` 11 个组件；`pages.json` 路由；`api/index.js` 12 个方法；`flow-task` 审批分支、`work-log` 筛选/跳转、待办标签；`materialForm.js` 仅保留 SCM 使用的 `formatTime`/`formatMaterialLabel`。
+  - 后端：`EmployeeMaterialController`、`InternalMaterialWorkflowController`、`MaterialRequisitionService/Impl`、`MaterialWriteOffService/Impl`、`EmployeeMaterialSupport`、`MaterialNoGenerator`、`MaterialWorkflowProperties`、`OpsMaterialRequisition*`/`OpsMaterialWriteOff*` 实体/Mapper/DTO 共 23 个文件；`application.yml` 的 `material.*` 配置。
+  - DB：`ops_material_requisition`、`ops_material_requisition_entry`、`ops_material_write_off`、`ops_material_write_off_entry`、`ops_material_seq` 5 张表；工作流定义 `OPS_MATERIAL_REQUISITION_APPROVAL`/`OPS_MATERIAL_WRITE_OFF_APPROVAL` 及节点/审批人（无实例/待办）。
+  - 文档：`docs/material-requisition.md`、手册/规格/CLAUDE 中相关条目。
+- **保留**：SCM 物料领用/核销（`LL-`/`HX-`，`MATERIAL_PICK`/`MATERIAL_WRITE_OFF`）及 2026-11-25 新流程不受影响。
+- **备份**：`backups/mall_db-ops-material-pre-delete-20261125_152033.sql.gz`、`backups/ai_platform-wf-pre-delete-ops-material-20261125_152033.sql.gz`。
+- **生产清理（2026-11-25 15:20）**：已删除 `ops_material_*` 5 张表、`OPS_MATERIAL_REQUISITION_APPROVAL`/`OPS_MATERIAL_WRITE_OFF_APPROVAL` 定义（id 6/7）及节点/审批人；无进行中实例/待办。
+- **发布（2026-11-25 15:22）**：ops JAR overlay（新镜像 `boss-platform/ops:ops-material-delete-20261125_152208`，回滚镜像 `boss-platform/ops:rollback-ops-material-delete-20261125_152208`）；ops H5 入口 `index-CXpZKTAW.js`（flow-task chunk sha256 与本地一致）。部署后 JAR 已无物资域类，SCM 物料领用/核销类与页面保留；三后端 healthy（8080/8082/8084 health 200），公网 `/ops/` 200。回滚点：`ops-app.jar.bak-ops-material-delete-20261125_152208`、`html-ops-pre-ops-material-delete-20261125_152208.tgz`。
+
 ## 2026-11-25（派工—物料领用—物料核销全流程重构，已发布）
 
 - **需求**：明确物料领用单 0 未审核 → 1 已审核 → 2 已领用 → 3 申请核销 → 4 物料核销 状态流转；新增「库管」角色负责打印领用单与审核核销；领用阶段不扣库存，核销通过才扣库存并生成核销出库单。
