@@ -29,11 +29,10 @@
 | 销售退货 | `audit_status` | DRAFT/AUDITED | 草稿/已审核 |
 | 盘点单 | `audit_status` | DRAFT/AUDITED | 只表示审核，不表示处理 |
 | 盘点单 | `process_status` | PENDING/PROCESSED/PROCESS_REVERSED/PROCESS_FAILED | 只表示处理进度 |
-| 物料领取 | `approval_status` | DRAFT/IN_APPROVAL/APPROVED/REJECTED | 发起→财务审批 |
-| 物料领取 | `audit_status` | DRAFT/AUDITED | 审批通过后审核（扣库存） |
-| 物料领取 | `write_off_status` | NONE/PENDING/PARTIAL/COMPLETED | 未核销/待核销/部分核销/已核销 |
-| 物料核销 | `approval_status` | DRAFT/IN_APPROVAL/APPROVED/REJECTED | 发起→部长→总经办 |
-| 物料核销 | `audit_status` | DRAFT/AUDITED | 审批通过即 AUDITED |
+| 物料领用 | `status` | 0/1/2/3/4 | 0未审核→1已审核→2已领用→3申请核销→4物料核销 |
+| 物料领用 | `print_by/print_time/print_count` | — | 首次打印1→2（发放）；补打只累加次数 |
+| 物料核销 | `approval_status` | DRAFT/IN_APPROVAL/APPROVED/REJECTED | 发起→库管审批（单节点） |
+| 物料核销 | `audit_status` | DRAFT/AUDITED | 审批通过即 AUDITED，并生成 HXC- 核销出库单 |
 
 ### A.3 金蝶同步状态（`sync_status`）
 
@@ -78,9 +77,10 @@
 | `STOCKTAKING_LOSS` | 盘点盘亏 | 减少 |
 | `STOCKTAKING_REVERSAL` | 盘点反处理冲销 | 反向 |
 | `JDY_SYNC` | 金蝶同步基线 | 基准 |
-| `MATERIAL_PICK` | 物料领取 | 减少 |
-| `MATERIAL_PICK_REVERSAL` | 物料领取反审冲销 | 增加 |
-| `MATERIAL_RETURN` | 物料核销退回 | 增加 |
+| `MATERIAL_PICK` | 物料领用（旧流程历史数据） | 减少 |
+| `MATERIAL_PICK_REVERSAL` | 物料领用反审冲销（旧流程历史数据） | 增加 |
+| `MATERIAL_RETURN` | 物料核销退回（旧流程历史数据） | 增加 |
+| `MATERIAL_WRITE_OFF` | 物料核销扣减（新流程） | 减少 |
 
 ## 附录 B 截图清单
 
@@ -153,8 +153,8 @@
 | 截图 7-1 | 员工工作台首页 | 第 7 章 |
 | 截图 7-2 | H5 派工出库任务页 | 第 7 章 |
 | 截图 7-3 | 选择施工员弹层与新增外部施工员 | 第 7 章 |
-| 截图 7-4 | H5 物料领取新建页 | 第 7 章 |
-| 截图 7-5 | H5 物料领用草稿编辑页 | 第 7 章 |
+| 截图 7-4 | H5 我的领用单列表（状态筛选与申请核销入口） | 第 7 章 |
+| 截图 7-5 | H5 物料领用单编辑页（仓库/批次/数量/审批留痕） | 第 7 章 |
 | 截图 7-6 | H5 物料核销页 | 第 7 章 |
 | 截图 7-7 | H5 个人中心 | 第 7 章 |
 
@@ -170,7 +170,7 @@
 | C7 | 外部施工员首次登录/微信绑定流程 | 正文只写创建与选中，未展开其登录步骤 | 产品/实施 |
 | C8 | 退款申请通过后实际打款渠道/时限 | 系统记录退款申请与审批，不执行支付；正文未承诺打款时效 | 财务 |
 | C9 | 以旧换新历史单（`source_type=MANUAL`）与新自动单的展示差异 | 正文按新流程描述；历史单仍走人工审批 | 供应链/产品 |
-| C10 | 物料领取/核销是否后续推送金蝶 | 当前决策“不推送”；正文按不推送描述 | 财务/供应链 |
+| C10 | 物料领用/核销是否后续推送金蝶 | 当前决策“不推送”；正文按不推送描述 | 财务/供应链 |
 
 ## 附录 D 29 项功能交付检查表
 
@@ -202,7 +202,7 @@
 | 24 | 业务订单作废 | 6.2 | ✅ |
 | 25 | 工作台首页 | 7.1 | ✅ |
 | 26 | 派工出库 | 7.2 | ✅ |
-| 27 | 物料领取 | 7.3 | ✅ |
+| 27 | 物料领用 | 7.3 | ✅ |
 | 28 | 物料核销 | 7.4 | ✅ |
 | 29 | 个人中心 | 7.5 | ✅ |
 
