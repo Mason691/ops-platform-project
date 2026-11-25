@@ -4,6 +4,7 @@ import com.aip.ops.dto.BalanceReceiveRequest;
 import com.aip.ops.dto.CommunityCreateRequest;
 import com.aip.ops.dto.EmployeeBusinessEntryRequest;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -23,6 +24,12 @@ public interface EmployeeBusinessEntryService {
 
     /** 员工制单新建小区：自动关联当前组织所在区县。 */
     Map<String, Object> createCommunity(CommunityCreateRequest request);
+
+    /**
+     * 新建小区定位：按 GCJ-02 坐标调用平台逆地理编码（高德 key 不下发前端）。
+     * 返回 formattedAddress/province/city/district/township/streetNumber/adcode/pois。
+     */
+    Map<String, Object> regeo(BigDecimal longitude, BigDecimal latitude);
 
     /** 保存手工录入的业务数据（同步发起工作流并带回下一审批人）。 */
     Map<String, Object> createManualEntry(EmployeeBusinessEntryRequest request);

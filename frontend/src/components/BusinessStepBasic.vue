@@ -51,33 +51,8 @@
       <text v-if="errors.customer" class="ferr">{{ errors.customer }}</text>
     </view>
 
-    <view v-if="show('communityId')" id="field-communityId" class="section">
-      <view class="label-row">
-        <text class="label" @click="focusField('field-communityId')">小区 <text class="req">*</text></text>
-        <text class="create-link" :class="{ disabled: !districtConfigured }" @click="openCommunityCreate()">＋ 新建小区</text>
-      </view>
-      <template v-if="communities.length > 8">
-        <view class="picker-trigger" :class="{ 'control-error': errors.communityId }"
-              @click="communitySheet = true">
-          <text :class="form.communityName ? 'trigger-value' : 'placeholder'">
-            {{ form.communityName || '请选择小区' }}
-          </text>
-          <text class="arrow">›</text>
-        </view>
-      </template>
-      <template v-else-if="communities.length">
-        <view v-if="communities.length > 4" class="search-row">
-          <input class="search-input" v-model="communityKeyword" placeholder="搜索小区" />
-          <text v-if="communityKeyword" class="search-clear" @click="communityKeyword = ''">清空</text>
-        </view>
-        <FieldChips class="chips-block" :class="{ 'control-error-box': errors.communityId }"
-                    :options="communityChips" :model-value="form.communityId"
-                    @update:model-value="setCommunity" compact />
-      </template>
-      <text v-else class="warn-text">{{ districtConfigured ? '组织暂未配置小区，可直接点击「新建小区」创建' : '组织暂未配置小区' }}</text>
-      <text v-if="errors.communityId" class="ferr">{{ errors.communityId }}</text>
-      <text v-else-if="!districtConfigured" class="warn-text">当前组织未配置所在区县，请联系管理员完善组织信息后再新建小区</text>
-    </view>
+    <BusinessCommunityField :visible="show('communityId')" :form="form" :meta="meta"
+                            :errors="errors" />
 
     <view v-if="show('detailAddress')" id="field-detailAddress" class="section">
       <text class="label" @click="focusField('field-detailAddress')">
@@ -100,14 +75,6 @@
     <BottomSheetSelect v-model:visible="batchSheet" title="选择批次" :options="batchOptions"
                        :model-value="form.batchNo" placeholder="搜索批次"
                        @select="option => setBatch(option.value)" />
-    <BottomSheetSelect v-model:visible="communitySheet" title="选择小区" :options="communityOptions"
-                       :model-value="form.communityId" placeholder="搜索小区名称"
-                       :action-text="districtConfigured ? '＋ 新建小区' : ''" @action="onCommunityAction"
-                       @select="option => setCommunity(option.value)" />
-    <BusinessCommunityCreateSheet v-model:visible="communityCreateVisible"
-                                  :initial-name="communityCreateInitial"
-                                  :district-name="meta.regionName || ''" :district-configured="districtConfigured"
-                                  @created="onCommunityCreated" />
   </view>
 </template>
 
@@ -116,7 +83,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import FieldChips from '@/components/FieldChips.vue'
 import BottomSheetSelect from '@/components/BottomSheetSelect.vue'
 import BusinessAgentPicker from '@/components/BusinessAgentPicker.vue'
-import BusinessCommunityCreateSheet from '@/components/BusinessCommunityCreateSheet.vue'
+import BusinessCommunityField from '@/components/BusinessCommunityField.vue'
 import { normalizePhone } from '@/utils/businessForm'
 import { focusField, keepFieldVisible } from '@/utils/fieldFocus'
 
@@ -135,10 +102,6 @@ const props = defineProps({
 const emit = defineEmits(['query-member'])
 
 const batchSheet = ref(false)
-const communitySheet = ref(false)
-const communityCreateVisible = ref(false)
-const communityCreateInitial = ref('')
-const communityKeyword = ref('')
 let queryTimer = null
 
 const show = key => !props.onlyErrors || !!props.errors[key]
@@ -159,19 +122,6 @@ const batchChips = computed(() => {
 const batchOptions = computed(() =>
   (props.meta.batches || []).map(batch => ({ value: batch, label: batch })))
 
-const communities = computed(() => props.meta.communities || [])
-const districtConfigured = computed(() => props.meta.regionConfigured !== false)
-const communityOptions = computed(() => communities.value.map(item => ({
-  value: item.id, label: item.name
-})))
-const communityChips = computed(() => {
-  const word = communityKeyword.value.trim().toLowerCase()
-  const list = word
-    ? communities.value.filter(item => String(item.name || '').toLowerCase().includes(word))
-    : communities.value
-  return list.map(item => ({ value: item.id, label: item.name }))
-})
-
 function setBatch(value) {
   if (value === '__new__') {
     props.form.newBatch = true
@@ -180,34 +130,6 @@ function setBatch(value) {
   }
   props.form.newBatch = false
   props.form.batchNo = value
-}
-
-function setCommunity(value) {
-  const found = communities.value.find(item => String(item.id) === String(value))
-  props.form.communityId = found ? found.id : null
-  props.form.communityName = found ? found.name : ''
-}
-
-/** 新建小区：用当前搜索词预填名称，创建成功后加入下拉并自动选中。 */
-function openCommunityCreate(initialName = '') {
-  if (!districtConfigured.value) return
-  communityCreateInitial.value = String(initialName || communityKeyword.value || '').trim()
-  communityCreateVisible.value = true
-}
-
-/** 选择器底部「新建小区」：把弹层里的搜索词带入新建弹层。 */
-function onCommunityAction(keyword) { communitySheet.value = false; openCommunityCreate(keyword) }
-
-function onCommunityCreated(created) {
-  const id = created && created.id
-  if (id == null) return
-  const list = props.meta.communities || []
-  if (!list.some(item => String(item.id) === String(id))) {
-    list.push({ id, name: created.name })
-    props.meta.communities = list
-  }
-  setCommunity(id)
-  communityKeyword.value = ''
 }
 
 function onPhoneInput(event) {
@@ -232,12 +154,6 @@ onBeforeUnmount(() => clearTimeout(queryTimer))
 }
 .label-row { display: flex; align-items: baseline; justify-content: space-between; }
 .label-row .label { margin-bottom: 0; }
-.create-link {
-  font-size: 24rpx; font-weight: 600; color: #FF6B35;
-  padding: 6rpx 18rpx; border: 2rpx solid #FF6B35; border-radius: 26rpx;
-  line-height: 1.2;
-}
-.create-link.disabled { color: #bbb; border-color: #ddd; }
 
 .label {
   display: block; font-size: 26rpx; color: #666; margin-bottom: 14rpx;
@@ -268,22 +184,6 @@ onBeforeUnmount(() => clearTimeout(queryTimer))
   background: #FFF8F4; font-size: 24rpx; color: #8a5a3b;
 }
 .strong { color: #FF6B35; font-weight: 600; }
-.picker-trigger {
-  display: flex; align-items: center; justify-content: space-between;
-  height: 80rpx; background: #f7f7f7; border-radius: 12rpx; padding: 0 20rpx;
-}
-.trigger-value {
-  flex: 1; min-width: 0; font-size: 28rpx; color: #333;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.placeholder { font-size: 28rpx; color: #bbb; }
-.arrow { font-size: 32rpx; color: #999; }
-.search-row {
-  display: flex; align-items: center; background: #f5f5f5;
-  border-radius: 10rpx; padding: 0 18rpx; margin-bottom: 14rpx;
-}
-.search-input { flex: 1; height: 66rpx !important; min-height: 66rpx !important; font-size: 26rpx; color: #333; }
-.search-clear { font-size: 23rpx; color: #999; padding-left: 12rpx; }
 .field-foot { display: flex; align-items: flex-start; justify-content: space-between; }
 .counter { font-size: 21rpx; color: #bbb; margin-left: 16rpx; }
 .ferr { display: block; font-size: 22rpx; color: #e53935; margin-top: 8rpx; }

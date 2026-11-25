@@ -26,6 +26,8 @@ import com.aip.ops.service.BusinessSpecialFileService;
 import com.aip.ops.service.EmployeeBusinessEntryService;
 import com.aip.ops.service.GasMemberMatcher;
 import com.aip.ops.service.ProductPriceService;
+import com.aip.ops.util.CommunityGeoUtils;
+import com.aip.ops.util.MinuteRateLimiter;
 import com.aip.ops.util.OrderPartyText;
 import com.aip.ops.util.PaymentMethod;
 import com.aip.sdk.client.PlatformInternalClient;
@@ -124,6 +126,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private final BusinessAttachmentService attachmentService;
     private final WorkflowPlatformClient workflowPlatformClient;
     private final ThreadPoolTaskExecutor workflowTaskExecutor;
+    /** 单个员工每分钟最多 10 次定位，防止脚本刷接口（平台侧另有单组织 60 次/分钟）。 */
+    private final MinuteRateLimiter regeoUserLimiter = new MinuteRateLimiter(10);
 
     private TransactionTemplate transactionTemplate;
 
@@ -193,16 +197,52 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
      */
     @Override
     public Map<String, Object> createCommunity(CommunityCreateRequest request) {
+        assertCanCreateCommunity(request);
+        String name = requireText(request.getName(), "小区名称", 200);
+        String address = CommunityGeoUtils.normalizeAddress(request.getDetailAddress());
+        BigDecimal longitude = request.getLongitude();
+        BigDecimal latitude = request.getLatitude();
+        CommunityGeoUtils.validate(longitude, latitude, request.getCoordinateType());
+        String source = CommunityGeoUtils.normalizeSource(request.getLocationSource());
+        EmployeeContext ctx = resolveEmployeeContext();
+        Map<?, ?> data = postCreateCommunity(ctx, request, name, address,
+                longitude, latitude, source);
+        if (!(data.get("id") instanceof Number id)) {
+            throw BusinessException.of("新建小区失败，请稍后重试");
+        }
+        log.info("员工新建小区 corpId={} name={} id={} operator={} source={} hasCoords={}",
+                ctx.corpId(), name, id.longValue(), ctx.employeeName(), source, longitude != null);
+        return communityResult(data, id.longValue(), address, longitude, latitude, source);
+    }
+
+    private void assertCanCreateCommunity(CommunityCreateRequest request) {
         if (jwtTokenInspector.isExternalUser()) {
             throw BusinessException.forbidden("外部用户暂不可新建小区");
         }
-        String name = requireText(request == null ? null : request.getName(), "小区名称", 200);
-        EmployeeContext ctx = resolveEmployeeContext();
+        if (request == null) {
+            throw BusinessException.of("小区名称不能为空");
+        }
+    }
+
+    private Map<?, ?> postCreateCommunity(EmployeeContext ctx, CommunityCreateRequest request,
+                                          String name, String address, BigDecimal longitude,
+                                          BigDecimal latitude, String source) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("corpId", ctx.corpId());
         body.put("name", name);
         body.put("operatorUserId", ctx.employeeUserId());
         body.put("operatorName", ctx.employeeName());
+        body.put("address", address);
+        body.put("longitude", longitude);
+        body.put("latitude", latitude);
+        body.put("coordinateType", longitude == null ? null : "GCJ02");
+        body.put("locationSource", source);
+        body.put("locationAccuracy", request.getLocationAccuracy());
+        body.put("province", request.getProvince());
+        body.put("city", request.getCity());
+        body.put("districtName", request.getDistrictName());
+        body.put("township", request.getTownship());
+        body.put("adcode", request.getAdcode());
         Map<String, Object> resp;
         try {
             resp = platformInternalClient.post("/api/internal/community/create", body, null);
@@ -213,29 +253,97 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         }
         if (resp == null || !(resp.get("code") instanceof Number n) || n.intValue() != 200) {
             String msg = resp == null ? "" : str(resp.get("msg"));
-            throw BusinessException.of(msg.isEmpty() ? "新建小区失败，请稍后重试" : msg);
+            throw BusinessException.of(responseCode(resp),
+                    msg.isEmpty() ? "新建小区失败，请稍后重试" : msg);
         }
-        if (!(resp.get("data") instanceof Map<?, ?> data) || !(data.get("id") instanceof Number id)) {
+        if (!(resp.get("data") instanceof Map<?, ?> data)) {
             throw BusinessException.of("新建小区失败，请稍后重试");
         }
+        return data;
+    }
+
+    private int responseCode(Map<String, Object> resp) {
+        return resp != null && resp.get("code") instanceof Number n ? n.intValue() : 500;
+    }
+
+    private Map<String, Object> communityResult(Map<?, ?> data, Long id, String address,
+                                                BigDecimal longitude, BigDecimal latitude,
+                                                String source) {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("id", id.longValue());
+        result.put("id", id);
         result.put("name", data.get("name"));
         result.put("regionId", data.get("regionId"));
         result.put("regionName", data.get("regionName"));
         result.put("existed", Boolean.TRUE.equals(data.get("existed")));
-        log.info("员工新建小区 corpId={} name={} id={} operator={}", ctx.corpId(), name,
-                id.longValue(), ctx.employeeName());
+        result.put("detailAddress", data.get("address") != null ? data.get("address") : address);
+        result.put("longitude", data.get("longitude") != null ? data.get("longitude") : longitude);
+        result.put("latitude", data.get("latitude") != null ? data.get("latitude") : latitude);
+        result.put("locationSource", data.get("locationSource") != null
+                ? data.get("locationSource") : source);
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> regeo(BigDecimal longitude, BigDecimal latitude) {
+        assertEmployee();
+        if (jwtTokenInspector.isExternalUser()) {
+            throw BusinessException.forbidden("外部用户暂不可使用定位");
+        }
+        if (longitude == null || latitude == null) {
+            throw BusinessException.of("定位坐标不合法");
+        }
+        CommunityGeoUtils.validate(longitude, latitude, "GCJ02");
+        regeoUserLimiter.check(SecurityUtils.getCurrentUserId());
+        EmployeeContext ctx = resolveEmployeeContext();
+        String path = "/api/internal/community/regeo?corpId=" + ctx.corpId()
+                + "&lng=" + longitude.toPlainString() + "&lat=" + latitude.toPlainString();
+        Map<String, Object> resp;
+        try {
+            resp = platformInternalClient.get(path, null);
+        } catch (Exception e) {
+            log.warn("逆地理编码调用平台失败 corpId={} lng={} lat={}: {}",
+                    ctx.corpId(), longitude, latitude, e.getMessage());
+            throw BusinessException.of("地址解析失败，请手动填写详细地址");
+        }
+        if (resp == null || !(resp.get("code") instanceof Number n) || n.intValue() != 200) {
+            String msg = resp == null ? "" : str(resp.get("msg"));
+            throw BusinessException.of(responseCode(resp),
+                    msg.isEmpty() ? "地址解析失败，请手动填写详细地址" : msg);
+        }
+        if (!(resp.get("data") instanceof Map<?, ?> data)) {
+            throw BusinessException.of("地址解析失败，请手动填写详细地址");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("formattedAddress", str(data.get("formattedAddress")));
+        result.put("province", str(data.get("province")));
+        result.put("city", str(data.get("city")));
+        result.put("district", str(data.get("district")));
+        result.put("township", str(data.get("township")));
+        result.put("streetNumber", str(data.get("streetNumber")));
+        result.put("adcode", str(data.get("adcode")));
+        result.put("pois", data.get("pois") instanceof List ? data.get("pois") : List.of());
         return result;
     }
 
     /** 当前员工所属组织的小区下拉（sys_community.corp_id 精确过滤）。 */
     private List<Map<String, Object>> loadCommunities(Long corpId) {
         try {
-            return jdbcTemplate.queryForList(
-                    "SELECT id, community_name AS name FROM ai_platform.sys_community "
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT id, community_name AS name, address, longitude, latitude "
+                            + "FROM ai_platform.sys_community "
                             + "WHERE delete_flag = 0 AND corp_id = ? ORDER BY community_name",
                     corpId);
+            List<Map<String, Object>> list = new ArrayList<>(rows.size());
+            for (Map<String, Object> row : rows) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", row.get("id"));
+                item.put("name", row.get("name"));
+                item.put("detailAddress", row.get("address"));
+                item.put("longitude", row.get("longitude"));
+                item.put("latitude", row.get("latitude"));
+                list.add(item);
+            }
+            return list;
         } catch (Exception e) {
             log.warn("加载组织小区列表失败 corpId={}: {}", corpId, e.getMessage());
             return List.of();

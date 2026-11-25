@@ -10,6 +10,15 @@
         <text class="label">小区名称 <text class="req">*</text></text>
         <input class="input" :value="name" maxlength="200"
                placeholder="请输入小区名称" @input="onInput" />
+
+        <CommunityLocationPanel
+          :status="status" :address="address" :coords-text="coordsText"
+          :source-text="sourceText" :has-location="hasLocation" :locating="locating"
+          :failure-reason="failureReason" :regeo-error="regeoError"
+          :mismatch-text="mismatchText"
+          @update:address="onAddressInput"
+          @relocate="locate({ force: true })" @skip="skip" />
+
         <view class="district-row">
           <text class="district-label">归属区县</text>
           <text class="district-value">{{ districtText }}</text>
@@ -18,12 +27,14 @@
         <text v-if="!districtConfigured" class="ferr">
           当前组织未配置所在区县，请联系管理员完善组织信息后再新建小区
         </text>
-        <text v-else class="hint">新小区将自动关联到本组织所在区县，创建后自动选中</text>
+        <text v-else class="hint">小区归属仍以组织所在区县为准，定位仅用于填充地址与核验</text>
       </view>
 
       <view class="sheet-foot">
         <view class="btn ghost" @click="close"><text>取消</text></view>
-        <view class="btn primary" :class="{ disabled: submitting || !districtConfigured }" @click="submit">
+        <view class="btn primary"
+              :class="{ disabled: submitting || !districtConfigured || locating }"
+              @click="submit">
           <text>{{ submitting ? '创建中...' : '创建并选择' }}</text>
         </view>
       </view>
@@ -34,22 +45,34 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { api } from '@/api/index'
+import CommunityLocationPanel from '@/components/CommunityLocationPanel.vue'
+import { useCommunityLocation } from '@/hooks/useCommunityLocation'
 
 /**
- * 员工制单新建小区：名称必填，组织与区县由服务端按 JWT / 组织配置派生。
- * 创建成功 emit created（{id, name, regionId, regionName, existed}），由父组件加入选项并选中。
+ * 员工制单新建小区：名称必填；打开时自动定位并回填详细地址/坐标（可编辑、可重试、可跳过）。
+ * 组织与区县仍由服务端按 JWT / 组织配置派生；定位区县不一致只提示确认，不阻断。
+ * 创建成功 emit created（含 id/name/regionId/regionName/detailAddress/longitude/latitude）。
  */
 const props = defineProps({
   visible: { type: Boolean, default: false },
   initialName: { type: String, default: '' },
   districtName: { type: String, default: '' },
-  districtConfigured: { type: Boolean, default: true }
+  districtConfigured: { type: Boolean, default: true },
+  regionId: { type: [String, Number], default: null }
 })
 const emit = defineEmits(['update:visible', 'created'])
 
 const name = ref('')
 const error = ref('')
 const submitting = ref(false)
+
+const {
+  status, address, failureReason, regeoError, locating, hasLocation, coordsText,
+  sourceText, mismatch, mismatchText, locate, onAddressInput, skip, reset, payload
+} = useCommunityLocation({
+  regionId: computed(() => props.regionId),
+  districtName: computed(() => props.districtName)
+})
 
 /** 区县名称可能带省/市路径，只展示末级（如「广河县」）。 */
 function shortRegionName(value) {
@@ -64,11 +87,12 @@ const districtText = computed(() => {
 })
 
 watch(() => props.visible, value => {
-  if (value) {
-    name.value = props.initialName || ''
-    error.value = ''
-  }
-})
+  if (!value) return
+  name.value = props.initialName || ''
+  error.value = ''
+  reset()
+  locate()
+}, { immediate: true })
 
 function onInput(event) {
   name.value = String(event.detail.value ?? '')
@@ -76,7 +100,7 @@ function onInput(event) {
 }
 
 async function submit() {
-  if (submitting.value) return
+  if (submitting.value || locating.value) return
   if (!props.districtConfigured) {
     error.value = '当前组织未配置所在区县，请联系管理员完善组织信息'
     return
@@ -90,20 +114,42 @@ async function submit() {
     error.value = '小区名称不能超过200个字符'
     return
   }
+  // 确认弹窗期间也置为提交中，避免重复点击弹出多个确认框。
   submitting.value = true
   try {
-    const created = await api.employeeCreateCommunity({ name: value })
-    const shortRegion = shortRegionName(created && created.regionName)
+    if (!(await confirmMismatchIfNeeded())) return
+    await doSubmit(value)
+  } finally {
+    submitting.value = false
+  }
+}
+
+/** 定位区县与组织区县不一致时二次确认；取消则停留在弹窗，不阻断后续手动提交。 */
+function confirmMismatchIfNeeded() {
+  if (!mismatch.value) return Promise.resolve(true)
+  return new Promise(resolve => {
+    uni.showModal({
+      title: '区县不一致',
+      content: mismatchText.value,
+      confirmText: '继续创建',
+      cancelText: '返回修改',
+      success: res => resolve(!!res.confirm),
+      fail: () => resolve(false)
+    })
+  })
+}
+
+async function doSubmit(value) {
+  try {
+    const created = await api.employeeCreateCommunity({ name: value, ...payload() })
     const title = created && created.existed
       ? '该小区已存在，已为您选中'
-      : (shortRegion ? '小区创建成功，已关联至' + shortRegion : '小区创建成功')
+      : (hasLocation.value ? '小区创建成功（已记录位置）' : '小区创建成功')
     uni.showToast({ title, icon: 'none' })
     emit('created', created || {})
     close()
   } catch (e) {
     error.value = (e && e.msg) || '新建小区失败，请重试'
-  } finally {
-    submitting.value = false
   }
 }
 
@@ -122,6 +168,7 @@ function close() {
   width: 100%; background: #fff; border-radius: 24rpx 24rpx 0 0;
   display: flex; flex-direction: column;
   padding-bottom: env(safe-area-inset-bottom);
+  max-height: 88vh;
 }
 .sheet-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -129,7 +176,7 @@ function close() {
 }
 .sheet-title { font-size: 31rpx; font-weight: 700; color: #1D2129; }
 .sheet-close { font-size: 44rpx; color: #999; line-height: 1; padding: 0 8rpx; }
-.sheet-body { padding: 24rpx 28rpx 8rpx; }
+.sheet-body { padding: 24rpx 28rpx 8rpx; overflow-y: auto; }
 .label { display: block; font-size: 25rpx; color: #666; margin-bottom: 12rpx; }
 .req { color: #e53935; }
 .input {

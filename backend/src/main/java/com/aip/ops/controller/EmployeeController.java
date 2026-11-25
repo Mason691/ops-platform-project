@@ -35,6 +35,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.math.BigDecimal;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -378,6 +379,15 @@ public class EmployeeController {
             return R.fail(403, "仅员工可新建小区");
         }
         return R.ok(employeeBusinessEntryService.createCommunity(request));
+    }
+
+    /**
+     * 新建小区定位：按 GCJ-02 坐标反解析地址。
+     * 高德 key 只在平台后端使用，前端只调本代理接口。
+     */
+    @GetMapping("/business-data/geo/regeo")
+    public R<?> regeo(@RequestParam BigDecimal lng, @RequestParam BigDecimal lat) {
+        return R.ok(employeeBusinessEntryService.regeo(lng, lat));
     }
 
     /**
