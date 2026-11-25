@@ -154,8 +154,7 @@ function displayValue(name, value) {
 const canOpenBusiness = computed(() => {
   const type = detail.value && detail.value.businessType
   const id = detail.value && detail.value.businessId
-  return !!id && ['OPS_BUSINESS_ORDER', 'OPS_MATERIAL_REQUISITION',
-    'OPS_MATERIAL_WRITE_OFF'].includes(type)
+  return !!id && type === 'OPS_BUSINESS_ORDER'
 })
 
 function openBusiness() {
@@ -163,9 +162,7 @@ function openBusiness() {
   const id = detail.value && detail.value.businessId
   if (!id) return
   const routes = {
-    OPS_BUSINESS_ORDER: '/pages/employee/order-detail?orderId=',
-    OPS_MATERIAL_REQUISITION: '/pages/employee/material-requisition-detail?id=',
-    OPS_MATERIAL_WRITE_OFF: '/pages/employee/material-write-off-detail?id='
+    OPS_BUSINESS_ORDER: '/pages/employee/order-detail?orderId='
   }
   const prefix = routes[type]
   if (!prefix) {
