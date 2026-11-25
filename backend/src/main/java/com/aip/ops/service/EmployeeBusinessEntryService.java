@@ -31,6 +31,12 @@ public interface EmployeeBusinessEntryService {
      */
     Map<String, Object> regeo(BigDecimal longitude, BigDecimal latitude);
 
+    /**
+     * 手动地址地理编码：只传区县之后的详细地址，平台按组织区县拼接完整地址并调用高德。
+     * 返回 fullAddress/formattedAddress/longitude/latitude/level/lowAccuracy。
+     */
+    Map<String, Object> geocode(String detailAddress);
+
     /** 保存手工录入的业务数据（同步发起工作流并带回下一审批人）。 */
     Map<String, Object> createManualEntry(EmployeeBusinessEntryRequest request);
 

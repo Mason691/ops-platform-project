@@ -264,6 +264,7 @@ export const api = {
   employeeLookupMember: (phone) => request({url:'/api/ops/employee/business-data/manual/member',data:{phone}}),
   employeeCreateCommunity: (data) => request({url:'/api/ops/employee/business-data/communities',method:'POST',data}),
   employeeRegeo: (lng, lat) => request({url:'/api/ops/employee/business-data/geo/regeo', data:{lng,lat}}),
+  employeeGeocode: (detailAddress) => request({url:'/api/ops/employee/business-data/geo/geocode',method:'POST',data:{detailAddress}}),
   employeeProductPrice: (params) => request({url:'/api/ops/employee/business-data/product-price', data:params}),
   employeeModelStock: (params) => request({url:'/api/ops/employee/business-data/model-stock', data:params}),
   employeeCheckReceiptNo: (params) => request({url:'/api/ops/employee/business-data/receipt-no/check', data:params}),

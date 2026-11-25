@@ -34,6 +34,7 @@
           class="community-address">
       <text class="ca-text">{{ selectedCommunity.detailAddress || '已记录坐标' }}</text>
       <text v-if="hasCoords" class="ca-nav" @click="navigateToCommunity">导航</text>
+      <text v-else class="ca-nav disabled">暂无位置信息</text>
     </view>
 
     <BottomSheetSelect v-model:visible="communitySheet" title="选择小区" :options="communityOptions"
@@ -195,4 +196,5 @@ function navigateToCommunity() {
   flex: none; margin-left: 16rpx; font-size: 23rpx; color: #FF6B35;
   font-weight: 600; padding: 2rpx 0 2rpx 12rpx;
 }
+.ca-nav.disabled { color: #bbb; font-weight: 400; }
 </style>

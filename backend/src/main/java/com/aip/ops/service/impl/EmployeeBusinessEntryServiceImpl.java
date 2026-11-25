@@ -126,8 +126,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
     private final BusinessAttachmentService attachmentService;
     private final WorkflowPlatformClient workflowPlatformClient;
     private final ThreadPoolTaskExecutor workflowTaskExecutor;
-    /** 单个员工每分钟最多 10 次定位，防止脚本刷接口（平台侧另有单组织 60 次/分钟）。 */
-    private final MinuteRateLimiter regeoUserLimiter = new MinuteRateLimiter(10);
+    /** 单个员工每分钟最多 10 次定位/地理编码，防止脚本刷接口（平台侧另有单组织 60 次/分钟）。 */
+    private final MinuteRateLimiter geoUserLimiter = new MinuteRateLimiter(10);
 
     private TransactionTemplate transactionTemplate;
 
@@ -212,7 +212,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         }
         log.info("员工新建小区 corpId={} name={} id={} operator={} source={} hasCoords={}",
                 ctx.corpId(), name, id.longValue(), ctx.employeeName(), source, longitude != null);
-        return communityResult(data, id.longValue(), address, longitude, latitude, source);
+        return communityResult(data, id.longValue(), address, longitude, latitude, source,
+                request.getGeocodeLevel());
     }
 
     private void assertCanCreateCommunity(CommunityCreateRequest request) {
@@ -233,11 +234,13 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         body.put("operatorUserId", ctx.employeeUserId());
         body.put("operatorName", ctx.employeeName());
         body.put("address", address);
+        body.put("fullAddress", request.getFullAddress());
         body.put("longitude", longitude);
         body.put("latitude", latitude);
         body.put("coordinateType", longitude == null ? null : "GCJ02");
         body.put("locationSource", source);
         body.put("locationAccuracy", request.getLocationAccuracy());
+        body.put("geocodeLevel", request.getGeocodeLevel());
         body.put("province", request.getProvince());
         body.put("city", request.getCity());
         body.put("districtName", request.getDistrictName());
@@ -268,7 +271,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
 
     private Map<String, Object> communityResult(Map<?, ?> data, Long id, String address,
                                                 BigDecimal longitude, BigDecimal latitude,
-                                                String source) {
+                                                String source, String geocodeLevel) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", id);
         result.put("name", data.get("name"));
@@ -280,6 +283,8 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         result.put("latitude", data.get("latitude") != null ? data.get("latitude") : latitude);
         result.put("locationSource", data.get("locationSource") != null
                 ? data.get("locationSource") : source);
+        result.put("geocodeLevel", data.get("geocodeLevel") != null
+                ? data.get("geocodeLevel") : geocodeLevel);
         return result;
     }
 
@@ -293,7 +298,7 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
             throw BusinessException.of("定位坐标不合法");
         }
         CommunityGeoUtils.validate(longitude, latitude, "GCJ02");
-        regeoUserLimiter.check(SecurityUtils.getCurrentUserId());
+        geoUserLimiter.check(SecurityUtils.getCurrentUserId());
         EmployeeContext ctx = resolveEmployeeContext();
         String path = "/api/internal/community/regeo?corpId=" + ctx.corpId()
                 + "&lng=" + longitude.toPlainString() + "&lat=" + latitude.toPlainString();
@@ -322,6 +327,47 @@ public class EmployeeBusinessEntryServiceImpl implements EmployeeBusinessEntrySe
         result.put("streetNumber", str(data.get("streetNumber")));
         result.put("adcode", str(data.get("adcode")));
         result.put("pois", data.get("pois") instanceof List ? data.get("pois") : List.of());
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> geocode(String detailAddress) {
+        assertEmployee();
+        if (jwtTokenInspector.isExternalUser()) {
+            throw BusinessException.forbidden("外部用户暂不可使用定位");
+        }
+        String detail = CommunityGeoUtils.normalizeDetailAddress(detailAddress);
+        geoUserLimiter.check(SecurityUtils.getCurrentUserId());
+        EmployeeContext ctx = resolveEmployeeContext();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("corpId", ctx.corpId());
+        body.put("detailAddress", detail);
+        Map<String, Object> resp;
+        try {
+            resp = platformInternalClient.post("/api/internal/community/geocode", body, null);
+        } catch (Exception e) {
+            log.warn("地理编码调用平台失败 corpId={}: {}", ctx.corpId(), e.getMessage());
+            throw BusinessException.of("地址解析失败，请检查地址后重试");
+        }
+        if (resp == null || !(resp.get("code") instanceof Number n) || n.intValue() != 200) {
+            String msg = resp == null ? "" : str(resp.get("msg"));
+            throw BusinessException.of(responseCode(resp),
+                    msg.isEmpty() ? "未找到该地址对应的位置，请检查地址是否准确" : msg);
+        }
+        if (!(resp.get("data") instanceof Map<?, ?> data)) {
+            throw BusinessException.of("地址解析失败，请检查地址后重试");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("fullAddress", str(data.get("fullAddress")));
+        result.put("formattedAddress", str(data.get("formattedAddress")));
+        result.put("longitude", data.get("longitude"));
+        result.put("latitude", data.get("latitude"));
+        result.put("level", str(data.get("level")));
+        result.put("lowAccuracy", Boolean.TRUE.equals(data.get("lowAccuracy")));
+        result.put("province", str(data.get("province")));
+        result.put("city", str(data.get("city")));
+        result.put("district", str(data.get("districtName")));
+        result.put("adcode", str(data.get("adcode")));
         return result;
     }
 

@@ -11,7 +11,8 @@ import java.util.Set;
  */
 public final class CommunityGeoUtils {
 
-    private static final Set<String> SOURCES = Set.of("WECHAT", "H5", "MANUAL");
+    private static final Set<String> SOURCES = Set.of("WECHAT", "H5", "MANUAL", "GEOCODE");
+    private static final int MAX_DETAIL_ADDRESS_LENGTH = 120;
 
     private CommunityGeoUtils() {
     }
@@ -50,6 +51,18 @@ public final class CommunityGeoUtils {
         if (trimmed.isEmpty()) return null;
         if (trimmed.length() > 500) {
             throw BusinessException.of("小区详细地址不能超过500个字符");
+        }
+        return trimmed;
+    }
+
+    /** 手动地理编码的输入只允许区县之后的地址，长度与前端输入框一致（1~120）。 */
+    public static String normalizeDetailAddress(String detailAddress) {
+        String trimmed = detailAddress == null ? "" : detailAddress.trim();
+        if (trimmed.isEmpty()) {
+            throw BusinessException.of("请填写详细地址（区县之后的部分，如 XX路XX号）");
+        }
+        if (trimmed.length() > MAX_DETAIL_ADDRESS_LENGTH) {
+            throw BusinessException.of("详细地址不能超过" + MAX_DETAIL_ADDRESS_LENGTH + "个字符");
         }
         return trimmed;
     }

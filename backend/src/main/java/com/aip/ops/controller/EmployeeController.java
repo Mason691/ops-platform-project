@@ -391,6 +391,18 @@ public class EmployeeController {
     }
 
     /**
+     * 手动地址地理编码：只传区县之后的详细地址，组织区县由服务端按员工 JWT 派生。
+     */
+    @PostMapping("/business-data/geo/geocode")
+    public R<?> geocode(@RequestBody GeocodeRequest request) {
+        return R.ok(employeeBusinessEntryService.geocode(
+                request == null ? null : request.detailAddress()));
+    }
+
+    public record GeocodeRequest(String detailAddress) {
+    }
+
+    /**
      * 制单时按商品查询标准售价：优先 productId（SCM 商品ID），
      * 旧前端仅传品牌/品类/型号时按字段兜底。
      */

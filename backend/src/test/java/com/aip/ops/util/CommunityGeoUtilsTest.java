@@ -41,9 +41,20 @@ class CommunityGeoUtilsTest {
     void normalizesSourceAndAddress() {
         assertThat(CommunityGeoUtils.normalizeSource(null)).isEqualTo("MANUAL");
         assertThat(CommunityGeoUtils.normalizeSource("wechat")).isEqualTo("WECHAT");
+        assertThat(CommunityGeoUtils.normalizeSource("geocode")).isEqualTo("GEOCODE");
         assertThat(CommunityGeoUtils.normalizeAddress("  ")).isNull();
         assertThat(CommunityGeoUtils.normalizeAddress(" 中山路1号 ")).isEqualTo("中山路1号");
         assertThatThrownBy(() -> CommunityGeoUtils.normalizeAddress("x".repeat(501)))
                 .isInstanceOf(BusinessException.class).hasMessageContaining("500");
+    }
+
+    @Test
+    void validatesManualDetailAddress() {
+        assertThat(CommunityGeoUtils.normalizeDetailAddress(" 中山路88号 "))
+                .isEqualTo("中山路88号");
+        assertThatThrownBy(() -> CommunityGeoUtils.normalizeDetailAddress("  "))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("请填写详细地址");
+        assertThatThrownBy(() -> CommunityGeoUtils.normalizeDetailAddress("x".repeat(121)))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("120");
     }
 }
