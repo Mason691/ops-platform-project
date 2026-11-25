@@ -37,3 +37,15 @@ export function materialPickStatusClass(status) {
     '4': 'st-ok'
   }[String(status)] || ''
 }
+
+/** 金蝶其他出库单同步状态（scm_material_pick.jdy_sync_status）。 */
+export const MATERIAL_PICK_JDY_STATUS_MAP = {
+  PUSHED: '金蝶已推送待审核',
+  AUDITED: '金蝶已同步',
+  PUSH_FAILED: '金蝶同步失败',
+  NOT_REQUIRED: '金蝶无需同步'
+}
+
+export function materialPickJdyStatusLabel(status) {
+  return MATERIAL_PICK_JDY_STATUS_MAP[status] || (status ? String(status) : '金蝶未推送')
+}

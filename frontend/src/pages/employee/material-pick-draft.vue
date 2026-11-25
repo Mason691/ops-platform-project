@@ -69,6 +69,22 @@
         </text>
       </view>
 
+      <view v-if="detail.status === '4'" class="card jdy-card">
+        <view class="kv">
+          <text class="k">金蝶其他出库</text>
+          <text class="v" :class="detail.jdySyncStatus === 'PUSH_FAILED' ? 'warn' : ''">
+            {{ materialPickJdyStatusLabel(detail.jdySyncStatus) }}
+          </text>
+        </view>
+        <view v-if="detail.jdyBillno" class="kv">
+          <text class="k">金蝶单号</text><text class="v">{{ detail.jdyBillno }}</text>
+        </view>
+        <view v-if="detail.pushError" class="kv">
+          <text class="k">同步提示</text><text class="v warn">{{ detail.pushError }}</text>
+        </view>
+        <text class="jdy-hint">本地库存已扣减；金蝶同步失败请联系库管/供应链在 PC 端重试推送。</text>
+      </view>
+
       <view class="section">
         <text class="section-title">物料明细（{{ rows.length }}）</text>
         <view v-if="!rows.length" class="empty"><text>暂无物料，请从库存添加</text></view>
@@ -148,7 +164,8 @@ import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 import { formatTime } from '@/utils/materialForm'
 import {
   materialPickStatusLabel,
-  materialPickStatusClass
+  materialPickStatusClass,
+  materialPickJdyStatusLabel
 } from '@/utils/materialPickStatus'
 
 /**
@@ -581,4 +598,8 @@ function openTaskOrder(item) {
 .stock-row { display: flex; justify-content: space-between; align-items: center; padding: 20rpx 4rpx; border-bottom: 1rpx solid #F2F3F5; }
 .stock-main { display: flex; flex-direction: column; gap: 4rpx; }
 .stock { font-size: 24rpx; color: #00B42A; }
+.jdy-card { background: #FBFDFC; }
+.jdy-card .kv { align-items: flex-start; padding: 10rpx 0; }
+.jdy-card .v { word-break: break-all; line-height: 1.5; }
+.jdy-hint { display: block; margin-top: 10rpx; color: #86909C; font-size: 24rpx; line-height: 1.5; }
 </style>

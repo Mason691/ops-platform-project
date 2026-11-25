@@ -55,6 +55,9 @@
           库管已打印：{{ item.printByName || '库管' }} {{ formatTime(item.printTime) }}
           （{{ item.printCount || 0 }} 次）
         </text>
+        <text v-if="item.status === '4'" class="card-print">
+          金蝶其他出库：{{ materialPickJdyStatusLabel(item.jdySyncStatus) }}
+        </text>
         <view class="card-foot">
           <text class="card-date">创建 {{ formatTime(item.createTime) }}</text>
           <view class="card-actions" @click.stop>
@@ -96,7 +99,8 @@ import { isEmployeeLoggedIn } from '@/utils/employeeSession'
 import {
   MATERIAL_PICK_STATUS_OPTIONS,
   materialPickStatusLabel,
-  materialPickStatusClass
+  materialPickStatusClass,
+  materialPickJdyStatusLabel
 } from '@/utils/materialPickStatus'
 
 /** 我的物料领用单：派工自动生成；施工员接受后自动确认，修改后需部长重新审批。 */
@@ -264,7 +268,7 @@ function totalQty(item) {
 .order-link { color: #FF6B35; }
 .card-summary { display: block; margin-top: 6rpx; font-size: 24rpx; color: #86909C; }
 .card-approval { display: block; margin-top: 6rpx; font-size: 22rpx; color: #165DFF; }
-.card-print { display: block; margin-top: 6rpx; font-size: 22rpx; color: #00B42A; }
+.card-print { display: block; margin-top: 6rpx; font-size: 22rpx; color: #00B42A; word-break: break-all; }
 .warn { color: #FF7D00; }
 .card-foot { margin-top: 16rpx; display: flex; align-items: center; justify-content: space-between; }
 .card-date { font-size: 22rpx; color: #86909C; }
