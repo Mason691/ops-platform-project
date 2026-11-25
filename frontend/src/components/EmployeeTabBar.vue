@@ -15,7 +15,9 @@
 
 <script setup>
 const props = defineProps({
-  activeKey: { type: String, default: 'home' }
+  activeKey: { type: String, default: 'home' },
+  /** 子页面沿用「主页」高亮时，点主页仍需跳回工作台（否则点击无响应） */
+  allowActiveClick: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['switch'])
@@ -28,7 +30,7 @@ const tabs = [
 ]
 
 function onTab(key) {
-  if (key === props.activeKey) return
+  if (key === props.activeKey && !props.allowActiveClick) return
   emit('switch', key)
 }
 </script>

@@ -2,6 +2,18 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-25（业务数据列表底部导航与工作台主页统一）
+
+- **需求**：公众号员工工作台「业务数据」列表页底部栏目与主页保持一致。
+- **修改**：
+  - `EmployeeTabBar` 新增 `allowActiveClick`（默认 false，不改变既有四个主页面行为）；
+    子页面沿用「主页」高亮时，点主页仍可跳回工作台。
+  - `business-data.vue` 移除自定义「业务数据/AI助手/我的」三栏，改用统一
+    `EmployeeTabBar`（AI助手/主页/待办/我的），主页高亮，四个入口均走
+    `uni.redirectTo`，与工作台/待办/个人中心一致。
+  - 删除页面内旧 `.bottom-bar/.bar-item/.bar-icon/.bar-label` 样式及 `goAiChat/goProfile`。
+- **验证**：`npm run build:h5` 通过；编译产物引用 `EmployeeTabBar`，业务数据页 CSS 已无旧 `bottom-bar`。
+
 ## 2026-11-25（施工员拒绝接受任务原因输入框无法输入修复）
 
 - **根因**：`ConstructReasonDialog` 的 textarea 只设置 `min-height:180rpx`，被 `App.vue` 全局 `uni-textarea{height:auto!important;min-height:auto!important}` 覆盖，宿主高度塌陷，内层绝对定位 textarea 高度为 0，点击无法聚焦、键盘不弹出。
