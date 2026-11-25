@@ -13,7 +13,13 @@
 - **前端**：平台主站 `MaterialPickList` 展开行新增「金蝶其他出库」状态/单号/错误与重试按钮；H5 领用单列表/详情在状态 4 展示简洁同步状态（H5 不提供重试）。
 - **全部退回**：核销数量为 0 时不生成金蝶其他出库单，`jdy_sync_status=NOT_REQUIRED`（前端显示“无需同步”），不记失败、不可重试。
 - **前置确认（代码常量 + TODO）**：账套库存更新参数（保存时/审核时）、分录传 `material_id`/`stock_id` 还是 `number`、审核 `entity_number` 精确值；默认按金蝶其他出库文档使用 `material_id`/`stock_id`/`batch_no`，联调不一致时只改 Converter 常量。
-- **验证**：SCM `mvn -o test` 通过（新增 4 条 Converter 单测）；平台 `npm run build`、ops H5 `npm run build:h5` 通过。未做金蝶联调与真机端到端。
+- **验证**：SCM `mvn -o test` 通过（新增 4 条 Converter 单测）；平台 `npm run build`、ops H5 `npm run build:h5` 通过。
+- **生产发布（2026-11-25 16:04-16:06，已发布）**：
+  - 备份：`backups/mall_db-pre-material-jdy-20261125_160438.sql.gz`（7.7M）、`backups/frontend-pre-material-jdy-20261125_160438.tgz`（2.0M）；回滚镜像 `boss-platform/scm:rollback-material-jdy-20261125_160438`。
+  - DDL：`mall_db.scm_material_pick` 已新增 `jdy_id/jdy_billno/jdy_sync_status/push_error` 并验证。
+  - SCM：overlay 镜像 `boss-platform/scm:material-jdy-20261125_160438`（jar sha256 `783d1a24…55da0`，容器内 sha256 一致），`docker compose up -d --no-deps scm-backend` 后 healthy（8084 health 200），实体注册 18 个。
+  - 前端：平台入口 `index-E_imBbO8.js` / `MaterialPickList-DRG94UWL.js`；H5 入口 `materialPickStatus.B0MdPsps.js`；公网主站与 `/ops/` 均 200，nginx reload 成功。
+  - **未执行**：真实金蝶推送联调。生产已有状态 4 领用单 id=8（`LTLL-20261125-001`）与核销出库单 `LTHXC-20261125-001`（qty=3），可在 PC 展开行点「重试推送」做首次真实联调；字段名/`entity_number`/`operation_key` 不匹配时只会 `PUSH_FAILED`，本地库存不回滚。
 
 ## 2026-11-25（操作手册按派工—物料领用—核销新流程修订）
 
