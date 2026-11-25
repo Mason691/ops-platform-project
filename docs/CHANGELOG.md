@@ -2,6 +2,14 @@
 
 > 自 CLAUDE.md「最后更新」段迁移而来（2026-10-12）。后续变更按时间倒序在此追加条目，历史条目保持原样。
 
+## 2026-11-25（金蝶其他出库审核方式修正，LTLL-20261125-003）
+
+- **问题**：物料核销单 LTLL-20261125-003 已生成金蝶其他出库单（id `2620561244322772992`），但 `common_operate` 审核返回“number为inv_other_out的元数据不存在”，金蝶单据停留未审核。
+- **根因**：金蝶其他出库不支持通用批量操作 `common_operate`；官方写入接口 `/jdy/v2/scm/inv_other_out` 支持 `id + operation_key=audit` 审核。
+- **修复**：`MaterialPickJdyPushService` 审核改为写入接口（仍保持 submit 保存 → audit 审核两次调用）；删除 `common_operate` 审核死路径；新增内部运维补推/补审 `POST /api/internal/scm/material-pick/{id}/retry-jdy`（X-Internal-Token）。
+- **验证**：SCM `mvn -o test` 通过；overlay 镜像 `boss-platform/scm:material-jdy-auditfix2-20261125_163652`（jar sha256 `262fa05f…a004`），容器 healthy（8084/200）。
+- **当前状态**：审核请求已到达金蝶，但金蝶返回“江总正在PC端编辑该记录，请稍后再试或联系系统管理员”；需金蝶端关闭该单据后重试。后台已按 20 秒间隔重试，平台状态仍为 `PUSH_FAILED`，本地库存不回滚。
+
 ## 2026-11-25（业务数据列表底部导航与工作台主页统一）
 
 - **需求**：公众号员工工作台「业务数据」列表页底部栏目与主页保持一致。
